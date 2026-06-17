@@ -12,7 +12,7 @@ const controlBase =
   "w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-soft focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-400/30 disabled:cursor-not-allowed disabled:opacity-60";
 
 const selectBase =
-  "w-full appearance-none rounded-xl border border-border bg-surface text-foreground shadow-sm outline-none transition-[background-color,border-color,box-shadow] hover:border-slate-300 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted disabled:opacity-70";
+  "peer w-full appearance-none rounded-xl border border-border bg-surface text-foreground shadow-sm outline-none transition-[background-color,border-color,box-shadow] hover:border-slate-300 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted disabled:opacity-70";
 
 type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & {
   compact?: boolean;
@@ -64,7 +64,7 @@ export function Select({ className, children, compact, ...props }: SelectProps) 
       >
         {children}
       </select>
-      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted">
+      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted transition-colors peer-focus:text-brand-600 peer-disabled:text-muted-soft">
         <ChevronDown className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
       </span>
     </div>
