@@ -1,0 +1,20 @@
+{
+  "name": "Smart Waste Bank Pangandaran",
+  "short_name": "ReLoop",
+  "description": "Platform pengelolaan sampah end-to-end: setor sampah, reward, campaign, dan operasional pengepul.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f8fafc",
+  "theme_color": "#16a34a",
+  "lang": "id",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

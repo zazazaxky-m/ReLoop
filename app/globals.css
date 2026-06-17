@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme {
+  /* Surfaces */
+  --color-background: #f8fafc;
+  --color-surface: #ffffff;
+  --color-foreground: #0f172a;
+  --color-muted: #64748b;
+  --color-muted-soft: #94a3b8;
+  --color-border: #e2e8f0;
+
+  /* Brand green scale */
+  --color-brand-50: #ecfdf5;
+  --color-brand-100: #dcfce7;
+  --color-brand-200: #bbf7d0;
+  --color-brand-300: #86efac;
+  --color-brand-400: #4ade80;
+  --color-brand-500: #16a34a;
+  --color-brand-600: #15803d;
+  --color-brand-700: #14532d;
+  --color-brand-800: #134e2a;
+  --color-brand-900: #0f3d21;
+
+  /* Semantic helpers */
+  --color-mint: #dcfce7;
+  --color-mint-soft: #ecfdf5;
+  --color-accent: #65a30d;
+
+  /* Status hues (used with text labels + icons, never color alone) */
+  --color-status-online: #16a34a;
+  --color-status-full: #d97706;
+  --color-status-maintenance: #2563eb;
+  --color-status-error: #dc2626;
+  --color-status-offline: #64748b;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+/* Subtle scrollbar for desktop dashboards */
+@media (pointer: fine) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 9999px;
+  }
+}

@@ -1,0 +1,737 @@
+// Prisma schema for ReLoop - Smart Waste Bank Pangandaran
+// Prisma 6.x (stable) + PostgreSQL.
+//
+// Ledger policy: RewardLedger is APPEND-ONLY. Rows are never deleted and
+// amount/entryType/references are never edited after creation. The only mutable
+// field is `status` (settlement lifecycle: PENDING -> AVAILABLE / REDEEMED / REJECTED).
+// Monetary corrections are always NEW entries (REVERSE / ADJUST). Amounts are signed
+// integers in rupiah (credits positive, debits negative); balance = SUM(amount).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Enums
+// ============================================================
+
+enum Role {
+  SUPERADMIN
+  ADMIN
+  PENGEPUL
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum OrgType {
+  SCHOOL
+  CAMPUS
+  VILLAGE
+  TOURISM_SITE
+  OFFICE
+  COMMUNITY
+  WASTE_BANK
+  OTHER
+}
+
+enum OrgStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum PartnerStatus {
+  INVITED
+  REQUESTED
+  PENDING_SUPERADMIN_APPROVAL
+  ACTIVE
+  SUSPENDED
+  REMOVED
+  REJECTED
+}
+
+enum RegionType {
+  PROVINCE
+  REGENCY
+  DISTRICT
+  VILLAGE
+}
+
+enum MachineStatus {
+  ONLINE
+  OFFLINE
+  FULL
+  MAINTENANCE
+  ERROR
+}
+
+enum WasteUnit {
+  ITEM
+  KG
+}
+
+enum CampaignType {
+  MACHINE_DEPOSIT
+  TRASH_BAG
+  EVENT
+  SCHOOL_PROGRAM
+  TOURISM_PROGRAM
+}
+
+enum CampaignVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum SessionStatus {
+  RESERVED
+  ACTIVE
+  PROCESSING_ITEM
+  COMPLETED
+  REVIEW
+  CANCELLED
+  EXPIRED
+}
+
+enum DepositItemStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  REVIEW
+}
+
+enum ItemSource {
+  MACHINE
+  MANUAL
+  PYTHON_SIMULATOR
+}
+
+enum CompactionStatus {
+  NOT_REQUIRED
+  PENDING
+  COMPACTED
+  FAILED
+}
+
+enum MachineEventType {
+  HEARTBEAT
+  QR_REFRESHED
+  CHAMBER_OPENED
+  CHAMBER_TIMEOUT
+  ITEM_DETECTED
+  WEIGHT_MEASURED
+  IMAGE_CLASSIFIED
+  BARCODE_READ
+  SENSOR_SEQUENCE
+  ITEM_ACCEPTED_POINT
+  ITEM_REJECTED
+  CONVEYOR_STARTED
+  COMPACTION_STARTED
+  COMPACTION_COMPLETED
+  FRAUD_DETECTED
+  VANDALISM_DETECTED
+  SAFE_STATE_ENTERED
+  STATUS_CHANGED
+  FILL_LEVEL_UPDATED
+  ERROR
+}
+
+enum LedgerEntryType {
+  EARN
+  REDEEM
+  PENALTY
+  REVERSE
+  ADJUST
+}
+
+enum LedgerStatus {
+  PENDING
+  AVAILABLE
+  REDEEMED
+  REVERSED
+  REJECTED
+}
+
+enum PayoutProviderType {
+  LINKAJA
+  GOPAY
+  OVO
+  DANA
+  SHOPEEPAY
+  BANK
+  OTHER
+}
+
+enum PayoutAccountStatus {
+  UNVERIFIED
+  VERIFIED
+  DISABLED
+}
+
+enum RedemptionStatus {
+  REQUESTED
+  APPROVED
+  PROCESSING
+  SUCCESS
+  FAILED
+  REVERSED
+}
+
+enum RedemptionMethod {
+  MANUAL_TRANSFER
+  PROVIDER_API
+}
+
+enum PickupStatus {
+  REQUESTED
+  ASSIGNED
+  ON_THE_WAY
+  ARRIVED
+  COLLECTED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum PickupReason {
+  FULL
+  SCHEDULED
+  MANUAL
+  ERROR
+}
+
+enum PickupItemSource {
+  MACHINE_COUNT
+  MANUAL_WEIGHING
+}
+
+enum TripStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum ConditionStatus {
+  GOOD
+  PARTIAL
+  POOR
+  NOT_RETURNED
+}
+
+// ============================================================
+// Core identity & tenancy
+// ============================================================
+
+model User {
+  id             String        @id @default(cuid())
+  name           String
+  email          String        @unique
+  phone          String?
+  passwordHash   String?
+  authProvider   String        @default("CREDENTIALS")
+  role           Role          @default(USER)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  status         UserStatus    @default(ACTIVE)
+  payoutEligible Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  depositSessions       DepositSession[]
+  ledgerEntries         RewardLedger[]
+  payoutAccounts        PayoutAccount[]
+  redemptions           Redemption[]
+  collectorPartnerships OrganizationCollectorPartner[] @relation("CollectorPartnerships")
+  assignedPickups       PickupRequest[]                @relation("AssignedCollector")
+
+  @@index([organizationId])
+  @@index([role])
+}
+
+model Organization {
+  id           String    @id @default(cuid())
+  name         String
+  type         OrgType   @default(OTHER)
+  // Region levels stored as soft references (Region.id) for aggregation/reporting.
+  provinceId   String?
+  regencyId    String?
+  districtId   String?
+  villageId    String?
+  regionId     String?
+  region       Region?   @relation(fields: [regionId], references: [id])
+  address      String?
+  contactName  String?
+  contactPhone String?
+  status       OrgStatus @default(ACTIVE)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  users             User[]
+  machines          Machine[]
+  campaigns         Campaign[]
+  rewardRates       RewardRate[]
+  collectorPartners OrganizationCollectorPartner[]
+  pickupRequests    PickupRequest[]
+  ledgerEntries     RewardLedger[]
+
+  @@index([regionId])
+  @@index([type])
+}
+
+model Region {
+  id        String     @id @default(cuid())
+  type      RegionType
+  name      String
+  parentId  String?
+  parent    Region?    @relation("RegionTree", fields: [parentId], references: [id])
+  children  Region[]   @relation("RegionTree")
+  createdAt DateTime   @default(now())
+
+  organizations Organization[]
+  machines      Machine[]
+
+  @@index([parentId])
+  @@index([type])
+}
+
+model OrganizationCollectorPartner {
+  id                     String        @id @default(cuid())
+  organizationId         String
+  organization           Organization  @relation(fields: [organizationId], references: [id])
+  collectorUserId        String
+  collectorUser          User          @relation("CollectorPartnerships", fields: [collectorUserId], references: [id])
+  status                 PartnerStatus @default(PENDING_SUPERADMIN_APPROVAL)
+  serviceAreaJson        Json?
+  contactName            String?
+  contactPhone           String?
+  notes                  String?
+  createdByAdminId       String?
+  approvedBySuperadminId String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  pickupRequests PickupRequest[]
+
+  @@unique([organizationId, collectorUserId])
+  @@index([collectorUserId, status])
+  @@index([organizationId, status])
+}
+
+// ============================================================
+// Machines, waste types, rates
+// ============================================================
+
+model Machine {
+  id                    String        @id @default(cuid())
+  organizationId        String
+  organization          Organization  @relation(fields: [organizationId], references: [id])
+  regionId              String?
+  region                Region?       @relation(fields: [regionId], references: [id])
+  machineCode           String        @unique
+  qrToken               String?
+  qrTokenExpiresAt      DateTime?
+  qrRotationSeconds     Int           @default(30)
+  // Per-machine secret for HMAC-signed event ingestion (provisioned by superadmin).
+  ingestSecret          String?
+  name                  String
+  description           String?
+  status                MachineStatus @default(OFFLINE)
+  fillLevelPercent      Int           @default(0)
+  capacityKg            Float?
+  hasInputChamber       Boolean       @default(true)
+  hasConveyor           Boolean       @default(true)
+  hasCompactor          Boolean       @default(false)
+  hasExternalCamera     Boolean       @default(false)
+  chamberTimeoutSeconds Int           @default(20)
+  lastHeartbeatAt       DateTime?
+  latitude              Float?
+  longitude             Float?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  wasteTypes     MachineWasteType[]
+  sessions       DepositSession[]
+  events         MachineEvent[]
+  pickupRequests PickupRequest[]
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model WasteType {
+  id                   String    @id @default(cuid())
+  name                 String
+  unit                 WasteUnit @default(ITEM)
+  minWeightGrams       Int?
+  maxWeightGrams       Int?
+  defaultRewardPerItem Int?
+  description          String?
+  active               Boolean   @default(true)
+  // null = global (managed by superadmin); set = organization-specific (admin-added)
+  organizationId       String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  machineLinks MachineWasteType[]
+  rewardRates  RewardRate[]
+  depositItems DepositItem[]
+  pickupItems  PickupItem[]
+
+  @@index([organizationId])
+}
+
+model MachineWasteType {
+  id          String    @id @default(cuid())
+  machineId   String
+  machine     Machine   @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  wasteTypeId String
+  wasteType   WasteType @relation(fields: [wasteTypeId], references: [id])
+  active      Boolean   @default(true)
+
+  @@unique([machineId, wasteTypeId])
+  @@index([wasteTypeId])
+}
+
+model RewardRate {
+  id             String        @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  campaignId     String?
+  campaign       Campaign?     @relation(fields: [campaignId], references: [id])
+  wasteTypeId    String
+  wasteType      WasteType     @relation(fields: [wasteTypeId], references: [id])
+  unit           WasteUnit     @default(ITEM)
+  pointsPerItem  Int
+  minWeightGrams Int?
+  maxWeightGrams Int?
+  effectiveFrom  DateTime      @default(now())
+  effectiveTo    DateTime?
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+
+  depositItems DepositItem[]
+
+  @@index([wasteTypeId, active])
+  @@index([organizationId])
+  @@index([campaignId])
+}
+
+// ============================================================
+// Campaigns
+// ============================================================
+
+model Campaign {
+  id                      String             @id @default(cuid())
+  organizationId          String
+  organization            Organization       @relation(fields: [organizationId], references: [id])
+  name                    String
+  description             String?
+  campaignType            CampaignType       @default(MACHINE_DEPOSIT)
+  visibility              CampaignVisibility @default(PUBLIC)
+  allowedEmailDomainsJson Json?
+  startAt                 DateTime?
+  endAt                   DateTime?
+  status                  CampaignStatus     @default(DRAFT)
+  rewardMultiplier        Float?
+  rulesJson               Json?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  sessions      DepositSession[]
+  rewardRates   RewardRate[]
+  ledgerEntries RewardLedger[]
+  trips         Trip[]
+
+  @@index([organizationId, status])
+}
+
+// ============================================================
+// Deposit flow
+// ============================================================
+
+model DepositSession {
+  id           String        @id @default(cuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  machineId    String
+  machine      Machine       @relation(fields: [machineId], references: [id])
+  campaignId   String?
+  campaign     Campaign?     @relation(fields: [campaignId], references: [id])
+  status       SessionStatus @default(RESERVED)
+  startedAt    DateTime      @default(now())
+  completedAt  DateTime?
+  timeoutAt    DateTime?
+  anomalyCount Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  items         DepositItem[]
+  events        MachineEvent[]
+  ledgerEntries RewardLedger[]
+
+  @@index([userId])
+  @@index([machineId, status])
+}
+
+model DepositItem {
+  id                   String            @id @default(cuid())
+  sessionId            String
+  session              DepositSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  wasteTypeId          String
+  wasteType            WasteType         @relation(fields: [wasteTypeId], references: [id])
+  quantity             Int               @default(1)
+  measuredWeightGrams  Int?
+  aiDetectedType       String?
+  aiConfidence         Float?
+  barcodeValue         String?
+  rewardRateId         String?
+  rewardRate           RewardRate?       @relation(fields: [rewardRateId], references: [id])
+  rewardAmount         Int               @default(0)
+  status               DepositItemStatus @default(PENDING)
+  source               ItemSource        @default(PYTHON_SIMULATOR)
+  validationReasonCode String?
+  sensorSequenceJson   Json?
+  acceptedAt           DateTime?
+  acceptanceEventId    String?
+  externalFraudFlag    Boolean           @default(false)
+  compactionStatus     CompactionStatus  @default(NOT_REQUIRED)
+  evidenceUrl          String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  events        MachineEvent[]
+  ledgerEntries RewardLedger[]
+
+  @@index([sessionId])
+  @@index([status])
+}
+
+model MachineEvent {
+  id            String           @id @default(cuid())
+  machineId     String
+  machine       Machine          @relation(fields: [machineId], references: [id])
+  sessionId     String?
+  session       DepositSession?  @relation(fields: [sessionId], references: [id])
+  depositItemId String?
+  depositItem   DepositItem?     @relation(fields: [depositItemId], references: [id])
+  localEventId  String
+  eventType     MachineEventType
+  payloadJson   Json?
+  occurredAt    DateTime         @default(now())
+  receivedAt    DateTime         @default(now())
+
+  // Idempotency: a machine retrying the same local event must not double-process.
+  @@unique([machineId, localEventId])
+  @@index([machineId, occurredAt])
+  @@index([sessionId])
+}
+
+// ============================================================
+// Reward ledger (append-only)
+// ============================================================
+
+model RewardLedger {
+  id             String          @id @default(cuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id])
+  organizationId String?
+  organization   Organization?   @relation(fields: [organizationId], references: [id])
+  sessionId      String?
+  session        DepositSession? @relation(fields: [sessionId], references: [id])
+  depositItemId  String?
+  depositItem    DepositItem?    @relation(fields: [depositItemId], references: [id])
+  campaignId     String?
+  campaign       Campaign?       @relation(fields: [campaignId], references: [id])
+  entryType      LedgerEntryType
+  amount         Int // signed rupiah: credits positive, debits negative
+  status         LedgerStatus    @default(PENDING)
+  reasonCode     String?
+  referenceType  String?
+  referenceId    String?
+  actorId        String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([userId, status])
+  @@index([sessionId])
+  @@index([depositItemId])
+}
+
+// ============================================================
+// Payout & redemption
+// ============================================================
+
+model PayoutAccount {
+  id                String              @id @default(cuid())
+  userId            String
+  user              User                @relation(fields: [userId], references: [id])
+  provider          PayoutProviderType
+  accountIdentifier String
+  accountName       String?
+  verifiedAt        DateTime?
+  status            PayoutAccountStatus @default(UNVERIFIED)
+  kycRequired       Boolean             @default(false)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([userId])
+}
+
+model Redemption {
+  id                      String             @id @default(cuid())
+  userId                  String
+  user                    User               @relation(fields: [userId], references: [id])
+  provider                PayoutProviderType @default(OTHER)
+  payoutAccountId         String?
+  amount                  Int
+  method                  RedemptionMethod   @default(MANUAL_TRANSFER)
+  status                  RedemptionStatus   @default(REQUESTED)
+  providerReference       String?
+  manualTransferProofUrl  String?
+  note                    String?
+  processedBySuperadminId String?
+  idempotencyKey          String             @unique
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  @@index([userId, status])
+  @@index([status])
+}
+
+// ============================================================
+// Pickup workflow
+// ============================================================
+
+model PickupRequest {
+  id                  String                        @id @default(cuid())
+  machineId           String?
+  machine             Machine?                      @relation(fields: [machineId], references: [id])
+  organizationId      String
+  organization        Organization                  @relation(fields: [organizationId], references: [id])
+  requestedById       String?
+  assignedCollectorId String?
+  assignedCollector   User?                         @relation("AssignedCollector", fields: [assignedCollectorId], references: [id])
+  collectorPartnerId  String?
+  collectorPartner    OrganizationCollectorPartner? @relation(fields: [collectorPartnerId], references: [id])
+  status              PickupStatus                  @default(REQUESTED)
+  priority            Int                           @default(0)
+  reason              PickupReason                  @default(FULL)
+  notes               String?
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+
+  items PickupItem[]
+
+  @@index([organizationId, status])
+  @@index([assignedCollectorId])
+}
+
+model PickupItem {
+  id                String           @id @default(cuid())
+  pickupRequestId   String
+  pickupRequest     PickupRequest    @relation(fields: [pickupRequestId], references: [id], onDelete: Cascade)
+  wasteTypeId       String?
+  wasteType         WasteType?       @relation(fields: [wasteTypeId], references: [id])
+  estimatedWeightKg Float?
+  actualWeightKg    Float?
+  itemCount         Int?
+  source            PickupItemSource @default(MANUAL_WEIGHING)
+  notes             String?
+  createdAt         DateTime         @default(now())
+
+  @@index([pickupRequestId])
+}
+
+// ============================================================
+// Optional Trip / Trash bag mode
+// ============================================================
+
+model Trip {
+  id               String     @id @default(cuid())
+  campaignId       String
+  campaign         Campaign   @relation(fields: [campaignId], references: [id])
+  userId           String?
+  travelAgentName  String?
+  groupName        String?
+  leaderName       String?
+  leaderContact    String?
+  participantCount Int        @default(1)
+  status           TripStatus @default(PLANNED)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  bagAssignments TrashBagAssignment[]
+  validations    ManualValidation[]
+
+  @@index([campaignId])
+}
+
+model TrashBagAssignment {
+  id           String   @id @default(cuid())
+  tripId       String
+  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  assignedById String?
+  bagQrCode    String   @unique
+  bagCount     Int      @default(1)
+  assignedAt   DateTime @default(now())
+
+  @@index([tripId])
+}
+
+model ManualValidation {
+  id               String           @id @default(cuid())
+  tripId           String?
+  trip             Trip?            @relation(fields: [tripId], references: [id])
+  validatedById    String?
+  bagQrCode        String?
+  returnedBagCount Int?
+  actualWeightKg   Float?
+  conditionStatus  ConditionStatus?
+  notes            String?
+  evidenceUrl      String?
+  createdAt        DateTime         @default(now())
+
+  @@index([tripId])
+}
+
+// ============================================================
+// Audit & config
+// ============================================================
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorId      String?
+  action       String
+  entityType   String
+  entityId     String?
+  metadataJson Json?
+  createdAt    DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+}
+
+model SystemConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

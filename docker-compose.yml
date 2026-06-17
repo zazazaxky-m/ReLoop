@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: reloop-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: reloop
+      POSTGRES_PASSWORD: reloop
+      POSTGRES_DB: reloop
+    ports:
+      - "5432:5432"
+    volumes:
+      - reloop-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reloop -d reloop"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  reloop-db-data:
