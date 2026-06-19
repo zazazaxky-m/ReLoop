@@ -70,7 +70,7 @@ export default async function SuperadminWasteTypesPage() {
     <div className="space-y-8">
       <PageHeader
         title="Jenis Sampah & Tarif Global"
-        description="Master waste type dan reward policy lintas organisasi."
+        description="Kelola jenis sampah dan kebijakan reward yang digunakan sistem."
       />
       <WasteTypeManager
         wasteTypes={wasteTypeRows}

@@ -80,7 +80,7 @@ export default async function AdminWasteTypesPage() {
     <div className="space-y-8">
       <PageHeader
         title="Jenis Sampah & Tarif"
-        description="Kelola jenis sampah organisasi, threshold berat, dan tarif reward. Jenis global dikelola superadmin."
+        description="Atur jenis sampah yang diterima, batas berat, dan nilai reward organisasi."
       />
       <WasteTypeManager wasteTypes={wasteTypeRows} canManageGlobal={false} />
       <RewardRateManager

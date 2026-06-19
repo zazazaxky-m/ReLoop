@@ -138,7 +138,7 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
         <Card>
           <CardHeader>
             <CardTitle>
-              {actionKind === "success" ? "Konfirmasi Transfer Manual" : "Tandai Gagal"}
+              {actionKind === "success" ? "Konfirmasi Pembayaran" : "Tandai Gagal"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -187,7 +187,7 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
               </Button>
             </div>
             <p className="text-xs text-muted">
-              Upload bukti tidak wajib untuk MVP — cukup catatan status.
+              Tambahkan catatan atau referensi transaksi untuk memudahkan pelacakan.
             </p>
           </CardContent>
         </Card>

@@ -30,7 +30,7 @@ export default async function SuperadminRegionsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Wilayah"
-        description="Provinsi → kabupaten/kota → kecamatan → desa. Baseline Pangandaran, siap ekspansi Jawa Barat."
+        description="Kelola struktur provinsi, kabupaten atau kota, kecamatan, dan desa atau kelurahan."
       />
       <RegionManager regions={rows} />
     </div>

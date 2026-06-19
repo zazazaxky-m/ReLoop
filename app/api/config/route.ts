@@ -8,6 +8,7 @@ const patchSchema = z.object({
   [CONFIG_KEYS.MIN_REDEMPTION]: z.number().int().min(0).max(100_000_000).optional(),
   [CONFIG_KEYS.DEFAULT_QR_ROTATION_SECONDS]: z.number().int().min(10).max(3600).optional(),
   [CONFIG_KEYS.POINTS_TO_RUPIAH]: z.number().int().min(1).max(1_000_000).optional(),
+  [CONFIG_KEYS.LANDING_HERO_SLIDES]: z.string().max(20_000).optional(),
 });
 
 export async function GET() {

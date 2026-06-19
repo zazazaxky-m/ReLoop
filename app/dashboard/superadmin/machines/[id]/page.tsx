@@ -6,6 +6,7 @@ import { MachineDetailView } from "@/components/machine/MachineDetailView";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { wasteTypeOptions, regionOptions } from "@/lib/queries";
+import { getSecurityEvents } from "@/lib/security-events";
 
 export const metadata: Metadata = { title: "Detail Mesin" };
 
@@ -28,16 +29,17 @@ export default async function SuperadminMachineDetailPage({
   });
   if (!machine) notFound();
 
-  const [wasteTypes, regions] = await Promise.all([
+  const [wasteTypes, regions, securityEvents] = await Promise.all([
     wasteTypeOptions(machine.organizationId),
     regionOptions(),
+    getSecurityEvents({ machineId: machine.id, take: 20 }),
   ]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={machine.name}
-        description={`Kode ${machine.machineCode} - ${machine.organization?.name ?? ""}`}
+        description={`Kode mesin: ${machine.machineCode} | Organisasi: ${machine.organization?.name ?? "-"}`}
         actions={
           <Link
             href="/dashboard/superadmin/machines"
@@ -53,6 +55,7 @@ export default async function SuperadminMachineDetailPage({
         regions={regions}
         listHref="/dashboard/superadmin/machines"
         ingestSecret={machine.ingestSecret ?? null}
+        securityEvents={securityEvents}
       />
     </div>
   );

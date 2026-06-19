@@ -13,6 +13,8 @@ import { buildScanUrl, isTokenValid, qrDataUrl } from "@/lib/qr";
 import { formatDateTime } from "@/lib/format";
 import { MachineControls } from "./MachineControls";
 import { MachineSecurity } from "./MachineSecurity";
+import { SecurityEventList } from "@/components/security/SecurityEventList";
+import type { SecurityEventRow } from "@/lib/security-events";
 
 interface DetailMachine {
   id: string;
@@ -52,6 +54,7 @@ export async function MachineDetailView({
   regions,
   listHref,
   ingestSecret,
+  securityEvents,
 }: {
   machine: DetailMachine;
   wasteTypes: { id: string; name: string }[];
@@ -59,6 +62,7 @@ export async function MachineDetailView({
   listHref: string;
   // Provided only for superadmin — exposes the per-machine HMAC secret.
   ingestSecret?: string | null;
+  securityEvents?: SecurityEventRow[];
 }) {
   const tokenValid =
     machine.qrToken &&
@@ -104,6 +108,17 @@ export async function MachineDetailView({
               </div>
             </CardContent>
           </Card>
+
+          {securityEvents ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Riwayat Event & Keamanan</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <SecurityEventList events={securityEvents} compact />
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>
@@ -168,7 +183,7 @@ export async function MachineDetailView({
                 </p>
               )}
               <Link
-                href={`/machine/${machine.machineCode}/display`}
+                href={`/kiosk/${machine.machineCode}`}
                 target="_blank"
                 className={buttonVariants({ variant: "outline", size: "sm", className: "w-full" })}
               >

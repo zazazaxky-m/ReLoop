@@ -28,7 +28,7 @@ export default async function SuperadminMachinesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Semua Mesin"
-        description="Seluruh mesin lintas organisasi pada platform."
+        description="Pantau seluruh mesin, status, kapasitas, dan organisasi pengelolanya."
       />
       <MachineManager
         wasteTypes={wasteTypes}

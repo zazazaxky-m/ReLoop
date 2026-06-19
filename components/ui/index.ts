@@ -15,3 +15,4 @@ export { EmptyState } from "./EmptyState";
 export { DataTable, type Column } from "./DataTable";
 export { FormField, Label, Input, Textarea, Select } from "./FormField";
 export { Timeline, type TimelineItem } from "./Timeline";
+export { QuickAction } from "./QuickAction";

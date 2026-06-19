@@ -55,12 +55,17 @@ export default async function SuperadminPartnershipsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Kemitraan Pengepul"
-        description="Setujui atau tolak kemitraan organisasi–pengepul. Hanya kemitraan ACTIVE yang bisa menerima assignment pickup."
+        description="Tinjau dan kelola kerja sama antara organisasi dan pengepul."
       />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <MetricCard label="Menunggu approval" value={pending} icon={Clock} />
-        <MetricCard label="Kemitraan aktif" value={active} icon={ShieldCheck} />
-        <MetricCard label="Total kemitraan" value={rows.length} />
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
+        <MetricCard label="Menunggu approval" value={pending} icon={Clock} tone="amber" />
+        <MetricCard label="Kemitraan aktif" value={active} icon={ShieldCheck} tone="green" />
+        <MetricCard
+          label="Total kemitraan"
+          value={rows.length}
+          tone="blue"
+          className="col-span-2 lg:col-span-1"
+        />
       </div>
       <PartnershipPanel viewer="superadmin" partnerships={rows} />
     </div>

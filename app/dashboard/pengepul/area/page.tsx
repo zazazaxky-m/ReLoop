@@ -45,7 +45,7 @@ export default async function PengepulAreaPage() {
     <div className="space-y-6">
       <PageHeader
         title="Area Layanan & Kemitraan"
-        description="Ajukan kemitraan dengan organisasi, terima undangan, dan atur wilayah layanan Anda. Akses tugas pickup aktif setelah disetujui superadmin."
+        description="Kelola wilayah layanan serta hubungan kemitraan dengan organisasi."
       />
       <PartnershipPanel viewer="pengepul" partnerships={rows} organizations={organizations} />
     </div>

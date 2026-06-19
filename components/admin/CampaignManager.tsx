@@ -282,7 +282,7 @@ export function CampaignManager({
                       id="c-domains"
                       value={form.domains}
                       onChange={(e) => setForm((f) => ({ ...f, domains: e.target.value }))}
-                      placeholder="@sman1pangandaran.sch.id"
+                      placeholder="@sekolah.sch.id"
                     />
                   </FormField>
                 ) : null}
@@ -352,7 +352,7 @@ export function CampaignManager({
         rows={campaigns}
         getRowKey={(r) => r.id}
         emptyTitle="Belum ada campaign"
-        emptyDescription="Buat campaign public atau private untuk organisasi Anda."
+        emptyDescription="Buat campaign yang sesuai dengan kebutuhan organisasi Anda."
       />
     </div>
   );

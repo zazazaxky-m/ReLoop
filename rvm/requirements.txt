@@ -1,0 +1,7 @@
+# Core runtime intentionally uses only Python standard library.
+# Install optional hardware/camera packages only on the target machine:
+# opencv-python-headless>=4.10
+# gpiozero>=2.0
+# lgpio>=0.2.2.0
+# HX711 driver compatible with your board/wiring
+# mpu6050-raspberrypi>=1.2

@@ -39,6 +39,10 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+/.reloop-*-queue.json
+/.reloop-*-state.json
+/data/
+/rvm/config.local.json
 
 # editor
 .vscode/*
@@ -46,3 +50,5 @@ venv/
 .idea
 
 context.md
+simulator/.reloop-MSN-001-queue.tmp
+simulator/.reloop-MSN-001-state.json

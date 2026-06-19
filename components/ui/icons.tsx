@@ -235,9 +235,38 @@ export const ChevronDown = (p: IconProps) => (
   </Base>
 );
 
+export const MoreHorizontal = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+    <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
+  </Base>
+);
+
 export const ArrowRight = (p: IconProps) => (
   <Base {...p}>
     <path d="M5 12h14M12 5l7 7-7 7" />
+  </Base>
+);
+
+export const ArrowUpRight = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M7 17 17 7" />
+    <path d="M7 7h10v10" />
+  </Base>
+);
+
+export const Activity = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M3 12h4l2-7 4 14 2-7h6" />
+  </Base>
+);
+
+export const Download = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M12 3v12" />
+    <path d="m7 10 5 5 5-5" />
+    <path d="M5 21h14" />
   </Base>
 );
 

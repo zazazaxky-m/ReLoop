@@ -1,5 +1,6 @@
 import { requirePageUser } from "@/lib/rbac";
 import { AppShell } from "@/components/AppShell";
+import { RealtimeRefresh } from "@/components/realtime/RealtimeRefresh";
 
 export default async function DashboardLayout({
   children,
@@ -16,6 +17,7 @@ export default async function DashboardLayout({
         organizationName: user.organizationName,
       }}
     >
+      <RealtimeRefresh />
       {children}
     </AppShell>
   );

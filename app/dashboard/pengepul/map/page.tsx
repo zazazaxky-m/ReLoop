@@ -35,7 +35,7 @@ export default async function PengepulMapPage() {
     <div className="space-y-6">
       <PageHeader
         title="Peta Mesin"
-        description="Lokasi mesin dari organisasi mitra aktif. Klik titik untuk status & sisa storage."
+        description="Temukan mesin mitra dan lihat status serta kapasitas terkini."
       />
       <Card>
         <CardContent className="space-y-4 p-4">

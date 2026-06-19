@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>ReLoop Local Kiosk</title>
+  <style>
+    :root{color-scheme:dark;--green:#06472e;--brand:#0ca160;--lime:#b7f436;--soft:#dce9e1}
+    *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}
+    body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:radial-gradient(circle at 80% 10%,#126747 0,transparent 30%),var(--green);color:#fff}
+    .shell{height:100%;display:grid;grid-template-rows:auto 1fr auto;padding:clamp(20px,4vw,52px)}
+    header{display:flex;align-items:center;justify-content:space-between}.brand{display:flex;align-items:center;gap:14px;font-size:clamp(24px,3vw,38px);font-weight:900}
+    .mark{width:56px;height:56px;border-radius:18px;background:#fff;color:var(--brand);display:grid;place-items:center;font-size:33px}
+    .connection{display:flex;align-items:center;gap:10px;padding:10px 16px;border:1px solid #ffffff22;border-radius:999px;background:#ffffff0d;font-weight:700}.dot{width:10px;height:10px;border-radius:50%;background:#f5b942}.online .dot{background:var(--lime)}
+    main{display:grid;grid-template-columns:1fr minmax(340px,520px);gap:clamp(26px,5vw,72px);align-items:center}
+    .eyebrow{color:var(--lime);font-weight:900;letter-spacing:.18em;text-transform:uppercase;font-size:13px}
+    h1{font-size:clamp(52px,7vw,92px);line-height:.95;letter-spacing:-.055em;margin:20px 0 24px}.sub{max-width:670px;color:#d9e7dfb8;font-size:clamp(18px,2vw,25px);line-height:1.5}
+    .panel{background:#fff;color:#062d20;border-radius:36px;padding:34px;box-shadow:0 30px 90px #001a1177}
+    .machine{display:flex;align-items:center;justify-content:space-between}.machine strong{font-size:28px}.machine small{display:block;color:#64766d;margin-top:5px}
+    .status{margin:30px 0;border-radius:24px;background:#edf8f1;padding:26px}.status-title{font-size:14px;color:#5b7167;text-transform:uppercase;letter-spacing:.13em;font-weight:800}.status-value{font-size:34px;font-weight:900;margin-top:7px}
+    .meter{height:13px;background:#dce9e1;border-radius:99px;overflow:hidden;margin-top:20px}.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--brand),var(--lime));width:0;transition:width .5s}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.sensor{background:#f6f9f7;padding:15px;border-radius:17px}.sensor b{display:block;font-size:20px}.sensor span{font-size:12px;color:#6c7e75}
+    footer{display:flex;justify-content:space-between;color:#ffffff88;font-size:14px}.queue{color:var(--lime);font-weight:800}
+    .maintenance{position:fixed;inset:0;background:#001a13ed;display:none;padding:50px;z-index:5}.maintenance.show{display:grid;place-items:center}.maint-card{width:min(760px,100%);background:#fff;color:#062d20;border-radius:30px;padding:30px}.buttons{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:22px}button{border:0;border-radius:15px;padding:15px;font-weight:800;cursor:pointer;background:#e8f5ed;color:#06472e}button.danger{background:#fee2e2;color:#991b1b}.close{float:right}
+    @media(max-width:900px){main{grid-template-columns:1fr}.intro{display:none}.panel{max-width:560px;margin:auto;width:100%}.shell{padding:20px}.buttons{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="brand"><span class="mark">↻</span>ReLoop</div>
+      <div id="connection" class="connection"><span class="dot"></span><span id="connectionText">Memeriksa server</span></div>
+    </header>
+    <main>
+      <section class="intro">
+        <p class="eyebrow">Local edge controller</p>
+        <h1>Mesin tetap bekerja, bahkan saat offline.</h1>
+        <p class="sub">Sensor, deteksi keamanan, dan antrean event berjalan langsung di perangkat. Data akan tersinkron otomatis saat koneksi kembali.</p>
+      </section>
+      <section class="panel">
+        <div class="machine"><div><strong id="machine">RLP</strong><small>Kontrol mesin lokal</small></div><span style="font-size:42px">♻</span></div>
+        <div class="status"><div class="status-title">Status mesin</div><div id="status" class="status-value">Memuat...</div><div class="meter"><i id="fillBar"></i></div></div>
+        <div class="grid">
+          <div class="sensor"><b id="fill">0%</b><span>Kapasitas terisi</span></div>
+          <div class="sensor"><b id="temperature">--°C</b><span>Suhu perangkat</span></div>
+          <div class="sensor"><b id="chamber">Tertutup</b><span>Input chamber</span></div>
+          <div class="sensor"><b id="camera">Aktif</b><span>Kamera keamanan</span></div>
+        </div>
+      </section>
+    </main>
+    <footer><span>Tekan Ctrl+Shift+M untuk maintenance lokal</span><span class="queue">Antrean: <b id="queue">0</b> event</span></footer>
+  </div>
+  <div id="maintenance" class="maintenance">
+    <div class="maint-card">
+      <button class="close" onclick="toggleMaintenance(false)">Tutup</button>
+      <h2>Maintenance lokal</h2>
+      <p>Command ini dikirim langsung ke proses Python pada perangkat.</p>
+      <div class="buttons">
+        <button onclick="command('heartbeat')">Heartbeat</button>
+        <button onclick="command('deposit',{kind:'botol'})">Simulasi botol</button>
+        <button onclick="command('deposit',{kind:'kaleng'})">Simulasi kaleng</button>
+        <button class="danger" onclick="command('fraud',{reason:'string-pull'})">Fraud string-pull</button>
+        <button class="danger" onclick="command('vandalism',{reason:'impact'})">Vandalisme</button>
+        <button onclick="command('flush')">Sinkronkan antrean</button>
+        <button onclick="command('reset-safe-state')">Reset safe state</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const $=id=>document.getElementById(id);
+    async function refresh(){
+      try{
+        const r=await fetch('/api/state',{cache:'no-store'}),d=await r.json(),s=d.sensors;
+        $('machine').textContent=d.machineCode;$('status').textContent=s.status;
+        $('fill').textContent=s.fill_level_percent+'%';$('fillBar').style.width=s.fill_level_percent+'%';
+        $('temperature').textContent=Number(s.ambient_temp_c).toFixed(1)+'°C';
+        $('chamber').textContent=s.chamber_open?'Terbuka':'Tertutup';
+        $('camera').textContent=s.camera_online?'Aktif':'Gangguan';$('queue').textContent=d.queueDepth;
+        $('connectionText').textContent=d.upstreamOnline?'Server terhubung':'Mode offline lokal';
+        $('connection').classList.toggle('online',d.upstreamOnline);
+      }catch{$('connectionText').textContent='Controller Python terputus'}
+    }
+    async function command(command,extra={}){
+      await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command,...extra})});refresh();
+    }
+    function toggleMaintenance(show){$('maintenance').classList.toggle('show',show)}
+    addEventListener('keydown',e=>{if(e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==='m')toggleMaintenance(true);if(e.key==='Escape')toggleMaintenance(false)});
+    refresh();setInterval(refresh,750);
+  </script>
+</body>
+</html>

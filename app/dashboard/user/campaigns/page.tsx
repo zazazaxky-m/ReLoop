@@ -18,7 +18,7 @@ export default async function UserCampaignsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Campaign"
-        description="Program lingkungan aktif yang bisa Anda ikuti saat setor sampah."
+        description="Temukan program lingkungan aktif dan manfaat yang tersedia."
       />
       <div className="grid gap-4 sm:grid-cols-2">
         {eligible.map((c) => (

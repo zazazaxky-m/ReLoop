@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { DataTable, StatusBadge, type Column } from "@/components/ui";
+import { ArrowUpRight } from "@/components/ui/icons";
 import { timeAgo } from "@/lib/format";
 
 export interface MachineRow {
@@ -63,9 +64,24 @@ export function MachineListTable({
     },
     {
       key: "fill",
-      header: "Fill",
-      align: "right",
-      render: (m) => `${m.fillLevelPercent}%`,
+      header: "Kapasitas",
+      render: (m) => (
+        <div className="flex min-w-32 items-center gap-2.5">
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
+            <div
+              className={
+                m.fillLevelPercent >= 80
+                  ? "h-full bg-amber-500"
+                  : "h-full bg-brand-500"
+              }
+              style={{ width: `${Math.min(m.fillLevelPercent, 100)}%` }}
+            />
+          </div>
+          <span className="w-9 text-right text-xs font-semibold text-muted">
+            {m.fillLevelPercent}%
+          </span>
+        </div>
+      ),
     },
     {
       key: "heartbeat",
@@ -81,9 +97,9 @@ export function MachineListTable({
       render: (m) => (
         <Link
           href={`${detailBase}/${m.id}`}
-          className="text-sm font-medium text-brand-600 hover:underline"
+          className="inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:text-brand-800"
         >
-          Detail
+          Detail <ArrowUpRight />
         </Link>
       ),
     },

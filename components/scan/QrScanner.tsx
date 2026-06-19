@@ -81,7 +81,7 @@ export function QrScanner({
     <div className="space-y-3">
       <div
         id={ELEMENT_ID}
-        className="mx-auto w-full max-w-sm overflow-hidden rounded-2xl border border-border bg-black"
+        className="mx-auto w-full max-w-sm overflow-hidden rounded-lg border border-border bg-black"
       />
       {starting && !error ? (
         <p className="text-center text-sm text-muted">Membuka kamera…</p>

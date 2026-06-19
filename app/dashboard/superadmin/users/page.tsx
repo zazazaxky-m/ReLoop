@@ -38,7 +38,10 @@ export default async function SuperadminUsersPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Pengguna & Peran" description="Kelola akun, peran, dan status seluruh pengguna platform." />
+      <PageHeader
+        title="Pengguna & Peran"
+        description="Kelola akun, peran, organisasi, dan status akses pengguna."
+      />
       <UserManager users={rows} organizations={organizations} />
     </div>
   );

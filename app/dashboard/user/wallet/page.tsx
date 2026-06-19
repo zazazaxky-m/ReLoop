@@ -11,56 +11,82 @@ import {
   PageHeader,
   StatusBadge,
 } from "@/components/ui";
-import { Wallet } from "@/components/ui/icons";
+import { Clock, Coins, Wallet } from "@/components/ui/icons";
 import { formatDateTime, formatRupiah } from "@/lib/format";
-import { WalletPanel, type AccountRow, type RedemptionRow } from "@/components/wallet/WalletPanel";
+import {
+  WalletPanel,
+  type AccountRow,
+  type RedemptionRow,
+} from "@/components/wallet/WalletPanel";
 
 export default async function UserWalletPage() {
   const user = await requirePageUser(["USER"]);
-  const [balance, history, accounts, redemptions, minRedemption] = await Promise.all([
-    getWalletBalance(user.id),
-    getLedgerHistory(user.id, 30),
-    prisma.payoutAccount.findMany({
-      where: { userId: user.id, status: { not: "DISABLED" } },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.redemption.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    }),
-    getMinRedemption(),
-  ]);
+  const [balance, history, accounts, redemptions, minRedemption] =
+    await Promise.all([
+      getWalletBalance(user.id),
+      getLedgerHistory(user.id, 30),
+      prisma.payoutAccount.findMany({
+        where: { userId: user.id, status: { not: "DISABLED" } },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.redemption.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
+      getMinRedemption(),
+    ]);
 
-  const accountRows: AccountRow[] = accounts.map((a) => ({
-    id: a.id,
-    provider: a.provider,
-    accountIdentifier: a.accountIdentifier,
-    accountName: a.accountName,
-    status: a.status,
+  const accountRows: AccountRow[] = accounts.map((account) => ({
+    id: account.id,
+    provider: account.provider,
+    accountIdentifier: account.accountIdentifier,
+    accountName: account.accountName,
+    status: account.status,
   }));
 
-  const redemptionRows: RedemptionRow[] = redemptions.map((r) => ({
-    id: r.id,
-    amount: r.amount,
-    provider: r.provider,
-    status: r.status,
-    note: r.note,
-    createdAt: r.createdAt,
+  const redemptionRows: RedemptionRow[] = redemptions.map((redemption) => ({
+    id: redemption.id,
+    amount: redemption.amount,
+    provider: redemption.provider,
+    status: redemption.status,
+    note: redemption.note,
+    createdAt: redemption.createdAt,
   }));
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Dompet Reward"
-        description="Saldo dihitung dari ledger append-only. Pencairan via transfer manual superadmin."
+        description="Kelola saldo reward, akun pencairan, dan riwayat transaksi."
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Tersedia" value={formatRupiah(balance.available)} icon={Wallet} />
-        <MetricCard label="Pending review" value={formatRupiah(balance.pending)} />
-        <MetricCard label="Direservasi" value={formatRupiah(balance.reserved)} hint="Pencairan diproses" />
-        <MetricCard label="Sudah dicairkan" value={formatRupiah(balance.redeemed)} />
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <MetricCard
+          label="Tersedia"
+          value={formatRupiah(balance.available)}
+          icon={Wallet}
+          tone="green"
+          className="col-span-2 sm:col-span-1"
+        />
+        <MetricCard
+          label="Pending"
+          value={formatRupiah(balance.pending)}
+          icon={Clock}
+          tone="amber"
+        />
+        <MetricCard
+          label="Direservasi"
+          value={formatRupiah(balance.reserved)}
+          hint="Pencairan diproses"
+          tone="blue"
+        />
+        <MetricCard
+          label="Sudah dicairkan"
+          value={formatRupiah(balance.redeemed)}
+          icon={Coins}
+          tone="teal"
+        />
       </div>
 
       <WalletPanel
@@ -72,27 +98,36 @@ export default async function UserWalletPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Riwayat ledger</CardTitle>
+          <CardTitle>Riwayat transaksi</CardTitle>
         </CardHeader>
         <CardContent>
-          <ul className="divide-y divide-border">
-            {history.map((e) => (
-              <li key={e.id} className="flex items-center justify-between py-3 text-sm">
-                <div>
-                  <p className="font-medium">
-                    {e.entryType} · {formatRupiah(e.amount)}
-                  </p>
-                  <p className="text-xs text-muted">
-                    {formatDateTime(e.createdAt)}
-                    {e.session?.machine
-                      ? ` · ${e.session.machine.name}`
-                      : ""}
-                  </p>
-                </div>
-                <StatusBadge status={e.status} />
-              </li>
-            ))}
-          </ul>
+          {history.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted">
+              Belum ada riwayat transaksi.
+            </p>
+          ) : (
+            <ul className="grid gap-2 lg:grid-cols-2">
+              {history.map((entry) => (
+                <li
+                  key={entry.id}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-3 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">
+                      {entry.entryType} · {formatRupiah(entry.amount)}
+                    </p>
+                    <p className="flex flex-wrap gap-x-2 text-xs text-muted">
+                      <span>{formatDateTime(entry.createdAt)}</span>
+                      {entry.session?.machine ? (
+                        <span>{entry.session.machine.name}</span>
+                      ) : null}
+                    </p>
+                  </div>
+                  <StatusBadge status={entry.status} />
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </div>

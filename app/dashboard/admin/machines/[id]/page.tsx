@@ -37,7 +37,7 @@ export default async function AdminMachineDetailPage({
     <div className="space-y-6">
       <PageHeader
         title={machine.name}
-        description={`Kode ${machine.machineCode}`}
+        description={`Kode mesin: ${machine.machineCode}`}
         actions={
           <Link
             href="/dashboard/admin/machines"

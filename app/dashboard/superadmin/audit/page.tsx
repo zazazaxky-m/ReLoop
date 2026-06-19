@@ -50,7 +50,7 @@ export default async function SuperadminAuditPage({
     <div className="space-y-6">
       <PageHeader
         title="Audit Log"
-        description="Riwayat aksi sensitif lintas platform (maks 150 terbaru)."
+        description="Tinjau aktivitas penting dan perubahan data terbaru pada sistem."
       />
 
       <div className="flex flex-wrap gap-2">

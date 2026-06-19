@@ -5,7 +5,7 @@ export default async function UserProfilePage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Profil" description="Informasi akun Anda." />
+      <PageHeader title="Profil" description="Lihat informasi dasar dan status akun Anda." />
       <Card>
         <CardHeader>
           <CardTitle>{user.name}</CardTitle>
@@ -23,11 +23,8 @@ export default async function UserProfilePage() {
             <span className="text-muted">Status:</span> {user.status}
           </p>
           <p>
-            <span className="text-muted">Payout eligible:</span>{" "}
+            <span className="text-muted">Dapat melakukan pencairan:</span>{" "}
             {user.payoutEligible ? "Ya" : "Tidak"}
-          </p>
-          <p className="text-xs text-muted-soft">
-            KYC tidak diperlukan pada MVP.
           </p>
         </CardContent>
       </Card>

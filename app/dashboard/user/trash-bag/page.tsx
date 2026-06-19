@@ -29,14 +29,14 @@ export default async function UserTrashBagPage() {
     <div className="space-y-6">
       <PageHeader
         title="Trash Bag / Trip"
-        description="Mode opsional untuk trip wisata tanpa sampah. Trash bag ber-QR unik divalidasi petugas saat dikembalikan."
+        description="Lihat penugasan kantong, status pengembalian, dan hasil validasi."
       />
 
       {trips.length === 0 ? (
         <EmptyState
           icon={Trash}
           title="Belum ada trip"
-          description="Anda belum tergabung dalam trip trash bag. Hubungi penyelenggara/admin untuk bergabung."
+          description="Belum ada penugasan kantong atau perjalanan untuk akun Anda."
         />
       ) : (
         trips.map((t) => (

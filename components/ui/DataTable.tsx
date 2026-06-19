@@ -38,51 +38,53 @@ export function DataTable<T>({
   return (
     <div
       className={cn(
-        "overflow-x-auto rounded-2xl border border-border bg-surface shadow-sm",
+        "-mx-4 overflow-hidden border-y border-border bg-surface shadow-sm sm:mx-0 sm:rounded-lg sm:border",
         className,
       )}
     >
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-border bg-slate-50/80">
-            {columns.map((col) => (
-              <th
-                key={col.key}
-                className={cn(
-                  "whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted",
-                  alignClass[col.align ?? "left"],
-                  col.className,
-                )}
-              >
-                {col.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr
-              key={getRowKey(row, i)}
-              className="border-b border-border last:border-0 transition-colors hover:bg-brand-50/40"
-            >
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[700px] border-collapse text-sm">
+          <thead className="bg-slate-100/80">
+            <tr className="border-b border-border bg-slate-50/80">
               {columns.map((col) => (
-                <td
+                <th
                   key={col.key}
                   className={cn(
-                    "px-4 py-3 align-middle text-foreground",
+                    "whitespace-nowrap px-4 py-3.5 text-[11px] font-bold uppercase tracking-[0.08em] text-muted",
                     alignClass[col.align ?? "left"],
                     col.className,
                   )}
                 >
-                  {col.render
-                    ? col.render(row)
-                    : ((row as Record<string, ReactNode>)[col.key] ?? "-")}
-                </td>
+                  {col.header}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr
+                key={getRowKey(row, i)}
+                className="border-b border-border last:border-0 transition-colors hover:bg-brand-50/50"
+              >
+                {columns.map((col) => (
+                  <td
+                    key={col.key}
+                    className={cn(
+                      "px-4 py-3.5 align-middle text-foreground",
+                      alignClass[col.align ?? "left"],
+                      col.className,
+                    )}
+                  >
+                    {col.render
+                      ? col.render(row)
+                      : ((row as Record<string, ReactNode>)[col.key] ?? "-")}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

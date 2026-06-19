@@ -2,7 +2,7 @@
   "name": "reloop",
   "version": "0.1.0",
   "private": true,
-  "description": "Smart Waste Bank Pangandaran (ReLoop) - all-in-one waste management platform MVP",
+  "description": "ReLoop - digital waste management platform",
   "engines": {
     "node": ">=20"
   },
@@ -10,6 +10,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "realtime": "node realtime/server.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

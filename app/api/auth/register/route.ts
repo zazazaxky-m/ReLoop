@@ -10,7 +10,12 @@ const schema = z.object({
   name: z.string().min(2, "Nama minimal 2 karakter"),
   email: z.string().email("Email tidak valid"),
   password: z.string().min(6, "Password minimal 6 karakter"),
-  phone: z.string().trim().optional(),
+  phone: z
+    .string()
+    .trim()
+    .min(9, "Nomor HP minimal 9 digit")
+    .max(16, "Nomor HP maksimal 16 digit")
+    .regex(/^[0-9]+$/, "Nomor HP hanya boleh berisi angka"),
 });
 
 export async function POST(req: NextRequest) {
@@ -25,7 +30,7 @@ export async function POST(req: NextRequest) {
       data: {
         name: data.name.trim(),
         email,
-        phone: data.phone || null,
+        phone: data.phone,
         passwordHash: await hashPassword(data.password),
         role: "USER",
       },

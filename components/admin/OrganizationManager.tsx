@@ -154,7 +154,7 @@ export function OrganizationManager({
         </div>
       ) : null}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-foreground">Organisasi / Tenant</h2>
+        <h2 className="text-lg font-semibold text-foreground">Organisasi</h2>
         <Button variant={open ? "outline" : "primary"} onClick={() => setOpen((o) => !o)}>
           {open ? "Tutup" : <><Plus /> Tambah</>}
         </Button>

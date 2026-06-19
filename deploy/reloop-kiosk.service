@@ -1,0 +1,14 @@
+[Unit]
+Description=ReLoop Chromium Kiosk
+After=reloop-rvm.service graphical.target
+Requires=reloop-rvm.service
+
+[Service]
+User=reloop
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/chromium --kiosk --app=http://127.0.0.1:8765 --no-first-run --disable-session-crashed-bubble --disable-pinch --overscroll-history-navigation=0
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical.target

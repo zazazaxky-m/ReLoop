@@ -1,7 +1,7 @@
 {
-  "name": "Smart Waste Bank Pangandaran",
+  "name": "ReLoop",
   "short_name": "ReLoop",
-  "description": "Platform pengelolaan sampah end-to-end: setor sampah, reward, campaign, dan operasional pengepul.",
+  "description": "Platform pengelolaan sampah digital untuk pengguna, organisasi, dan pengepul.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

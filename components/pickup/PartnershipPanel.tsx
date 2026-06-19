@@ -335,7 +335,7 @@ export function PartnershipPanel({
                   id="a-regions"
                   value={regions}
                   onChange={(e) => setRegions(e.target.value)}
-                  placeholder="Pangandaran, Cijulang"
+                  placeholder="Jakarta Selatan, Bandung"
                 />
               </FormField>
               <FormField label="Catatan area" htmlFor="a-note">

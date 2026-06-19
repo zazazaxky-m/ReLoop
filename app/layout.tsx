@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const appName = process.env.NEXT_PUBLIC_APP_NAME ?? "Smart Waste Bank Pangandaran";
+const appName = process.env.NEXT_PUBLIC_APP_NAME ?? "ReLoop";
 
 export const metadata: Metadata = {
   title: {
@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     template: `%s | ${appName}`,
   },
   description:
-    "Platform pengelolaan sampah end-to-end: setor sampah, reward, campaign lingkungan, dan operasional pengepul. Mulai dari Kabupaten Pangandaran.",
+    "Platform pengelolaan sampah digital untuk penyetoran, reward, operasional mesin, dan pengambilan material.",
   manifest: "/manifest.webmanifest",
   applicationName: appName,
   appleWebApp: {

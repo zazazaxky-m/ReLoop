@@ -139,7 +139,7 @@ export function MachineForm({
             id="name"
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            placeholder="Mesin Pasar Pangandaran"
+            placeholder="Mesin Pasar Utama"
             required
           />
         </FormField>

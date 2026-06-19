@@ -28,7 +28,7 @@ export function MapLegend({ showCampaign = true }: { showCampaign?: boolean }) {
           >
             ★
           </span>
-          Campaign
+          Program
         </span>
       ) : null}
     </div>

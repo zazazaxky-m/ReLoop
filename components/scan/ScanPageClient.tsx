@@ -166,7 +166,7 @@ export function ScanPageClient() {
     <div className="space-y-6">
       <PageHeader
         title="Scan Mesin"
-        description="Pindai QR dinamis pada layar mesin untuk memulai sesi setor."
+        description="Pindai kode QR pada mesin untuk memulai sesi penyetoran."
       />
 
       {error ? (
@@ -194,7 +194,7 @@ export function ScanPageClient() {
               <QrScanner onResult={handleScanned} onCancel={() => setCameraOn(false)} />
             ) : (
               <div className="text-center">
-                <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-2xl text-brand-600">
+                <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-brand-50 text-2xl text-brand-600">
                   <QrCode />
                 </span>
                 {code && token ? (

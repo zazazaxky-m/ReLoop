@@ -4,6 +4,7 @@ export const CONFIG_KEYS = {
   MIN_REDEMPTION: "min_redemption",
   DEFAULT_QR_ROTATION_SECONDS: "default_qr_rotation_seconds",
   POINTS_TO_RUPIAH: "points_to_rupiah",
+  LANDING_HERO_SLIDES: "landing_hero_slides",
 } as const;
 
 export const CONFIG_DEFAULTS: Record<string, string> = {

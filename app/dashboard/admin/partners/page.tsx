@@ -42,7 +42,7 @@ export default async function AdminPartnersPage() {
     <div className="space-y-6">
       <PageHeader
         title="Mitra Pengepul"
-        description="Undang dan kelola mitra pengepul organisasi Anda. Kemitraan baru harus disetujui superadmin sebelum bisa ditugaskan pickup."
+        description="Kelola undangan dan status kerja sama dengan pengepul."
       />
       <PartnershipPanel viewer="admin" partnerships={rows} />
     </div>

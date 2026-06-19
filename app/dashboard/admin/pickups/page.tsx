@@ -52,7 +52,7 @@ export default async function AdminPickupsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Pickup Request"
-        description="Kelola permintaan pengambilan sampah. Assign hanya ke mitra pengepul aktif organisasi Anda."
+        description="Jadwalkan pengambilan, tetapkan pengepul, dan pantau progresnya."
       />
       <PickupManager pickups={rows} machines={machines} activePartners={activePartners} />
     </div>

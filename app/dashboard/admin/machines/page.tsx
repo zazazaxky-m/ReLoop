@@ -20,13 +20,12 @@ export default async function AdminMachinesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Mesin Organisasi"
-        description="Pantau & operasikan mesin kolektor organisasi Anda (status, maintenance, jenis sampah)."
+        description="Pantau status, kapasitas, dan konfigurasi mesin organisasi."
       />
       <Card className="border-dashed">
         <CardContent className="py-4 text-sm text-muted">
-          Penambahan unit mesin baru dilakukan oleh <strong>superadmin</strong> (mesin
-          disediakan & didaftarkan terpusat). Hubungi superadmin untuk provisioning mesin
-          baru pada organisasi Anda.
+          Unit mesin baru didaftarkan oleh <strong>superadmin</strong>. Hubungi
+          pengelola sistem untuk menambahkan mesin ke organisasi Anda.
         </CardContent>
       </Card>
       <MachineListTable

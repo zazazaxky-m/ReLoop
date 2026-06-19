@@ -33,7 +33,10 @@ export default async function SuperadminOrganizationsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Organisasi / Tenant" description="Kelola seluruh organisasi pemilik mesin." />
+      <PageHeader
+        title="Organisasi"
+        description="Kelola organisasi, wilayah, dan status operasionalnya."
+      />
       <OrganizationManager organizations={rows} regions={regions} />
     </div>
   );

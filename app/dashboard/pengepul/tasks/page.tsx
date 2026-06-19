@@ -48,7 +48,7 @@ export default async function PengepulTasksPage() {
     <div className="space-y-6">
       <PageHeader
         title="Tugas Pickup"
-        description="Tugas pengambilan dari organisasi mitra aktif Anda. Perbarui status dan catat material."
+        description="Lihat tugas pengambilan, perbarui progres, dan catat material."
       />
       <PickupTaskList tasks={rows} wasteTypes={wasteTypes} />
     </div>

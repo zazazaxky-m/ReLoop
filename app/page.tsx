@@ -1,257 +1,279 @@
+import Image from "next/image";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui";
+import { HeroCarousel } from "@/components/landing/HeroCarousel";
+import { CONFIG_KEYS, getConfig } from "@/lib/config";
+import { parseHeroSlides } from "@/lib/hero-slides";
 import {
   ArrowRight,
-  Building,
+  CheckCircle,
   Coins,
   Leaf,
   QrCode,
   Recycle,
   ShieldCheck,
   Truck,
-  User,
   Wallet,
 } from "@/components/ui/icons";
+
+export const dynamic = "force-dynamic";
 
 const steps = [
   {
     icon: QrCode,
-    title: "Scan QR Mesin",
-    desc: "Pindai QR dinamis pada layar mesin kolektor untuk memulai sesi setor.",
-  },
-  {
-    icon: Recycle,
-    title: "Masukkan Sampah",
-    desc: "Botol & kaleng divalidasi via berat, kamera AI, dan acceptance point.",
+    number: "01",
+    title: "Pindai & setor",
+    desc: "Temukan titik ReLoop terdekat, pindai kode, lalu setorkan material.",
   },
   {
     icon: Coins,
-    title: "Dapat Reward",
-    desc: "Reward per item tercatat di ledger internal setelah barang diterima.",
+    number: "02",
+    title: "Dapatkan nilai",
+    desc: "Setiap setoran tervalidasi dan reward langsung tercatat di akunmu.",
   },
   {
     icon: Wallet,
-    title: "Cairkan Saldo",
-    desc: "Tarik saldo ke e-wallet via transfer manual superadmin.",
+    number: "03",
+    title: "Gunakan reward",
+    desc: "Pantau saldo dan ajukan pencairan dengan proses yang transparan.",
   },
 ];
 
-const roles = [
-  {
-    icon: User,
-    title: "Pengguna",
-    desc: "Setor sampah, lihat saldo & riwayat, ikuti campaign, cairkan reward.",
-  },
-  {
-    icon: Building,
-    title: "Admin Organisasi",
-    desc: "Kelola mesin, campaign, jenis sampah, dan mitra pengepul organisasi.",
-  },
-  {
-    icon: Truck,
-    title: "Pengepul",
-    desc: "Pantau mesin penuh & tugas pickup pada organisasi mitra aktif.",
-  },
-  {
-    icon: ShieldCheck,
-    title: "Superadmin",
-    desc: "Kelola tenant, wilayah, kemitraan, payout, dan laporan lintas daerah.",
-  },
+const ecosystem = [
+  "Warga menyetor lebih mudah",
+  "Organisasi memantau dampak",
+  "Pengepul bekerja lebih terarah",
 ];
 
-export default function Home() {
+export default async function Home() {
+  const heroSlides = parseHeroSlides(
+    await getConfig(CONFIG_KEYS.LANDING_HERO_SLIDES),
+  );
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Nav */}
-      <header className="sticky top-0 z-20 border-b border-border bg-surface/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-500 text-lg text-white">
-              <Recycle />
-            </span>
-            <div className="leading-tight">
-              <p className="text-base font-bold text-foreground">ReLoop</p>
-              <p className="text-[11px] font-medium text-muted">
-                Smart Waste Bank Pangandaran
-              </p>
-            </div>
-          </div>
-          <nav className="flex items-center gap-2">
-            <Link href="/login" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+    <div className="min-h-screen overflow-hidden bg-[#f7faf7]">
+      <header className="relative z-30 border-b border-emerald-950/5 bg-[#f7faf7]/90 backdrop-blur-xl">
+        <div className="mx-auto flex h-18 max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
+          <Link href="/" className="flex items-center">
+            <Image
+              src="/reloop-logo-name.svg"
+              alt="ReLoop"
+              width={138}
+              height={41}
+              priority
+              className="h-10 w-auto"
+            />
+          </Link>
+
+          <nav className="flex items-center gap-1 sm:gap-2">
+            <Link
+              href="/login"
+              className={buttonVariants({
+                variant: "ghost",
+                size: "sm",
+                className: "rounded-full px-4 text-emerald-950",
+              })}
+            >
               Masuk
             </Link>
-            <Link href="/register" className={buttonVariants({ variant: "primary", size: "sm" })}>
-              Daftar
+            <Link
+              href="/register"
+              className={buttonVariants({
+                variant: "primary",
+                size: "sm",
+                className:
+                  "rounded-full bg-emerald-950 px-5 shadow-none hover:bg-emerald-800",
+              })}
+            >
+              Mulai
             </Link>
           </nav>
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 -z-10 bg-gradient-to-b from-brand-50 via-mint-soft to-background" />
-        <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:py-24">
-          <div className="space-y-6">
-            <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-mint px-3 py-1 text-sm font-medium text-brand-700">
-              <Leaf className="text-base" /> Mulai dari Kabupaten Pangandaran
-            </span>
-            <h1 className="text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl">
-              Setor sampah, dapat{" "}
-              <span className="text-brand-600">reward</span>, jaga bumi.
-            </h1>
-            <p className="max-w-xl text-lg text-muted">
-              Platform manajemen sampah end-to-end: mesin kolektor pintar,
-              reward pengguna, campaign lingkungan, dan operasional pengepul
-              dalam satu sistem.
-            </p>
-            <div className="flex flex-wrap items-center gap-3">
-              <Link
-                href="/register"
-                className={buttonVariants({ variant: "primary", size: "lg" })}
-              >
-                Mulai Sekarang <ArrowRight />
-              </Link>
-              <Link
-                href="/login"
-                className={buttonVariants({ variant: "outline", size: "lg" })}
-              >
-                Masuk ke Dashboard
-              </Link>
-            </div>
-          </div>
+      <main>
+        <section className="relative isolate">
+          <div className="pointer-events-none absolute -left-32 top-10 -z-10 h-96 w-96 rounded-full bg-lime-200/35 blur-3xl" />
+          <div className="pointer-events-none absolute right-0 top-0 -z-10 h-[34rem] w-[34rem] rounded-full bg-emerald-200/30 blur-3xl" />
 
-          {/* Hero visual: machine mock */}
-          <div className="relative mx-auto w-full max-w-sm">
-            <div className="rounded-3xl border border-border bg-surface p-6 shadow-xl">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-500 text-white">
-                    <Recycle />
-                  </span>
-                  <div className="leading-tight">
-                    <p className="text-sm font-semibold">Mesin RLP-001</p>
-                    <p className="text-xs text-muted">Pantai Pangandaran</p>
-                  </div>
-                </div>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700">
-                  <span className="h-2 w-2 rounded-full bg-brand-500" /> Online
+          <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-10 px-5 pb-14 pt-7 sm:px-8 sm:pt-9 lg:grid-cols-[1.02fr_.98fr] lg:px-10 lg:pb-20 lg:pt-10">
+            <div className="relative z-10 min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-900/10 bg-white/75 px-3.5 py-2 text-xs font-bold uppercase tracking-[0.13em] text-emerald-800 shadow-sm backdrop-blur">
+                <Leaf className="text-base" />
+                Satu aksi, dampak berulang
+              </div>
+
+              <h1 className="mt-7 max-w-3xl text-[2.85rem] font-black leading-[0.94] tracking-[-0.065em] text-emerald-950 min-[370px]:text-[3.15rem] sm:text-7xl lg:text-[5.35rem]">
+                Sampah selesai.
+                <span className="mt-2 block text-emerald-600">
+                  Dampak dimulai.
                 </span>
-              </div>
-              <div className="mt-5 flex aspect-square items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-white">
-                <QrCode className="text-7xl" />
-              </div>
-              <p className="mt-3 text-center text-xs text-muted">
-                QR dinamis &middot; berotasi setiap 30 detik
+              </h1>
+
+              <p className="mt-7 max-w-xl text-base leading-7 text-emerald-950/62 sm:text-lg sm:leading-8">
+                ReLoop membuat setoran, reward, dan pengambilan material bergerak
+                dalam satu alur yang sederhana—untuk warga, komunitas, dan kota.
               </p>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-brand-50 p-3 text-center">
-                  <p className="text-xs text-muted">Botol</p>
-                  <p className="text-base font-bold text-brand-700">Rp200</p>
-                </div>
-                <div className="rounded-xl bg-brand-50 p-3 text-center">
-                  <p className="text-xs text-muted">Kaleng</p>
-                  <p className="text-base font-bold text-brand-700">Rp250</p>
-                </div>
+
+              <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+                <Link
+                  href="/register"
+                  className={buttonVariants({
+                    variant: "primary",
+                    size: "lg",
+                    className:
+                      "h-14 rounded-full bg-emerald-700 px-7 shadow-[0_12px_30px_rgba(4,120,87,0.24)] hover:bg-emerald-800",
+                  })}
+                >
+                  Mulai setor <ArrowRight />
+                </Link>
+                <Link
+                  href="/login"
+                  className={buttonVariants({
+                    variant: "outline",
+                    size: "lg",
+                    className:
+                      "h-14 rounded-full border-emerald-950/10 bg-white/70 px-7 shadow-none backdrop-blur hover:bg-white",
+                  })}
+                >
+                  Buka dashboard
+                </Link>
               </div>
-            </div>
-          </div>
-        </div>
-      </section>
 
-      {/* How it works */}
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-        <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            Cara kerjanya
-          </h2>
-          <p className="mt-2 text-muted">
-            Empat langkah sederhana dari setor sampah hingga cair reward.
-          </p>
-        </div>
-        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {steps.map((s, i) => (
-            <div
-              key={s.title}
-              className="relative rounded-2xl border border-border bg-surface p-6 shadow-sm"
-            >
-              <span className="absolute right-5 top-5 text-3xl font-bold text-brand-100">
-                {i + 1}
-              </span>
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-2xl text-brand-600">
-                <s.icon />
-              </span>
-              <h3 className="mt-4 font-semibold text-foreground">{s.title}</h3>
-              <p className="mt-1 text-sm text-muted">{s.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Roles */}
-      <section className="bg-brand-50/50 py-16">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="mx-auto max-w-2xl text-center">
-            <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-              Satu platform, empat peran
-            </h2>
-            <p className="mt-2 text-muted">
-              Akses dibatasi server-side dengan RBAC, tenant isolation, dan
-              kemitraan pengepul.
-            </p>
-          </div>
-          <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {roles.map((r) => (
-              <div
-                key={r.title}
-                className="rounded-2xl border border-border bg-surface p-6 shadow-sm"
-              >
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-500 text-2xl text-white">
-                  <r.icon />
+              <div className="mt-10 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold text-emerald-950/65">
+                <span className="flex items-center gap-2">
+                  <CheckCircle className="text-lg text-emerald-600" />
+                  Reward transparan
                 </span>
-                <h3 className="mt-4 font-semibold text-foreground">
-                  {r.title}
-                </h3>
-                <p className="mt-1 text-sm text-muted">{r.desc}</p>
+                <span className="flex items-center gap-2">
+                  <CheckCircle className="text-lg text-emerald-600" />
+                  Dampak tercatat
+                </span>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
+            </div>
 
-      {/* CTA banner */}
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-        <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 to-brand-800 px-8 py-12 text-center text-white sm:px-12">
-          <h2 className="text-2xl font-bold sm:text-3xl">
-            Dari Pangandaran untuk Jawa Barat
-          </h2>
-          <p className="mx-auto mt-3 max-w-2xl text-brand-50">
-            Model wilayah siap diperluas dari kabupaten ke provinsi. Bergabung
-            dan jadikan pengelolaan sampah lebih bersih dan terukur.
-          </p>
-          <Link
-            href="/register"
-            className={buttonVariants({
-              variant: "secondary",
-              size: "lg",
-              className: "mt-6",
-            })}
-          >
-            Buat Akun Gratis <ArrowRight />
-          </Link>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-border bg-surface">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-6 text-sm text-muted sm:flex-row sm:px-6">
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500 text-sm text-white">
-              <Recycle />
-            </span>
-            <span className="font-semibold text-foreground">ReLoop</span>
-            <span>&middot; Smart Waste Bank Pangandaran</span>
+            <div className="mx-auto min-w-0 w-full max-w-xl lg:max-w-none">
+              <HeroCarousel slides={heroSlides} />
+            </div>
           </div>
-          <p>MVP &middot; {new Date().getFullYear()}</p>
+        </section>
+
+        <section className="px-5 py-8 sm:px-8 lg:px-10">
+          <div className="mx-auto grid max-w-7xl overflow-hidden rounded-[2rem] bg-emerald-950 text-white lg:grid-cols-[.8fr_1.2fr]">
+            <div className="relative overflow-hidden p-8 sm:p-10 lg:p-12">
+              <div className="absolute -bottom-24 -right-20 h-64 w-64 rounded-full border-[45px] border-lime-300/10" />
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-lime-300">
+                Sesederhana itu
+              </p>
+              <h2 className="mt-4 max-w-md text-3xl font-black leading-tight tracking-[-0.045em] sm:text-4xl">
+                Dari barang bekas menjadi nilai baru.
+              </h2>
+              <p className="mt-4 max-w-sm leading-7 text-white/58">
+                Tanpa alur rumit. Setiap langkah terasa jelas dari awal sampai
+                reward masuk.
+              </p>
+            </div>
+
+            <div className="grid border-t border-white/10 sm:grid-cols-3 lg:border-l lg:border-t-0">
+              {steps.map((step, index) => (
+                <article
+                  key={step.title}
+                  className={`group p-7 transition-colors hover:bg-white/[0.06] sm:p-8 ${
+                    index
+                      ? "border-t border-white/10 sm:border-l sm:border-t-0"
+                      : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-lime-300 text-xl text-emerald-950">
+                      <step.icon />
+                    </span>
+                    <span className="text-xs font-bold tracking-[0.15em] text-white/25">
+                      {step.number}
+                    </span>
+                  </div>
+                  <h3 className="mt-8 text-lg font-bold">{step.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-white/52">
+                    {step.desc}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="mx-auto grid max-w-7xl gap-12 px-5 py-20 sm:px-8 lg:grid-cols-2 lg:px-10 lg:py-28">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">
+              Dibangun untuk bergerak bersama
+            </p>
+            <h2 className="mt-4 max-w-xl text-4xl font-black leading-[1.05] tracking-[-0.05em] text-emerald-950 sm:text-5xl">
+              Semua orang punya peran dalam satu putaran.
+            </h2>
+          </div>
+
+          <div className="lg:pt-3">
+            <p className="max-w-xl text-base leading-7 text-emerald-950/60 sm:text-lg sm:leading-8">
+              Dari setoran harian hingga pengangkutan skala organisasi, ReLoop
+              menjaga data dan pekerjaan tetap terhubung.
+            </p>
+            <div className="mt-8 space-y-3">
+              {ecosystem.map((item, index) => {
+                const Icon = [Recycle, ShieldCheck, Truck][index];
+                return (
+                  <div
+                    key={item}
+                    className="flex items-center gap-4 rounded-2xl border border-emerald-950/8 bg-white p-4 shadow-[0_8px_30px_rgba(6,78,59,0.05)]"
+                  >
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-xl text-emerald-700">
+                      <Icon />
+                    </span>
+                    <p className="font-bold text-emerald-950">{item}</p>
+                    <ArrowRight className="ml-auto text-emerald-900/25" />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section className="px-5 pb-8 sm:px-8 lg:px-10 lg:pb-10">
+          <div className="relative mx-auto max-w-7xl overflow-hidden rounded-[2rem] bg-lime-300 px-7 py-12 sm:px-12 sm:py-16 lg:flex lg:items-center lg:justify-between">
+            <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full border-[55px] border-emerald-950/5" />
+            <div className="relative">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-800">
+                Giliranmu ikut memutar
+              </p>
+              <h2 className="mt-3 max-w-2xl text-3xl font-black leading-tight tracking-[-0.045em] text-emerald-950 sm:text-5xl">
+                Mulai dari satu setoran hari ini.
+              </h2>
+            </div>
+            <Link
+              href="/register"
+              className={buttonVariants({
+                variant: "primary",
+                size: "lg",
+                className:
+                  "relative mt-8 h-14 rounded-full bg-emerald-950 px-7 shadow-none hover:bg-emerald-800 lg:mt-0",
+              })}
+            >
+              Buat akun gratis <ArrowRight />
+            </Link>
+          </div>
+        </section>
+      </main>
+
+      <footer className="px-5 py-8 sm:px-8 lg:px-10">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 border-t border-emerald-950/8 pt-7 text-sm text-emerald-950/48 sm:flex-row sm:items-center sm:justify-between">
+          <Image
+            src="/reloop-logo-name.svg"
+            alt="ReLoop"
+            width={112}
+            height={34}
+            className="h-8 w-auto"
+          />
+          <p>Pengelolaan sampah yang kembali memberi nilai.</p>
+          <p>&copy; {new Date().getFullYear()} ReLoop</p>
         </div>
       </footer>
     </div>

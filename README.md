@@ -1,6 +1,6 @@
-# ReLoop - Smart Waste Bank Pangandaran
+# ReLoop
 
-All-in-one waste management platform. Users deposit waste into smart collector machines (dynamic QR), earn rewards into an internal ledger, join environmental campaigns, and redeem balances; admins manage their organization's machines/campaigns/collector partners; collectors (pengepul) handle pickups; and a superadmin manages tenants, regions, global config, and payouts. Starts in Kabupaten Pangandaran and is modeled to expand to Provinsi Jawa Barat.
+Digital waste management platform for users, organizations, collectors, and system operators. ReLoop supports machine-based deposits, rewards, environmental programs, material pickups, regional management, and operational reporting in one system.
 
 > This repository currently implements the **MVP foundation vertical slice** (Phases 0-3): scaffold, green UI kit, auth + server-side RBAC/tenant/partnership scoping, machine management with dynamic QR, scan-to-deposit flow, append-only reward ledger gated on a hardware "acceptance point" event, and a Python machine simulator. Later phases (admin/campaign, pickup/partnership, payout/redemption, trash-bag, reporting) ship with the full database schema and stubbed routes to iterate on next.
 
@@ -53,6 +53,9 @@ npm run db:seed
 # 6. Run the app
 npm run dev
 # open http://localhost:3000
+
+# 7. Run the lightweight realtime gateway in a second terminal
+npm run realtime
 ```
 
 > If you have a local PostgreSQL whose `postgres` password you know but do not
@@ -67,6 +70,55 @@ cd simulator
 pip install -r requirements.txt
 python simulator.py --machine <MACHINE_CODE> --secret <INGEST_SECRET>
 ```
+
+Recommended long-running machine process:
+
+```bash
+python simulator.py -m RLP-001 --secret <SECRET> --daemon
+```
+
+The simulator queues events locally and sends compact batches (up to 20 by
+default), so intermittent cellular connections do not lose sensor reports.
+Fraud and vandalism examples:
+
+```bash
+python simulator.py -m RLP-001 --secret <SECRET> --session <SESSION_ID> --deposit botol --fraud string-pull
+python simulator.py -m RLP-001 --secret <SECRET> --vandalism panel-open
+python simulator.py -m RLP-001 --secret <SECRET> --vandalism impact
+```
+
+### Realtime architecture
+
+- Machine telemetry remains persisted through signed HTTP POST requests.
+- Multiple sensor events are batched to reduce headers, TLS, and cellular use.
+- The realtime gateway broadcasts only tiny update notifications over WebSocket.
+- Dashboards refresh canonical data from PostgreSQL after a notification.
+- If the gateway is offline, data remains safe and UI polling/future refreshes
+  still retrieve it.
+
+Set `REALTIME_INTERNAL_SECRET` to the same value for the Next.js process and
+the realtime process. For remote clients, set `NEXT_PUBLIC_REALTIME_WS_URL` to
+the reachable gateway URL (use `wss://` behind HTTPS).
+
+### Chromium machine kiosk
+
+The kiosk UI and sensor daemon are separate processes. See
+[`kiosk/README.md`](kiosk/README.md). The kiosk route is:
+
+```text
+/kiosk/<MACHINE_CODE>
+```
+
+For an actual machine, prefer the **offline local edge mode**:
+
+```bash
+python simulator/simulator.py -m RLP-001 --secret <SECRET> \
+  --base-url https://server-reloop.example --daemon --local-kiosk
+```
+
+Chromium then opens `http://127.0.0.1:8765`, not the cloud URL. The display,
+sensor state, fraud detection, vandalism detection, and disk-backed event queue
+continue to run without internet. See `kiosk/README.md` for launch scripts.
 
 Machine codes **and per-machine ingest secrets** are printed by the seed script, and
 the secret is also shown in the superadmin machine detail page (Keamanan Mesin →

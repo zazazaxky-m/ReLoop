@@ -55,12 +55,17 @@ export default async function SuperadminRedemptionsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Redemption & Payout"
-        description="Antrian transfer manual ke e-wallet pengguna. Tandai status setelah transfer — upload bukti tidak wajib."
+        description="Proses permintaan pencairan dan pantau status pembayaran pengguna."
       />
-      <div className="grid gap-4 sm:grid-cols-3">
-        <MetricCard label="Antrian aktif" value={queueCount} icon={Clock} />
-        <MetricCard label="Total dibayar" value={formatRupiah(paidTotal)} icon={Wallet} />
-        <MetricCard label="Min. redemption" value={formatRupiah(minRedemption)} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+        <MetricCard label="Antrian aktif" value={queueCount} icon={Clock} tone="amber" />
+        <MetricCard label="Total dibayar" value={formatRupiah(paidTotal)} icon={Wallet} tone="green" />
+        <MetricCard
+          label="Min. pencairan"
+          value={formatRupiah(minRedemption)}
+          tone="slate"
+          className="col-span-2 sm:col-span-1"
+        />
       </div>
       <RedemptionQueue redemptions={rows} />
     </div>

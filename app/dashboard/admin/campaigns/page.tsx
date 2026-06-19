@@ -35,7 +35,7 @@ export default async function AdminCampaignsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Campaign"
-        description="Buat dan kelola campaign lokal organisasi Anda — public atau private dengan validasi domain email."
+        description="Buat dan kelola program lingkungan untuk pengguna organisasi."
       />
       <CampaignManager campaigns={rows} />
     </div>

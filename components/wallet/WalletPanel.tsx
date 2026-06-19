@@ -187,7 +187,6 @@ export function WalletPanel({
                 <Button type="submit" size="sm" disabled={busy}>
                   Simpan Akun
                 </Button>
-                <p className="mt-1 text-xs text-muted">KYC tidak diperlukan untuk MVP.</p>
               </div>
             </form>
           ) : null}
@@ -260,7 +259,7 @@ export function WalletPanel({
             </form>
           )}
           <p className="mt-3 text-xs text-muted">
-            Pencairan diproses superadmin via transfer manual ke e-wallet Anda.
+            Pencairan diproses oleh pengelola sistem ke akun pembayaran Anda.
           </p>
         </CardContent>
       </Card>

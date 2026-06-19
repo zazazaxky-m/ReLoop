@@ -5,11 +5,16 @@ export const metadata: Metadata = { title: "Daftar" };
 
 export default function RegisterPage() {
   return (
-    <div className="space-y-6">
-      <div className="space-y-1 text-center">
-        <h1 className="text-xl font-bold text-foreground">Buat akun baru</h1>
-        <p className="text-sm text-muted">
-          Daftar sebagai pengguna untuk mulai setor sampah
+    <div className="space-y-5 sm:space-y-6">
+      <div>
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-600">
+          Mulai perjalananmu
+        </p>
+        <h1 className="mt-1.5 text-2xl font-black tracking-[-0.045em] text-emerald-950 sm:text-3xl">
+          Buat akun ReLoop
+        </h1>
+        <p className="mt-1 text-sm leading-5 text-emerald-950/55 sm:mt-2 sm:leading-6">
+          Satu menit untuk mulai memberi dampak.
         </p>
       </div>
       <AuthForm mode="register" />

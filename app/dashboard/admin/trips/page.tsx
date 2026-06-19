@@ -41,7 +41,7 @@ export default async function AdminTripsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Trip / Trash Bag"
-        description="Mode opsional untuk wisata & validasi manual. Setiap trash bag punya QR unik; reward via validasi petugas."
+        description="Kelola perjalanan, kantong ber-QR, dan validasi pengembalian."
       />
       <TripManager trips={rows} campaigns={campaigns} />
     </div>

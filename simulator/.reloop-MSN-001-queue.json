@@ -1,0 +1,1 @@
+[{"localEventId":"dbdf97c1-120d-46d8-8f00-3c4c3613b3cc","eventType":"HEARTBEAT","payload":{"status":"ERROR","fillLevelPercent":33,"temperatureC":28.9,"cameraOnline":true,"doorLocked":true,"servicePanelOpen":false},"sessionId":null,"depositItemId":null,"occurredAt":"2026-06-19T07:08:56Z"}]

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Recycle } from "@/components/ui/icons";
+import Image from "next/image";
 
 interface Payload {
   machineCode: string;
@@ -20,7 +20,7 @@ const statusMessage: Record<string, string> = {
   OFFLINE: "Mesin sedang offline.",
 };
 
-export function MachineDisplay({ code }: { code: string }) {
+export function MachineDisplay({ code, kiosk = false }: { code: string; kiosk?: boolean }) {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -49,14 +49,31 @@ export function MachineDisplay({ code }: { code: string }) {
     }, 0);
     timer.current = setInterval(() => {
       void fetchPayload();
-    }, 2000);
+    }, 30000);
     const tick = setInterval(() => setNow(Date.now()), 500);
+    const realtimeUrl =
+      process.env.NEXT_PUBLIC_REALTIME_WS_URL ?? "ws://localhost:3001/ws";
+    const socket = new WebSocket(realtimeUrl);
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data));
+        if (
+          message.type === "event" &&
+          message.data?.machineCode === code
+        ) {
+          void fetchPayload();
+        }
+      } catch {
+        // Polling remains the fallback when realtime messages are malformed.
+      }
+    };
     return () => {
       clearTimeout(boot);
       if (timer.current) clearInterval(timer.current);
       clearInterval(tick);
+      socket.close();
     };
-  }, [fetchPayload]);
+  }, [code, fetchPayload]);
 
   const secondsLeft = data
     ? Math.max(0, Math.round((new Date(data.expiresAt).getTime() - now) / 1000))
@@ -64,18 +81,19 @@ export function MachineDisplay({ code }: { code: string }) {
   const isOnline = data?.status === "ONLINE";
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-brand-700 to-brand-900 p-6 text-white">
-      <div className="flex items-center gap-2.5">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/15 text-lg">
-          <Recycle />
-        </span>
-        <div className="leading-tight">
-          <p className="text-lg font-bold">ReLoop</p>
-          <p className="text-xs text-brand-100">Smart Waste Bank</p>
-        </div>
+    <div className={`flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-brand-700 to-brand-900 text-white ${kiosk ? "cursor-none p-8" : "p-6"}`}>
+      <div className="rounded-2xl bg-white px-4 py-2.5 shadow-lg">
+        <Image
+          src="/reloop-logo-name.svg"
+          alt="ReLoop"
+          width={150}
+          height={45}
+          priority
+          className="h-10 w-auto"
+        />
       </div>
 
-      <div className="mt-8 w-full max-w-sm rounded-3xl bg-white p-6 text-center text-foreground shadow-2xl">
+      <div className={`mt-8 w-full rounded-3xl bg-white text-center text-foreground shadow-2xl ${kiosk ? "max-w-lg p-9" : "max-w-sm p-6"}`}>
         {error ? (
           <div className="py-12">
             <p className="text-lg font-semibold text-status-error">{error}</p>
@@ -91,7 +109,7 @@ export function MachineDisplay({ code }: { code: string }) {
             <img
               src={data.qrDataUrl}
               alt="QR dinamis mesin"
-              className="mx-auto mt-4 h-64 w-64 rounded-2xl"
+              className={`mx-auto mt-4 rounded-xl ${kiosk ? "h-80 w-80" : "h-64 w-64"}`}
             />
             <p className="mt-3 font-medium text-brand-700">
               Scan untuk mulai setor sampah
@@ -112,7 +130,7 @@ export function MachineDisplay({ code }: { code: string }) {
       </div>
 
       <p className="mt-6 text-xs text-brand-100">
-        Layar mesin &middot; QR dinamis dengan masa berlaku singkat
+        {kiosk ? "Mode kios aktif" : "Layar mesin"} &middot; QR dinamis dengan masa berlaku singkat
       </p>
     </div>
   );

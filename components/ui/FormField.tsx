@@ -9,10 +9,10 @@ import { cn } from "@/lib/cn";
 import { ChevronDown } from "./icons";
 
 const controlBase =
-  "w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-soft focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-400/30 disabled:cursor-not-allowed disabled:opacity-60";
+  "w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-soft hover:border-slate-300 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60";
 
 const selectBase =
-  "peer w-full appearance-none rounded-xl border border-border bg-surface text-foreground shadow-sm outline-none transition-[background-color,border-color,box-shadow] hover:border-slate-300 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted disabled:opacity-70";
+  "peer w-full appearance-none rounded-lg border border-border bg-surface text-foreground shadow-sm outline-none transition-[background-color,border-color,box-shadow] hover:border-slate-300 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted disabled:opacity-70";
 
 type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & {
   compact?: boolean;

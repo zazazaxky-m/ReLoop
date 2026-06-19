@@ -17,5 +17,20 @@ services:
       timeout: 5s
       retries: 10
 
+  realtime:
+    image: node:22-alpine
+    container_name: reloop-realtime
+    working_dir: /app
+    command: ["node", "realtime/server.mjs"]
+    restart: unless-stopped
+    environment:
+      REALTIME_PORT: "3001"
+      REALTIME_HOST: "0.0.0.0"
+      REALTIME_INTERNAL_SECRET: "${REALTIME_INTERNAL_SECRET:-reloop-dev-realtime-secret}"
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./:/app:ro
+
 volumes:
   reloop-db-data:

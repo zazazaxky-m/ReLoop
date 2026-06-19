@@ -109,7 +109,7 @@ export function MapView({
               <span style="display:inline-block;width:9px;height:9px;border-radius:9999px;background:${color}"></span>
               <strong style="color:${color}">${STATUS_LABEL[m.status] ?? m.status}</strong>
             </p>
-            <p style="margin:4px 0 0;color:#475569">Sisa storage: <strong>${100 - m.fillLevelPercent}%</strong> (terisi ${m.fillLevelPercent}%)</p>
+            <p style="margin:4px 0 0;color:#475569">Kapasitas tersisa: <strong>${100 - m.fillLevelPercent}%</strong> (terisi ${m.fillLevelPercent}%)</p>
             ${m.capacityKg != null ? `<p style="margin:2px 0 0;color:#475569">Kapasitas: ${m.capacityKg} kg</p>` : ""}
             ${waste}
           </div>`;
@@ -127,7 +127,7 @@ export function MapView({
         const popup = `
           <div style="min-width:160px;font-family:system-ui">
             <p style="margin:0;font-weight:700;color:#0f172a">${escapeHtml(c.name)}</p>
-            <p style="margin:2px 0 4px;color:#64748b;font-size:12px">Campaign · ${escapeHtml(c.organizationName)}</p>
+            <p style="margin:2px 0 4px;color:#64748b;font-size:12px">Program · ${escapeHtml(c.organizationName)}</p>
             ${c.rewardMultiplier ? `<p style="margin:0;color:#0d9488;font-weight:600">Reward ${c.rewardMultiplier}x</p>` : ""}
           </div>`;
         L.marker([c.latitude, c.longitude], { icon }).bindPopup(popup).addTo(layer);
@@ -137,8 +137,7 @@ export function MapView({
       if (points.length > 0) {
         mapRef.current.fitBounds(points, { padding: [40, 40], maxZoom: 15 });
       } else {
-        // Default to Pangandaran.
-        mapRef.current.setView([-7.6886, 108.6531], 13);
+        mapRef.current.setView([-2.5489, 118.0149], 5);
       }
     }
 
@@ -160,7 +159,7 @@ export function MapView({
     <div
       ref={containerRef}
       style={{ height }}
-      className="w-full overflow-hidden rounded-2xl border border-border bg-surface shadow-sm"
+      className="relative z-0 isolate w-full overflow-hidden rounded-lg border border-border bg-surface shadow-sm"
     />
   );
 }

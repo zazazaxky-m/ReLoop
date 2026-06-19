@@ -2,12 +2,12 @@
 
 @theme {
   /* Surfaces */
-  --color-background: #f8fafc;
+  --color-background: #f3f7f5;
   --color-surface: #ffffff;
-  --color-foreground: #0f172a;
-  --color-muted: #64748b;
-  --color-muted-soft: #94a3b8;
-  --color-border: #e2e8f0;
+  --color-foreground: #14211a;
+  --color-muted: #5f6f66;
+  --color-muted-soft: #8b9a91;
+  --color-border: #dce6df;
 
   /* Brand green scale */
   --color-brand-50: #ecfdf5;
@@ -53,6 +53,22 @@ body {
   border-color: var(--color-border);
 }
 
+::selection {
+  background: var(--color-brand-200);
+  color: var(--color-brand-900);
+}
+
+button,
+a,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled),
+[role="button"] {
+  cursor: pointer;
+}
+
 /* Subtle scrollbar for desktop dashboards */
 @media (pointer: fine) {
   ::-webkit-scrollbar {
@@ -60,7 +76,7 @@ body {
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
+    background: #bdcbc2;
     border-radius: 9999px;
   }
 }

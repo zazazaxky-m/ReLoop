@@ -64,14 +64,14 @@ export default async function MapPage() {
     <div className="space-y-6">
       <PageHeader
         title="Peta Lokasi"
-        description="Temukan mesin kolektor (reverse vending machine) terdekat dan campaign aktif. Klik titik untuk detail status & sisa storage."
+        description="Temukan mesin terdekat dan lihat status operasional serta kapasitasnya."
       />
       <Card>
         <CardContent className="space-y-4 p-4">
           <MapLegend />
           <MapView machines={mapMachines} campaigns={mapCampaigns} height={520} />
           <p className="text-xs text-muted">
-            {mapMachines.length} mesin · {mapCampaigns.length} campaign publik aktif.
+            {mapMachines.length} mesin · {mapCampaigns.length} program publik aktif.
           </p>
         </CardContent>
       </Card>

@@ -5,7 +5,10 @@ export default async function PengepulProfilePage() {
   const user = await requirePageUser(["PENGEPUL"]);
   return (
     <div className="space-y-6">
-      <PageHeader title="Profil Pengepul" />
+      <PageHeader
+        title="Profil Pengepul"
+        description="Lihat informasi akun dan kontak pengepul."
+      />
       <Card>
         <CardHeader>
           <CardTitle>{user.name}</CardTitle>

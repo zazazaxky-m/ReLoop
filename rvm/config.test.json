@@ -1,0 +1,14 @@
+{
+  "machine_code": "RVM-TEST-001",
+  "machine_name": "RVM Integration Test",
+  "server_url": "http://127.0.0.1:3000",
+  "machine_secret": "integration-test-secret",
+  "database_path": "data/rvm-test.db",
+  "host": "127.0.0.1",
+  "port": 8877,
+  "hardware_driver": "mock",
+  "heartbeat_seconds": 3600,
+  "sync_interval_seconds": 1,
+  "camera_enabled": false,
+  "maintenance_pin_hash": "a1fb4e703a9ef1fa4936801721ff285a97ac85330856674412e054892afe6972"
+}
