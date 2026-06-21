@@ -1,0 +1,13 @@
+FROM node:22-alpine
+WORKDIR /app
+
+# Copy the server script directly since it has no external dependencies
+COPY realtime/server.mjs ./realtime/server.mjs
+
+ENV NODE_ENV=production
+ENV REALTIME_PORT=3001
+ENV REALTIME_HOST=0.0.0.0
+
+EXPOSE 3001
+
+CMD ["node", "realtime/server.mjs"]

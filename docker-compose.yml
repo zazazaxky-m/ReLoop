@@ -4,33 +4,77 @@ services:
     container_name: reloop-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: reloop
-      POSTGRES_PASSWORD: reloop
-      POSTGRES_DB: reloop
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-reloop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reloop}
+      POSTGRES_DB: ${POSTGRES_DB:-reloop}
     volumes:
       - reloop-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U reloop -d reloop"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-reloop} -d $${POSTGRES_DB:-reloop}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  db-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: reloop-db-migrate
+    command: npx prisma migrate deploy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-reloop}:${POSTGRES_PASSWORD:-reloop}@db:5432/${POSTGRES_DB:-reloop}?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
+
   realtime:
-    image: node:22-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.realtime
     container_name: reloop-realtime
-    working_dir: /app
-    command: ["node", "realtime/server.mjs"]
     restart: unless-stopped
     environment:
       REALTIME_PORT: "3001"
       REALTIME_HOST: "0.0.0.0"
-      REALTIME_INTERNAL_SECRET: "${REALTIME_INTERNAL_SECRET:-reloop-dev-realtime-secret}"
+      REALTIME_INTERNAL_SECRET: ${REALTIME_INTERNAL_SECRET:-reloop-dev-realtime-secret}
+    # No host port exposed - proxied through Nginx internally
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: reloop-web
+    restart: unless-stopped
+    # No host port exposed - proxied through Nginx internally
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-reloop}:${POSTGRES_PASSWORD:-reloop}@db:5432/${POSTGRES_DB:-reloop}?schema=public
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-change-me-to-a-long-random-string}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-ReLoop}
+      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
+      REALTIME_INTERNAL_SECRET: ${REALTIME_INTERNAL_SECRET:-reloop-dev-realtime-secret}
+      REALTIME_PUBLISH_URL: http://realtime:3001/publish
+      NEXT_PUBLIC_REALTIME_WS_URL: ${NEXT_PUBLIC_REALTIME_WS_URL:-ws://localhost:3001/ws}
+    depends_on:
+      db:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: reloop-nginx
+    restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "127.0.0.1:8111:80"
     volumes:
-      - ./:/app:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+      - realtime
 
 volumes:
   reloop-db-data:
