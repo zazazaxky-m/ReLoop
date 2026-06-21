@@ -48,6 +48,23 @@ CREATE TABLE IF NOT EXISTS leases (
   status TEXT NOT NULL,
   signature TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS capture_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  local_capture_id TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  session_id TEXT,
+  image_path TEXT NOT NULL,
+  face_paths_json TEXT NOT NULL,
+  metadata_json TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at REAL NOT NULL DEFAULT 0,
+  last_error TEXT,
+  sent_at REAL
+);
+CREATE INDEX IF NOT EXISTS capture_outbox_pending_idx
+ON capture_outbox(sent_at, next_attempt_at, id);
 """
 
 
@@ -169,6 +186,75 @@ class EdgeDatabase:
                 "INSERT INTO audit(action,data_json,created_at) VALUES(?,?,?)",
                 (action, json.dumps(data, separators=(",", ":")), time.time()),
             )
+
+    def enqueue_capture(self, capture: dict[str, Any]) -> None:
+        metadata = {
+            key: value
+            for key, value in capture.items()
+            if key not in {"id", "kind", "reason", "sessionId", "imagePath", "facePaths", "occurredAt"}
+        }
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO capture_outbox"
+                "(local_capture_id,kind,reason,session_id,image_path,face_paths_json,metadata_json,occurred_at)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    capture["id"],
+                    capture["kind"],
+                    capture["reason"],
+                    capture.get("sessionId"),
+                    capture["imagePath"],
+                    json.dumps(capture.get("facePaths", []), separators=(",", ":")),
+                    json.dumps(metadata, separators=(",", ":")),
+                    capture["occurredAt"],
+                ),
+            )
+
+    def pending_captures(self, limit: int = 3) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM capture_outbox WHERE sent_at IS NULL AND next_attempt_at<=? "
+                "ORDER BY id LIMIT ?",
+                (time.time(), limit),
+            ).fetchall()
+        return [
+            {
+                "db_id": row["id"],
+                "localCaptureId": row["local_capture_id"],
+                "kind": row["kind"],
+                "reason": row["reason"],
+                "sessionId": row["session_id"],
+                "imagePath": row["image_path"],
+                "facePaths": json.loads(row["face_paths_json"]),
+                "metadata": json.loads(row["metadata_json"]),
+                "occurredAt": row["occurred_at"],
+                "attempts": row["attempts"],
+            }
+            for row in rows
+        ]
+
+    def mark_capture_sent(self, db_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE capture_outbox SET sent_at=?,last_error=NULL WHERE id=?",
+                (time.time(), db_id),
+            )
+
+    def mark_capture_failed(self, db_id: int, attempts: int, error: str) -> None:
+        attempts += 1
+        delay = min(300, 2 ** min(attempts, 8))
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE capture_outbox SET attempts=?,next_attempt_at=?,last_error=? WHERE id=?",
+                (attempts, time.time() + delay, error[:500], db_id),
+            )
+
+    def capture_queue_depth(self) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS count FROM capture_outbox WHERE sent_at IS NULL"
+            ).fetchone()
+        return int(row["count"])
 
     def save_lease(self, lease: dict[str, Any]) -> None:
         with self._lock, self._conn:

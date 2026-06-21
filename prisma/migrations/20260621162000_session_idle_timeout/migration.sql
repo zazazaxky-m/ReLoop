@@ -1,0 +1,2 @@
+ALTER TABLE "Machine"
+ADD COLUMN "sessionIdleTimeoutMinutes" INTEGER NOT NULL DEFAULT 3;

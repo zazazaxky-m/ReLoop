@@ -86,7 +86,7 @@ export async function POST(req: Request) {
         campaignId,
         status: "ACTIVE",
         startedAt: new Date(),
-        timeoutAt: new Date(Date.now() + machine.chamberTimeoutSeconds * 60 * 1000),
+        timeoutAt: new Date(Date.now() + machine.sessionIdleTimeoutMinutes * 60 * 1000),
       },
     });
 

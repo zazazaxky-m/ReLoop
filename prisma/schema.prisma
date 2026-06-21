@@ -130,6 +130,26 @@ enum CompactionStatus {
   FAILED
 }
 
+enum RemoteCommandStatus {
+  QUEUED
+  DISPATCHED
+  SUCCEEDED
+  FAILED
+  EXPIRED
+}
+
+enum RemoteCommandType {
+  REFRESH_STATE
+  CAPTURE_SNAPSHOT
+  SYNC_NOW
+  STOP_ALL
+  OPEN_GATE
+  CLOSE_GATE
+  RESET_ALERT
+  ENTER_MAINTENANCE
+  RESUME_OPERATION
+}
+
 enum MachineEventType {
   HEARTBEAT
   QR_REFRESHED
@@ -340,36 +360,40 @@ model OrganizationCollectorPartner {
 // ============================================================
 
 model Machine {
-  id                    String        @id @default(cuid())
-  organizationId        String
-  organization          Organization  @relation(fields: [organizationId], references: [id])
-  regionId              String?
-  region                Region?       @relation(fields: [regionId], references: [id])
-  machineCode           String        @unique
-  qrToken               String?
-  qrTokenExpiresAt      DateTime?
-  qrRotationSeconds     Int           @default(30)
+  id                        String        @id @default(cuid())
+  organizationId            String
+  organization              Organization  @relation(fields: [organizationId], references: [id])
+  regionId                  String?
+  region                    Region?       @relation(fields: [regionId], references: [id])
+  machineCode               String        @unique
+  qrToken                   String?
+  qrTokenExpiresAt          DateTime?
+  qrRotationSeconds         Int           @default(30)
   // Per-machine secret for HMAC-signed event ingestion (provisioned by superadmin).
-  ingestSecret          String?
-  name                  String
-  description           String?
-  status                MachineStatus @default(OFFLINE)
-  fillLevelPercent      Int           @default(0)
-  capacityKg            Float?
-  hasInputChamber       Boolean       @default(true)
-  hasConveyor           Boolean       @default(true)
-  hasCompactor          Boolean       @default(false)
-  hasExternalCamera     Boolean       @default(false)
-  chamberTimeoutSeconds Int           @default(20)
-  lastHeartbeatAt       DateTime?
-  latitude              Float?
-  longitude             Float?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  ingestSecret              String?
+  name                      String
+  description               String?
+  status                    MachineStatus @default(OFFLINE)
+  fillLevelPercent          Int           @default(0)
+  capacityKg                Float?
+  hasInputChamber           Boolean       @default(true)
+  hasConveyor               Boolean       @default(true)
+  hasCompactor              Boolean       @default(false)
+  hasExternalCamera         Boolean       @default(false)
+  chamberTimeoutSeconds     Int           @default(20)
+  sessionIdleTimeoutMinutes Int           @default(3)
+  lastHeartbeatAt           DateTime?
+  latitude                  Float?
+  longitude                 Float?
+  createdAt                 DateTime      @default(now())
+  updatedAt                 DateTime      @updatedAt
 
   wasteTypes     MachineWasteType[]
   sessions       DepositSession[]
   events         MachineEvent[]
+  captures       MachineCapture[]
+  media          MachineMedia[]
+  remoteCommands MachineRemoteCommand[]
   pickupRequests PickupRequest[]
 
   @@index([organizationId])
@@ -485,6 +509,7 @@ model DepositSession {
 
   items         DepositItem[]
   events        MachineEvent[]
+  captures      MachineCapture[]
   ledgerEntries RewardLedger[]
 
   @@index([userId])
@@ -522,6 +547,75 @@ model DepositItem {
 
   @@index([sessionId])
   @@index([status])
+}
+
+enum MachineMediaType {
+  IMAGE
+  VIDEO
+}
+
+model MachineCapture {
+  id             String          @id @default(cuid())
+  machineId      String
+  machine        Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  sessionId      String?
+  session        DepositSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  localCaptureId String
+  kind           String
+  reason         String
+  scenePath      String
+  facePathsJson  Json
+  metadataJson   Json?
+  faceCount      Int             @default(0)
+  personDetected Boolean         @default(false)
+  occurredAt     DateTime
+  receivedAt     DateTime        @default(now())
+
+  @@unique([machineId, localCaptureId])
+  @@index([machineId, occurredAt])
+  @@index([sessionId])
+  @@index([kind, occurredAt])
+}
+
+model MachineMedia {
+  id              String           @id @default(cuid())
+  machineId       String
+  machine         Machine          @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  title           String?
+  mediaType       MachineMediaType
+  mimeType        String
+  originalName    String
+  storagePath     String
+  fileSize        Int
+  sha256          String
+  durationSeconds Int              @default(8)
+  sortOrder       Int              @default(0)
+  active          Boolean          @default(true)
+  createdById     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([machineId, active, sortOrder])
+}
+
+model MachineRemoteCommand {
+  id            String              @id @default(cuid())
+  machineId     String
+  machine       Machine             @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  requestedById String?
+  command       RemoteCommandType
+  status        RemoteCommandStatus @default(QUEUED)
+  payloadJson   Json?
+  resultJson    Json?
+  errorMessage  String?
+  expiresAt     DateTime
+  dispatchedAt  DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([machineId, status, createdAt])
+  @@index([requestedById, createdAt])
 }
 
 model MachineEvent {

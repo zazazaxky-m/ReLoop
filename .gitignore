@@ -52,3 +52,6 @@ venv/
 context.md
 simulator/.reloop-MSN-001-queue.tmp
 simulator/.reloop-MSN-001-state.json
+
+# artifacts
+*.apk

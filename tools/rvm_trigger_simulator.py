@@ -83,68 +83,44 @@ class TriggerClient:
         time.sleep(duration)
         self.sensors(**{name: False})
 
+    def simulate(self, scenario: str) -> dict:
+        return request(
+            self.base,
+            "/api/maintenance/command",
+            {"command": "simulate", "scenario": scenario},
+            self.token,
+        )
+
 
 def run(client: TriggerClient, scenario: str) -> None:
     client.reset()
-    if scenario == "normal-bottle":
+    session_scenarios = {
+        "normal-bottle",
+        "normal-can",
+        "string-pull",
+        "acceptance-without-item",
+        "abnormal-weight",
+        "abnormal-underweight",
+        "chamber-timeout",
+    }
+    if scenario in session_scenarios:
         client.lease()
-        client.sensors(chamber_open=True)
-        client.pulse("item_present")
-        client.sensors(weight_grams=22.4, weight_stable=True)
-        client.pulse("acceptance_triggered")
-        client.sensors(chamber_open=False, weight_grams=0, weight_stable=False, fill_percent=21)
-    elif scenario == "normal-can":
-        client.lease()
-        client.sensors(chamber_open=True)
-        client.pulse("item_present")
-        client.sensors(weight_grams=15.1, weight_stable=True)
-        client.pulse("acceptance_triggered")
-        client.sensors(chamber_open=False, weight_grams=0, weight_stable=False, fill_percent=21)
-    elif scenario == "string-pull":
-        client.lease()
-        client.sensors(chamber_open=True)
-        client.pulse("item_present")
-        client.sensors(weight_grams=23, weight_stable=True)
-        client.pulse("acceptance_triggered")
-        client.pulse("reverse_motion")
-    elif scenario == "acceptance-without-item":
-        client.lease()
-        client.pulse("acceptance_triggered")
-    elif scenario == "abnormal-weight":
-        client.lease()
-        client.sensors(chamber_open=True)
-        client.pulse("item_present")
-        client.sensors(weight_grams=900, weight_stable=True)
-    elif scenario == "item-without-session":
-        client.pulse("item_present")
-    elif scenario == "vandalism-impact":
-        client.sensors(vibration_g=4.8)
-    elif scenario == "panel-forced":
-        client.sensors(service_panel_open=True)
-    elif scenario == "door-forced":
-        client.sensors(collection_door_open=True)
-    elif scenario == "camera-covered":
-        client.sensors(camera_online=True, camera_occluded=True)
-    elif scenario == "camera-offline":
-        client.sensors(camera_online=False)
-    elif scenario == "machine-full":
-        client.sensors(fill_percent=98)
-    elif scenario == "chamber-timeout":
-        client.lease(seconds=5)
-        client.sensors(chamber_open=True)
-        time.sleep(6)
-    else:
-        raise ValueError(f"Scenario tidak dikenal: {scenario}")
-    time.sleep(0.8)
-    print(json.dumps(request(client.base, "/api/state"), indent=2))
+    client.simulate(scenario)
 
+    deadline = time.time() + 8
+    state = request(client.base, "/api/state")
+    while state.get("simulation", {}).get("running") and time.time() < deadline:
+        time.sleep(0.2)
+        state = request(client.base, "/api/state")
+    print(json.dumps(state, indent=2))
 
 def main() -> None:
     scenarios = [
         "normal-bottle", "normal-can", "string-pull",
-        "acceptance-without-item", "abnormal-weight", "item-without-session",
-        "vandalism-impact", "panel-forced", "door-forced",
-        "camera-covered", "camera-offline", "machine-full", "chamber-timeout",
+        "acceptance-without-item", "abnormal-weight", "abnormal-underweight",
+        "item-without-session", "chamber-timeout", "vandalism-impact",
+        "panel-forced", "door-forced", "camera-covered", "camera-offline",
+        "camera-blurry", "overheat", "machine-full",
     ]
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://127.0.0.1:8765")
