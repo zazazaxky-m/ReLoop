@@ -24,7 +24,12 @@ void main() async {
     await Firebase.initializeApp();
   } catch (_) {}
 
-  await Environment.load(BuildEnvironment.development);
+  const envStr = String.fromEnvironment('BUILD_ENV', defaultValue: 'production');
+  final env = BuildEnvironment.values.firstWhere(
+    (e) => e.name == envStr,
+    orElse: () => BuildEnvironment.production,
+  );
+  await Environment.load(env);
 
   final offline = OfflineService();
   await offline.init();

@@ -17,10 +17,13 @@ class Environment {
     switch (env) {
       case BuildEnvironment.development:
         await dotenv.load(fileName: '.env.development');
+        break;
       case BuildEnvironment.staging:
         await dotenv.load(fileName: '.env.staging');
+        break;
       case BuildEnvironment.production:
         await dotenv.load(fileName: '.env.production');
+        break;
     }
   }
 

@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
             machineId: machine.id,
             localEventId: localId,
             eventType: eventTypeVal as any,
-            payloadJson: payload,
+            payloadJson: payload as any,
             occurredAt: record.occurred_at ? new Date(record.occurred_at as string) : undefined,
           },
         });

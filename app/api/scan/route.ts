@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     });
 
     if (!machine) throw new HttpError(404, "Mesin tidak ditemukan");
-    if (!isTokenValid(machine, body.token)) {
+    if (!isTokenValid(machine, body.token ?? '')) {
       const reason = !machine.qrToken ? 'NO_QR_TOKEN' :
                      !machine.qrTokenExpiresAt ? 'NO_EXPIRY' :
                      machine.qrToken !== body.token ? 'TOKEN_MISMATCH' :
