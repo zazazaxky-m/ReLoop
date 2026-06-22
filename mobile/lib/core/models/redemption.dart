@@ -24,11 +24,11 @@ class Redemption {
   factory Redemption.fromJson(Map<String, dynamic> json) {
     return Redemption(
       id: json['id'] as String,
-      amount: (json['amount'] as num).toInt(),
+      amount: (json['amount'] as num?)?.toInt() ?? 0,
       provider: json['provider'] as String? ?? '',
       accountIdentifier: json['accountIdentifier'] as String?,
       accountName: json['accountName'] as String?,
-      status: json['status'] as String? ?? 'PENDING',
+      status: json['status'] as String? ?? 'REQUESTED',
       note: json['note'] as String?,
       createdAt: json['createdAt'] as String? ?? '',
       processedAt: json['processedAt'] as String?,
@@ -37,14 +37,16 @@ class Redemption {
 
   String get statusLabel {
     switch (status) {
-      case 'PENDING':
+      case 'REQUESTED':
         return 'Menunggu';
+      case 'APPROVED':
+        return 'Disetujui';
       case 'PROCESSING':
         return 'Diproses';
-      case 'COMPLETED':
+      case 'SUCCESS':
         return 'Selesai';
-      case 'REJECTED':
-        return 'Ditolak';
+      case 'FAILED':
+        return 'Gagal';
       case 'CANCELLED':
         return 'Dibatalkan';
       default:

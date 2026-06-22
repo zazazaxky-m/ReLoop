@@ -57,9 +57,9 @@ class CurrentUser {
 
   factory CurrentUser.fromJson(Map<String, dynamic> json) {
     return CurrentUser(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      email: json['email'] as String,
+      id: (json['id'] as String?) ?? '',
+      name: (json['name'] as String?) ?? '',
+      email: (json['email'] as String?) ?? '',
       phone: json['phone'] as String?,
       role: AppRoleX.fromString(json['role'] as String),
       organizationId: json['organizationId'] as String?,
@@ -138,9 +138,9 @@ class DepositSession {
 
   factory DepositSession.fromJson(Map<String, dynamic> json) {
     return DepositSession(
-      id: json['id'] as String,
-      userId: json['userId'] as String,
-      machineId: json['machineId'] as String,
+      id: (json['id'] as String?) ?? '',
+      userId: (json['userId'] as String?) ?? '',
+      machineId: (json['machineId'] as String?) ?? '',
       campaignId: json['campaignId'] as String?,
       status: json['status'] as String? ?? 'ACTIVE',
       startedAt: json['startedAt'] as String? ?? '',
@@ -166,6 +166,7 @@ class MachineInfo {
   final String id;
   final String machineCode;
   final String name;
+  final String? organizationId;
   final String? organizationName;
   final String status;
   final int fillLevelPercent;
@@ -177,6 +178,7 @@ class MachineInfo {
     required this.id,
     required this.machineCode,
     required this.name,
+    this.organizationId,
     this.organizationName,
     this.status = 'OFFLINE',
     this.fillLevelPercent = 0,
@@ -187,9 +189,10 @@ class MachineInfo {
 
   factory MachineInfo.fromJson(Map<String, dynamic> json) {
     return MachineInfo(
-      id: json['id'] as String,
-      machineCode: json['machineCode'] as String,
-      name: json['name'] as String,
+      id: (json['id'] as String?) ?? '',
+      machineCode: (json['machineCode'] as String?) ?? '',
+      name: (json['name'] as String?) ?? '',
+      organizationId: json['organizationId'] as String?,
       organizationName: json['organizationName'] as String? ??
           (json['organization']?['name'] as String?),
       status: json['status'] as String? ?? 'OFFLINE',
@@ -213,8 +216,8 @@ class WasteTypeRef {
 
   factory WasteTypeRef.fromJson(Map<String, dynamic> json) {
     return WasteTypeRef(
-      id: json['id'] as String,
-      name: json['name'] as String,
+      id: (json['id'] as String?) ?? '',
+      name: (json['name'] as String?) ?? '',
     );
   }
 }
@@ -248,8 +251,8 @@ class DepositItem {
 
   factory DepositItem.fromJson(Map<String, dynamic> json) {
     return DepositItem(
-      id: json['id'] as String,
-      sessionId: json['sessionId'] as String,
+      id: (json['id'] as String?) ?? '',
+      sessionId: (json['sessionId'] as String?) ?? '',
       wasteTypeId: json['wasteTypeId'] as String?,
       quantity: (json['quantity'] as num?)?.toInt() ?? 1,
       measuredWeightGrams: (json['measuredWeightGrams'] as num?)?.toInt(),
@@ -274,6 +277,10 @@ class CampaignInfo {
   final String status;
   final String? organizationId;
   final String? organizationName;
+  final DateTime? startAt;
+  final DateTime? endAt;
+  final List<String>? allowedEmailDomains;
+  final double? rewardMultiplier;
 
   CampaignInfo({
     required this.id,
@@ -284,18 +291,26 @@ class CampaignInfo {
     this.status = 'DRAFT',
     this.organizationId,
     this.organizationName,
+    this.startAt,
+    this.endAt,
+    this.allowedEmailDomains,
+    this.rewardMultiplier,
   });
 
   factory CampaignInfo.fromJson(Map<String, dynamic> json) {
     return CampaignInfo(
-      id: json['id'] as String,
-      name: json['name'] as String,
+      id: (json['id'] as String?) ?? '',
+      name: (json['name'] as String?) ?? '',
       description: json['description'] as String?,
       campaignType: json['campaignType'] as String? ?? 'MACHINE_DEPOSIT',
       visibility: json['visibility'] as String? ?? 'PUBLIC',
       status: json['status'] as String? ?? 'DRAFT',
       organizationId: json['organizationId'] as String?,
       organizationName: json['organization']?['name'] as String?,
+      startAt: json['startAt'] != null ? DateTime.tryParse(json['startAt'] as String) : null,
+      endAt: json['endAt'] != null ? DateTime.tryParse(json['endAt'] as String) : null,
+      allowedEmailDomains: (json['allowedEmailDomains'] as List<dynamic>?)?.cast<String>(),
+      rewardMultiplier: (json['rewardMultiplier'] as num?)?.toDouble(),
     );
   }
 }
@@ -331,13 +346,13 @@ class RewardLedgerEntry {
 
   factory RewardLedgerEntry.fromJson(Map<String, dynamic> json) {
     return RewardLedgerEntry(
-      id: json['id'] as String,
-      userId: json['userId'] as String,
+      id: (json['id'] as String?) ?? '',
+      userId: (json['userId'] as String?) ?? '',
       sessionId: json['sessionId'] as String?,
       depositItemId: json['depositItemId'] as String?,
       campaignId: json['campaignId'] as String?,
       entryType: json['entryType'] as String? ?? 'EARN',
-      amount: (json['amount'] as num).toInt(),
+      amount: (json['amount'] as num?)?.toInt() ?? 0,
       status: json['status'] as String? ?? 'AVAILABLE',
       reasonCode: json['reasonCode'] as String?,
       createdAt: json['createdAt'] as String? ?? '',
@@ -381,8 +396,10 @@ class UserDashboard {
   });
 
   factory UserDashboard.fromJson(Map<String, dynamic> json) {
+    final balanceData = json['balance'];
+    if (balanceData == null) throw Exception('Dashboard missing "balance" field');
     return UserDashboard(
-      balance: WalletBalance.fromJson(json['balance'] as Map<String, dynamic>),
+      balance: WalletBalance.fromJson(balanceData as Map<String, dynamic>),
       recentSessions: (json['recentSessions'] as List? ?? [])
           .map((e) => DepositSession.fromJson(e as Map<String, dynamic>))
           .toList(),
