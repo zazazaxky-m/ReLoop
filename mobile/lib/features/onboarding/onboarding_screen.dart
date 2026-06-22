@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:go_router/go_router.dart';
+import '../../shared/widgets/reloop_logo.dart';
 import '../../theme/colors.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -41,9 +42,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 },
                 children: const [
                   _OnboardingPage(
-                    icon: Icons.recycling,
+                    logo: true,
                     title: 'Selamat Datang di ReLoop',
-                    description: 'Aplikasi pengelolaan sampah digital. Setor sampah, dapatkan reward!',
+                    description: 'Aplikasi pengelolaan sampah digital.\nSetor sampah, dapatkan reward!',
                     color: ReLoopColors.brand500,
                   ),
                   _OnboardingPage(
@@ -134,13 +135,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 }
 
 class _OnboardingPage extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
+  final bool logo;
   final String title;
   final String description;
   final Color color;
 
   const _OnboardingPage({
-    required this.icon,
+    this.icon,
+    this.logo = false,
     required this.title,
     required this.description,
     required this.color,
@@ -148,41 +151,47 @@ class _OnboardingPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 120,
-            height: 120,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (logo)
+              const ReLoopLogo(compact: true, height: 80)
+            else
+              Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 56),
+              ),
+            const SizedBox(height: 40),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                color: ReLoopColors.foreground,
+              ),
             ),
-            child: Icon(icon, color: color, size: 56),
-          ),
-          const SizedBox(height: 40),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              color: ReLoopColors.foreground,
+            const SizedBox(height: 16),
+            Text(
+              description,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 15,
+                color: ReLoopColors.muted,
+                height: 1.5,
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            description,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 15,
-              color: ReLoopColors.muted,
-              height: 1.5,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

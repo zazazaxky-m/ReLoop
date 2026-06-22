@@ -71,8 +71,8 @@ class _ScanScreenState extends State<ScanScreen> {
 
       // Handle both: /scan?machine=XXX&token=YYY and /machine/XXX/display
       if (uri.path.contains('scan')) {
-        machineCode = uri.queryParameters['machine'];
-        token = uri.queryParameters['token'];
+        machineCode = uri.queryParameters['machine'] ?? uri.queryParameters['m'];
+        token = uri.queryParameters['token'] ?? uri.queryParameters['t'];
       } else if (segments.length >= 3 && segments[0] == 'machine') {
         machineCode = segments[1];
         token = uri.queryParameters['token'];
@@ -134,9 +134,6 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Scan Mesin'),
-      ),
       body: _buildBody(),
     );
   }

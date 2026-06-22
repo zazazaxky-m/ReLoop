@@ -50,7 +50,7 @@ class _PayoutAccountFormState extends State<PayoutAccountForm> {
 
     try {
       final api = context.read<ApiClient>();
-      await api.post('/api/wallet/payout-accounts', data: {
+      await api.post('/api/payout-accounts', data: {
         'provider': _selectedProvider,
         'accountIdentifier': _numberCtrl.text.trim(),
         'accountName': _nameCtrl.text.trim(),

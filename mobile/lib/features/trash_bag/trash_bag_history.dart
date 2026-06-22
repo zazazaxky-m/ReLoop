@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/models/trash_bag.dart';
@@ -138,10 +139,14 @@ class _TrashBagHistoryState extends State<TrashBagHistory> {
                   child: bag.photoUrl != null
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            bag.photoUrl!,
+                          child: CachedNetworkImage(
+                            imageUrl: bag.photoUrl!,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => const Icon(
+                            placeholder: (_, __) => Container(
+                              color: ReLoopColors.border,
+                              child: const Icon(Icons.image, color: ReLoopColors.mutedSoft),
+                            ),
+                            errorWidget: (_, _, _) => const Icon(
                               Icons.delete_outline,
                               color: ReLoopColors.mutedSoft,
                             ),

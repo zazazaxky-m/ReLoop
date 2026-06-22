@@ -9,6 +9,7 @@ import '../../shared/widgets/reloop_button.dart';
 import '../../shared/widgets/reloop_card.dart';
 import '../../shared/widgets/status_badge.dart';
 import '../../theme/colors.dart';
+import 'package:go_router/go_router.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -64,7 +65,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       final api = context.read<ApiClient>();
-      await api.patch('/api/user/profile', data: {
+      await api.patch('/api/auth/me', data: {
         'name': _nameCtrl.text.trim(),
         'phone': _phoneCtrl.text.trim(),
       });
@@ -131,27 +132,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Profil'),
-        actions: [
-          if (!_isEditing)
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              onPressed: () => setState(() => _isEditing = true),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.close),
-              onPressed: () {
-                setState(() {
-                  _isEditing = false;
-                  _nameCtrl.text = user.name;
-                  _phoneCtrl.text = user.phone ?? '';
-                });
-              },
-            ),
-        ],
-      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -196,6 +176,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 8),
                   StatusBadge(statusKey: user.status),
+                ],
+                if (!_isEditing) ...[
+                  const SizedBox(height: 12),
+                  TextButton.icon(
+                    onPressed: () => setState(() => _isEditing = true),
+                    icon: const Icon(Icons.edit_outlined, size: 16),
+                    label: const Text('Edit Profil'),
+                    style: TextButton.styleFrom(foregroundColor: ReLoopColors.brand600),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 12),
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _isEditing = false;
+                        _nameCtrl.text = user.name;
+                        _phoneCtrl.text = user.phone ?? '';
+                      });
+                    },
+                    icon: const Icon(Icons.close, size: 16),
+                    label: const Text('Batal'),
+                    style: TextButton.styleFrom(foregroundColor: ReLoopColors.muted),
+                  ),
                 ],
               ],
             ),
@@ -365,6 +368,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             variant: ReLoopButtonVariant.danger,
             onPressed: _logout,
           ),
+          const SizedBox(height: 32),
+          const Divider(),
+          const SizedBox(height: 16),
+          _LegalLink(label: 'Syarat & Ketentuan', onTap: () => context.push('/terms')),
+          _LegalLink(label: 'Kebijakan Privasi', onTap: () => context.push('/privacy')),
+          _LegalLink(label: 'Tentang Aplikasi', onTap: () => context.push('/about')),
           const SizedBox(height: 80),
         ],
       ),
@@ -446,6 +455,30 @@ class _InfoRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _LegalLink extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _LegalLink({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            const Icon(Icons.chevron_right, size: 18, color: ReLoopColors.mutedSoft),
+            const SizedBox(width: 8),
+            Text(label, style: const TextStyle(color: ReLoopColors.muted, fontSize: 14)),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -38,7 +38,7 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
 
     try {
       final api = context.read<ApiClient>();
-      final response = await api.get('/api/machines/${widget.machineCode}');
+      final response = await api.get('/api/public/machines/${widget.machineCode}');
       final data = response.data as Map<String, dynamic>;
 
       setState(() {
