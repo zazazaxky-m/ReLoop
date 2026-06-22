@@ -1,0 +1,18 @@
+
+> reloop@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.9 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.60:3000
+- Environments: .env
+✓ Ready in 893ms
+
+ POST /api/machine-events 201 in 822ms (next.js: 320ms, application-code: 502ms)
+ GET /api/machine-session/MSN-001 200 in 470ms
+ GET /api/machine-commands/MSN-001 200 in 468ms
+ GET /api/display/MSN-001 200 in 1928ms (next.js: 1832ms, application-code: 96ms)
+ GET /api/machine-commands/MSN-001 200 in 48ms (next.js: 20ms, application-code: 28ms)
+ GET /api/machine-media/manifest/MSN-001 200 in 3.4s (next.js: 3.3s, application-code: 20ms)
+ GET /api/machine-session/MSN-001 200 in 24ms (next.js: 9ms, application-code: 15ms)
+ GET /api/machine-commands/MSN-001 200 in 32ms (next.js: 13ms, application-code: 19ms)

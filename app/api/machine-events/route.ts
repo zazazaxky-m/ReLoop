@@ -1,111 +1,70 @@
+import { NextRequest } from "next/server";
 import { z } from "zod";
-import { MachineEventType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { handleApiError, jsonError, jsonOk } from "@/lib/api";
-import { ingestMachineEvent } from "@/lib/machine-events";
 import { verifyMachineSignature } from "@/lib/machine-auth";
-import { publishRealtime } from "@/lib/realtime";
+import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 
-const eventFields = z.object({
-  localEventId: z.string().min(1),
-  eventType: z.nativeEnum(MachineEventType),
-  payload: z.record(z.unknown()).optional(),
-  sessionId: z.string().transform((v) => (v === "" ? null : v)).optional().nullable(),
-  depositItemId: z.string().transform((v) => (v === "" ? null : v)).optional().nullable(),
-  occurredAt: z.string().optional().nullable(),
+const eventsSchema = z.object({
+  machineCode: z.string(),
+  events: z.array(z.record(z.unknown())),
 });
 
-const singleSchema = eventFields.extend({
-  machineCode: z.string().min(1),
-});
-
-const batchSchema = z.object({
-  machineCode: z.string().min(1),
-  events: z.array(eventFields).min(1).max(50),
-});
-
-const bodySchema = z.union([singleSchema, batchSchema]);
-
-/**
- * HMAC-authenticated machine ingestion.
- * Supports a single event or a compact batch of up to 50 events to reduce
- * cellular data and TLS/header overhead.
- */
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const raw = await req.text();
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return jsonError(400, "Body bukan JSON valid");
-    }
-    const body = bodySchema.parse(parsed);
+    const rawBody = await req.clone().text();
+    const body = eventsSchema.parse(JSON.parse(rawBody));
 
     const machine = await prisma.machine.findUnique({
       where: { machineCode: body.machineCode },
       select: { id: true, ingestSecret: true },
     });
-    if (!machine) return jsonError(404, "Mesin tidak ditemukan");
-    if (!machine.ingestSecret) {
-      return jsonError(401, "Mesin belum dikonfigurasi secret ingest");
+
+    if (!machine || !machine.ingestSecret) {
+      return jsonError(404, "Mesin tidak ditemukan");
     }
 
-    const headerCode = req.headers.get("x-reloop-machine");
-    if (headerCode && headerCode !== body.machineCode) {
-      return jsonError(401, "Header mesin tidak cocok dengan body");
-    }
+    const timestamp = req.headers.get("x-reloop-timestamp");
+    const nonce = req.headers.get("x-reloop-nonce");
+    const signature = req.headers.get("x-reloop-signature");
 
-    const verdict = verifyMachineSignature({
+    const verify = verifyMachineSignature({
       secret: machine.ingestSecret,
-      timestamp: req.headers.get("x-reloop-timestamp"),
-      nonce: req.headers.get("x-reloop-nonce"),
-      signature: req.headers.get("x-reloop-signature"),
-      rawBody: raw,
+      timestamp: timestamp ?? undefined,
+      nonce: nonce ?? undefined,
+      rawBody,
+      signature: signature ?? undefined,
     });
-    if (!verdict.ok) {
-      return jsonError(401, `Tanda tangan tidak valid (${verdict.reason})`);
+
+    if (!verify.ok) {
+      return jsonError(401, verify.reason ?? "Unauthorised");
     }
 
-    const inputs =
-      "events" in body
-        ? body.events.map((event) => ({ ...event, machineCode: body.machineCode }))
-        : [body];
-    const results = [];
+    for (const event of body.events) {
+      const record = event as Record<string, unknown>;
+      let payload = record;
+      if (typeof record.payload_json === 'string') {
+        try { payload = JSON.parse(record.payload_json); } catch (_) {}
+      }
+      const eventTypeVal = (record.event_type as string) || (record.eventType as string) || 'UNKNOWN';
+      const localId = (record.local_event_id as string) || (record.localEventId as string) || 'unknown';
 
-    for (const input of inputs) {
-      const result = await ingestMachineEvent(input);
-      results.push(result);
-
-      if (!result.duplicate) {
-        const security = ["FRAUD_DETECTED", "VANDALISM_DETECTED", "SAFE_STATE_ENTERED"].includes(
-          input.eventType,
-        );
-        void publishRealtime({
-          topic: security ? "security-alert" : "machine-event",
-          machineCode: input.machineCode,
-          eventType: input.eventType,
-          eventId: result.eventId,
-          occurredAt: input.occurredAt ?? new Date().toISOString(),
+      try {
+        await prisma.machineEvent.create({
+          data: {
+            machineId: machine.id,
+            localEventId: localId,
+            eventType: eventTypeVal as any,
+            payloadJson: payload,
+            occurredAt: record.occurred_at ? new Date(record.occurred_at as string) : undefined,
+          },
         });
+      } catch (_) {
+        // Skip duplicate events gracefully
       }
     }
 
-    return jsonOk(
-      "events" in body
-        ? {
-            accepted: results.length,
-            duplicates: results.filter((result) => result.duplicate).length,
-            results,
-          }
-        : results[0],
-      results.every((result) => result.duplicate) ? 200 : 201,
-    );
+    return jsonOk({ received: body.events.length });
   } catch (error) {
-    if (error instanceof Error && error.message === "Mesin tidak ditemukan") {
-      return jsonError(404, error.message);
-    }
     return handleApiError(error);
   }
 }

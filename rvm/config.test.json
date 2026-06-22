@@ -10,5 +10,19 @@
   "heartbeat_seconds": 3600,
   "sync_interval_seconds": 1,
   "camera_enabled": false,
-  "maintenance_pin_hash": "a1fb4e703a9ef1fa4936801721ff285a97ac85330856674412e054892afe6972"
+  "maintenance_pin_hash": "a1fb4e703a9ef1fa4936801721ff285a97ac85330856674412e054892afe6972",
+  "max_temperature_c": 55,
+  "compactor_enabled": true,
+  "camera_face_detection_enabled": true,
+  "camera_person_detection_enabled": true,
+  "camera_capture_session_start": true,
+  "camera_capture_security_events": true,
+  "camera_jpeg_quality": 88,
+  "camera_retention_days": 30,
+  "camera_max_local_captures": 1000,
+  "camera_startup_grace_seconds": 5,
+  "camera_anomaly_frames": 5,
+  "media_cache_dir": "data/media-cache",
+  "media_sync_seconds": 30,
+  "media_max_cache_mb": 1024
 }

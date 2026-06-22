@@ -25,6 +25,7 @@ interface MachineInitial {
   capacityKg: number | null;
   qrRotationSeconds: number;
   chamberTimeoutSeconds: number;
+  sessionIdleTimeoutMinutes: number;
   hasInputChamber: boolean;
   hasConveyor: boolean;
   hasCompactor: boolean;

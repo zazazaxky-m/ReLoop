@@ -26,7 +26,7 @@ const createSchema = z.object({
 
 export async function GET() {
   try {
-    await requireApiUser(["SUPERADMIN"]);
+    await requireApiUser(["USER", "PENGEPUL", "ADMIN", "SUPERADMIN"]);
     const organizations = await prisma.organization.findMany({
       orderBy: { createdAt: "desc" },
       include: {

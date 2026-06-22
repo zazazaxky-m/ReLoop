@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireApiUser, assertOrgScope, HttpError } from "@/lib/rbac";
+import { requireApiUser, assertOrgScope, activePartnerOrgIds, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 
@@ -25,17 +25,29 @@ const createSchema = z
 
 export async function GET() {
   try {
-    const user = await requireApiUser(["ADMIN", "SUPERADMIN"]);
+    const user = await requireApiUser(["USER", "PENGEPUL", "ADMIN", "SUPERADMIN"]);
 
-    const where =
-      user.role === "SUPERADMIN"
-        ? {}
-        : {
-            OR: [
-              { organizationId: null },
-              { organizationId: user.organizationId ?? "__none__" },
-            ],
-          };
+    let where: Record<string, unknown> = {};
+    if (user.role === "SUPERADMIN") {
+      where = {};
+    } else if (user.role === "ADMIN") {
+      where = {
+        OR: [
+          { organizationId: null },
+          { organizationId: user.organizationId ?? "__none__" },
+        ],
+      };
+    } else if (user.role === "PENGEPUL") {
+      const orgIds = await activePartnerOrgIds(user.id);
+      where = {
+        OR: [
+          { organizationId: null },
+          ...(orgIds.length > 0 ? [{ organizationId: { in: orgIds } }] : []),
+        ],
+      };
+    } else {
+      where = {};
+    }
 
     const wasteTypes = await prisma.wasteType.findMany({
       where,

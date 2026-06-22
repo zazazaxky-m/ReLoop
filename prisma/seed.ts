@@ -191,7 +191,7 @@ async function main() {
       name: "Mesin Alun-alun", description: "Dekat alun-alun Pangandaran",
       status: "FULL", fillLevelPercent: 95, capacityKg: 50,
       hasInputChamber: true, hasConveyor: true, hasCompactor: false, hasExternalCamera: true,
-      chamberTimeoutSeconds: 20, qrRotationSeconds: 30,
+      chamberTimeoutSeconds: 20, qrRotationSeconds: 120,
       ingestSecret: secrets["RLP-002"],
       lastHeartbeatAt: new Date(), latitude: -7.6921, longitude: 108.6498,
     },

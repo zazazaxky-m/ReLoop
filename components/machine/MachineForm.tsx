@@ -17,6 +17,7 @@ interface MachineInitial {
   capacityKg: number | null;
   qrRotationSeconds: number;
   chamberTimeoutSeconds: number;
+  sessionIdleTimeoutMinutes: number;
   hasInputChamber: boolean;
   hasConveyor: boolean;
   hasCompactor: boolean;
@@ -55,6 +56,7 @@ export function MachineForm({
     capacityKg: machine?.capacityKg?.toString() ?? "",
     qrRotationSeconds: (machine?.qrRotationSeconds ?? 30).toString(),
     chamberTimeoutSeconds: (machine?.chamberTimeoutSeconds ?? 20).toString(),
+    sessionIdleTimeoutMinutes: (machine?.sessionIdleTimeoutMinutes ?? 3).toString(),
     hasInputChamber: machine?.hasInputChamber ?? true,
     hasConveyor: machine?.hasConveyor ?? true,
     hasCompactor: machine?.hasCompactor ?? false,
@@ -84,6 +86,7 @@ export function MachineForm({
         capacityKg: form.capacityKg ? Number(form.capacityKg) : undefined,
         qrRotationSeconds: Number(form.qrRotationSeconds),
         chamberTimeoutSeconds: Number(form.chamberTimeoutSeconds),
+        sessionIdleTimeoutMinutes: Number(form.sessionIdleTimeoutMinutes),
         hasInputChamber: form.hasInputChamber,
         hasConveyor: form.hasConveyor,
         hasCompactor: form.hasCompactor,
@@ -215,6 +218,16 @@ export function MachineForm({
             type="number"
             value={form.chamberTimeoutSeconds}
             onChange={(e) => setForm((f) => ({ ...f, chamberTimeoutSeconds: e.target.value }))}
+          />
+        </FormField>
+        <FormField label="Timeout Sesi Tanpa Item (menit)" htmlFor="sessionIdleTimeout">
+          <Input
+            id="sessionIdleTimeout"
+            type="number"
+            min="1"
+            max="30"
+            value={form.sessionIdleTimeoutMinutes}
+            onChange={(e) => setForm((f) => ({ ...f, sessionIdleTimeoutMinutes: e.target.value }))}
           />
         </FormField>
       </div>

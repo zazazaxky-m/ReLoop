@@ -13,6 +13,7 @@ const updateSchema = z.object({
   fillLevelPercent: z.number().int().min(0).max(100).optional(),
   capacityKg: z.number().positive().nullable().optional(),
   chamberTimeoutSeconds: z.number().int().min(5).max(120).optional(),
+  sessionIdleTimeoutMinutes: z.number().int().min(1).max(30).optional(),
   qrRotationSeconds: z.number().int().min(10).max(300).optional(),
   hasInputChamber: z.boolean().optional(),
   hasConveyor: z.boolean().optional(),
