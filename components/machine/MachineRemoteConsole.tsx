@@ -49,11 +49,15 @@ export function MachineRemoteConsole({
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const response = await fetch(`/api/machines/${machineId}/remote-commands`, {
-      cache: "no-store",
-    });
-    if (!response.ok) return;
-    setData(await response.json());
+    try {
+      const response = await fetch(`/api/machines/${machineId}/remote-commands`, {
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      setData(await response.json());
+    } catch (error) {
+      // Abaikan error fetch jika server mati sementara
+    }
   }, [machineId]);
 
   useEffect(() => {
