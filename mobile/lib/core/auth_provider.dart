@@ -143,7 +143,7 @@ class AuthProvider extends ChangeNotifier {
       case AppRole.USER:
         return '/dashboard';
       case AppRole.PENGEPUL:
-        return '/pickup';
+        return '/pengepul/dashboard';
       case AppRole.ADMIN:
         return '/admin';
       case AppRole.SUPERADMIN:

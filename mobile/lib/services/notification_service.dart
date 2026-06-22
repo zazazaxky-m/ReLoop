@@ -9,7 +9,7 @@ class NotificationService {
   factory NotificationService() => _instance;
   NotificationService._();
 
-  final FirebaseMessaging _fcm = FirebaseMessaging.instance;
+  FirebaseMessaging? _fcm;
   final FlutterLocalNotificationsPlugin _local = FlutterLocalNotificationsPlugin();
 
   String? _deviceToken;
@@ -18,6 +18,11 @@ class NotificationService {
   void Function(String route, Map<String, String>? params)? onNotificationTap;
 
   Future<void> initialize() async {
+    try {
+      _fcm = FirebaseMessaging.instance;
+    } catch (_) {
+      return;
+    }
     await _initLocalNotifications();
     await _requestPermission();
     await _getToken();
@@ -43,7 +48,7 @@ class NotificationService {
   }
 
   Future<void> _requestPermission() async {
-    final settings = await _fcm.requestPermission(
+    final settings = await _fcm!.requestPermission(
       alert: true,
       badge: true,
       sound: true,
@@ -54,9 +59,9 @@ class NotificationService {
   }
 
   Future<void> _getToken() async {
-    _deviceToken = await _fcm.getToken();
+    _deviceToken = await _fcm!.getToken();
     debugPrint('FCM Token: $_deviceToken');
-    _fcm.onTokenRefresh.listen((token) {
+    _fcm!.onTokenRefresh.listen((token) {
       _deviceToken = token;
       _registerDeviceToken();
     });

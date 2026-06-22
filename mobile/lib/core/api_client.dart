@@ -63,7 +63,7 @@ class ApiClient {
     await _cookieJar.deleteAll();
   }
 
-  static String getErrorMessage(Object error) {
+  static String getErrorMessage(Object error, {bool includeDetails = false}) {
     if (error is DioException) {
       switch (error.type) {
         case DioExceptionType.connectionTimeout:
@@ -110,6 +110,7 @@ class ApiClient {
           return 'Terjadi kesalahan jaringan.';
       }
     }
+    if (includeDetails) return 'Terjadi kesalahan: $error';
     return 'Terjadi kesalahan yang tidak terduga.';
   }
 }
