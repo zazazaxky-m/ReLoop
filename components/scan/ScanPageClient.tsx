@@ -134,7 +134,7 @@ export function ScanPageClient() {
   );
 
   useEffect(() => {
-    if (!session?.id || session.status === "COMPLETED") return;
+    if (!session?.id || ["COMPLETED", "CANCELLED", "EXPIRED"].includes(session.status)) return;
     const t = setInterval(() => refreshSession(session.id), 5000);
     return () => clearInterval(t);
   }, [session?.id, session?.status, refreshSession]);

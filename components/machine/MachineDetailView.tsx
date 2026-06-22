@@ -13,8 +13,12 @@ import { buildScanUrl, isTokenValid, qrDataUrl } from "@/lib/qr";
 import { formatDateTime } from "@/lib/format";
 import { MachineControls } from "./MachineControls";
 import { MachineSecurity } from "./MachineSecurity";
-import { SecurityEventList } from "@/components/security/SecurityEventList";
+import { MachineActivityPanel } from "./MachineActivityPanel";
+import { MachineRemoteConsole } from "./MachineRemoteConsole";
+import { MachineMediaManager } from "./MachineMediaManager";
+import type { MachineCaptureRow } from "@/lib/machine-captures";
 import type { SecurityEventRow } from "@/lib/security-events";
+import type { RemoteCommandView } from "@/lib/remote-commands";
 
 interface DetailMachine {
   id: string;
@@ -26,6 +30,7 @@ interface DetailMachine {
   capacityKg: number | null;
   qrRotationSeconds: number;
   chamberTimeoutSeconds: number;
+  sessionIdleTimeoutMinutes: number;
   hasInputChamber: boolean;
   hasConveyor: boolean;
   hasCompactor: boolean;
@@ -55,6 +60,8 @@ export async function MachineDetailView({
   listHref,
   ingestSecret,
   securityEvents,
+  cameraCaptures,
+  remoteCommands,
 }: {
   machine: DetailMachine;
   wasteTypes: { id: string; name: string }[];
@@ -63,6 +70,8 @@ export async function MachineDetailView({
   // Provided only for superadmin — exposes the per-machine HMAC secret.
   ingestSecret?: string | null;
   securityEvents?: SecurityEventRow[];
+  cameraCaptures?: MachineCaptureRow[];
+  remoteCommands?: RemoteCommandView[];
 }) {
   const tokenValid =
     machine.qrToken &&
@@ -75,10 +84,10 @@ export async function MachineDetailView({
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Status" value={<StatusBadge status={machine.status} />} icon={Signal} />
-        <MetricCard label="Fill Level" value={`${machine.fillLevelPercent}%`} icon={Box} hint={machine.capacityKg ? `Kapasitas ${machine.capacityKg} kg` : undefined} />
-        <MetricCard label="Rotasi QR" value={`${machine.qrRotationSeconds}s`} icon={QrCode} hint={`Timeout chamber ${machine.chamberTimeoutSeconds}s`} />
-        <MetricCard label="Heartbeat" value={machine.lastHeartbeatAt ? "Aktif" : "-"} icon={Wrench} hint={formatDateTime(machine.lastHeartbeatAt)} />
+        <MetricCard className="min-h-24" label="Status" value={<StatusBadge status={machine.status} />} icon={Signal} />
+        <MetricCard className="min-h-24" label="Fill Level" value={`${machine.fillLevelPercent}%`} icon={Box} hint={machine.capacityKg ? `Kapasitas ${machine.capacityKg} kg` : undefined} />
+        <MetricCard className="min-h-24" label="Rotasi QR" value={`${machine.qrRotationSeconds}s`} icon={QrCode} hint={`Chamber ${machine.chamberTimeoutSeconds}s · sesi idle ${machine.sessionIdleTimeoutMinutes}m`} />
+        <MetricCard className="min-h-24" label="Heartbeat" value={machine.lastHeartbeatAt ? "Aktif" : "-"} icon={Wrench} hint={formatDateTime(machine.lastHeartbeatAt)} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -87,12 +96,12 @@ export async function MachineDetailView({
             <CardHeader>
               <CardTitle>Informasi Mesin</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm">
+            <CardContent className="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
               <Row label="Kode" value={machine.machineCode} />
               <Row label="Organisasi" value={machine.organization?.name ?? "-"} />
               <Row label="Wilayah" value={machine.region?.name ?? "-"} />
               <Row label="Deskripsi" value={machine.description ?? "-"} />
-              <div className="flex flex-wrap gap-2 pt-1">
+              <div className="flex flex-wrap gap-2 pt-1 sm:col-span-2">
                 {hardwareChips(machine).map(([label, on]) => (
                   <span
                     key={label}
@@ -106,61 +115,30 @@ export async function MachineDetailView({
                   </span>
                 ))}
               </div>
+              <div className="border-t border-border pt-3 sm:col-span-2">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-muted">
+                  Jenis sampah didukung
+                </p>
+                {machine.wasteTypes.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {machine.wasteTypes.map((w) => (
+                      <span key={w.wasteTypeId} className="rounded-full bg-mint px-2.5 py-1 text-xs font-medium text-brand-700">
+                        {w.wasteType.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">Belum ada jenis sampah.</p>
+                )}
+              </div>
             </CardContent>
           </Card>
 
-          {securityEvents ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Riwayat Event & Keamanan</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <SecurityEventList events={securityEvents} compact />
-              </CardContent>
-            </Card>
-          ) : null}
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Jenis Sampah Didukung</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {machine.wasteTypes.length === 0 ? (
-                <p className="text-sm text-muted">Belum ada jenis sampah.</p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {machine.wasteTypes.map((w) => (
-                    <span
-                      key={w.wasteTypeId}
-                      className="rounded-full bg-mint px-3 py-1 text-sm font-medium text-brand-700"
-                    >
-                      {w.wasteType.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Sesi Terbaru</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {machine.sessions.length === 0 ? (
-                <p className="text-sm text-muted">Belum ada sesi deposit.</p>
-              ) : (
-                <ul className="divide-y divide-border text-sm">
-                  {machine.sessions.map((s) => (
-                    <li key={s.id} className="flex items-center justify-between py-2">
-                      <span className="text-muted">{formatDateTime(s.startedAt)}</span>
-                      <StatusBadge status={s.status} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
+          <MachineActivityPanel
+            securityEvents={securityEvents}
+            cameraCaptures={cameraCaptures}
+            sessions={machine.sessions}
+          />
         </div>
 
         <div className="space-y-6">
@@ -172,7 +150,7 @@ export async function MachineDetailView({
               {qr ? (
                 <>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={qr} alt="QR mesin" className="mx-auto h-48 w-48 rounded-xl border border-border" />
+                  <img src={qr} alt="QR mesin" className="mx-auto h-36 w-36 rounded-xl border border-border" />
                   <p className="text-xs text-muted">
                     Snapshot token saat ini. QR berotasi tiap {machine.qrRotationSeconds}s di layar mesin.
                   </p>
@@ -192,6 +170,25 @@ export async function MachineDetailView({
             </CardContent>
           </Card>
 
+          {ingestSecret !== undefined ? (
+            <MachineMediaManager machineId={machine.id} />
+          ) : null}
+
+          {ingestSecret !== undefined ? (
+            <MachineRemoteConsole
+              machineId={machine.id}
+              initialData={{
+                machine: {
+                  machineCode: machine.machineCode,
+                  status: machine.status,
+                  fillLevelPercent: machine.fillLevelPercent,
+                  lastHeartbeatAt: machine.lastHeartbeatAt?.toISOString() ?? null,
+                },
+                commands: remoteCommands ?? [],
+              }}
+            />
+          ) : null}
+
           <MachineControls
             machine={{
               id: machine.id,
@@ -202,6 +199,7 @@ export async function MachineDetailView({
               capacityKg: machine.capacityKg,
               qrRotationSeconds: machine.qrRotationSeconds,
               chamberTimeoutSeconds: machine.chamberTimeoutSeconds,
+              sessionIdleTimeoutMinutes: machine.sessionIdleTimeoutMinutes,
               hasInputChamber: machine.hasInputChamber,
               hasConveyor: machine.hasConveyor,
               hasCompactor: machine.hasCompactor,

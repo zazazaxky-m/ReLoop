@@ -61,6 +61,45 @@ export async function ingestMachineEvent(
     };
   }
 
+  // Edge machines can retain queued events across a server database reset.
+  // Detach stale foreign keys instead of failing the complete ingest batch.
+  let sessionId = input.sessionId ?? null;
+  let depositItemId = input.depositItemId ?? null;
+  const orphanedReferences: Record<string, string> = {};
+
+  if (sessionId) {
+    const session = await prisma.depositSession.findFirst({
+      where: { id: sessionId, machineId: machine.id },
+      select: { id: true },
+    });
+    if (!session) {
+      orphanedReferences.sessionId = sessionId;
+      sessionId = null;
+      depositItemId = null;
+    }
+  }
+
+  if (depositItemId) {
+    const item = await prisma.depositItem.findFirst({
+      where: { id: depositItemId, session: { machineId: machine.id } },
+      select: { id: true, sessionId: true },
+    });
+    if (!item || (sessionId && item.sessionId !== sessionId)) {
+      orphanedReferences.depositItemId = depositItemId;
+      depositItemId = null;
+    }
+  }
+
+  const sanitizedInput: IngestEventInput = {
+    ...input,
+    sessionId,
+    depositItemId,
+    payload:
+      Object.keys(orphanedReferences).length > 0
+        ? { ...(input.payload ?? {}), orphanedReferences }
+        : input.payload,
+  };
+
   let createdItemId: string | null = null;
 
   const occurredAt = input.occurredAt
@@ -71,16 +110,16 @@ export async function ingestMachineEvent(
     const created = await tx.machineEvent.create({
       data: {
         machineId: machine.id,
-        sessionId: input.sessionId ?? null,
-        depositItemId: input.depositItemId ?? null,
+        sessionId,
+        depositItemId,
         localEventId: input.localEventId,
         eventType: input.eventType,
-        payloadJson: (input.payload ?? undefined) as Prisma.InputJsonValue | undefined,
+        payloadJson: (sanitizedInput.payload ?? undefined) as Prisma.InputJsonValue | undefined,
         occurredAt,
       },
     });
 
-    await processEventSideEffects(tx, machine, input, created.id, (id) => {
+    await processEventSideEffects(tx, machine, sanitizedInput, created.id, (id) => {
       createdItemId = id;
     });
     return created;
@@ -89,7 +128,11 @@ export async function ingestMachineEvent(
   return {
     duplicate: false,
     eventId: event.id,
-    depositItemId: createdItemId ?? input.depositItemId ?? null,
+    depositItemId: createdItemId ?? depositItemId,
+    message:
+      Object.keys(orphanedReferences).length > 0
+        ? "Referensi sesi/item lokal tidak ditemukan dan dilepas"
+        : undefined,
   };
 }
 
@@ -99,6 +142,7 @@ async function processEventSideEffects(
     id: string;
     organizationId: string;
     chamberTimeoutSeconds: number;
+    sessionIdleTimeoutMinutes: number;
     hasCompactor: boolean;
   },
   input: IngestEventInput,
@@ -166,14 +210,10 @@ async function processEventSideEffects(
           where: { id: input.sessionId },
         });
         if (session && ["ACTIVE", "RESERVED"].includes(session.status)) {
-          const timeoutAt = new Date(
-            Date.now() + machine.chamberTimeoutSeconds * 1000,
-          );
           await tx.depositSession.update({
             where: { id: session.id },
             data: {
               status: transitionSession(session.status, "START_ITEM"),
-              timeoutAt,
             },
           });
         }
@@ -202,6 +242,15 @@ async function processEventSideEffects(
         where: { id: input.sessionId },
       });
       if (!session) break;
+
+      await tx.depositSession.update({
+        where: { id: session.id },
+        data: {
+          timeoutAt: new Date(
+            Date.now() + machine.sessionIdleTimeoutMinutes * 60 * 1000,
+          ),
+        },
+      });
 
       let wasteTypeId: string | null =
         (payload.wasteTypeId as string | undefined) ?? null;
@@ -339,22 +388,36 @@ async function processEventSideEffects(
 
     case "FRAUD_DETECTED":
     case "VANDALISM_DETECTED": {
-      if (input.depositItemId) {
+      const reason = String(payload.reason ?? input.eventType);
+      const affectedItemId =
+        input.eventType === "FRAUD_DETECTED"
+          ? await resolveFraudDepositItemId(tx, input)
+          : input.depositItemId ?? null;
+
+      if (affectedItemId) {
         await tx.depositItem.update({
-          where: { id: input.depositItemId },
+          where: { id: affectedItemId },
           data: {
             status: "REVIEW",
             externalFraudFlag: true,
-            validationReasonCode: input.eventType,
+            validationReasonCode: reason,
           },
+        });
+        await tx.rewardLedger.updateMany({
+          where: { depositItemId: affectedItemId, status: "AVAILABLE" },
+          data: { status: "PENDING", reasonCode: reason },
+        });
+        await tx.machineEvent.update({
+          where: { id: eventId },
+          data: { depositItemId: affectedItemId },
         });
       }
       if (input.sessionId) {
         await flagAnomaly(
           tx,
           input.sessionId,
-          input.depositItemId,
-          input.eventType,
+          affectedItemId,
+          reason,
         );
       }
       break;
@@ -405,6 +468,20 @@ async function processEventSideEffects(
     default:
       break;
   }
+}
+
+async function resolveFraudDepositItemId(
+  tx: Prisma.TransactionClient,
+  input: IngestEventInput,
+): Promise<string | null> {
+  if (input.depositItemId) return input.depositItemId;
+  if (!input.sessionId) return null;
+  const item = await tx.depositItem.findFirst({
+    where: { sessionId: input.sessionId },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  return item?.id ?? null;
 }
 
 async function resolveDepositItemId(
@@ -565,7 +642,9 @@ async function flagAnomaly(
     await tx.depositSession.update({
       where: { id: sessionId },
       data: {
-        status: session.status === "PROCESSING_ITEM" ? "REVIEW" : session.status,
+        status: ["ACTIVE", "PROCESSING_ITEM"].includes(session.status)
+          ? "REVIEW"
+          : session.status,
         anomalyCount: { increment: 1 },
       },
     });

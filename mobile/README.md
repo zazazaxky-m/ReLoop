@@ -1,17 +1,44 @@
-# mobile
+# ReLoop Mobile
 
-A new Flutter project.
+Aplikasi Flutter untuk platform ReLoop. Satu codebase mendukung Android,
+iPhone, iPad, serta tablet Android.
 
-## Getting Started
+## Fitur
 
-This project is a starting point for a Flutter application.
+- Login, registrasi, dan pemulihan sesi berbasis cookie yang sama dengan web.
+- Dashboard adaptif untuk USER, PENGEPUL, ADMIN, dan SUPERADMIN.
+- Scan QR dinamis mesin dengan kamera native dan pemantauan sesi setor.
+- Dompet reward, akun payout, dan pengajuan pencairan.
+- Daftar mesin, kapasitas, material yang diterima, dan navigasi lokasi.
+- Pickup, kemitraan, campaign, trip/trash bag, tarif, organisasi, pengguna,
+  redemption, keamanan, audit, konfigurasi, dan laporan sesuai RBAC backend.
+- Navigasi bawah untuk ponsel dan navigation rail untuk tablet.
 
-A few resources to get you started if this is your first Flutter project:
+## Menjalankan
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+```powershell
+cd mobile
+flutter pub get
+flutter run
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Alamat default Android Emulator adalah `http://10.0.2.2:3000`. Tekan tombol
+server di layar login untuk menggantinya dengan URL deployment HTTPS. Untuk
+iOS Simulator yang menjalankan backend di Mac yang sama, gunakan
+`http://localhost:3000`.
+
+## Build
+
+```powershell
+flutter build apk --release
+flutter build appbundle --release
+```
+
+Build iOS harus dijalankan di macOS:
+
+```bash
+flutter build ios --release
+```
+
+Lanjutkan signing/archive melalui Xcode dengan bundle id
+`id.reloop.reloopMobile`.

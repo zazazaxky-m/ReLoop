@@ -61,7 +61,7 @@ export async function PATCH(
         ? "CANCELLED"
         : transitionSession(session.status, "FINISH");
 
-    const updated = await prisma.depositSession.update({
+    await prisma.depositSession.update({
       where: { id },
       data: {
         status: nextStatus,
@@ -76,7 +76,20 @@ export async function PATCH(
       entityId: id,
     });
 
-    const balance = await getWalletBalance(user.id);
+    const [updated, balance] = await Promise.all([
+      prisma.depositSession.findUnique({
+        where: { id },
+        include: {
+          machine: { select: { name: true, machineCode: true } },
+          campaign: { select: { name: true } },
+          items: {
+            include: { wasteType: { select: { name: true } } },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      }),
+      getWalletBalance(user.id),
+    ]);
     return jsonOk({ session: updated, balance });
   } catch (error) {
     return handleApiError(error);
