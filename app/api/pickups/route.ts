@@ -51,8 +51,9 @@ export async function GET(req: Request) {
       orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
       include: {
         machine: { select: { id: true, name: true, machineCode: true, fillLevelPercent: true } },
-        organization: { select: { id: true, name: true, contactName: true, contactPhone: true } },
+        organization: { select: { id: true, name: true, contactName: true, contactPhone: true, address: true } },
         assignedCollector: { select: { id: true, name: true } },
+        items: { include: { wasteType: { select: { name: true } } } },
         _count: { select: { items: true } },
       },
     });
