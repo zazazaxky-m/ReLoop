@@ -577,6 +577,17 @@ class RvmController:
 
     def activate_lease(self, lease: dict[str, Any]) -> bool:
         if not self.verify_lease(lease) or float(lease["expiresAt"]) <= time.time():
+            # Pre-scan lease (QR display data), save as display
+            if lease.get("qrDataUrl"):
+                self.db.set_json(
+                    "display",
+                    {
+                        "qrDataUrl": lease["qrDataUrl"],
+                        "expiresAt": lease.get("expiresAt"),
+                        "status": "ONLINE",
+                        "updatedAt": time.time(),
+                    }
+                )
             return False
         lease = {**lease, "status": "ACTIVE"}
         self.db.save_lease(lease)

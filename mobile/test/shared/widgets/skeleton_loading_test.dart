@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:reloop_mobile/shared/widgets/skeleton_loading.dart';
-import 'package:reloop_mobile/theme/colors.dart';
 
 void main() {
   group('SkeletonBox', () {
