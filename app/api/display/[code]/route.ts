@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { buildScanUrl, qrDataUrl, rotateToken } from "@/lib/qr";
 
+export const dynamic = "force-dynamic";
+
 // Public endpoint shown on the machine's small screen.
 // Rotates the dynamic QR token only when the current one has expired, so the
 // token always has a short TTL (the machine's qrRotationSeconds window).

@@ -9,7 +9,7 @@ import { logAudit } from "@/lib/audit";
 
 const scanSchema = z.object({
   machineCode: z.string().min(1),
-  token: z.string().min(1),
+  token: z.string().optional(),
   campaignId: z.string().optional(),
 });
 
@@ -31,7 +31,12 @@ export async function POST(req: Request) {
 
     if (!machine) throw new HttpError(404, "Mesin tidak ditemukan");
     if (!isTokenValid(machine, body.token)) {
-      throw new HttpError(401, "QR token tidak valid atau sudah kedaluwarsa");
+      const reason = !machine.qrToken ? 'NO_QR_TOKEN' :
+                     !machine.qrTokenExpiresAt ? 'NO_EXPIRY' :
+                     machine.qrToken !== body.token ? 'TOKEN_MISMATCH' :
+                     'EXPIRED';
+      console.log(`[scan] token check failed: ${reason} | expected=${machine.qrToken?.substring(0, 10)}... | got=${body.token?.substring(0, 10)}... | expiresAt=${machine.qrTokenExpiresAt?.toISOString()}`);
+      throw new HttpError(401, `QR token tidak valid atau sudah kedaluwarsa (${reason}). Silakan scan QR terbaru dari layar mesin.`);
     }
     if (!machineAcceptsSessions(machine.status)) {
       throw new HttpError(409, `Mesin tidak menerima setor (status: ${machine.status})`);
