@@ -20,7 +20,7 @@ class ReLoopCard extends StatelessWidget {
       padding: padding ?? const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: ReLoopColors.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: ReLoopColors.border),
         boxShadow: const [
           BoxShadow(

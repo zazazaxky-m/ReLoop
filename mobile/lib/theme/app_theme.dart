@@ -22,6 +22,18 @@ class AppTheme {
       colorScheme: colorScheme,
       scaffoldBackgroundColor: ReLoopColors.backgroundDark,
       fontFamily: null,
+      textTheme: const TextTheme(
+        headlineLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: ReLoopColors.foregroundDark),
+        headlineMedium: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: ReLoopColors.foregroundDark),
+        titleLarge: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: ReLoopColors.foregroundDark),
+        titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ReLoopColors.foregroundDark),
+        titleSmall: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: ReLoopColors.foregroundDark),
+        bodyLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.normal, color: ReLoopColors.foregroundDark),
+        bodyMedium: TextStyle(fontSize: 13, fontWeight: FontWeight.normal, color: ReLoopColors.mutedDark),
+        bodySmall: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: ReLoopColors.mutedSoftDark),
+        labelLarge: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ReLoopColors.mutedDark),
+        labelSmall: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: ReLoopColors.mutedSoftDark),
+      ),
       brightness: Brightness.dark,
       appBarTheme: const AppBarTheme(
         backgroundColor: ReLoopColors.surfaceDark,
@@ -39,7 +51,7 @@ class AppTheme {
         color: ReLoopColors.surfaceDark,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
           side: const BorderSide(color: ReLoopColors.borderDark),
         ),
       ),
@@ -48,19 +60,19 @@ class AppTheme {
         fillColor: ReLoopColors.surfaceDark,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: ReLoopColors.borderDark),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: ReLoopColors.borderDark),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: ReLoopColors.brand500, width: 2),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: ReLoopColors.danger),
         ),
         labelStyle: const TextStyle(color: ReLoopColors.mutedDark),
@@ -73,7 +85,7 @@ class AppTheme {
           elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
           textStyle: const TextStyle(
             fontSize: 15,
@@ -87,7 +99,7 @@ class AppTheme {
           side: const BorderSide(color: ReLoopColors.borderDark),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
         ),
       ),
@@ -142,7 +154,19 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: ReLoopColors.background,
-      fontFamily: null, // system default sans-serif
+      fontFamily: null,
+      textTheme: const TextTheme(
+        headlineLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: ReLoopColors.foreground),
+        headlineMedium: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: ReLoopColors.foreground),
+        titleLarge: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: ReLoopColors.foreground),
+        titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ReLoopColors.foreground),
+        titleSmall: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: ReLoopColors.foreground),
+        bodyLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.normal, color: ReLoopColors.foreground),
+        bodyMedium: TextStyle(fontSize: 13, fontWeight: FontWeight.normal, color: ReLoopColors.muted),
+        bodySmall: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: ReLoopColors.mutedSoft),
+        labelLarge: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ReLoopColors.muted),
+        labelSmall: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: ReLoopColors.mutedSoft),
+      ),
       appBarTheme: const AppBarTheme(
         backgroundColor: ReLoopColors.surface,
         foregroundColor: ReLoopColors.foreground,
@@ -159,7 +183,7 @@ class AppTheme {
         color: ReLoopColors.surface,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
           side: const BorderSide(color: ReLoopColors.border),
         ),
       ),
@@ -168,19 +192,19 @@ class AppTheme {
         fillColor: ReLoopColors.surface,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: ReLoopColors.border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: ReLoopColors.border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: ReLoopColors.brand500, width: 2),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: ReLoopColors.danger),
         ),
         labelStyle: const TextStyle(color: ReLoopColors.muted),
@@ -193,7 +217,7 @@ class AppTheme {
           elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
           textStyle: const TextStyle(
             fontSize: 15,
@@ -207,7 +231,7 @@ class AppTheme {
           side: const BorderSide(color: ReLoopColors.border),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
         ),
       ),

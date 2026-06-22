@@ -81,7 +81,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           disabledForegroundColor: Colors.white70,
           padding: size.padding,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
         );
       case ReLoopButtonVariant.secondary:
@@ -93,7 +93,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           disabledForegroundColor: ReLoopColors.mutedSoft,
           padding: size.padding,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
         );
       case ReLoopButtonVariant.outline:
@@ -102,7 +102,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           side: const BorderSide(color: ReLoopColors.border),
           padding: size.padding,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
         );
       case ReLoopButtonVariant.ghost:
@@ -110,7 +110,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           foregroundColor: ReLoopColors.foreground,
           padding: size.padding,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
         );
       case ReLoopButtonVariant.danger:
@@ -120,7 +120,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           disabledBackgroundColor: ReLoopColors.danger.withValues(alpha: 0.5),
           padding: size.padding,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
         );
     }
@@ -133,9 +133,9 @@ extension _ButtonSizeStyle on ReLoopButtonSize {
   double get height {
     switch (this) {
       case ReLoopButtonSize.sm: return 32;
-      case ReLoopButtonSize.md: return 44;
-      case ReLoopButtonSize.lg: return 52;
-      case ReLoopButtonSize.icon: return 44;
+      case ReLoopButtonSize.md: return 40;
+      case ReLoopButtonSize.lg: return 48;
+      case ReLoopButtonSize.icon: return 40;
     }
   }
 
