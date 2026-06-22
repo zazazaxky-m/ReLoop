@@ -38,15 +38,19 @@ class Redemption {
   String get statusLabel {
     switch (status) {
       case 'REQUESTED':
+      case 'PENDING':
         return 'Menunggu';
       case 'APPROVED':
         return 'Disetujui';
       case 'PROCESSING':
         return 'Diproses';
       case 'SUCCESS':
+      case 'COMPLETED':
         return 'Selesai';
       case 'FAILED':
         return 'Gagal';
+      case 'REJECTED':
+        return 'Ditolak';
       case 'CANCELLED':
         return 'Dibatalkan';
       default:
