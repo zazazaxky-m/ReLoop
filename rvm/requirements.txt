@@ -1,0 +1,8 @@
+# Camera runtime (face/person detection, evidence capture, item classification).
+opencv-python-headless>=4.10,<5
+
+# Install hardware packages only on the target machine:
+# gpiozero>=2.0
+# lgpio>=0.2.2.0
+# HX711 driver compatible with your board/wiring
+# mpu6050-raspberrypi>=1.2

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#062f22">
+  <title>ReLoop RVM</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="app">
+    <header>
+      <img class="logo" src="/logo.svg" alt="ReLoop">
+      <div class="top-actions">
+        <button id="simulatorLauncher" class="ghost" hidden>Simulator</button>
+        <div id="network" class="network"><i></i><span>Menyiapkan mesin</span></div>
+      </div>
+    </header>
+
+    <section class="layout">
+      <article class="stage">
+        <div id="adPlayer" class="ad-player" hidden aria-live="polite">
+          <img id="adImage" alt="Materi promosi">
+          <video id="adVideo" playsinline preload="auto"></video>
+          <div class="ad-shade"></div>
+          <div class="ad-caption"><span>Informasi mitra ReLoop</span><strong id="adTitle"></strong><div id="adDots" class="ad-dots"></div></div>
+        </div>
+
+        <div class="stage-copy">
+          <p id="eyebrow" class="eyebrow">Mesin siap</p>
+          <h1 id="headline">Scan QR untuk mulai menyetor.</h1>
+          <p id="message">Setorkan botol atau kaleng satu per satu dan lihat reward bertambah langsung.</p>
+        </div>
+
+        <div id="securityAlert" class="security-alert" hidden role="alert" aria-live="assertive">
+          <div id="alertIcon" class="alert-icon">!</div>
+          <div class="alert-copy">
+            <span id="alertCategory">Peringatan keamanan</span>
+            <strong id="alertTitle">Aktivitas mencurigakan terdeteksi</strong>
+            <p id="alertMessage">Mesin menghentikan proses untuk pemeriksaan.</p>
+          </div>
+          <time id="alertTime"></time>
+        </div>
+
+        <div id="sessionSummary" class="session-summary" hidden>
+          <div class="session-head">
+            <div>
+              <span>Sesi aktif</span>
+              <strong id="userName">Pengguna ReLoop</strong>
+            </div>
+            <div class="countdown">
+              <span>Berakhir jika tidak aktif</span>
+              <strong id="countdown">--:--</strong>
+            </div>
+          </div>
+          <div class="totals">
+            <div><span>Total item</span><strong id="totalItems">0</strong></div>
+            <div><span>Reward</span><strong id="totalReward">Rp0</strong></div>
+          </div>
+          <div id="itemList" class="item-list">
+            <div class="empty">Belum ada item. Masukkan sampah pertama Anda.</div>
+          </div>
+        </div>
+
+        <div class="flow">
+          <span id="stepScan" class="active"><b>1</b> Scan</span>
+          <i></i>
+          <span id="stepDeposit"><b>2</b> Setor</span>
+          <i></i>
+          <span id="stepReward"><b>3</b> Reward</span>
+        </div>
+      </article>
+
+      <aside class="machine-card">
+        <div class="machine-head">
+          <div><small>Kode mesin</small><strong id="machineCode">—</strong></div>
+          <span id="runtimeState" class="badge">BOOTING</span>
+        </div>
+
+        <div id="visual" class="visual">
+          <img id="qr" class="qr" alt="QR dinamis mesin">
+          <div id="visualIcon" class="visual-icon">♻</div>
+          <div class="visual-copy">
+            <span id="visualKicker">Mulai di sini</span>
+            <strong id="visualTitle">Menyiapkan mesin</strong>
+            <p id="visualText">Mohon tunggu sebentar</p>
+          </div>
+        </div>
+
+        <div class="fill-row"><span>Kapasitas mesin</span><strong id="fillValue">0%</strong></div>
+        <div class="meter"><i id="fillBar"></i></div>
+        <div class="stats">
+          <div><span>Chamber</span><b id="chamber">Tertutup</b></div>
+          <div><span>Kamera</span><b id="camera">Aktif</b></div>
+          <div><span>Suhu</span><b id="temperature">—</b></div>
+          <div><span>Antrean</span><b id="queue">0</b></div>
+        </div>
+      </aside>
+    </section>
+
+    <footer><span id="machineName">ReLoop RVM</span><span>Local edge · sinkronisasi aman</span></footer>
+  </main>
+
+  <dialog id="pinDialog">
+    <form id="pinForm" method="dialog">
+      <h2>Otorisasi teknisi</h2><p>Masukkan PIN maintenance.</p>
+      <input id="pin" aria-label="PIN maintenance" type="password" inputmode="numeric" maxlength="12" required>
+      <div class="dialog-actions"><button value="cancel">Batal</button><button class="primary" value="default">Masuk</button></div>
+      <p id="pinError" class="error"></p>
+    </form>
+  </dialog>
+
+  <dialog id="maintenanceDialog" class="maintenance-dialog">
+    <section>
+      <div class="maintenance-head"><div><p class="eyebrow">Teknisi</p><h2>Panel maintenance</h2></div><button id="closeMaintenance">Tutup</button></div>
+      <div id="simulatorPanel" class="simulator-panel">
+        <div class="section-heading"><div><span>Simulator interaktif</span><strong>Uji alur operasional</strong></div><em id="simulationStatus">Siap</em></div>
+        <p class="sim-hint">Simulasi setoran membutuhkan sesi nyata. Scan QR dari aplikasi terlebih dahulu.</p>
+        <div class="scenario-grid">
+          <button class="scenario normal" data-command="simulate" data-scenario="normal-bottle" data-session="true"><b>Botol normal</b><span>Tambah 1 botol</span></button>
+          <button class="scenario normal" data-command="simulate" data-scenario="normal-can" data-session="true"><b>Kaleng normal</b><span>Tambah 1 kaleng</span></button>
+          <button class="scenario warning" data-command="simulate" data-scenario="string-pull" data-session="true"><b>String pull</b><span>Tarik item kembali</span></button>
+          <button class="scenario warning" data-command="simulate" data-scenario="abnormal-weight" data-session="true"><b>Terlalu berat</b><span>Objek 900 gram</span></button>
+          <button class="scenario warning" data-command="simulate" data-scenario="abnormal-underweight" data-session="true"><b>Terlalu ringan</b><span>Objek 1 gram</span></button>
+          <button class="scenario warning" data-command="simulate" data-scenario="acceptance-without-item" data-session="true"><b>Sensor lompat</b><span>Accept tanpa item</span></button>
+          <button class="scenario warning" data-command="simulate" data-scenario="chamber-timeout" data-session="true"><b>Chamber timeout</b><span>Item macet diproses</span></button>
+          <button class="scenario warning" data-command="simulate" data-scenario="item-without-session"><b>Item tanpa sesi</b><span>Setor sebelum scan</span></button>
+          <button class="scenario danger" data-command="simulate" data-scenario="vandalism-impact"><b>Benturan keras</b><span>Getaran 4.8 G</span></button>
+          <button class="scenario danger" data-command="simulate" data-scenario="panel-forced"><b>Panel dibobol</b><span>Service panel terbuka</span></button>
+          <button class="scenario danger" data-command="simulate" data-scenario="door-forced"><b>Pintu kolektor</b><span>Dibuka paksa</span></button>
+          <button class="scenario danger" data-command="simulate" data-scenario="camera-covered"><b>Kamera ditutup</b><span>Visibilitas hilang</span></button>
+          <button class="scenario danger" data-command="simulate" data-scenario="camera-offline"><b>Kamera offline</b><span>Koneksi terputus</span></button>
+          <button class="scenario warning" data-command="simulate" data-scenario="camera-blurry"><b>Kamera buram</b><span>Gambar tak layak</span></button>
+          <button class="scenario danger" data-command="simulate" data-scenario="overheat"><b>Suhu berlebih</b><span>Proteksi thermal</span></button>
+          <button class="scenario warning" data-command="simulate" data-scenario="machine-full"><b>Mesin penuh</b><span>Kapasitas 98%</span></button>
+        </div>
+      </div>
+      <div class="section-heading compact"><div><span>Kontrol perangkat</span><strong>Operasi manual</strong></div></div>
+      <div class="maintenance-grid">
+        <button data-command="reset-safe-state">Reset safe state</button>
+        <button data-command="flush">Sinkronkan antrean</button>
+        <button data-command="gate" data-open="true">Buka input gate</button>
+        <button data-command="gate" data-open="false">Tutup input gate</button>
+        <button data-command="conveyor" data-direction="FORWARD">Conveyor maju</button>
+        <button data-command="conveyor" data-direction="STOPPED">Stop conveyor</button>
+      </div>
+      <pre id="diagnostic">Memuat diagnostik…</pre>
+    </section>
+  </dialog>
+  <script src="/app.js"></script>
+</body>
+</html>
