@@ -34,6 +34,13 @@ import '../features/admin/admin_waste_types_screen.dart';
 import '../features/admin/admin_partners_screen.dart';
 import '../features/admin/admin_trips_screen.dart';
 import '../features/admin/admin_reports_screen.dart';
+import '../features/superadmin/superadmin_dashboard_screen.dart';
+import '../features/superadmin/superadmin_organizations_screen.dart';
+import '../features/superadmin/superadmin_users_screen.dart';
+import '../features/superadmin/superadmin_redemptions_screen.dart';
+import '../features/superadmin/superadmin_regions_screen.dart';
+import '../features/superadmin/superadmin_audit_screen.dart';
+import '../features/superadmin/superadmin_config_screen.dart';
 import '../shared/widgets/reloop_logo.dart';
 import '../services/notification_service.dart';
 import '../services/analytics_service.dart';
@@ -81,6 +88,10 @@ class AppRouter {
     '/trash-bags': 'Trash Bag',
     '/trash-bags/create': 'Trash Bag Form',
     '/trash-bags/history': 'Trash Bag History',
+    '/admin': 'Admin Dashboard',
+    '/superadmin': 'Superadmin Dashboard',
+    '/superadmin/organizations': 'Superadmin Organizations',
+    '/superadmin/users': 'Superadmin Users',
   };
 
   late final router = GoRouter(
@@ -187,11 +198,60 @@ class AppRouter {
             path: '/admin/reports',
             builder: (context, state) => const AdminReportsScreen(),
           ),
+          GoRoute(
+            path: '/campaigns',
+            builder: (context, state) => const CampaignsScreen(),
+          ),
+          // Superadmin routes
+          GoRoute(
+            path: '/superadmin',
+            builder: (context, state) => const SuperadminDashboardScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/organizations',
+            builder: (context, state) => const SuperadminOrganizationsScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/users',
+            builder: (context, state) => const SuperadminUsersScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/machines',
+            builder: (context, state) => const AdminMachinesScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/partnerships',
+            builder: (context, state) => const AdminPartnersScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/redemptions',
+            builder: (context, state) => const SuperadminRedemptionsScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/regions',
+            builder: (context, state) => const SuperadminRegionsScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/waste-types',
+            builder: (context, state) => const AdminWasteTypesScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/trips',
+            builder: (context, state) => const AdminTripsScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/reports',
+            builder: (context, state) => const AdminReportsScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/audit',
+            builder: (context, state) => const SuperadminAuditScreen(),
+          ),
+          GoRoute(
+            path: '/superadmin/config',
+            builder: (context, state) => const SuperadminConfigScreen(),
+          ),
         ],
-      ),
-      GoRoute(
-        path: '/campaigns',
-        builder: (context, state) => const CampaignsScreen(),
       ),
       GoRoute(
         path: '/wallet/redemption',

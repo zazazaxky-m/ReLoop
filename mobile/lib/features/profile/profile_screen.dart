@@ -331,14 +331,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 16),
                 _SettingsRow(
                   icon: Icons.brightness_6,
-                  label: 'Tema Gelap',
-                  trailing: Switch.adaptive(
-                    value: context.watch<ThemeProvider>().isDark,
-                    onChanged: (v) {
-                      context.read<ThemeProvider>().toggle();
+                  label: 'Tema',
+                  trailing: SegmentedButton<ThemeMode>(
+                    segments: const [
+                      ButtonSegment(value: ThemeMode.light, label: Text('Terang'), icon: Icon(Icons.wb_sunny_outlined, size: 18)),
+                      ButtonSegment(value: ThemeMode.system, label: Text('Sistem'), icon: Icon(Icons.phone_android, size: 18)),
+                      ButtonSegment(value: ThemeMode.dark, label: Text('Gelap'), icon: Icon(Icons.nightlight_outlined, size: 18)),
+                    ],
+                    selected: {context.watch<ThemeProvider>().themeMode},
+                    onSelectionChanged: (v) {
+                      context.read<ThemeProvider>().setThemeMode(v.first);
                     },
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                   ),
                 ),
+                const SizedBox(height: 8),
                 if (_biometricAvailable) ...[
                   const Divider(height: 24),
                   _SettingsRow(

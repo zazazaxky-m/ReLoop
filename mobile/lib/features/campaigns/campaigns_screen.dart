@@ -71,9 +71,6 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Program Aktif'),
-      ),
       body: RefreshIndicator(
         onRefresh: _loadCampaigns,
         child: _buildBody(),

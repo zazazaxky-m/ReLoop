@@ -147,7 +147,7 @@ class AuthProvider extends ChangeNotifier {
       case AppRole.ADMIN:
         return '/admin';
       case AppRole.SUPERADMIN:
-        return '/admin';
+        return '/superadmin';
     }
   }
 }

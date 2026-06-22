@@ -6,11 +6,11 @@ import '../../core/models.dart';
 import '../../shared/widgets/reloop_logo.dart';
 import '../../theme/colors.dart';
 
-class AdminShell extends StatelessWidget {
+class SuperadminShell extends StatelessWidget {
   final Widget child;
   final String title;
 
-  const AdminShell({super.key, required this.child, required this.title});
+  const SuperadminShell({super.key, required this.child, required this.title});
 
   @override
   Widget build(BuildContext context) {
@@ -54,11 +54,8 @@ class AdminShell extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(
-                  'ReLoop v1.0 — Admin',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isDark ? ReLoopColors.mutedSoftDark : ReLoopColors.mutedSoft,
-                  ),
+                  'ReLoop v1.0 — Superadmin',
+                  style: TextStyle(fontSize: 11, color: isDark ? ReLoopColors.mutedSoftDark : ReLoopColors.mutedSoft),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -86,7 +83,7 @@ class AdminShell extends StatelessWidget {
                   radius: 20,
                   backgroundColor: ReLoopColors.brand100,
                   child: Text(
-                    user.name.isNotEmpty ? user.name[0].toUpperCase() : 'A',
+                    user.name.isNotEmpty ? user.name[0].toUpperCase() : 'SA',
                     style: const TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 16,
@@ -138,26 +135,30 @@ class AdminShell extends StatelessWidget {
   ) {
     final sections = [
       _NavSection('Utama', [
-        _NavItem('Dashboard', Icons.dashboard_outlined, '/admin'),
-        _NavItem('Mesin', Icons.recycling_outlined, '/admin/machines'),
-        _NavItem('Pickup', Icons.local_shipping_outlined, '/admin/pickups'),
-        _NavItem('Campaign', Icons.campaign_outlined, '/admin/campaigns'),
+        _NavItem('Dashboard', Icons.dashboard_outlined, '/superadmin'),
+        _NavItem('Organisasi', Icons.business_outlined, '/superadmin/organizations'),
+        _NavItem('Pengguna', Icons.people_outlined, '/superadmin/users'),
+        _NavItem('Mesin', Icons.recycling_outlined, '/superadmin/machines'),
       ]),
-      _NavSection('Data', [
-        _NavItem('Jenis & Tarif', Icons.delete_outline, '/admin/waste-types'),
-        _NavItem('Mitra Pengepul', Icons.handshake_outlined, '/admin/partners'),
-        _NavItem('Trip / Trash Bag', Icons.luggage_outlined, '/admin/trips'),
+      _NavSection('Operasional', [
+        _NavItem('Kemitraan', Icons.handshake_outlined, '/superadmin/partnerships'),
+        _NavItem('Redemption', Icons.account_balance_wallet_outlined, '/superadmin/redemptions'),
+        _NavItem('Wilayah', Icons.public_outlined, '/superadmin/regions'),
+        _NavItem('Jenis & Tarif', Icons.delete_outline, '/superadmin/waste-types'),
+        _NavItem('Trip / Trash Bag', Icons.luggage_outlined, '/superadmin/trips'),
       ]),
-      _NavSection('Lainnya', [
-        _NavItem('Laporan', Icons.description_outlined, '/admin/reports'),
+      _NavSection('Sistem', [
+        _NavItem('Keamanan & Audit', Icons.security_outlined, '/superadmin/audit'),
+        _NavItem('Konfigurasi', Icons.settings_outlined, '/superadmin/config'),
+        _NavItem('Laporan', Icons.description_outlined, '/superadmin/reports'),
+      ]),
+      _NavSection('Akun', [
         _NavItem('Profil', Icons.person_outline, '/profile'),
       ]),
     ];
 
     final activeColor = ReLoopColors.brand600;
-    final activeBg = isDark
-        ? ReLoopColors.brand700.withValues(alpha: 0.15)
-        : ReLoopColors.brand50;
+    final activeBg = isDark ? ReLoopColors.brand700.withValues(alpha: 0.15) : ReLoopColors.brand50;
 
     final widgets = <Widget>[];
     for (final section in sections) {
@@ -177,16 +178,14 @@ class AdminShell extends StatelessWidget {
       );
       for (final item in section.items) {
         final isActive = location == item.route ||
-            (item.route != '/admin' && location.startsWith(item.route));
+            (item.route != '/superadmin' && location.startsWith(item.route));
         widgets.add(
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
             child: ListTile(
               leading: Icon(
                 item.icon,
-                color: isActive
-                    ? activeColor
-                    : (isDark ? ReLoopColors.mutedSoftDark : ReLoopColors.mutedSoft),
+                color: isActive ? activeColor : (isDark ? ReLoopColors.mutedSoftDark : ReLoopColors.mutedSoft),
                 size: 20,
               ),
               title: Text(
