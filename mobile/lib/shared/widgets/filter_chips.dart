@@ -23,7 +23,7 @@ class ReLoopFilterChips extends StatelessWidget {
         if (label != null) ...[
           Text(
             label!,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: ReLoopColors.muted),
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.reloopMuted),
           ),
           const SizedBox(height: 8),
         ],
@@ -31,29 +31,29 @@ class ReLoopFilterChips extends StatelessWidget {
           spacing: 8,
           runSpacing: 6,
           children: [
-            _buildChip(null, 'Semua'),
-            ...options.map((o) => _buildChip(o, o)),
+            _buildChip(context, null, 'Semua'),
+            ...options.map((o) => _buildChip(context, o, o)),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildChip(String? value, String label) {
+  Widget _buildChip(BuildContext context, String? value, String label) {
     final isSelected = value == selected;
     return GestureDetector(
       onTap: () => onSelected(value),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? ReLoopColors.brand500 : ReLoopColors.background,
+          color: isSelected ? ReLoopColors.brand500 : context.reloopSurfaceSoft,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: isSelected ? ReLoopColors.brand500 : ReLoopColors.border),
+          border: Border.all(color: isSelected ? ReLoopColors.brand500 : context.reloopBorder),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: isSelected ? Colors.white : ReLoopColors.muted,
+            color: isSelected ? Colors.white : context.reloopMuted,
             fontSize: 12,
             fontWeight: FontWeight.w600,
           ),

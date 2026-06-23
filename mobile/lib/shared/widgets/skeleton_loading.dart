@@ -54,9 +54,9 @@ class _SkeletonBoxState extends State<SkeletonBox>
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
               colors: [
-                ReLoopColors.border,
-                ReLoopColors.border.withValues(alpha: 0.5),
-                ReLoopColors.border,
+                context.reloopBorder,
+                context.reloopBorder.withValues(alpha: 0.5),
+                context.reloopBorder,
               ],
               stops: [
                 (_animation.value - 0.3).clamp(0.0, 1.0),
@@ -113,9 +113,9 @@ class SkeletonCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: ReLoopColors.surface,
+        color: context.reloopSurfaceRaised,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ReLoopColors.border),
+        border: Border.all(color: context.reloopBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -154,9 +154,9 @@ class SkeletonListTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: ReLoopColors.surface,
+        color: context.reloopSurfaceRaised,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ReLoopColors.border),
+        border: Border.all(color: context.reloopBorder),
       ),
       child: Row(
         children: [
@@ -191,9 +191,9 @@ class SkeletonDashboard extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: ReLoopColors.surface,
+            color: context.reloopSurfaceRaised,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: ReLoopColors.border),
+            border: Border.all(color: context.reloopBorder),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

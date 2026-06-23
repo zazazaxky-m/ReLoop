@@ -34,6 +34,10 @@ import '../features/admin/admin_waste_types_screen.dart';
 import '../features/admin/admin_partners_screen.dart';
 import '../features/admin/admin_trips_screen.dart';
 import '../features/admin/admin_reports_screen.dart';
+import '../features/admin/admin_shell.dart';
+import '../features/superadmin/superadmin_dashboard_screen.dart';
+import '../features/superadmin/superadmin_resource_screen.dart';
+import '../features/superadmin/superadmin_system_screen.dart';
 import '../shared/widgets/reloop_logo.dart';
 import '../services/notification_service.dart';
 import '../services/analytics_service.dart';
@@ -187,6 +191,18 @@ class AppRouter {
             path: '/admin/reports',
             builder: (context, state) => const AdminReportsScreen(),
           ),
+          GoRoute(path: '/superadmin', builder: (context, state) => const SuperadminDashboardScreen()),
+          GoRoute(path: '/superadmin/organizations', builder: (context, state) => const SuperadminResourceScreen(title: 'Organisasi', endpoint: '/api/organizations', rootKey: 'organizations', primaryFields: ['name', 'status'], secondaryFields: ['type', 'region'], action: SuperadminResourceAction.organization)),
+          GoRoute(path: '/superadmin/machines', builder: (context, state) => const AdminMachinesScreen()),
+          GoRoute(path: '/superadmin/users', builder: (context, state) => const SuperadminResourceScreen(title: 'Pengguna & Peran', endpoint: '/api/users', rootKey: 'users', primaryFields: ['name', 'role'], secondaryFields: ['email', 'organization'], action: SuperadminResourceAction.user)),
+          GoRoute(path: '/superadmin/partnerships', builder: (context, state) => const SuperadminResourceScreen(title: 'Kemitraan', endpoint: '/api/partnerships', rootKey: 'partnerships', primaryFields: ['status', 'contactName'], secondaryFields: ['organization', 'collector'], action: SuperadminResourceAction.partnership)),
+          GoRoute(path: '/superadmin/redemptions', builder: (context, state) => const SuperadminResourceScreen(title: 'Redemption', endpoint: '/api/redemptions?queue=1', rootKey: 'redemptions', primaryFields: ['amount', 'status'], secondaryFields: ['provider', 'user'], action: SuperadminResourceAction.redemption)),
+          GoRoute(path: '/superadmin/regions', builder: (context, state) => const SuperadminResourceScreen(title: 'Wilayah', endpoint: '/api/regions', rootKey: 'regions', primaryFields: ['name', 'type'], secondaryFields: ['parent'])),
+          GoRoute(path: '/superadmin/waste-types', builder: (context, state) => const AdminWasteTypesScreen()),
+          GoRoute(path: '/superadmin/security', builder: (context, state) => const SuperadminSystemScreen(title: 'Log Keamanan', mode: SuperadminSystemMode.security)),
+          GoRoute(path: '/superadmin/config', builder: (context, state) => const SuperadminSystemScreen(title: 'Konfigurasi Global', mode: SuperadminSystemMode.config)),
+          GoRoute(path: '/superadmin/audit', builder: (context, state) => const SuperadminSystemScreen(title: 'Audit Log', mode: SuperadminSystemMode.audit)),
+          GoRoute(path: '/superadmin/reports', builder: (context, state) => const AdminReportsScreen()),
         ],
       ),
       GoRoute(
@@ -283,7 +299,7 @@ class _SplashScreenState extends State<_SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ReLoopColors.background,
+      backgroundColor: context.reloopBackground,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -299,232 +315,99 @@ class _SplashScreenState extends State<_SplashScreen> {
 }
 
 class _AppScaffold extends StatelessWidget {
-  final Widget child;
-
   const _AppScaffold({required this.child});
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final location = GoRouterState.of(context).matchedLocation;
     final user = auth.user;
-
     final isCollector = user?.role == AppRole.PENGEPUL;
-    final isAdmin = user?.role == AppRole.ADMIN ||
-        user?.role == AppRole.SUPERADMIN;
+    final isAdmin = user?.role == AppRole.ADMIN || user?.role == AppRole.SUPERADMIN;
 
     if (isAdmin) {
+      if (location == '/profile') return AdminShell(title: 'Profil', child: child);
       return child;
     }
 
     final items = isCollector ? _pengepulNavItems : _userNavItems;
-    final pageTitle = isCollector ? _pengepulPageTitles[location] : _userPageTitles[location];
-    int currentIndex = items.indexWhere(
-      (item) => location.startsWith(item['path'] as String),
-    );
+    var currentIndex = items.indexWhere((item) => location.startsWith(item['path'] as String));
     if (currentIndex < 0) currentIndex = 0;
 
     return Scaffold(
-      body: Column(
-        children: [
-          _AppHeader(
-            user: user,
-            pageTitle: pageTitle ?? 'ReLoop',
-            onLogout: () => auth.logout(),
-          ),
-          Expanded(child: child),
-        ],
-      ),
+      body: SafeArea(bottom: false, child: child),
       bottomNavigationBar: _CustomBottomNavBar(
         selectedIndex: currentIndex,
         items: items,
-        onTap: (index) {
-          final path = items[index]['path'] as String;
-          context.go(path);
-        },
+        onTap: (index) => context.go(items[index]['path'] as String),
       ),
     );
   }
 }
 
 class _CustomBottomNavBar extends StatelessWidget {
+  const _CustomBottomNavBar({required this.selectedIndex, required this.items, required this.onTap});
   final int selectedIndex;
   final List<Map<String, dynamic>> items;
   final ValueChanged<int> onTap;
 
-  const _CustomBottomNavBar({
-    required this.selectedIndex,
-    required this.items,
-    required this.onTap,
-  });
-
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: ReLoopColors.surface,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            offset: const Offset(0, -4),
-            blurRadius: 8,
-            spreadRadius: 0,
-          ),
-        ],
-        border: const Border(
-          top: BorderSide(color: ReLoopColors.border, width: 0.5),
-        ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 60,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: List.generate(items.length, (index) {
-              final item = items[index];
-              final isSelected = selectedIndex == index;
-              final color = isSelected ? ReLoopColors.brand700 : ReLoopColors.muted;
-              final iconData = (isSelected ? item['selectedIcon'] : item['icon']) as IconData;
-              final label = item['label'] as String;
-
-              return Expanded(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => onTap(index),
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      if (isSelected)
-                        Positioned(
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          child: Align(
-                            alignment: Alignment.topCenter,
-                            child: Container(
-                              width: 32,
-                              height: 2,
-                              decoration: const BoxDecoration(
-                                color: ReLoopColors.brand500,
-                                borderRadius: BorderRadius.only(
-                                  bottomLeft: Radius.circular(4),
-                                  bottomRight: Radius.circular(4),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const SizedBox(height: 4),
-                            Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: isSelected ? ReLoopColors.brand50 : Colors.transparent,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Icon(
-                                iconData,
-                                color: color,
-                                size: 18,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              label,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                color: color,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AppHeader extends StatelessWidget {
-  final CurrentUser? user;
-  final String pageTitle;
-  final VoidCallback onLogout;
-
-  const _AppHeader({
-    required this.user,
-    required this.pageTitle,
-    required this.onLogout,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (user == null) return const SizedBox.shrink();
-
-    return SafeArea(
-      bottom: false,
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, bottomInset + 4),
       child: Container(
-        height: 56,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: const BoxDecoration(
-          color: ReLoopColors.surface,
-          border: Border(bottom: BorderSide(color: ReLoopColors.border)),
-        ),
-        child: Row(
-          children: [
-            const ReLoopLogo(compact: true, height: 28),
-            const SizedBox(width: 10),
-            Container(
-              width: 1,
-              height: 24,
-              color: ReLoopColors.border,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    pageTitle,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: ReLoopColors.foreground,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    user!.role.label,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: ReLoopColors.mutedSoft,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.logout, size: 20),
-              color: ReLoopColors.muted,
-              tooltip: 'Keluar',
-              onPressed: onLogout,
+        height: 60,
+        decoration: BoxDecoration(
+          color: context.reloopSurfaceRaised.withValues(alpha: .98),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: context.reloopBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: context.isDarkMode ? .38 : .08),
+              blurRadius: context.isDarkMode ? 22 : 16,
+              offset: const Offset(0, 6),
             ),
           ],
+        ),
+        child: Row(
+          children: List.generate(items.length, (index) {
+            final item = items[index];
+            final selected = selectedIndex == index;
+            final primary = item['path'] == '/scan';
+            final color = selected ? context.reloopBrandText : context.reloopMuted;
+            final icon = (selected ? item['selectedIcon'] : item['icon']) as IconData;
+            return Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(18),
+                onTap: () => onTap(index),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      width: primary ? 44 : (selected ? 42 : 36),
+                      height: primary ? 39 : 34,
+                      decoration: BoxDecoration(
+                        color: primary ? ReLoopColors.brand600 : selected ? context.reloopBrandSoft : Colors.transparent,
+                        borderRadius: BorderRadius.circular(primary ? 13 : 11),
+                        boxShadow: primary ? const [BoxShadow(color: Color(0x28249A4D), blurRadius: 12, offset: Offset(0, 4))] : null,
+                      ),
+                      child: Icon(icon, size: primary ? 24 : 22, color: primary ? Colors.white : color),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      item['label'] as String,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 9.5, fontWeight: selected ? FontWeight.w700 : FontWeight.w500, color: color),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
         ),
       ),
     );
@@ -532,93 +415,17 @@ class _AppHeader extends StatelessWidget {
 }
 
 const _userNavItems = [
-  {
-    'path': '/dashboard',
-    'icon': Icons.dashboard_outlined,
-    'selectedIcon': Icons.dashboard_rounded,
-    'label': 'Beranda',
-  },
-  {
-    'path': '/scan',
-    'icon': Icons.qr_code_scanner_outlined,
-    'selectedIcon': Icons.qr_code_scanner,
-    'label': 'Scan',
-  },
-  {
-    'path': '/map',
-    'icon': Icons.map_outlined,
-    'selectedIcon': Icons.map,
-    'label': 'Peta',
-  },
-  {
-    'path': '/wallet',
-    'icon': Icons.account_balance_wallet_outlined,
-    'selectedIcon': Icons.account_balance_wallet,
-    'label': 'Dompet',
-  },
-  {
-    'path': '/campaigns',
-    'icon': Icons.campaign_outlined,
-    'selectedIcon': Icons.campaign,
-    'label': 'Program',
-  },
-  {
-    'path': '/profile',
-    'icon': Icons.person_outline,
-    'selectedIcon': Icons.person,
-    'label': 'Profil',
-  },
+  {'path': '/dashboard', 'icon': Icons.dashboard_outlined, 'selectedIcon': Icons.dashboard_rounded, 'label': 'Beranda'},
+  {'path': '/map', 'icon': Icons.map_outlined, 'selectedIcon': Icons.map, 'label': 'Peta'},
+  {'path': '/scan', 'icon': Icons.qr_code_scanner_outlined, 'selectedIcon': Icons.qr_code_scanner, 'label': 'Scan'},
+  {'path': '/wallet', 'icon': Icons.account_balance_wallet_outlined, 'selectedIcon': Icons.account_balance_wallet, 'label': 'Dompet'},
+  {'path': '/profile', 'icon': Icons.person_outline_rounded, 'selectedIcon': Icons.person_rounded, 'label': 'Profil'},
 ];
-
-const _userPageTitles = {
-  '/dashboard': 'Dashboard',
-  '/scan': 'Scan Mesin',
-  '/map': 'Peta',
-  '/wallet': 'Dompet',
-  '/profile': 'Profil',
-  '/campaigns': 'Program',
-  '/trash-bags': 'Kantong',
-  '/pickup': 'Pickup',
-};
 
 const _pengepulNavItems = [
-  {
-    'path': '/pengepul/dashboard',
-    'icon': Icons.dashboard_outlined,
-    'selectedIcon': Icons.dashboard_rounded,
-    'label': 'Dashboard',
-  },
-  {
-    'path': '/pickup',
-    'icon': Icons.local_shipping_outlined,
-    'selectedIcon': Icons.local_shipping,
-    'label': 'Tugas',
-  },
-  {
-    'path': '/map',
-    'icon': Icons.map_outlined,
-    'selectedIcon': Icons.map,
-    'label': 'Peta',
-  },
-  {
-    'path': '/pengepul/area',
-    'icon': Icons.location_on_outlined,
-    'selectedIcon': Icons.location_on,
-    'label': 'Area',
-  },
-  {
-    'path': '/profile',
-    'icon': Icons.person_outline,
-    'selectedIcon': Icons.person,
-    'label': 'Profil',
-  },
+  {'path': '/pengepul/dashboard', 'icon': Icons.dashboard_outlined, 'selectedIcon': Icons.dashboard_rounded, 'label': 'Dashboard'},
+  {'path': '/pickup', 'icon': Icons.local_shipping_outlined, 'selectedIcon': Icons.local_shipping, 'label': 'Tugas'},
+  {'path': '/map', 'icon': Icons.map_outlined, 'selectedIcon': Icons.map, 'label': 'Peta'},
+  {'path': '/pengepul/area', 'icon': Icons.location_on_outlined, 'selectedIcon': Icons.location_on, 'label': 'Area'},
+  {'path': '/profile', 'icon': Icons.person_outline_rounded, 'selectedIcon': Icons.person_rounded, 'label': 'Profil'},
 ];
-
-const _pengepulPageTitles = {
-  '/pengepul/dashboard': 'Dashboard Pengepul',
-  '/pickup': 'Tugas Pickup',
-  '/map': 'Peta Mesin',
-  '/pengepul/area': 'Area Layanan',
-  '/profile': 'Profil',
-  '/wallet': 'Dompet',
-};

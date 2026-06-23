@@ -29,33 +29,33 @@ class MetricCard extends StatelessWidget {
     }
   }
 
-  Color _toneColor() {
+  Color _toneColor(BuildContext context) {
     switch (tone) {
-      case MetricTone.green: return const Color(0xFF15803D);
-      case MetricTone.amber: return const Color(0xFFB45309);
-      case MetricTone.blue: return const Color(0xFF1D4ED8);
-      case MetricTone.teal: return const Color(0xFF0F766E);
-      case MetricTone.slate: return const Color(0xFF334155);
+      case MetricTone.green: return context.isDarkMode ? ReLoopColors.brand300 : const Color(0xFF15803D);
+      case MetricTone.amber: return context.isDarkMode ? const Color(0xFFF5B85C) : const Color(0xFFB45309);
+      case MetricTone.blue: return context.isDarkMode ? const Color(0xFF77AFFF) : const Color(0xFF1D4ED8);
+      case MetricTone.teal: return context.isDarkMode ? const Color(0xFF63D6CC) : const Color(0xFF0F766E);
+      case MetricTone.slate: return context.isDarkMode ? const Color(0xFFCBD5E1) : const Color(0xFF334155);
     }
   }
 
-  Color _toneBg() {
+  Color _toneBg(BuildContext context) {
     switch (tone) {
-      case MetricTone.green: return ReLoopColors.brand50;
-      case MetricTone.amber: return const Color(0xFFFFFBEB);
-      case MetricTone.blue: return const Color(0xFFEFF6FF);
-      case MetricTone.teal: return const Color(0xFFF0FDFA);
-      case MetricTone.slate: return const Color(0xFFF1F5F9);
+      case MetricTone.green: return context.isDarkMode ? const Color(0xFF173D26) : ReLoopColors.brand50;
+      case MetricTone.amber: return context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFFBEB);
+      case MetricTone.blue: return context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEFF6FF);
+      case MetricTone.teal: return context.isDarkMode ? const Color(0xFF173936) : const Color(0xFFF0FDFA);
+      case MetricTone.slate: return context.isDarkMode ? const Color(0xFF29322C) : const Color(0xFFF1F5F9);
     }
   }
 
-  Color _toneValueColor() {
+  Color _toneValueColor(BuildContext context) {
     switch (tone) {
-      case MetricTone.green: return ReLoopColors.brand800;
-      case MetricTone.amber: return const Color(0xFF92400E);
-      case MetricTone.blue: return const Color(0xFF1E40AF);
-      case MetricTone.teal: return const Color(0xFF065F46);
-      case MetricTone.slate: return const Color(0xFF1E293B);
+      case MetricTone.green: return context.isDarkMode ? ReLoopColors.brand300 : ReLoopColors.brand800;
+      case MetricTone.amber: return context.isDarkMode ? const Color(0xFFF5B85C) : const Color(0xFF92400E);
+      case MetricTone.blue: return context.isDarkMode ? const Color(0xFF8BBCFF) : const Color(0xFF1E40AF);
+      case MetricTone.teal: return context.isDarkMode ? const Color(0xFF70DDD2) : const Color(0xFF065F46);
+      case MetricTone.slate: return context.isDarkMode ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B);
     }
   }
 
@@ -69,9 +69,9 @@ class MetricCard extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: ReLoopColors.surface,
+            color: context.reloopSurfaceRaised,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: ReLoopColors.border),
+            border: Border.all(color: context.reloopBorder),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -83,11 +83,11 @@ class MetricCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       label.toUpperCase(),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 0.8,
-                        color: ReLoopColors.muted,
+                        color: context.reloopMuted,
                       ),
                     ),
                   ),
@@ -96,10 +96,10 @@ class MetricCard extends StatelessWidget {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: _toneBg(),
+                      color: _toneBg(context),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Icon(icon, color: _toneColor(), size: 18),
+                    child: Icon(icon, color: _toneColor(context), size: 18),
                   ),
                 ],
               ),
@@ -109,7 +109,7 @@ class MetricCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
-                  color: _toneValueColor(),
+                  color: _toneValueColor(context),
                   height: 1.2,
                 ),
               ),
@@ -117,9 +117,9 @@ class MetricCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   hint!,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: ReLoopColors.muted,
+                    color: context.reloopMuted,
                     height: 1.3,
                   ),
                 ),
