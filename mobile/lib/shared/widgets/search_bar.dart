@@ -22,17 +22,17 @@ class ReLoopSearchBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ReLoopColors.border),
+        border: Border.all(color: context.reloopBorder),
       ),
       child: TextField(
         controller: controller,
         onChanged: onChanged,
         decoration: InputDecoration(
           hintText: hintText,
-          prefixIcon: const Icon(Icons.search, size: 20, color: ReLoopColors.mutedSoft),
+          prefixIcon: Icon(Icons.search, size: 20, color: context.reloopMutedSoft),
           suffixIcon: controller != null && controller!.text.isNotEmpty
               ? IconButton(
-                  icon: const Icon(Icons.clear, size: 18, color: ReLoopColors.mutedSoft),
+                  icon: Icon(Icons.clear, size: 18, color: context.reloopMutedSoft),
                   onPressed: () {
                     controller!.clear();
                     onChanged('');

@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/api_client.dart';
-import '../../core/models.dart';
 import '../../core/auth_provider.dart';
-import '../../shared/widgets/metric_card.dart';
+import '../../core/models.dart';
+import '../../shared/widgets/promo_carousel.dart';
 import '../../shared/widgets/quick_action.dart';
 import '../../shared/widgets/reloop_card.dart';
-import '../../shared/widgets/status_badge.dart';
 import '../../shared/widgets/skeleton_loading.dart';
-import '../../shared/widgets/reloop_button.dart';
+import '../../shared/widgets/status_badge.dart';
 import '../../theme/colors.dart';
 
 class UserDashboardScreen extends StatefulWidget {
@@ -21,250 +21,172 @@ class UserDashboardScreen extends StatefulWidget {
 
 class _UserDashboardScreenState extends State<UserDashboardScreen> {
   UserDashboard? _dashboard;
-  bool _isLoading = true;
+  bool _loading = true;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadDashboard();
+    _load();
   }
 
-  Future<void> _loadDashboard() async {
+  Future<void> _load() async {
     setState(() {
-      _isLoading = true;
+      _loading = true;
       _error = null;
     });
-
     try {
-      final api = context.read<ApiClient>();
-      final response = await api.get('/api/user/dashboard');
+      final response = await context.read<ApiClient>().get(
+        '/api/user/dashboard',
+      );
       final data = response.data;
-
       if (data is! Map<String, dynamic>) {
-        throw Exception('Response format tidak valid (expected Map, got ${data.runtimeType})');
+        throw Exception('Format dashboard tidak valid');
       }
-
-      _dashboard = UserDashboard.fromJson(data);
-
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e, stack) {
-      debugPrint('Dashboard error: $e\n$stack');
-      setState(() {
-        _error = ApiClient.getErrorMessage(e, includeDetails: true);
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _dashboard = UserDashboard.fromJson(data);
+          _loading = false;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = ApiClient.getErrorMessage(error);
+          _loading = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: RefreshIndicator(
-        onRefresh: _loadDashboard,
-        child: _buildBody(),
-      ),
+      body: RefreshIndicator(onRefresh: _load, child: _body()),
     );
   }
 
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const SkeletonDashboard();
-    }
-
+  Widget _body() {
+    if (_loading) return const SkeletonDashboard();
     if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
-            const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
-            const SizedBox(height: 12),
-            TextButton(onPressed: _loadDashboard, child: const Text('Coba Lagi')),
-          ],
-        ),
+      return ListView(
+        padding: const EdgeInsets.all(24),
+        children: [
+          const SizedBox(height: 140),
+          Icon(
+            Icons.cloud_off_rounded,
+            size: 48,
+            color: context.reloopMutedSoft,
+          ),
+          const SizedBox(height: 12),
+          Text(_error!, textAlign: TextAlign.center),
+          TextButton(onPressed: _load, child: Text('Coba lagi')),
+        ],
       );
     }
 
-    final d = _dashboard!;
-    final auth = context.watch<AuthProvider>();
-    final userName = auth.user?.name ?? 'User';
-    final firstName = userName.split(' ').first;
-    final userEmail = auth.user?.email ?? '';
+    final dashboard = _dashboard!;
+    final user = context.watch<AuthProvider>().user;
+    final firstName = (user?.name ?? 'Pengguna').split(' ').first;
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
       children: [
-        // Greeting Page Header
-        Container(
-          padding: const EdgeInsets.only(bottom: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Halo, $firstName!',
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: ReLoopColors.foreground,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Pantau aktivitas setor, saldo reward, dan program yang sedang berlangsung.',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: ReLoopColors.muted,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 16),
-              ReLoopButton(
-                label: 'Scan Mesin',
-                icon: Icons.qr_code_scanner,
-                expanded: true,
-                onPressed: () => context.push('/scan'),
-              ),
-            ],
+        const PromoCarousel(),
+        const SizedBox(height: 16),
+        _WalletSummary(
+          firstName: firstName,
+          balance: dashboard.balance,
+          onWallet: () => context.push('/wallet'),
+          onHistory: () => context.push('/wallet'),
+          onProfile: () => context.push('/profile'),
+        ),
+        const SizedBox(height: 22),
+        Text(
+          'Layanan ReLoop',
+          style: TextStyle(
+            color: context.reloopForeground,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -.2,
           ),
         ),
-
-        Row(
-          children: [
-            Expanded(
-              child: MetricCard(
-                label: 'Saldo tersedia',
-                value: d.balance.availableFormatted,
-                hint: d.balance.pending > 0
-                    ? '+${_fmtCurrency(d.balance.pending)} menunggu tinjauan'
-                    : null,
-                icon: Icons.account_balance_wallet,
-                tone: MetricTone.green,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: MetricCard(
-                label: 'Total diperoleh',
-                value: _fmtCurrency(d.balance.totalEarned),
-                icon: Icons.savings_outlined,
-                tone: MetricTone.amber,
-              ),
-            ),
-          ],
-        ),
         const SizedBox(height: 12),
-        MetricCard(
-          label: 'Program aktif',
-          value: d.campaigns.where((c) => c.status == 'ACTIVE').length.toString(),
-          icon: Icons.campaign,
-          tone: MetricTone.blue,
-        ),
-
-        const SizedBox(height: 16),
         GridView.count(
-          crossAxisCount: 2,
+          crossAxisCount: 4,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          padding: EdgeInsets.zero,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 1.55,
+          mainAxisSpacing: 0,
+          crossAxisSpacing: 8,
+          childAspectRatio: .78,
           children: [
             QuickAction(
-              icon: Icons.qr_code_scanner,
-              title: 'Scan mesin',
-              description: 'Mulai sesi setor dengan QR.',
-              onTap: () => context.push('/scan'),
-            ),
-            QuickAction(
-              icon: Icons.map,
-              title: 'Cari mesin',
-              description: 'Lihat lokasi dan kapasitas.',
-              color: ReLoopColors.accent,
-              onTap: () => context.push('/map'),
-            ),
-            QuickAction(
-              icon: Icons.account_balance_wallet,
-              title: 'Dompet',
-              description: 'Kelola saldo dan pencairan.',
-              color: ReLoopColors.statusFull,
-              onTap: () => context.push('/wallet'),
-            ),
-            QuickAction(
-              icon: Icons.campaign,
+              icon: Icons.campaign_outlined,
               title: 'Program',
-              description: 'Lihat program yang tersedia.',
-              color: ReLoopColors.info,
+              description: 'Promo aktif',
+              tone: QuickActionTone.blue,
               onTap: () => context.push('/campaigns'),
+            ),
+            QuickAction(
+              icon: Icons.inventory_2_outlined,
+              title: 'Trash Bag',
+              description: 'Pickup rumah',
+              tone: QuickActionTone.green,
+              onTap: () => context.push('/trash-bags'),
+            ),
+            QuickAction(
+              icon: Icons.payments_outlined,
+              title: 'Pencairan',
+              description: 'Tarik reward',
+              tone: QuickActionTone.teal,
+              onTap: () => context.push('/wallet/redemption'),
+            ),
+            QuickAction(
+              icon: Icons.receipt_long_outlined,
+              title: 'Riwayat Bag',
+              description: 'Pantau status',
+              tone: QuickActionTone.blue,
+              onTap: () => context.push('/trash-bags/history'),
             ),
           ],
         ),
-
         const SizedBox(height: 24),
-        _sectionHeader('Sesi setor terakhir'),
-        const SizedBox(height: 8),
-        ..._buildSessions(d),
-
-        const SizedBox(height: 24),
-        _sectionHeader('Campaign untuk Anda'),
-        const SizedBox(height: 8),
-        ..._buildCampaigns(d, userEmail),
-
-        const SizedBox(height: 24),
-        _sectionHeader('Riwayat reward'),
-        const SizedBox(height: 8),
-        ..._buildLedger(d),
-
-        const SizedBox(height: 80),
+        _SectionTitle(
+          title: 'Aktivitas terakhir',
+          action: 'Lihat dompet',
+          onAction: () => context.push('/wallet'),
+        ),
+        const SizedBox(height: 10),
+        ..._sessions(dashboard),
+        const SizedBox(height: 22),
+        _SectionTitle(
+          title: 'Program untuk kamu',
+          action: 'Lihat semua',
+          onAction: () => context.push('/campaigns'),
+        ),
+        const SizedBox(height: 10),
+        ..._campaigns(dashboard),
+        const SizedBox(height: 22),
+        const _SectionTitle(title: 'Reward terbaru'),
+        const SizedBox(height: 10),
+        ..._ledger(dashboard),
       ],
     );
   }
 
-  Widget _sectionHeader(String title) {
-    return Text(
-      title,
-      style: const TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w700,
-        color: ReLoopColors.foreground,
-      ),
-    );
-  }
-
-  List<Widget> _buildSessions(UserDashboard d) {
-    if (d.recentSessions.isEmpty) {
-      return [
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 24),
-          child: Center(
-            child: Text(
-              'Belum ada sesi setor.',
-              style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
-            ),
-          ),
-        ),
-      ];
+  List<Widget> _sessions(UserDashboard dashboard) {
+    if (dashboard.recentSessions.isEmpty) {
+      return const [_EmptyRow('Belum ada aktivitas setor.')];
     }
-
-    return d.recentSessions.take(5).map((s) {
+    return dashboard.recentSessions.take(4).map((session) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: ReLoopCard(
           child: Row(
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: ReLoopColors.mintSoft,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.recycling,
-                    color: ReLoopColors.brand500, size: 18),
+              const _ActivityIcon(
+                icon: Icons.recycling_rounded,
+                tone: QuickActionTone.green,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -272,24 +194,24 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      s.machine?.name ?? 'Mesin',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: ReLoopColors.foreground,
+                      session.machine?.name ?? 'Mesin ReLoop',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
                         fontSize: 13,
                       ),
                     ),
+                    const SizedBox(height: 3),
                     Text(
-                      _formatDate(s.startedAt),
-                      style: const TextStyle(
-                        color: ReLoopColors.mutedSoft,
+                      _formatDate(session.startedAt),
+                      style: TextStyle(
+                        color: context.reloopMuted,
                         fontSize: 11,
                       ),
                     ),
                   ],
                 ),
               ),
-              StatusBadge(statusKey: s.status),
+              StatusBadge(statusKey: session.status),
             ],
           ),
         ),
@@ -297,151 +219,22 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     }).toList();
   }
 
-  List<Widget> _buildLedger(UserDashboard d) {
-    if (d.recentLedger.isEmpty) {
-      return [
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 24),
-          child: Center(
-            child: Text(
-              'Belum ada riwayat reward.',
-              style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
-            ),
-          ),
-        ),
-      ];
+  List<Widget> _campaigns(UserDashboard dashboard) {
+    final campaigns = dashboard.campaigns
+        .where((item) => item.status == 'ACTIVE')
+        .take(3);
+    if (campaigns.isEmpty) {
+      return const [_EmptyRow('Belum ada program aktif.')];
     }
-
-    return d.recentLedger.take(5).map((entry) {
+    return campaigns.map((campaign) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: ReLoopCard(
           child: Row(
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: entry.amount >= 0
-                      ? ReLoopColors.brand50
-                      : ReLoopColors.tones['danger']!.bg,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  Icons.recycling,
-                  color: entry.amount >= 0
-                      ? ReLoopColors.brand500
-                      : ReLoopColors.danger,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      entry.wasteTypeName ?? entry.entryType,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: ReLoopColors.foreground,
-                        fontSize: 13,
-                      ),
-                    ),
-                    Text(
-                      _formatDate(entry.createdAt),
-                      style: const TextStyle(
-                        color: ReLoopColors.mutedSoft,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Text(
-                '${entry.amount >= 0 ? "+" : ""}${_fmtCurrencyShort(entry.amount)}',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: entry.amount >= 0
-                      ? ReLoopColors.brand700
-                      : ReLoopColors.danger,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }).toList();
-  }
-
-  String _fmtCurrency(int amount) {
-    final formatted = amount.toString().replaceAllMapped(
-      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-      (m) => '${m[1]}.',
-    );
-    return 'Rp $formatted';
-  }
-
-  String _fmtCurrencyShort(int amount) {
-    final formatted = amount.toString().replaceAllMapped(
-      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-      (m) => '${m[1]}.',
-    );
-    return 'Rp $formatted';
-  }
-
-  String _formatDate(String iso) {
-    try {
-      final dt = DateTime.parse(iso);
-      return '${dt.day}/${dt.month}/${dt.year} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
-    } catch (_) {
-      return iso;
-    }
-  }
-
-  bool _isCampaignEligible(CampaignInfo c, String email) {
-    if (c.allowedEmailDomains == null || c.allowedEmailDomains!.isEmpty) {
-      return true;
-    }
-    final domain = email.split('@').last.toLowerCase();
-    return c.allowedEmailDomains!.any((d) => d.toLowerCase() == domain);
-  }
-
-  List<Widget> _buildCampaigns(UserDashboard d, String email) {
-    final eligibleCampaigns = d.campaigns.where((c) {
-      return c.status == 'ACTIVE' && _isCampaignEligible(c, email);
-    }).toList();
-
-    if (eligibleCampaigns.isEmpty) {
-      return [
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 24),
-          child: Center(
-            child: Text(
-              'Tidak ada campaign aktif saat ini.',
-              style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
-            ),
-          ),
-        ),
-      ];
-    }
-
-    return eligibleCampaigns.take(4).map((campaign) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: ReLoopCard(
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: ReLoopColors.brand50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: ReLoopColors.brand100),
-                ),
-                child: const Icon(Icons.campaign, color: ReLoopColors.brand600, size: 18),
+              const _ActivityIcon(
+                icon: Icons.campaign_rounded,
+                tone: QuickActionTone.blue,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -450,20 +243,78 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                   children: [
                     Text(
                       campaign.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: ReLoopColors.brand800,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
                         fontSize: 13,
                       ),
                     ),
+                    const SizedBox(height: 3),
                     Text(
-                      campaign.organizationName ?? 'Organisasi',
-                      style: const TextStyle(
-                        color: ReLoopColors.muted,
+                      campaign.organizationName ?? 'ReLoop',
+                      style: TextStyle(
+                        color: context.reloopMuted,
                         fontSize: 11,
                       ),
                     ),
                   ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: context.reloopMutedSoft,
+              ),
+            ],
+          ),
+        ),
+      );
+    }).toList();
+  }
+
+  List<Widget> _ledger(UserDashboard dashboard) {
+    if (dashboard.recentLedger.isEmpty) {
+      return const [_EmptyRow('Belum ada riwayat reward.')];
+    }
+    return dashboard.recentLedger.take(4).map((entry) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: ReLoopCard(
+          child: Row(
+            children: [
+              const _ActivityIcon(
+                icon: Icons.savings_outlined,
+                tone: QuickActionTone.amber,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.wasteTypeName ?? entry.entryType,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      _formatDate(entry.createdAt),
+                      style: TextStyle(
+                        color: context.reloopMuted,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                '${entry.amount >= 0 ? '+' : ''}${_currency(entry.amount)}',
+                style: TextStyle(
+                  color: entry.amount >= 0
+                      ? context.reloopBrandText
+                      : ReLoopColors.danger,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
                 ),
               ),
             ],
@@ -471,5 +322,222 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
         ),
       );
     }).toList();
+  }
+}
+
+class _WalletSummary extends StatelessWidget {
+  const _WalletSummary({
+    required this.firstName,
+    required this.balance,
+    required this.onWallet,
+    required this.onHistory,
+    required this.onProfile,
+  });
+
+  final String firstName;
+  final WalletBalance balance;
+  final VoidCallback onWallet;
+  final VoidCallback onHistory;
+  final VoidCallback onProfile;
+
+  @override
+  Widget build(BuildContext context) {
+    return ReLoopCard(
+      padding: const EdgeInsets.fromLTRB(16, 15, 12, 15),
+      child: Row(
+        children: [
+          InkWell(
+            onTap: onProfile,
+            borderRadius: BorderRadius.circular(20),
+            child: CircleAvatar(
+              radius: 23,
+              backgroundColor: context.reloopBrandSoftStrong,
+              child: Text(
+                firstName.isEmpty ? '?' : firstName[0].toUpperCase(),
+                style: TextStyle(
+                  color: context.reloopBrandText,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: InkWell(
+              onTap: onWallet,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    balance.availableFormatted,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -.3,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Halo, $firstName - Saldo tersedia',
+                    style: TextStyle(
+                      color: context.reloopMuted,
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          _SummaryAction(
+            icon: Icons.payments_outlined,
+            label: 'Cairkan',
+            onTap: onWallet,
+          ),
+          const SizedBox(width: 5),
+          _SummaryAction(
+            icon: Icons.history_rounded,
+            label: 'Riwayat',
+            onTap: onHistory,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryAction extends StatelessWidget {
+  const _SummaryAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        width: 50,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: ReLoopColors.brand600,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: Colors.white, size: 19),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: context.reloopMuted,
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, this.action, this.onAction});
+
+  final String title;
+  final String? action;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              color: context.reloopForeground,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        if (action != null)
+          TextButton(onPressed: onAction, child: Text(action!)),
+      ],
+    );
+  }
+}
+
+class _ActivityIcon extends StatelessWidget {
+  const _ActivityIcon({required this.icon, required this.tone});
+
+  final IconData icon;
+  final QuickActionTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (tone) {
+      QuickActionTone.green => ReLoopColors.brand600,
+      QuickActionTone.blue => ReLoopColors.info,
+      QuickActionTone.amber => ReLoopColors.warning,
+      QuickActionTone.teal => const Color(0xFF159A91),
+    };
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .1),
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: Icon(icon, color: color, size: 20),
+    );
+  }
+}
+
+class _EmptyRow extends StatelessWidget {
+  const _EmptyRow(this.message);
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Center(
+        child: Text(
+          message,
+          style: TextStyle(color: context.reloopMuted, fontSize: 12),
+        ),
+      ),
+    );
+  }
+}
+
+String _currency(int amount) {
+  final formatted = amount.toString().replaceAllMapped(
+    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+    (match) => '${match[1]}.',
+  );
+  return 'Rp $formatted';
+}
+
+String _formatDate(String iso) {
+  try {
+    final date = DateTime.parse(iso).toLocal();
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '${date.day}/${date.month}/${date.year} ${date.hour}:$minute';
+  } catch (_) {
+    return iso;
   }
 }

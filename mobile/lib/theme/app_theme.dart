@@ -1,271 +1,210 @@
 import 'package:flutter/material.dart';
+
 import 'colors.dart';
 
 class AppTheme {
   AppTheme._();
 
-  static ThemeData get dark {
-    final colorScheme = ColorScheme.fromSeed(
+  static ThemeData get light => _build(Brightness.light);
+  static ThemeData get dark => _build(Brightness.dark);
+
+  static ThemeData _build(Brightness brightness) {
+    final dark = brightness == Brightness.dark;
+    final background = dark
+        ? ReLoopColors.backgroundDark
+        : ReLoopColors.background;
+    final surface = dark ? ReLoopColors.surfaceDark : ReLoopColors.surface;
+    final foreground = dark
+        ? ReLoopColors.foregroundDark
+        : ReLoopColors.foreground;
+    final muted = dark ? ReLoopColors.mutedDark : ReLoopColors.muted;
+    final border = dark ? ReLoopColors.borderDark : ReLoopColors.border;
+    final scheme = ColorScheme.fromSeed(
       seedColor: ReLoopColors.brand500,
-      primary: ReLoopColors.brand400,
-      onPrimary: ReLoopColors.brand900,
-      surface: ReLoopColors.surfaceDark,
-      onSurface: ReLoopColors.foregroundDark,
+      brightness: brightness,
+      primary: dark ? ReLoopColors.brand400 : ReLoopColors.brand600,
+      surface: surface,
+      surfaceContainerLowest: dark ? const Color(0xFF111814) : ReLoopColors.background,
+      surfaceContainerLow: dark ? const Color(0xFF151D18) : const Color(0xFFF8FAF9),
+      surfaceContainer: dark ? const Color(0xFF19221C) : ReLoopColors.surface,
+      surfaceContainerHigh: dark ? const Color(0xFF202A23) : const Color(0xFFF1F5F2),
+      onSurface: foreground,
+      outline: border,
+      outlineVariant: dark ? const Color(0xFF29362E) : const Color(0xFFEEF2EF),
       error: ReLoopColors.danger,
-      outline: ReLoopColors.borderDark,
-      surfaceContainerHighest: ReLoopColors.backgroundDark,
-      brightness: Brightness.dark,
     );
+
+    OutlineInputBorder inputBorder(Color color, [double width = 1]) {
+      return OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: color, width: width),
+      );
+    }
 
     return ThemeData(
       useMaterial3: true,
-      colorScheme: colorScheme,
-      scaffoldBackgroundColor: ReLoopColors.backgroundDark,
-      fontFamily: null,
-      textTheme: const TextTheme(
-        headlineLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: ReLoopColors.foregroundDark),
-        headlineMedium: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: ReLoopColors.foregroundDark),
-        titleLarge: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: ReLoopColors.foregroundDark),
-        titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ReLoopColors.foregroundDark),
-        titleSmall: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: ReLoopColors.foregroundDark),
-        bodyLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.normal, color: ReLoopColors.foregroundDark),
-        bodyMedium: TextStyle(fontSize: 13, fontWeight: FontWeight.normal, color: ReLoopColors.mutedDark),
-        bodySmall: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: ReLoopColors.mutedSoftDark),
-        labelLarge: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ReLoopColors.mutedDark),
-        labelSmall: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: ReLoopColors.mutedSoftDark),
+      brightness: brightness,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: background,
+      splashFactory: InkSparkle.splashFactory,
+      visualDensity: VisualDensity.standard,
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+        },
       ),
-      brightness: Brightness.dark,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: ReLoopColors.surfaceDark,
-        foregroundColor: ReLoopColors.foregroundDark,
-        elevation: 0,
-        scrolledUnderElevation: 1,
-        centerTitle: false,
-        titleTextStyle: TextStyle(
-          color: ReLoopColors.foregroundDark,
+      textTheme: TextTheme(
+        headlineLarge: TextStyle(
+          fontSize: 28,
+          height: 1.1,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.7,
+          color: foreground,
+        ),
+        headlineMedium: TextStyle(
+          fontSize: 22,
+          height: 1.15,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.4,
+          color: foreground,
+        ),
+        titleLarge: TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.w700,
+          letterSpacing: -0.2,
+          color: foreground,
+        ),
+        titleMedium: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: foreground,
+        ),
+        bodyLarge: TextStyle(fontSize: 15, height: 1.45, color: foreground),
+        bodyMedium: TextStyle(fontSize: 13, height: 1.4, color: muted),
+        labelLarge: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: foreground,
+        ),
+      ),
+      iconTheme: IconThemeData(color: dark ? ReLoopColors.mutedDark : ReLoopColors.muted),
+      listTileTheme: ListTileThemeData(
+        textColor: foreground,
+        iconColor: muted,
+        tileColor: Colors.transparent,
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: surface,
+        indicatorColor: dark ? const Color(0xFF205232) : ReLoopColors.brand100,
+        labelTextStyle: WidgetStatePropertyAll(
+          TextStyle(color: muted, fontSize: 11, fontWeight: FontWeight.w600),
+        ),
+      ),
+      appBarTheme: AppBarTheme(
+        backgroundColor: surface.withValues(alpha: .94),
+        foregroundColor: foreground,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        titleTextStyle: TextStyle(
+          color: foreground,
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.25,
         ),
       ),
       cardTheme: CardThemeData(
-        color: ReLoopColors.surfaceDark,
+        color: surface,
         elevation: 0,
+        margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: ReLoopColors.borderDark),
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: border),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: ReLoopColors.surfaceDark,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: ReLoopColors.borderDark),
+        fillColor: surface,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 15,
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: ReLoopColors.borderDark),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: ReLoopColors.brand500, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: ReLoopColors.danger),
-        ),
-        labelStyle: const TextStyle(color: ReLoopColors.mutedDark),
-        hintStyle: const TextStyle(color: ReLoopColors.mutedSoftDark),
+        border: inputBorder(border),
+        enabledBorder: inputBorder(border),
+        focusedBorder: inputBorder(ReLoopColors.brand500, 1.5),
+        errorBorder: inputBorder(ReLoopColors.danger),
+        focusedErrorBorder: inputBorder(ReLoopColors.danger, 1.5),
+        labelStyle: TextStyle(color: muted),
+        hintStyle: TextStyle(color: muted.withValues(alpha: .75)),
       ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(48, 50),
           backgroundColor: ReLoopColors.brand600,
           foregroundColor: Colors.white,
           elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(14),
           ),
-          textStyle: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          minimumSize: const Size(48, 50),
+          backgroundColor: ReLoopColors.brand600,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
           ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: ReLoopColors.foregroundDark,
-          side: const BorderSide(color: ReLoopColors.borderDark),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          minimumSize: const Size(44, 44),
+          foregroundColor: foreground,
+          side: BorderSide(color: border),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(13),
           ),
         ),
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: ReLoopColors.surfaceDark,
-        selectedItemColor: ReLoopColors.brand400,
-        unselectedItemColor: ReLoopColors.mutedSoftDark,
-        type: BottomNavigationBarType.fixed,
-        elevation: 0,
+      chipTheme: ChipThemeData(
+        backgroundColor: dark
+            ? ReLoopColors.brand900.withValues(alpha: .45)
+            : ReLoopColors.brand50,
+        side: BorderSide.none,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        labelStyle: TextStyle(
+          color: dark ? ReLoopColors.brand300 : ReLoopColors.brand800,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
       ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: ReLoopColors.surfaceDark,
-        indicatorColor: ReLoopColors.brand700.withValues(alpha: 0.3),
+      dividerTheme: DividerThemeData(color: border, thickness: 1),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        height: 70,
-        labelTextStyle: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: ReLoopColors.brand400,
-            );
-          }
-          return const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: ReLoopColors.mutedSoftDark,
-          );
-        }),
-      ),
-      dividerTheme: const DividerThemeData(
-        color: ReLoopColors.borderDark,
-        thickness: 1,
-      ),
-    );
-  }
-
-  static ThemeData get light {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: ReLoopColors.brand500,
-      primary: ReLoopColors.brand600,
-      onPrimary: Colors.white,
-      surface: ReLoopColors.surface,
-      onSurface: ReLoopColors.foreground,
-      error: ReLoopColors.danger,
-      outline: ReLoopColors.border,
-      surfaceContainerHighest: ReLoopColors.background,
-    );
-
-    return ThemeData(
-      useMaterial3: true,
-      colorScheme: colorScheme,
-      scaffoldBackgroundColor: ReLoopColors.background,
-      fontFamily: null,
-      textTheme: const TextTheme(
-        headlineLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: ReLoopColors.foreground),
-        headlineMedium: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: ReLoopColors.foreground),
-        titleLarge: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: ReLoopColors.foreground),
-        titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ReLoopColors.foreground),
-        titleSmall: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: ReLoopColors.foreground),
-        bodyLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.normal, color: ReLoopColors.foreground),
-        bodyMedium: TextStyle(fontSize: 13, fontWeight: FontWeight.normal, color: ReLoopColors.muted),
-        bodySmall: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: ReLoopColors.mutedSoft),
-        labelLarge: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ReLoopColors.muted),
-        labelSmall: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: ReLoopColors.mutedSoft),
-      ),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: ReLoopColors.surface,
-        foregroundColor: ReLoopColors.foreground,
-        elevation: 0,
-        scrolledUnderElevation: 1,
-        centerTitle: false,
-        titleTextStyle: TextStyle(
-          color: ReLoopColors.foreground,
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
+        showDragHandle: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         ),
       ),
-      cardTheme: CardThemeData(
-        color: ReLoopColors.surface,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: ReLoopColors.border),
-        ),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: ReLoopColors.surface,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: ReLoopColors.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: ReLoopColors.border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: ReLoopColors.brand500, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: ReLoopColors.danger),
-        ),
-        labelStyle: const TextStyle(color: ReLoopColors.muted),
-        hintStyle: const TextStyle(color: ReLoopColors.mutedSoft),
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: ReLoopColors.brand600,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-          textStyle: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: ReLoopColors.foreground,
-          side: const BorderSide(color: ReLoopColors.border),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-      ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: ReLoopColors.surface,
-        selectedItemColor: ReLoopColors.brand600,
-        unselectedItemColor: ReLoopColors.mutedSoft,
-        type: BottomNavigationBarType.fixed,
-        elevation: 0,
-      ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: ReLoopColors.surface,
-        indicatorColor: ReLoopColors.brand50,
+      dialogTheme: DialogThemeData(
+        backgroundColor: surface,
         surfaceTintColor: Colors.transparent,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        height: 70,
-        labelTextStyle: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: ReLoopColors.brand600,
-            );
-          }
-          return const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: ReLoopColors.mutedSoft,
-          );
-        }),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),
-      dividerTheme: const DividerThemeData(
-        color: ReLoopColors.border,
-        thickness: 1,
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: foreground,
+        contentTextStyle: TextStyle(color: background),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
     );
   }

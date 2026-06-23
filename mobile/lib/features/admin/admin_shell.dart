@@ -1,161 +1,435 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/auth_provider.dart';
 import '../../core/models.dart';
 import '../../shared/widgets/reloop_logo.dart';
 import '../../theme/colors.dart';
 
 class AdminShell extends StatelessWidget {
-  final Widget child;
-  final String title;
-
   const AdminShell({super.key, required this.child, required this.title});
 
-  static const _navItems = <_AdminNavItem>[
-    _AdminNavItem('Dashboard', Icons.dashboard_outlined, '/admin'),
-    _AdminNavItem('Mesin', Icons.recycling_outlined, '/admin/machines'),
-    _AdminNavItem('Pickup', Icons.local_shipping_outlined, '/admin/pickups'),
-    _AdminNavItem('Campaign', Icons.campaign_outlined, '/admin/campaigns'),
-    _AdminNavItem('Jenis Sampah & Tarif', Icons.delete_outline, '/admin/waste-types'),
-    _AdminNavItem('Mitra Pengepul', Icons.handshake_outlined, '/admin/partners'),
-    _AdminNavItem('Trip / Trash Bag', Icons.luggage_outlined, '/admin/trips'),
-    _AdminNavItem('Laporan', Icons.description_outlined, '/admin/reports'),
-    _AdminNavItem('Profil', Icons.person_outline, '/profile'),
-  ];
+  final Widget child;
+  final String title;
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final user = auth.user;
     final location = GoRouterState.of(context).matchedLocation;
+    final superadmin = user?.role == AppRole.SUPERADMIN;
+    final desktopItems = superadmin ? _superadminDesktop : _adminDesktop;
+    final mobileItems = superadmin ? _superadminMobile : _adminMobile;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        leading: Builder(
-          builder: (ctx) => IconButton(
-            icon: const Icon(Icons.menu),
-            onPressed: () => Scaffold.of(ctx).openDrawer(),
-          ),
-        ),
-        actions: [
-          if (user != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: IconButton(
-                icon: const Icon(Icons.logout, size: 20),
-                tooltip: 'Keluar',
-                onPressed: () => auth.logout(),
-              ),
-            ),
-        ],
-      ),
-      drawer: Drawer(
-        child: SafeArea(
-          child: Column(
-            children: [
-              DrawerHeader(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const ReLoopLogo(compact: true, height: 40),
-                    const SizedBox(height: 12),
-                    if (user != null) ...[
-                      Text(
-                        user.name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                          color: ReLoopColors.foreground,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        user.email,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: ReLoopColors.mutedSoft,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: ReLoopColors.brand50,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          user.role.label,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: ReLoopColors.brand600,
-                          ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final desktop = constraints.maxWidth >= 840;
+        final navigation = _DesktopNavigation(
+          user: user,
+          items: desktopItems,
+          location: location,
+          onLogout: auth.logout,
+          compact: constraints.maxWidth < 1160,
+        );
+
+        return Scaffold(
+          appBar: desktop
+              ? AppBar(
+                  toolbarHeight: 64,
+                  titleSpacing: 18,
+                  title: Row(
+                    children: [
+                      if (!desktop) ...[
+                        const ReLoopLogo(compact: true, height: 30),
+                        const SizedBox(width: 12),
+                      ],
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.25,
+                              ),
+                            ),
+                            Text(
+                              user?.role.label ?? 'ReLoop',
+                              style: TextStyle(
+                                color: context.reloopMuted,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
-                  ],
-                ),
-              ),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  children: _navItems.map((item) {
-                    final isActive = location == item.route ||
-                        (item.route != '/admin' &&
-                            location.startsWith(item.route));
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: ListTile(
-                        leading: Icon(
-                          item.icon,
-                          color: isActive
-                              ? ReLoopColors.brand600
-                              : ReLoopColors.mutedSoft,
-                          size: 20,
-                        ),
-                        title: Text(
-                          item.label,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight:
-                                isActive ? FontWeight.w600 : FontWeight.normal,
-                            color: isActive
-                                ? ReLoopColors.brand600
-                                : ReLoopColors.foreground,
+                  ),
+                  actions: [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 14),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(22),
+                        onTap: () => context.push('/profile'),
+                        child: CircleAvatar(
+                          radius: 18,
+                          backgroundColor: context.reloopBrandSoftStrong,
+                          child: Text(
+                            user?.name.isNotEmpty == true
+                                ? user!.name[0].toUpperCase()
+                                : '?',
+                            style: TextStyle(
+                              color: context.reloopBrandText,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        selected: isActive,
-                        selectedTileColor: ReLoopColors.brand50,
-                        dense: true,
-                        onTap: () {
-                          Navigator.pop(context);
-                          if (location != item.route) {
-                            context.go(item.route);
-                          }
-                        },
                       ),
-                    );
-                  }).toList(),
+                    ),
+                  ],
+                )
+              : null,
+          body: Row(
+            children: [
+              if (desktop)
+                SizedBox(
+                  width: constraints.maxWidth < 1160 ? 92 : 270,
+                  child: navigation,
                 ),
+              if (desktop)
+                VerticalDivider(width: 1, color: context.reloopBorder),
+              Expanded(
+                child: desktop ? child : SafeArea(bottom: false, child: child),
               ),
             ],
           ),
+          bottomNavigationBar: desktop
+              ? null
+              : _ManagementBottomBar(items: mobileItems, location: location),
+        );
+      },
+    );
+  }
+}
+
+class _ManagementBottomBar extends StatelessWidget {
+  const _ManagementBottomBar({required this.items, required this.location});
+
+  final List<_AdminNavItem> items;
+  final String location;
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    var selected = items.indexWhere(
+      (item) =>
+          location == item.route ||
+          (item.route != '/admin' &&
+              item.route != '/superadmin' &&
+              location.startsWith(item.route)),
+    );
+    if (selected < 0) selected = items.length - 1;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, bottomInset + 4),
+      child: Container(
+        height: 60,
+        decoration: BoxDecoration(
+          color: context.reloopSurfaceRaised.withValues(alpha: .98),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: context.reloopBorder),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x140D1710),
+              blurRadius: 16,
+              offset: Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            for (var i = 0; i < items.length; i++)
+              Expanded(
+                child: _BottomItem(item: items[i], active: selected == i),
+              ),
+          ],
         ),
       ),
-      body: child,
+    );
+  }
+}
+
+class _BottomItem extends StatelessWidget {
+  const _BottomItem({required this.item, required this.active});
+  final _AdminNavItem item;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () {
+        if (!active) context.go(item.route);
+      },
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: active ? 42 : 36,
+            height: 34,
+            decoration: BoxDecoration(
+              color: active ? context.reloopBrandSoft : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              item.icon,
+              size: 22,
+              color: active ? context.reloopBrandText : context.reloopMuted,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            item.shortLabel ?? item.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              color: active ? context.reloopBrandText : context.reloopMuted,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DesktopNavigation extends StatelessWidget {
+  const _DesktopNavigation({
+    required this.user,
+    required this.items,
+    required this.location,
+    required this.onLogout,
+    required this.compact,
+  });
+
+  final CurrentUser? user;
+  final List<_AdminNavItem> items;
+  final String location;
+  final VoidCallback onLogout;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: context.reloopSurface,
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                compact ? 22 : 20,
+                18,
+                compact ? 22 : 20,
+                16,
+              ),
+              child: compact
+                  ? const ReLoopLogo(compact: true, height: 40)
+                  : const Align(
+                      alignment: Alignment.centerLeft,
+                      child: ReLoopLogo(height: 38),
+                    ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 12),
+                children: [
+                  for (final item in items)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: _DesktopTile(
+                        item: item,
+                        compact: compact,
+                        active:
+                            location == item.route ||
+                            (item.route != '/admin' &&
+                                item.route != '/superadmin' &&
+                                location.startsWith(item.route)),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: ListTile(
+                minTileHeight: 48,
+                leading: Icon(
+                  Icons.logout_rounded,
+                  color: ReLoopColors.danger,
+                  size: 20,
+                ),
+                title: compact
+                    ? null
+                    : Text(
+                        'Keluar',
+                        style: TextStyle(
+                          color: ReLoopColors.danger,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                onTap: onLogout,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopTile extends StatelessWidget {
+  const _DesktopTile({
+    required this.item,
+    required this.compact,
+    required this.active,
+  });
+
+  final _AdminNavItem item;
+  final bool compact;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: compact ? item.label : '',
+      child: ListTile(
+        minTileHeight: 48,
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: compact ? 12 : 14,
+          vertical: 2,
+        ),
+        leading: Icon(
+          item.icon,
+          size: 20,
+          color: active ? context.reloopBrandText : context.reloopMuted,
+        ),
+        title: compact
+            ? null
+            : Text(
+                item.label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  color: active
+                      ? context.reloopBrandText
+                      : context.reloopForeground,
+                ),
+              ),
+        selected: active,
+        selectedTileColor: context.reloopBrandSoft,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        onTap: () {
+          if (!active) context.go(item.route);
+        },
+      ),
     );
   }
 }
 
 class _AdminNavItem {
+  const _AdminNavItem(this.label, this.icon, this.route, {this.shortLabel});
   final String label;
   final IconData icon;
   final String route;
-  const _AdminNavItem(this.label, this.icon, this.route);
+  final String? shortLabel;
 }
+
+const _adminMobile = [
+  _AdminNavItem(
+    'Dashboard',
+    Icons.home_outlined,
+    '/admin',
+    shortLabel: 'Beranda',
+  ),
+  _AdminNavItem('Mesin', Icons.recycling_outlined, '/admin/machines'),
+  _AdminNavItem('Pickup', Icons.local_shipping_outlined, '/admin/pickups'),
+  _AdminNavItem('Laporan', Icons.description_outlined, '/admin/reports'),
+  _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
+];
+
+const _superadminMobile = [
+  _AdminNavItem(
+    'Dashboard',
+    Icons.home_outlined,
+    '/superadmin',
+    shortLabel: 'Beranda',
+  ),
+  _AdminNavItem(
+    'Organisasi',
+    Icons.business_outlined,
+    '/superadmin/organizations',
+    shortLabel: 'Org',
+  ),
+  _AdminNavItem('Mesin', Icons.recycling_outlined, '/superadmin/machines'),
+  _AdminNavItem('Keamanan', Icons.shield_outlined, '/superadmin/security'),
+  _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
+];
+
+const _adminDesktop = [
+  _AdminNavItem('Dashboard', Icons.space_dashboard_outlined, '/admin'),
+  _AdminNavItem('Mesin', Icons.recycling_outlined, '/admin/machines'),
+  _AdminNavItem('Pickup', Icons.local_shipping_outlined, '/admin/pickups'),
+  _AdminNavItem('Campaign', Icons.campaign_outlined, '/admin/campaigns'),
+  _AdminNavItem(
+    'Jenis Sampah & Tarif',
+    Icons.delete_outline,
+    '/admin/waste-types',
+  ),
+  _AdminNavItem('Mitra Pengepul', Icons.handshake_outlined, '/admin/partners'),
+  _AdminNavItem('Trip / Trash Bag', Icons.luggage_outlined, '/admin/trips'),
+  _AdminNavItem('Laporan', Icons.description_outlined, '/admin/reports'),
+  _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
+];
+
+const _superadminDesktop = [
+  _AdminNavItem('Dashboard', Icons.space_dashboard_outlined, '/superadmin'),
+  _AdminNavItem(
+    'Organisasi',
+    Icons.business_outlined,
+    '/superadmin/organizations',
+  ),
+  _AdminNavItem('Mesin', Icons.recycling_outlined, '/superadmin/machines'),
+  _AdminNavItem('Pengguna', Icons.people_outline, '/superadmin/users'),
+  _AdminNavItem(
+    'Kemitraan',
+    Icons.handshake_outlined,
+    '/superadmin/partnerships',
+  ),
+  _AdminNavItem(
+    'Redemption',
+    Icons.account_balance_wallet_outlined,
+    '/superadmin/redemptions',
+  ),
+  _AdminNavItem('Log Keamanan', Icons.shield_outlined, '/superadmin/security'),
+  _AdminNavItem('Wilayah', Icons.public_outlined, '/superadmin/regions'),
+  _AdminNavItem(
+    'Jenis Sampah & Tarif',
+    Icons.delete_outline,
+    '/superadmin/waste-types',
+  ),
+  _AdminNavItem('Konfigurasi', Icons.settings_outlined, '/superadmin/config'),
+  _AdminNavItem('Audit Log', Icons.history_rounded, '/superadmin/audit'),
+  _AdminNavItem('Laporan', Icons.description_outlined, '/superadmin/reports'),
+  _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
+];

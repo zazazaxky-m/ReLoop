@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../shared/widgets/metric_card.dart';
-import '../../shared/widgets/quick_action.dart';
+import '../../shared/widgets/promo_carousel.dart';
 import '../../shared/widgets/reloop_card.dart';
 import '../../shared/widgets/status_badge.dart';
 import '../../shared/widgets/skeleton_loading.dart';
@@ -13,7 +12,8 @@ class PengepulDashboardScreen extends StatefulWidget {
   const PengepulDashboardScreen({super.key});
 
   @override
-  State<PengepulDashboardScreen> createState() => _PengepulDashboardScreenState();
+  State<PengepulDashboardScreen> createState() =>
+      _PengepulDashboardScreenState();
 }
 
 class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
@@ -42,8 +42,7 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
 
       final results = await Future.wait([
         api.get('/api/pickups', queryParameters: {'scope': 'collector'}),
-        api.get('/api/public/machines',
-            queryParameters: {'scope': 'partners'}),
+        api.get('/api/public/machines', queryParameters: {'scope': 'partners'}),
         api.get('/api/partnerships', queryParameters: {'status': 'ACTIVE'}),
       ]);
 
@@ -52,8 +51,13 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
       final partnershipsData = results[2].data;
 
       final pickups = (pickupsData['pickups'] as List? ?? []).cast<dynamic>();
-      final machines = (machinesData['machines'] as List? ?? []).cast<dynamic>();
-      final partnerships = (partnershipsData is Map ? (partnershipsData['partnerships'] as List? ?? []) : []).cast<dynamic>();
+      final machines = (machinesData['machines'] as List? ?? [])
+          .cast<dynamic>();
+      final partnerships =
+          (partnershipsData is Map
+                  ? (partnershipsData['partnerships'] as List? ?? [])
+                  : [])
+              .cast<dynamic>();
 
       setState(() {
         _activeTasks = pickups.where((p) {
@@ -81,10 +85,7 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: RefreshIndicator(
-        onRefresh: _loadDashboard,
-        child: _buildBody(),
-      ),
+      body: RefreshIndicator(onRefresh: _loadDashboard, child: _buildBody()),
     );
   }
 
@@ -105,22 +106,31 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+            Icon(
+              Icons.cloud_off,
+              size: 48,
+              color: context.reloopMutedSoft,
+            ),
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
+            Text(_error!, style: TextStyle(color: context.reloopMuted)),
             const SizedBox(height: 12),
-            TextButton(onPressed: _loadDashboard, child: const Text('Coba Lagi')),
+            TextButton(
+              onPressed: _loadDashboard,
+              child: Text('Coba Lagi'),
+            ),
           ],
         ),
       );
     }
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
       children: [
-        const Text(
+        const PromoCarousel(),
+        const SizedBox(height: 18),
+        Text(
           'Pantau tugas pengambilan dan mesin yang membutuhkan penanganan.',
-          style: TextStyle(fontSize: 13, color: ReLoopColors.muted),
+          style: TextStyle(fontSize: 13, color: context.reloopMuted),
         ),
         const SizedBox(height: 16),
 
@@ -154,46 +164,6 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
           tone: MetricTone.blue,
         ),
 
-        const SizedBox(height: 20),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 1.3,
-          children: [
-            QuickAction(
-              icon: Icons.local_shipping,
-              title: 'Tugas pickup',
-              description: 'Lihat dan perbarui tugas.',
-              color: ReLoopColors.statusFull,
-              onTap: () => context.push('/pickup'),
-            ),
-            QuickAction(
-              icon: Icons.map,
-              title: 'Peta mesin',
-              description: 'Cari mesin organisasi mitra.',
-              color: ReLoopColors.info,
-              onTap: () => context.push('/map'),
-            ),
-            QuickAction(
-              icon: Icons.location_on,
-              title: 'Area layanan',
-              description: 'Kelola wilayah dan mitra.',
-              color: ReLoopColors.accent,
-              onTap: () => context.push('/pengepul/area'),
-            ),
-            QuickAction(
-              icon: Icons.person,
-              title: 'Profil',
-              description: 'Periksa informasi kontak.',
-              color: ReLoopColors.brand500,
-              onTap: () => context.push('/profile'),
-            ),
-          ],
-        ),
-
         const SizedBox(height: 24),
         _buildSectionHeader('Tugas pickup'),
         const SizedBox(height: 8),
@@ -212,10 +182,10 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
   Widget _buildSectionHeader(String title) {
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 16,
         fontWeight: FontWeight.w700,
-        color: ReLoopColors.foreground,
+        color: context.reloopForeground,
       ),
     );
   }
@@ -223,12 +193,12 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
   List<Widget> _buildTaskList() {
     if (_tasks.isEmpty) {
       return [
-        const Padding(
+        Padding(
           padding: EdgeInsets.symmetric(vertical: 24),
           child: Center(
             child: Text(
               'Tidak ada tugas pickup saat ini.',
-              style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
+              style: TextStyle(color: context.reloopMutedSoft, fontSize: 13),
             ),
           ),
         ),
@@ -251,11 +221,13 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      machine?['name'] as String? ?? org?['name'] as String? ?? 'Mesin',
-                      style: const TextStyle(
+                      machine?['name'] as String? ??
+                          org?['name'] as String? ??
+                          'Mesin',
+                      style: TextStyle(
                         fontWeight: FontWeight.w600,
                         fontSize: 13,
-                        color: ReLoopColors.foreground,
+                        color: context.reloopForeground,
                       ),
                     ),
                   ),
@@ -269,16 +241,25 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
                     children: [
                       Text(
                         org['name'] as String? ?? '',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
-                          color: ReLoopColors.mutedSoft,
+                          color: context.reloopMutedSoft,
                         ),
                       ),
                       if (org['contactPhone'] != null) ...[
-                        const Text('  ·  ', style: TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft)),
+                        Text(
+                          '  -  ',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: context.reloopMutedSoft,
+                          ),
+                        ),
                         Text(
                           org['contactPhone'] as String,
-                          style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: context.reloopMutedSoft,
+                          ),
                         ),
                       ],
                     ],
@@ -298,12 +279,12 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
 
     if (fullList.isEmpty) {
       return [
-        const Padding(
+        Padding(
           padding: EdgeInsets.symmetric(vertical: 24),
           child: Center(
             child: Text(
               'Tidak ada mesin penuh.',
-              style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
+              style: TextStyle(color: context.reloopMutedSoft, fontSize: 13),
             ),
           ),
         ),
@@ -326,10 +307,10 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
                   children: [
                     Text(
                       machine['name'] as String? ?? 'Mesin',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w600,
                         fontSize: 13,
-                        color: ReLoopColors.foreground,
+                        color: context.reloopForeground,
                       ),
                     ),
                     if (org != null)
@@ -339,12 +320,24 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
                           children: [
                             Text(
                               org['name'] as String? ?? '',
-                              style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: context.reloopMutedSoft,
+                              ),
                             ),
-                            const Text('  ·  ', style: TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft)),
+                            Text(
+                              '  -  ',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: context.reloopMutedSoft,
+                              ),
+                            ),
                             Text(
                               '$fillLevel% terisi',
-                              style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: context.reloopMutedSoft,
+                              ),
                             ),
                           ],
                         ),

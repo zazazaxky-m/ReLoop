@@ -1,16 +1,10 @@
 import 'package:flutter/material.dart';
+
 import '../../theme/colors.dart';
 
 enum QuickActionTone { green, blue, amber, teal }
 
 class QuickAction extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String description;
-  final VoidCallback? onTap;
-  final Color? color;
-  final QuickActionTone? tone;
-
   const QuickAction({
     super.key,
     required this.icon,
@@ -19,142 +13,146 @@ class QuickAction extends StatelessWidget {
     this.onTap,
     this.color,
     this.tone,
+    this.badge,
   });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final VoidCallback? onTap;
+  final Color? color;
+  final QuickActionTone? tone;
+  final String? badge;
 
   QuickActionTone get _resolvedTone {
     if (tone != null) return tone!;
-    if (color == null) return QuickActionTone.green;
-    
-    if (color == ReLoopColors.info) {
-      return QuickActionTone.blue;
-    } else if (color == ReLoopColors.statusFull || color == ReLoopColors.warning) {
+    if (color == ReLoopColors.info) return QuickActionTone.blue;
+    if (color == ReLoopColors.statusFull || color == ReLoopColors.warning) {
       return QuickActionTone.amber;
-    } else if (color == ReLoopColors.accent) {
-      return QuickActionTone.teal;
     }
+    if (color == ReLoopColors.accent) return QuickActionTone.teal;
     return QuickActionTone.green;
   }
 
-  Color _surfaceBg(QuickActionTone resolvedTone) {
-    switch (resolvedTone) {
-      case QuickActionTone.green:
-        return ReLoopColors.brand50.withValues(alpha: 0.7);
-      case QuickActionTone.blue:
-        return const Color(0xFFEFF6FF).withValues(alpha: 0.7);
-      case QuickActionTone.amber:
-        return const Color(0xFFFFFBEB).withValues(alpha: 0.7);
-      case QuickActionTone.teal:
-        return const Color(0xFFF0FDFA).withValues(alpha: 0.7);
-    }
-  }
-
-  Color _surfaceBorder(QuickActionTone resolvedTone) {
-    switch (resolvedTone) {
-      case QuickActionTone.green:
-        return ReLoopColors.brand200;
-      case QuickActionTone.blue:
-        return const Color(0xFFBFDBFE);
-      case QuickActionTone.amber:
-        return const Color(0xFFFDE68A);
-      case QuickActionTone.teal:
-        return const Color(0xFF99F6E4);
-    }
-  }
-
-  Color _iconBg(QuickActionTone resolvedTone) {
-    switch (resolvedTone) {
-      case QuickActionTone.green:
-        return ReLoopColors.brand600;
-      case QuickActionTone.blue:
-        return const Color(0xFF2563EB);
-      case QuickActionTone.amber:
-        return const Color(0xFFD97706);
-      case QuickActionTone.teal:
-        return const Color(0xFF0D9488);
-    }
-  }
-
-  Color _arrowColor(QuickActionTone resolvedTone) {
-    switch (resolvedTone) {
-      case QuickActionTone.green:
-        return ReLoopColors.brand700;
-      case QuickActionTone.blue:
-        return const Color(0xFF1D4ED8);
-      case QuickActionTone.amber:
-        return const Color(0xFFB45309);
-      case QuickActionTone.teal:
-        return const Color(0xFF0F766E);
-    }
+  ({Color background, Color icon, Color soft}) _colors(BuildContext context) {
+    return switch (_resolvedTone) {
+      QuickActionTone.green => (
+        background: ReLoopColors.brand600,
+        icon: Colors.white,
+        soft: context.isDarkMode ? const Color(0xFF173D26) : ReLoopColors.brand50,
+      ),
+      QuickActionTone.blue => (
+        background: const Color(0xFF2877D5),
+        icon: Colors.white,
+        soft: context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEDF5FF),
+      ),
+      QuickActionTone.amber => (
+        background: const Color(0xFFE48B19),
+        icon: Colors.white,
+        soft: context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFF5E7),
+      ),
+      QuickActionTone.teal => (
+        background: const Color(0xFF159A91),
+        icon: Colors.white,
+        soft: context.isDarkMode ? const Color(0xFF173936) : const Color(0xFFEAF9F7),
+      ),
+    };
   }
 
   @override
   Widget build(BuildContext context) {
-    final resolvedTone = _resolvedTone;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: _surfaceBg(resolvedTone),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _surfaceBorder(resolvedTone)),
-      ),
+    final palette = _colors(context);
+    return Semantics(
+      button: true,
+      label: '$title. $description',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(20),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.start,
               children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: _iconBg(resolvedTone),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(icon, color: Colors.white, size: 18),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              title,
-                              style: const TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.bold,
-                                color: ReLoopColors.foreground,
-                                height: 1.2,
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 68,
+                      height: 68,
+                      decoration: BoxDecoration(
+                        color: palette.soft,
+                        borderRadius: BorderRadius.circular(21),
+                      ),
+                      child: Center(
+                        child: Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: palette.background,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: palette.background.withValues(alpha: .2),
+                                blurRadius: 12,
+                                offset: const Offset(0, 5),
                               ),
+                            ],
+                          ),
+                          child: Icon(icon, color: palette.icon, size: 27),
+                        ),
+                      ),
+                    ),
+                    if (badge != null)
+                      Positioned(
+                        top: -5,
+                        right: -7,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1D211E),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                          child: Text(
+                            badge!,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                          Icon(
-                            Icons.arrow_outward,
-                            size: 14,
-                            color: _arrowColor(resolvedTone),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        description,
-                        style: const TextStyle(
-                          fontSize: 10.5,
-                          color: ReLoopColors.muted,
-                          height: 1.3,
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ],
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: context.reloopForeground,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  description,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: context.reloopMuted,
+                    fontSize: 10,
+                    height: 1.2,
                   ),
                 ),
               ],

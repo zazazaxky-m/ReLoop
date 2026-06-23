@@ -22,6 +22,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isEditing = false;
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _currentPasswordCtrl = TextEditingController();
+  final _newPasswordCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isSaving = false;
   bool _biometricAvailable = false;
@@ -34,6 +37,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final auth = context.read<AuthProvider>();
     _nameCtrl.text = auth.user?.name ?? '';
     _phoneCtrl.text = auth.user?.phone ?? '';
+    _emailCtrl.text = auth.user?.email ?? '';
     _checkBiometric();
   }
 
@@ -55,6 +59,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void dispose() {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
+    _emailCtrl.dispose();
+    _currentPasswordCtrl.dispose();
+    _newPasswordCtrl.dispose();
     super.dispose();
   }
 
@@ -65,14 +72,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       final api = context.read<ApiClient>();
-      await api.patch('/api/auth/me', data: {
-        'name': _nameCtrl.text.trim(),
-        'phone': _phoneCtrl.text.trim(),
-      });
+      await api.patch(
+        '/api/auth/me',
+        data: {
+          'name': _nameCtrl.text.trim(),
+          'phone': _phoneCtrl.text.trim(),
+          'email': _emailCtrl.text.trim(),
+          if (_currentPasswordCtrl.text.isNotEmpty)
+            'currentPassword': _currentPasswordCtrl.text,
+          if (_newPasswordCtrl.text.isNotEmpty)
+            'newPassword': _newPasswordCtrl.text,
+        },
+      );
       if (!mounted) return;
       await context.read<AuthProvider>().checkSession();
       if (!mounted) return;
-      setState(() => _isEditing = false);
+      setState(() {
+        _isEditing = false;
+        _currentPasswordCtrl.clear();
+        _newPasswordCtrl.clear();
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Profil berhasil diperbarui'),
@@ -99,16 +118,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Keluar'),
-        content: const Text('Apakah Anda yakin ingin keluar?'),
+        title: Text('Keluar'),
+        content: Text('Apakah Anda yakin ingin keluar?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Batal'),
+            child: Text('Batal'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text(
+            child: Text(
               'Keluar',
               style: TextStyle(color: ReLoopColors.danger),
             ),
@@ -142,14 +161,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   width: 80,
                   height: 80,
                   decoration: BoxDecoration(
-                    color: ReLoopColors.brand100,
+                    color: context.reloopBrandSoftStrong,
                     shape: BoxShape.circle,
                   ),
                   child: Center(
                     child: Text(
                       user.name[0].toUpperCase(),
-                      style: const TextStyle(
-                        color: ReLoopColors.brand700,
+                      style: TextStyle(
+                        color: context.reloopBrandText,
                         fontWeight: FontWeight.w700,
                         fontSize: 32,
                       ),
@@ -160,17 +179,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 if (!_isEditing) ...[
                   Text(
                     user.name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w700,
-                      color: ReLoopColors.foreground,
+                      color: context.reloopForeground,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     user.email,
-                    style: const TextStyle(
-                      color: ReLoopColors.muted,
+                    style: TextStyle(
+                      color: context.reloopMuted,
                       fontSize: 14,
                     ),
                   ),
@@ -181,9 +200,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 12),
                   TextButton.icon(
                     onPressed: () => setState(() => _isEditing = true),
-                    icon: const Icon(Icons.edit_outlined, size: 16),
-                    label: const Text('Edit Profil'),
-                    style: TextButton.styleFrom(foregroundColor: ReLoopColors.brand600),
+                    icon: Icon(Icons.edit_outlined, size: 16),
+                    label: Text('Edit Profil'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: ReLoopColors.brand600,
+                    ),
                   ),
                 ] else ...[
                   const SizedBox(height: 12),
@@ -193,11 +214,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         _isEditing = false;
                         _nameCtrl.text = user.name;
                         _phoneCtrl.text = user.phone ?? '';
+                        _emailCtrl.text = user.email;
+                        _currentPasswordCtrl.clear();
+                        _newPasswordCtrl.clear();
                       });
                     },
-                    icon: const Icon(Icons.close, size: 16),
-                    label: const Text('Batal'),
-                    style: TextButton.styleFrom(foregroundColor: ReLoopColors.muted),
+                    icon: Icon(Icons.close, size: 16),
+                    label: Text('Batal'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: context.reloopMuted,
+                    ),
                   ),
                 ],
               ],
@@ -210,12 +236,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Nama Lengkap',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: ReLoopColors.muted,
+                      color: context.reloopMuted,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -232,29 +258,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     },
                   ),
                   const SizedBox(height: 20),
-                  const Text(
+                  Text(
                     'Email',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: ReLoopColors.muted,
+                      color: context.reloopMuted,
                     ),
                   ),
                   const SizedBox(height: 8),
                   TextFormField(
-                    initialValue: user.email,
-                    enabled: false,
+                    controller: _emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
                     decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.email_outlined),
+                      helperText:
+                          'Perubahan email memerlukan password saat ini.',
                     ),
+                    validator: (value) => value != null && value.contains('@')
+                        ? null
+                        : 'Email tidak valid',
                   ),
                   const SizedBox(height: 20),
-                  const Text(
+                  Text(
                     'No. Telepon',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: ReLoopColors.muted,
+                      color: context.reloopMuted,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -270,6 +301,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         if (digits.length < 9 || digits.length > 16) {
                           return 'No. telepon 9-16 digit';
                         }
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Password Saat Ini',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: context.reloopMuted,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _currentPasswordCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.lock_outline_rounded),
+                      hintText: 'Wajib untuk ganti email atau password',
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Password Baru',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: context.reloopMuted,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _newPasswordCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.password_rounded),
+                      hintText: 'Kosongkan jika tidak ingin mengganti',
+                    ),
+                    validator: (value) {
+                      if (value != null &&
+                          value.isNotEmpty &&
+                          value.length < 6) {
+                        return 'Password minimal 6 karakter';
                       }
                       return null;
                     },
@@ -371,9 +446,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 32),
           const Divider(),
           const SizedBox(height: 16),
-          _LegalLink(label: 'Syarat & Ketentuan', onTap: () => context.push('/terms')),
-          _LegalLink(label: 'Kebijakan Privasi', onTap: () => context.push('/privacy')),
-          _LegalLink(label: 'Tentang Aplikasi', onTap: () => context.push('/about')),
+          _LegalLink(
+            label: 'Syarat & Ketentuan',
+            onTap: () => context.push('/terms'),
+          ),
+          _LegalLink(
+            label: 'Kebijakan Privasi',
+            onTap: () => context.push('/privacy'),
+          ),
+          _LegalLink(
+            label: 'Tentang Aplikasi',
+            onTap: () => context.push('/about'),
+          ),
           const SizedBox(height: 80),
         ],
       ),
@@ -396,13 +480,13 @@ class _SettingsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: ReLoopColors.mutedSoft, size: 20),
+        Icon(icon, color: context.reloopMutedSoft, size: 20),
         const SizedBox(width: 12),
         Expanded(
           child: Text(
             label,
-            style: const TextStyle(
-              color: ReLoopColors.foreground,
+            style: TextStyle(
+              color: context.reloopForeground,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),
@@ -429,7 +513,7 @@ class _InfoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: ReLoopColors.mutedSoft, size: 20),
+        Icon(icon, color: context.reloopMutedSoft, size: 20),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -437,16 +521,16 @@ class _InfoRow extends StatelessWidget {
             children: [
               Text(
                 label,
-                style: const TextStyle(
-                  color: ReLoopColors.mutedSoft,
+                style: TextStyle(
+                  color: context.reloopMutedSoft,
                   fontSize: 12,
                 ),
               ),
               const SizedBox(height: 2),
               Text(
                 value,
-                style: const TextStyle(
-                  color: ReLoopColors.foreground,
+                style: TextStyle(
+                  color: context.reloopForeground,
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
                 ),
@@ -473,9 +557,16 @@ class _LegalLink extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
           children: [
-            const Icon(Icons.chevron_right, size: 18, color: ReLoopColors.mutedSoft),
+            Icon(
+              Icons.chevron_right,
+              size: 18,
+              color: context.reloopMutedSoft,
+            ),
             const SizedBox(width: 8),
-            Text(label, style: const TextStyle(color: ReLoopColors.muted, fontSize: 14)),
+            Text(
+              label,
+              style: TextStyle(color: context.reloopMuted, fontSize: 14),
+            ),
           ],
         ),
       ),
