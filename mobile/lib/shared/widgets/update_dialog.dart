@@ -28,35 +28,35 @@ class ForceUpdateDialog extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const Icon(Icons.system_update, color: ReLoopColors.brand500, size: 28),
+            Icon(Icons.system_update, color: ReLoopColors.brand500, size: 28),
             const SizedBox(width: 12),
-            const Text('Update Tersedia', style: TextStyle(fontWeight: FontWeight.w800)),
+            Text('Update Tersedia', style: TextStyle(fontWeight: FontWeight.w800)),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Versi baru ReLoop sudah tersedia. Silakan update untuk melanjutkan.', style: TextStyle(color: ReLoopColors.muted, fontSize: 14)),
+            Text('Versi baru ReLoop sudah tersedia. Silakan update untuk melanjutkan.', style: TextStyle(color: context.reloopMuted, fontSize: 14)),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: ReLoopColors.brand50,
+                color: context.reloopBrandSoft,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: ReLoopColors.brand200),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.new_releases, color: ReLoopColors.brand500, size: 18),
+                  Icon(Icons.new_releases, color: ReLoopColors.brand500, size: 18),
                   const SizedBox(width: 8),
-                  Text('Versi $latestVersion', style: const TextStyle(fontWeight: FontWeight.w700, color: ReLoopColors.brand700, fontSize: 14)),
+                  Text('Versi $latestVersion', style: TextStyle(fontWeight: FontWeight.w700, color: ReLoopColors.brand700, fontSize: 14)),
                 ],
               ),
             ),
             if (changelog != null) ...[
               const SizedBox(height: 12),
-              Text(changelog!, style: const TextStyle(color: ReLoopColors.mutedSoft, fontSize: 12)),
+              Text(changelog!, style: TextStyle(color: context.reloopMutedSoft, fontSize: 12)),
             ],
           ],
         ),

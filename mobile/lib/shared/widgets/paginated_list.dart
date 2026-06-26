@@ -124,11 +124,11 @@ class _PaginatedListState<T> extends State<PaginatedList<T>> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+            Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
+            Text(_error!, style: TextStyle(color: context.reloopMuted)),
             const SizedBox(height: 12),
-            TextButton(onPressed: refresh, child: const Text('Coba Lagi')),
+            TextButton(onPressed: refresh, child: Text('Coba Lagi')),
           ],
         ),
       );

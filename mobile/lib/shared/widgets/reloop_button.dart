@@ -86,11 +86,11 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
         );
       case ReLoopButtonVariant.secondary:
         return ElevatedButton.styleFrom(
-          backgroundColor: ReLoopColors.brand50,
-          foregroundColor: ReLoopColors.brand800,
-          side: const BorderSide(color: ReLoopColors.brand200),
-          disabledBackgroundColor: ReLoopColors.brand50,
-          disabledForegroundColor: ReLoopColors.mutedSoft,
+          backgroundColor: context.reloopBrandSoft,
+          foregroundColor: context.reloopBrandText,
+          side: BorderSide(color: context.reloopBorder),
+          disabledBackgroundColor: context.reloopBrandSoft,
+          disabledForegroundColor: context.reloopMutedSoft,
           padding: size.padding,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
@@ -98,8 +98,8 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
         );
       case ReLoopButtonVariant.outline:
         return OutlinedButton.styleFrom(
-          foregroundColor: ReLoopColors.foreground,
-          side: const BorderSide(color: ReLoopColors.border),
+          foregroundColor: context.reloopForeground,
+          side: BorderSide(color: context.reloopBorder),
           padding: size.padding,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
@@ -107,7 +107,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
         );
       case ReLoopButtonVariant.ghost:
         return TextButton.styleFrom(
-          foregroundColor: ReLoopColors.foreground,
+          foregroundColor: context.reloopForeground,
           padding: size.padding,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),

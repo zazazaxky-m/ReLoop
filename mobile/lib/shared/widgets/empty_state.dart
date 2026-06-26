@@ -22,9 +22,9 @@ class EmptyState extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
       decoration: BoxDecoration(
-        color: ReLoopColors.surface,
+        color: context.reloopSurfaceRaised,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ReLoopColors.border, strokeAlign: BorderSide.strokeAlignInside),
+        border: Border.all(color: context.reloopBorder, strokeAlign: BorderSide.strokeAlignInside),
         boxShadow: const [
           BoxShadow(color: Color(0x0A0F172A), blurRadius: 2, offset: Offset(0, 1)),
         ],
@@ -37,7 +37,7 @@ class EmptyState extends StatelessWidget {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: ReLoopColors.brand50,
+                color: context.reloopBrandSoft,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(icon, color: ReLoopColors.brand600, size: 24),
@@ -47,9 +47,9 @@ class EmptyState extends StatelessWidget {
           Text(
             title,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.w600,
-              color: ReLoopColors.foreground,
+              color: context.reloopForeground,
             ),
           ),
           if (description != null) ...[
@@ -57,9 +57,9 @@ class EmptyState extends StatelessWidget {
             Text(
               description!,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
-                color: ReLoopColors.muted,
+                color: context.reloopMuted,
               ),
             ),
           ],

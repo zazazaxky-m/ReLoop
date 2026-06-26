@@ -30,6 +30,15 @@ export const DEFAULT_HERO_SLIDES: HeroSlide[] = [
   },
 ];
 
+export const DEFAULT_MOBILE_HERO_SLIDES: HeroSlide[] = [
+  {
+    eyebrow: "Program ReLoop",
+    title: "Setor sampah, kumpulkan reward.",
+    description: "Temukan mesin dan program ReLoop di sekitar Anda.",
+    imageUrl: "/hero-ai-community.webp",
+    href: "/campaigns",
+  },
+];
 function isSafeUrl(value: string) {
   return (
     value === "" ||
@@ -39,12 +48,15 @@ function isSafeUrl(value: string) {
   );
 }
 
-export function parseHeroSlides(value?: string | null): HeroSlide[] {
-  if (!value) return DEFAULT_HERO_SLIDES;
+export function parseHeroSlides(
+  value?: string | null,
+  fallback: HeroSlide[] = DEFAULT_HERO_SLIDES,
+): HeroSlide[] {
+  if (!value) return fallback;
 
   try {
     const parsed = JSON.parse(value);
-    if (!Array.isArray(parsed)) return DEFAULT_HERO_SLIDES;
+    if (!Array.isArray(parsed)) return fallback;
 
     const slides = parsed
       .slice(0, 6)
@@ -64,8 +76,8 @@ export function parseHeroSlides(value?: string | null): HeroSlide[] {
       })
       .filter((slide): slide is HeroSlide => slide !== null);
 
-    return slides.length ? slides : DEFAULT_HERO_SLIDES;
+    return slides.length ? slides : fallback;
   } catch {
-    return DEFAULT_HERO_SLIDES;
+    return fallback;
   }
 }
