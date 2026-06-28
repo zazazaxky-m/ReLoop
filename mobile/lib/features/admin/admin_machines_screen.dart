@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
+import '../../core/auth_provider.dart';
+import '../../core/models.dart';
 import '../../shared/widgets/reloop_card.dart';
 import '../../shared/widgets/status_badge.dart';
 import '../../shared/widgets/skeleton_loading.dart';
@@ -124,7 +126,17 @@ class _AdminMachinesScreenState extends State<AdminMachinesScreen> {
       padding: const EdgeInsets.only(bottom: 8),
       child: ReLoopCard(
         child: InkWell(
-          onTap: code.isNotEmpty ? () => context.push('/machine/$code/detail') : null,
+          onTap: () {
+            final id = machine['id'] as String?;
+            if (id != null) {
+              final auth = context.read<AuthProvider>();
+              if (auth.user?.role == AppRole.SUPERADMIN) {
+                context.push('/superadmin/machines/$id/detail');
+              } else {
+                context.push('/admin/machines/$id/detail');
+              }
+            }
+          },
           borderRadius: BorderRadius.circular(12),
           child: Padding(
             padding: const EdgeInsets.all(2),

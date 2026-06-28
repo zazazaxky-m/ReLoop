@@ -18,6 +18,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
   late TabController _tabController;
   List<dynamic> _wasteTypes = [];
   List<dynamic> _rates = [];
+  List<dynamic> _campaigns = [];
   bool _isLoading = true;
   String? _error;
 
@@ -38,10 +39,15 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
     setState(() { _isLoading = true; _error = null; });
     try {
       final api = context.read<ApiClient>();
-      final results = await Future.wait([api.get('/api/waste-types'), api.get('/api/reward-rates')]);
+      final results = await Future.wait([
+        api.get('/api/waste-types'),
+        api.get('/api/reward-rates'),
+        api.get('/api/campaigns'),
+      ]);
       setState(() {
         _wasteTypes = ((results[0].data as Map)['wasteTypes'] as List?)?.cast<dynamic>() ?? [];
         _rates = ((results[1].data as Map)['rates'] as List?)?.cast<dynamic>() ?? [];
+        _campaigns = ((results[2].data as Map)['campaigns'] as List?)?.cast<dynamic>() ?? [];
         _isLoading = false;
       });
     } catch (e) {
@@ -137,30 +143,68 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
 
   // ---- Reward Rate CRUD ----
 
-  Future<void> _saveRate({String? id}) async {
-    final existingWasteId = id != null ? (_rates.firstWhere((r) => r['id'] == id) as Map)['wasteTypeId'] as String? : null;
+  Future<void> _saveRate() async {
     final activeWasteTypes = _wasteTypes.where((w) => w['active'] == true).toList();
-    String wasteTypeId = existingWasteId ?? ((activeWasteTypes.isNotEmpty ? activeWasteTypes[0]['id'] : null) as String?) ?? '';
-    final pointsCtrl = TextEditingController(text: id != null ? (_rates.firstWhere((r) => r['id'] == id) as Map)['pointsPerItem']?.toString() : '');
+    String wasteTypeId = (activeWasteTypes.isNotEmpty ? activeWasteTypes[0]['id'] : null) as String? ?? '';
+    final pointsCtrl = TextEditingController();
+    final minWeightCtrl = TextEditingController();
+    final maxWeightCtrl = TextEditingController();
+    String unit = 'ITEM';
+    String? campaignId;
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setSt) => AlertDialog(
-        title: Text(id != null ? 'Edit Tarif' : 'Tarif Baru'),
+        title: const Text('Tarif Baru'),
         content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
           DropdownButtonFormField<String>(value: wasteTypeId, isExpanded: true, decoration: const InputDecoration(labelText: 'Jenis Sampah'),
             items: _wasteTypes.where((w) => w['active'] == true).map((w) => DropdownMenuItem(value: (w['id'] as String?) ?? '', child: Text((w['name'] as String?) ?? ''))).toList(),
             onChanged: (v) => setSt(() => wasteTypeId = v ?? '')),
           const SizedBox(height: 10),
-          TextField(controller: pointsCtrl, decoration: const InputDecoration(labelText: 'Poin per item', hintText: 'wajib'), keyboardType: TextInputType.number),
+          TextField(controller: pointsCtrl, decoration: const InputDecoration(labelText: 'Poin per unit', hintText: 'wajib'), keyboardType: TextInputType.number),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(value: unit, isExpanded: true, decoration: const InputDecoration(labelText: 'Unit'),
+            items: const [
+              DropdownMenuItem(value: 'ITEM', child: Text('ITEM (per pcs)')),
+              DropdownMenuItem(value: 'KG', child: Text('KG (per kilogram)')),
+            ],
+            onChanged: (v) => setSt(() => unit = v ?? 'ITEM')),
+          const SizedBox(height: 10),
+          TextField(controller: minWeightCtrl, decoration: const InputDecoration(labelText: 'Berat Min (Gram)', hintText: 'opsional'), keyboardType: TextInputType.number),
+          const SizedBox(height: 10),
+          TextField(controller: maxWeightCtrl, decoration: const InputDecoration(labelText: 'Berat Max (Gram)', hintText: 'opsional'), keyboardType: TextInputType.number),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String?>(
+            value: campaignId,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Scope Campaign'),
+            items: [
+              const DropdownMenuItem(value: null, child: Text('Global / Organisasi')),
+              ..._campaigns.map((c) => DropdownMenuItem(value: c['id'] as String?, child: Text(c['name'] as String? ?? ''))),
+            ],
+            onChanged: (v) => setSt(() => campaignId = v),
+          ),
         ])),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
-          TextButton(onPressed: () => Navigator.pop(ctx, {'wasteTypeId': wasteTypeId, 'pointsPerItem': int.tryParse(pointsCtrl.text)}), child: const Text('Simpan')),
+          TextButton(onPressed: () {
+            final points = int.tryParse(pointsCtrl.text) ?? 0;
+            final minW = int.tryParse(minWeightCtrl.text);
+            final maxW = int.tryParse(maxWeightCtrl.text);
+            
+            Navigator.pop(ctx, {
+              'wasteTypeId': wasteTypeId,
+              'pointsPerItem': points,
+              'unit': unit,
+              'minWeightGrams': minW,
+              'maxWeightGrams': maxW,
+              'campaignId': campaignId,
+            });
+          }, child: const Text('Simpan')),
         ],
       )),
     );
-    if (result == null || result['wasteTypeId'] == null || result['pointsPerItem'] == null || !mounted) return;
+    if (result == null || result['wasteTypeId'] == null || !mounted) return;
     try {
       await context.read<ApiClient>().post('/api/reward-rates', data: result);
       await _load();

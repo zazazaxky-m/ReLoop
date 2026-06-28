@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/api_client.dart';
 import '../../shared/widgets/reloop_card.dart';
 import '../../shared/widgets/metric_card.dart';
@@ -18,6 +19,7 @@ class AdminReportsScreen extends StatefulWidget {
 class _AdminReportsScreenState extends State<AdminReportsScreen> {
   int _depositCount = 0;
   int _pickupCount = 0;
+  int _rewardTotal = 0;
   bool _isLoading = true;
 
   @override
@@ -30,11 +32,34 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     setState(() { _isLoading = true; });
     try {
       final api = context.read<ApiClient>();
+      
+      // Load overview metrics
       final res = await api.get('/api/mobile/overview');
       final data = res.data as Map<String, dynamic>;
+      
+      // Fetch rewards to compute aggregate total
+      final resRewards = await api.get('/api/reports', queryParameters: {'type': 'rewards'});
+      final csvData = resRewards.data.toString();
+      
+      int computedReward = 0;
+      final lines = csvData.split('\n');
+      for (var i = 1; i < lines.length; i++) {
+        final line = lines[i].trim();
+        if (line.isEmpty) continue;
+        final parts = line.split(',');
+        if (parts.length >= 4) {
+          final type = parts[2].replaceAll('"', '').trim();
+          final amountStr = parts[3].replaceAll('"', '').trim();
+          if (type == 'EARN') {
+            computedReward += int.tryParse(amountStr) ?? 0;
+          }
+        }
+      }
+
       setState(() {
         _depositCount = (data['depositCount'] as num?)?.toInt() ?? 0;
         _pickupCount = data['pickups'] is List ? (data['pickups'] as List).length : 0;
+        _rewardTotal = computedReward;
         _isLoading = false;
       });
     } catch (_) {
@@ -48,15 +73,14 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       final res = await api.get('/api/reports', queryParameters: {'type': type});
       final csv = res.data.toString();
 
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/$filename');
       await file.writeAsString(csv);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Laporan disimpan: ${file.path}'), backgroundColor: ReLoopColors.success, duration: const Duration(seconds: 4)),
-        );
-      }
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'text/csv')],
+        subject: filename,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -64,6 +88,13 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         );
       }
     }
+  }
+
+  String _formatRupiah(int amount) {
+    return amount.toString().replaceAllMapped(
+      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+      (m) => '${m[1]}.',
+    );
   }
 
   @override
@@ -78,6 +109,10 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
           Expanded(child: MetricCard(label: 'Item Diterima', value: _depositCount.toString(), icon: Icons.inventory_2, tone: MetricTone.green)),
           const SizedBox(width: 12),
           Expanded(child: MetricCard(label: 'Pickup Selesai', value: _pickupCount.toString(), icon: Icons.local_shipping, tone: MetricTone.blue)),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: MetricCard(label: 'Reward Diterbitkan', value: 'Rp ${_formatRupiah(_rewardTotal)}', icon: Icons.paid_outlined, tone: MetricTone.amber)),
         ]),
         const SizedBox(height: 20),
         const Text('Unduh Laporan CSV', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ReLoopColors.foreground)),
@@ -114,7 +149,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       child: const Row(children: [
         Icon(Icons.info_outline, size: 18, color: ReLoopColors.brand600),
         SizedBox(width: 10),
-        Expanded(child: Text('Laporan CSV disimpan ke folder dokumen aplikasi. Data dibatasi 5000 baris per laporan.', style: TextStyle(fontSize: 12, color: ReLoopColors.brand700))),
+        Expanded(child: Text('Laporan CSV disimpan ke folder sementara dan dapat dibagikan langsung. Data dibatasi 5000 baris per laporan.', style: TextStyle(fontSize: 12, color: ReLoopColors.brand700))),
       ]),
     );
   }

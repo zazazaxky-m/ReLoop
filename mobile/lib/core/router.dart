@@ -17,8 +17,6 @@ import '../features/campaigns/campaigns_screen.dart';
 import '../features/pickup/pickup_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/trash_bag/trash_bag_screen.dart';
-import '../features/trash_bag/trash_bag_form.dart';
-import '../features/trash_bag/trash_bag_history.dart';
 import '../features/machine/machine_detail_screen.dart';
 import '../features/pengepul/area_map_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
@@ -28,6 +26,7 @@ import '../features/about/about_screen.dart';
 import '../features/auth/forgot_password_screen.dart';
 import '../features/admin/admin_dashboard_screen.dart';
 import '../features/admin/admin_machines_screen.dart';
+import '../features/admin/admin_machine_detail_screen.dart';
 import '../features/admin/admin_pickups_screen.dart';
 import '../features/admin/admin_campaigns_screen.dart';
 import '../features/admin/admin_waste_types_screen.dart';
@@ -37,6 +36,9 @@ import '../features/admin/admin_reports_screen.dart';
 import '../features/admin/admin_shell.dart';
 import '../features/superadmin/superadmin_dashboard_screen.dart';
 import '../features/superadmin/superadmin_resource_screen.dart';
+import '../features/superadmin/superadmin_organizations_screen.dart';
+import '../features/superadmin/superadmin_users_screen.dart';
+import '../features/superadmin/superadmin_regions_screen.dart';
 import '../features/superadmin/superadmin_system_screen.dart';
 import '../shared/widgets/reloop_logo.dart';
 import '../services/notification_service.dart';
@@ -83,8 +85,6 @@ class AppRouter {
     '/pickup': 'Pickup',
     '/profile': 'Profile',
     '/trash-bags': 'Trash Bag',
-    '/trash-bags/create': 'Trash Bag Form',
-    '/trash-bags/history': 'Trash Bag History',
   };
 
   late final router = GoRouter(
@@ -147,6 +147,10 @@ class AppRouter {
             builder: (context, state) => const MapScreen(),
           ),
           GoRoute(
+            path: '/campaigns',
+            builder: (context, state) => const CampaignsScreen(),
+          ),
+          GoRoute(
             path: '/pickup',
             builder: (context, state) => const PickupScreen(),
           ),
@@ -166,6 +170,13 @@ class AppRouter {
           GoRoute(
             path: '/admin/machines',
             builder: (context, state) => const AdminMachinesScreen(),
+          ),
+          GoRoute(
+            path: '/admin/machines/:id/detail',
+            builder: (context, state) {
+              final id = state.pathParameters['id']!;
+              return AdminMachineDetailScreen(machineId: id);
+            },
           ),
           GoRoute(
             path: '/admin/pickups',
@@ -192,12 +203,19 @@ class AppRouter {
             builder: (context, state) => const AdminReportsScreen(),
           ),
           GoRoute(path: '/superadmin', builder: (context, state) => const SuperadminDashboardScreen()),
-          GoRoute(path: '/superadmin/organizations', builder: (context, state) => const SuperadminResourceScreen(title: 'Organisasi', endpoint: '/api/organizations', rootKey: 'organizations', primaryFields: ['name', 'status'], secondaryFields: ['type', 'region'], action: SuperadminResourceAction.organization)),
+          GoRoute(path: '/superadmin/organizations', builder: (context, state) => const SuperadminOrganizationsScreen()),
           GoRoute(path: '/superadmin/machines', builder: (context, state) => const AdminMachinesScreen()),
-          GoRoute(path: '/superadmin/users', builder: (context, state) => const SuperadminResourceScreen(title: 'Pengguna & Peran', endpoint: '/api/users', rootKey: 'users', primaryFields: ['name', 'role'], secondaryFields: ['email', 'organization'], action: SuperadminResourceAction.user)),
+          GoRoute(
+            path: '/superadmin/machines/:id/detail',
+            builder: (context, state) {
+              final id = state.pathParameters['id']!;
+              return AdminMachineDetailScreen(machineId: id);
+            },
+          ),
+          GoRoute(path: '/superadmin/users', builder: (context, state) => const SuperadminUsersScreen()),
           GoRoute(path: '/superadmin/partnerships', builder: (context, state) => const SuperadminResourceScreen(title: 'Kemitraan', endpoint: '/api/partnerships', rootKey: 'partnerships', primaryFields: ['status', 'contactName'], secondaryFields: ['organization', 'collector'], action: SuperadminResourceAction.partnership)),
           GoRoute(path: '/superadmin/redemptions', builder: (context, state) => const SuperadminResourceScreen(title: 'Redemption', endpoint: '/api/redemptions?queue=1', rootKey: 'redemptions', primaryFields: ['amount', 'status'], secondaryFields: ['provider', 'user'], action: SuperadminResourceAction.redemption)),
-          GoRoute(path: '/superadmin/regions', builder: (context, state) => const SuperadminResourceScreen(title: 'Wilayah', endpoint: '/api/regions', rootKey: 'regions', primaryFields: ['name', 'type'], secondaryFields: ['parent'])),
+          GoRoute(path: '/superadmin/regions', builder: (context, state) => const SuperadminRegionsScreen()),
           GoRoute(path: '/superadmin/waste-types', builder: (context, state) => const AdminWasteTypesScreen()),
           GoRoute(path: '/superadmin/security', builder: (context, state) => const SuperadminSystemScreen(title: 'Log Keamanan', mode: SuperadminSystemMode.security)),
           GoRoute(path: '/superadmin/config', builder: (context, state) => const SuperadminSystemScreen(title: 'Konfigurasi Global', mode: SuperadminSystemMode.config)),
@@ -205,10 +223,7 @@ class AppRouter {
           GoRoute(path: '/superadmin/reports', builder: (context, state) => const AdminReportsScreen()),
         ],
       ),
-      GoRoute(
-        path: '/campaigns',
-        builder: (context, state) => const CampaignsScreen(),
-      ),
+
       GoRoute(
         path: '/wallet/redemption',
         builder: (context, state) => const RedemptionScreen(),
@@ -224,14 +239,6 @@ class AppRouter {
       GoRoute(
         path: '/trash-bags',
         builder: (context, state) => const TrashBagScreen(),
-      ),
-      GoRoute(
-        path: '/trash-bags/create',
-        builder: (context, state) => const TrashBagForm(),
-      ),
-      GoRoute(
-        path: '/trash-bags/history',
-        builder: (context, state) => const TrashBagHistory(),
       ),
       GoRoute(
         path: '/machine/:code/detail',

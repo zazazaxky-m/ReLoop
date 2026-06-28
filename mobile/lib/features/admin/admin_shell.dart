@@ -8,10 +8,11 @@ import '../../shared/widgets/reloop_logo.dart';
 import '../../theme/colors.dart';
 
 class AdminShell extends StatelessWidget {
-  const AdminShell({super.key, required this.child, required this.title});
+  const AdminShell({super.key, required this.child, required this.title, this.actions});
 
   final Widget child;
   final String title;
+  final List<Widget>? actions;
 
   @override
   Widget build(BuildContext context) {
@@ -34,67 +35,67 @@ class AdminShell extends StatelessWidget {
         );
 
         return Scaffold(
-          appBar: desktop
-              ? AppBar(
-                  toolbarHeight: 64,
-                  titleSpacing: 18,
-                  title: Row(
+          appBar: AppBar(
+            toolbarHeight: desktop ? 64 : 56,
+            titleSpacing: 18,
+            title: Row(
+              children: [
+                if (!desktop) ...[
+                  const ReLoopLogo(compact: true, height: 30),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (!desktop) ...[
-                        const ReLoopLogo(compact: true, height: 30),
-                        const SizedBox(width: 12),
-                      ],
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.25,
-                              ),
-                            ),
-                            Text(
-                              user?.role.label ?? 'ReLoop',
-                              style: TextStyle(
-                                color: context.reloopMuted,
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: desktop ? 17 : 16,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.25,
                         ),
                       ),
-                    ],
-                  ),
-                  actions: [
-                    Padding(
-                      padding: const EdgeInsets.only(right: 14),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(22),
-                        onTap: () => context.push('/profile'),
-                        child: CircleAvatar(
-                          radius: 18,
-                          backgroundColor: context.reloopBrandSoftStrong,
-                          child: Text(
-                            user?.name.isNotEmpty == true
-                                ? user!.name[0].toUpperCase()
-                                : '?',
-                            style: TextStyle(
-                              color: context.reloopBrandText,
-                              fontWeight: FontWeight.w700,
-                            ),
+                      if (desktop)
+                        Text(
+                          user?.role.label ?? 'ReLoop',
+                          style: TextStyle(
+                            color: context.reloopMuted,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              if (actions != null) ...actions!,
+              Padding(
+                padding: const EdgeInsets.only(right: 14),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(22),
+                  onTap: () => context.push('/profile'),
+                  child: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: context.reloopBrandSoftStrong,
+                    child: Text(
+                      user?.name.isNotEmpty == true
+                          ? user!.name[0].toUpperCase()
+                          : '?',
+                      style: TextStyle(
+                        color: context.reloopBrandText,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                  ],
-                )
-              : null,
+                  ),
+                ),
+              ),
+            ],
+          ),
           body: Row(
             children: [
               if (desktop)
@@ -175,7 +176,12 @@ class _BottomItem extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: () {
-        if (!active) context.go(item.route);
+        if (item.route == '__more__') {
+          final isSuper = context.read<AuthProvider>().user?.role == AppRole.SUPERADMIN;
+          _showMoreBottomSheet(context, isSuper);
+        } else if (!active) {
+          context.go(item.route);
+        }
       },
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -365,7 +371,7 @@ const _adminMobile = [
   _AdminNavItem('Mesin', Icons.recycling_outlined, '/admin/machines'),
   _AdminNavItem('Pickup', Icons.local_shipping_outlined, '/admin/pickups'),
   _AdminNavItem('Laporan', Icons.description_outlined, '/admin/reports'),
-  _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
+  _AdminNavItem('Lainnya', Icons.grid_view_outlined, '__more__'),
 ];
 
 const _superadminMobile = [
@@ -383,8 +389,131 @@ const _superadminMobile = [
   ),
   _AdminNavItem('Mesin', Icons.recycling_outlined, '/superadmin/machines'),
   _AdminNavItem('Keamanan', Icons.shield_outlined, '/superadmin/security'),
-  _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
+  _AdminNavItem('Lainnya', Icons.grid_view_outlined, '__more__'),
 ];
+
+void _showMoreBottomSheet(BuildContext context, bool isSuper) {
+  final location = GoRouterState.of(context).matchedLocation;
+  
+  final items = isSuper
+      ? const [
+          _AdminNavItem('Pengguna', Icons.people_outline, '/superadmin/users'),
+          _AdminNavItem('Kemitraan', Icons.handshake_outlined, '/superadmin/partnerships'),
+          _AdminNavItem('Redemption', Icons.account_balance_wallet_outlined, '/superadmin/redemptions'),
+          _AdminNavItem('Wilayah', Icons.public_outlined, '/superadmin/regions'),
+          _AdminNavItem('Jenis & Tarif', Icons.delete_outline, '/superadmin/waste-types'),
+          _AdminNavItem('Konfigurasi', Icons.settings_outlined, '/superadmin/config'),
+          _AdminNavItem('Audit Log', Icons.history_rounded, '/superadmin/audit'),
+          _AdminNavItem('Laporan', Icons.description_outlined, '/superadmin/reports'),
+          _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
+        ]
+      : const [
+          _AdminNavItem('Campaign', Icons.campaign_outlined, '/admin/campaigns'),
+          _AdminNavItem('Jenis & Tarif', Icons.delete_outline, '/admin/waste-types'),
+          _AdminNavItem('Mitra Pengepul', Icons.handshake_outlined, '/admin/partners'),
+          _AdminNavItem('Trip / Trash Bag', Icons.luggage_outlined, '/admin/trips'),
+          _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
+        ];
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: context.reloopSurfaceRaised,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (ctx) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Align(
+                alignment: Alignment.center,
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: ctx.reloopBorder,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Menu Administrasi',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: ctx.reloopForeground,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Flexible(
+                child: GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                    childAspectRatio: 0.95,
+                  ),
+                  itemCount: items.length,
+                  itemBuilder: (context, index) {
+                    final item = items[index];
+                    final active = location == item.route ||
+                        (item.route != '/profile' && location.startsWith(item.route));
+                    final color = active ? ctx.reloopBrandText : ctx.reloopMuted;
+                    
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        ctx.go(item.route);
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: active ? ctx.reloopBrandSoft : Colors.transparent,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: active ? ctx.reloopBrandSoftStrong : Colors.transparent,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(item.icon, size: 24, color: color),
+                            const SizedBox(height: 8),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              child: Text(
+                                item.label,
+                                textAlign: TextAlign.center,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                                  color: color,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
 
 const _adminDesktop = [
   _AdminNavItem('Dashboard', Icons.space_dashboard_outlined, '/admin'),

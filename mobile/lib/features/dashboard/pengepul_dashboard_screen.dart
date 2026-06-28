@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../shared/widgets/metric_card.dart';
 import '../../shared/widgets/promo_carousel.dart';
+import '../../shared/widgets/quick_action.dart';
 import '../../shared/widgets/reloop_card.dart';
 import '../../shared/widgets/status_badge.dart';
 import '../../shared/widgets/skeleton_loading.dart';
@@ -162,6 +164,46 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
           value: _fullMachines.toString(),
           icon: Icons.recycling,
           tone: MetricTone.blue,
+        ),
+
+        const SizedBox(height: 24),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 1.6,
+          children: [
+            QuickAction(
+              icon: Icons.local_shipping_outlined,
+              title: 'Tugas Pickup',
+              description: 'Lihat tugas',
+              tone: QuickActionTone.amber,
+              onTap: () => context.push('/pickup'),
+            ),
+            QuickAction(
+              icon: Icons.map_outlined,
+              title: 'Peta Mesin',
+              description: 'Cari mesin',
+              tone: QuickActionTone.blue,
+              onTap: () => context.push('/map'),
+            ),
+            QuickAction(
+              icon: Icons.location_on_outlined,
+              title: 'Area Layanan',
+              description: 'Kelola mitra',
+              tone: QuickActionTone.teal,
+              onTap: () => context.push('/pengepul/area'),
+            ),
+            QuickAction(
+              icon: Icons.person_outline,
+              title: 'Profil',
+              description: 'Info kontak',
+              tone: QuickActionTone.green,
+              onTap: () => context.push('/profile'),
+            ),
+          ],
         ),
 
         const SizedBox(height: 24),

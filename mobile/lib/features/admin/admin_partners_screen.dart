@@ -18,6 +18,7 @@ class _AdminPartnersScreenState extends State<AdminPartnersScreen> {
   List<dynamic> _partners = [];
   bool _isLoading = true;
   String? _error;
+  String? _statusFilter;
 
   @override
   void initState() {
@@ -96,7 +97,54 @@ class _AdminPartnersScreenState extends State<AdminPartnersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return AdminShell(title: 'Mitra Pengepul', child: RefreshIndicator(onRefresh: _load, child: _buildBody()));
+    return AdminShell(
+      title: 'Mitra Pengepul',
+      child: Column(
+        children: [
+          _buildFilterChips(),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _load,
+              child: _buildBody(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChips() {
+    const statuses = ['REQUESTED', 'ACTIVE', 'SUSPENDED', 'INVITED'];
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+        FilterChip(
+          label: const Text('Semua'),
+          selected: _statusFilter == null,
+          onSelected: (_) => setState(() => _statusFilter = null),
+        ),
+        const SizedBox(width: 6),
+        ...statuses.map((s) => Padding(
+          padding: const EdgeInsets.only(right: 6),
+          child: FilterChip(
+            label: Text(_statusLabel(s)),
+            selectedColor: ReLoopColors.brand50,
+            selected: _statusFilter == s,
+            onSelected: (_) => setState(() => _statusFilter = _statusFilter == s ? null : s),
+          ),
+        )),
+      ])),
+    );
+  }
+
+  String _statusLabel(String s) {
+    switch (s) {
+      case 'REQUESTED': return 'Diminta';
+      case 'ACTIVE': return 'Aktif';
+      case 'SUSPENDED': return 'Ditangguhkan';
+      case 'INVITED': return 'Diundang';
+      default: return s;
+    }
   }
 
   Widget _buildBody() {
@@ -108,13 +156,18 @@ class _AdminPartnersScreenState extends State<AdminPartnersScreen> {
         TextButton(onPressed: _load, child: const Text('Coba Lagi')),
       ]));
     }
+    
+    final filtered = _statusFilter == null
+        ? _partners
+        : _partners.where((p) => p['status'] == _statusFilter).toList();
+
     return ListView(padding: const EdgeInsets.all(16), children: [
       ReLoopButton(label: 'Undang Pengepul', icon: Icons.person_add, variant: ReLoopButtonVariant.primary, onPressed: _invite),
       const SizedBox(height: 16),
-      if (_partners.isEmpty)
+      if (filtered.isEmpty)
         SizedBox(height: 120, child: Center(child: Text('Belum ada mitra.', style: const TextStyle(color: ReLoopColors.mutedSoft))))
       else
-        ..._partners.map((p) {
+        ...filtered.map((p) {
           final partner = p as Map<String, dynamic>;
           final collector = partner['collectorUser'] as Map<String, dynamic>?;
           final org = partner['organization'] as Map<String, dynamic>?;

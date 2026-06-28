@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -27,7 +28,9 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
   Map<String, dynamic>? _data;
   String? _error;
   bool _saving = false;
+  String _auditFilter = '';
   final Map<String, TextEditingController> _controllers = {};
+  List<Map<String, dynamic>> _mobileSlides = [];
 
   @override
   void initState() {
@@ -52,8 +55,17 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
       final data = response.data as Map<String, dynamic>;
       if (widget.mode == SuperadminSystemMode.config) {
         final config = data['config'] as Map<String, dynamic>? ?? {};
+        
+        try {
+          if (config['mobile_hero_slides'] != null) {
+            _mobileSlides = List<Map<String, dynamic>>.from(
+              jsonDecode(config['mobile_hero_slides'].toString()),
+            );
+          }
+        } catch (_) {}
+
         for (final entry in config.entries) {
-          if (entry.key == 'landing_hero_slides') continue;
+          if (entry.key == 'landing_hero_slides' || entry.key == 'mobile_hero_slides') continue;
           _controllers.putIfAbsent(
             entry.key,
             () => TextEditingController(text: entry.value.toString()),
@@ -74,6 +86,7 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
         data: {
           for (final entry in _controllers.entries)
             entry.key: int.tryParse(entry.value.text) ?? entry.value.text,
+          'mobile_hero_slides': jsonEncode(_mobileSlides),
         },
       );
       if (mounted) {
@@ -178,14 +191,65 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
 
   Widget _audit() {
     final logs = _data!['auditLogs'] as List? ?? const [];
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 100),
+    
+    final filters = [
+      '',
+      'Machine',
+      'DepositSession',
+      'OrganizationCollectorPartner',
+      'PickupRequest',
+      'Redemption',
+      'Campaign',
+      'WasteType',
+      'Trip',
+    ];
+
+    final filteredLogs = logs.where((raw) {
+      if (_auditFilter.isEmpty) return true;
+      final data = raw as Map<String, dynamic>;
+      return data['entityType'] == _auditFilter;
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final raw in logs)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _LogCard(data: raw as Map<String, dynamic>),
+        SizedBox(
+          height: 48,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            children: filters.map((f) {
+              final isSelected = _auditFilter == f;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FilterChip(
+                  label: Text(f.isEmpty ? 'Semua' : f),
+                  selected: isSelected,
+                  onSelected: (_) => setState(() => _auditFilter = f),
+                  selectedColor: ReLoopColors.brand50,
+                  checkmarkColor: ReLoopColors.brand700,
+                  labelStyle: TextStyle(
+                    color: isSelected ? ReLoopColors.brand700 : ReLoopColors.foreground,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+              );
+            }).toList(),
           ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 100),
+            itemCount: filteredLogs.length,
+            itemBuilder: (context, index) {
+              final raw = filteredLogs[index] as Map<String, dynamic>;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _LogCard(data: raw),
+              );
+            },
+          ),
+        ),
       ],
     );
   }
@@ -215,15 +279,72 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
                 ),
                 const SizedBox(height: 14),
               ],
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _saving ? null : _saveConfig,
-                  icon: const Icon(Icons.check_rounded),
-                  label: Text(_saving ? 'Menyimpan...' : 'Simpan perubahan'),
-                ),
-              ),
             ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        Text(
+          'Konten Carousel Mobile',
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        const SizedBox(height: 12),
+        for (int i = 0; i < _mobileSlides.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ReLoopCard(
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Slide ${i + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: ReLoopColors.warning),
+                        onPressed: () => setState(() => _mobileSlides.removeAt(i)),
+                      ),
+                    ],
+                  ),
+                  TextField(
+                    decoration: const InputDecoration(labelText: 'Title'),
+                    controller: TextEditingController(text: _mobileSlides[i]['title'])..selection = TextSelection.collapsed(offset: _mobileSlides[i]['title']?.length ?? 0),
+                    onChanged: (v) => _mobileSlides[i]['title'] = v,
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    decoration: const InputDecoration(labelText: 'Description'),
+                    controller: TextEditingController(text: _mobileSlides[i]['description'])..selection = TextSelection.collapsed(offset: _mobileSlides[i]['description']?.length ?? 0),
+                    onChanged: (v) => _mobileSlides[i]['description'] = v,
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    decoration: const InputDecoration(labelText: 'Link (opsional)'),
+                    controller: TextEditingController(text: _mobileSlides[i]['href'])..selection = TextSelection.collapsed(offset: _mobileSlides[i]['href']?.length ?? 0),
+                    onChanged: (v) => _mobileSlides[i]['href'] = v,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        OutlinedButton.icon(
+          onPressed: () {
+            setState(() {
+              _mobileSlides.add({
+                'title': 'Judul baru',
+                'description': 'Deskripsi singkat.',
+                'href': '/campaigns',
+              });
+            });
+          },
+          icon: const Icon(Icons.add),
+          label: const Text('Tambah Slide'),
+        ),
+        const SizedBox(height: 32),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _saving ? null : _saveConfig,
+            icon: const Icon(Icons.check_rounded),
+            label: Text(_saving ? 'Menyimpan...' : 'Simpan perubahan'),
           ),
         ),
       ],

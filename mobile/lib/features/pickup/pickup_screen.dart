@@ -16,8 +16,10 @@ class PickupScreen extends StatefulWidget {
   State<PickupScreen> createState() => _PickupScreenState();
 }
 
-class _PickupScreenState extends State<PickupScreen> {
+class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   List<dynamic> _pickups = [];
+  List<dynamic> _availablePickups = [];
   List<dynamic> _wasteTypes = [];
   bool _isLoading = true;
   String? _error;
@@ -28,7 +30,14 @@ class _PickupScreenState extends State<PickupScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
     _loadAll();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadAll() async {
@@ -46,17 +55,26 @@ class _PickupScreenState extends State<PickupScreen> {
         queryParams['scope'] = 'collector';
       }
 
-      final results = await Future.wait([
+      final futures = <Future<dynamic>>[
         api.get('/api/pickups', queryParameters: queryParams),
         api.get('/api/waste-types'),
-      ]);
+      ];
+      if (auth.user?.role == AppRole.PENGEPUL) {
+        futures.add(api.get('/api/pickups', queryParameters: {'scope': 'available'}));
+      }
+
+      final results = await Future.wait(futures);
 
       final pickupsData = results[0].data as Map<String, dynamic>;
       final wasteData = results[1].data as Map<String, dynamic>;
+      final availableData = results.length > 2 ? results[2].data as Map<String, dynamic> : null;
 
       setState(() {
         _pickups = (pickupsData['pickups'] as List? ?? []).cast<dynamic>();
         _wasteTypes = (wasteData['wasteTypes'] as List? ?? []).cast<dynamic>();
+        if (availableData != null) {
+          _availablePickups = (availableData['pickups'] as List? ?? []).cast<dynamic>();
+        }
         _isLoading = false;
       });
     } catch (e) {
@@ -177,9 +195,34 @@ class _PickupScreenState extends State<PickupScreen> {
     final isCollector = auth.user?.role == AppRole.PENGEPUL;
 
     return Scaffold(
-      body: RefreshIndicator(
-        onRefresh: _loadAll,
-        child: _buildBody(isCollector),
+      body: Column(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              color: ReLoopColors.surface,
+              border: Border(bottom: BorderSide(color: ReLoopColors.border, width: 0.5)),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: ReLoopColors.brand600,
+              unselectedLabelColor: ReLoopColors.mutedSoft,
+              indicatorColor: ReLoopColors.brand500,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              tabs: const [
+                Tab(text: 'Tugas Aktif'),
+                Tab(text: 'Tersedia'),
+                Tab(text: 'Selesai/Gagal'),
+              ],
+            ),
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _loadAll,
+              child: _buildBody(isCollector),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -213,7 +256,28 @@ class _PickupScreenState extends State<PickupScreen> {
       );
     }
 
-    if (_pickups.isEmpty) {
+    final activeTasks = _pickups.where((p) {
+      final s = (p as Map)['status'] as String?;
+      return !['COMPLETED', 'CANCELLED', 'FAILED'].contains(s);
+    }).toList();
+
+    final doneTasks = _pickups.where((p) {
+      final s = (p as Map)['status'] as String?;
+      return ['COMPLETED', 'CANCELLED', 'FAILED'].contains(s);
+    }).toList();
+
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        _buildList(activeTasks, isCollector, emptyMessage: 'Tidak ada tugas aktif'),
+        _buildList(_availablePickups, isCollector, emptyMessage: 'Tidak ada tugas baru dari mitra', isAvailableTasks: true),
+        _buildList(doneTasks, isCollector, emptyMessage: 'Tidak ada riwayat tugas'),
+      ],
+    );
+  }
+
+  Widget _buildList(List<dynamic> list, bool isCollector, {required String emptyMessage, bool isAvailableTasks = false}) {
+    if (list.isEmpty) {
       return ListView(
         children: [
           SizedBox(
@@ -222,12 +286,11 @@ class _PickupScreenState extends State<PickupScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.local_shipping_outlined,
-                      size: 48, color: ReLoopColors.mutedSoft),
+                  const Icon(Icons.local_shipping_outlined, size: 48, color: ReLoopColors.mutedSoft),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Belum ada tugas pickup',
-                    style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 14),
+                  Text(
+                    emptyMessage,
+                    style: const TextStyle(color: ReLoopColors.mutedSoft, fontSize: 14),
                   ),
                 ],
               ),
@@ -236,14 +299,13 @@ class _PickupScreenState extends State<PickupScreen> {
         ],
       );
     }
-
     return ListView(
       padding: const EdgeInsets.all(16),
-      children: _pickups.map((p) => _buildPickupCard(p, isCollector)).toList(),
+      children: list.map((p) => _buildPickupCard(p, isCollector, isAvailableTasks: isAvailableTasks)).toList(),
     );
   }
 
-  Widget _buildPickupCard(dynamic p, bool isCollector) {
+  Widget _buildPickupCard(dynamic p, bool isCollector, {bool isAvailableTasks = false}) {
     final pickup = p as Map<String, dynamic>;
     final machine = pickup['machine'] as Map<String, dynamic>?;
     final org = pickup['organization'] as Map<String, dynamic>?;
@@ -428,7 +490,18 @@ class _PickupScreenState extends State<PickupScreen> {
               ),
             ],
 
-            if (isCollector) ...[
+            if (isAvailableTasks) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ReLoopButton(
+                  label: 'Ambil Tugas Ini',
+                  icon: Icons.front_hand,
+                  variant: ReLoopButtonVariant.primary,
+                  onPressed: () => _updatePickupStatus(pickupId, 'assign'),
+                ),
+              ),
+            ] else if (isCollector) ...[
               const SizedBox(height: 12),
               _buildActionButtons(pickupId, status, isFormExpanded),
             ],

@@ -220,7 +220,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _buildSection(
           'Pickup Aktif',
           _pickups.isEmpty ? 'Tidak ada pickup aktif.' : null,
-          children: _pickups.take(5).map(_buildPickupTile).toList(),
+          children: [
+            ..._pickups.take(5).map(_buildPickupTile),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                'Total sesi selesai organisasi: $_depositCount',
+                style: TextStyle(
+                  color: context.reloopMutedSoft,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 80),
       ],

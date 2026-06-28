@@ -1,8 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:reloop_mobile/core/api_client.dart';
 import 'package:reloop_mobile/core/models.dart';
-import 'package:reloop_mobile/core/models/redemption.dart';
-import 'package:reloop_mobile/core/models/trash_bag.dart';
 
 void main() {
   group('ApiClient.getErrorMessage', () {

@@ -1,102 +1,256 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+import '../../core/api_client.dart';
+import '../../core/models.dart';
 import '../../shared/widgets/reloop_card.dart';
+import '../../shared/widgets/status_badge.dart';
+import '../../shared/widgets/skeleton_loading.dart';
 import '../../theme/colors.dart';
 
-class TrashBagScreen extends StatelessWidget {
+class TrashBagScreen extends StatefulWidget {
   const TrashBagScreen({super.key});
+
+  @override
+  State<TrashBagScreen> createState() => _TrashBagScreenState();
+}
+
+class _TrashBagScreenState extends State<TrashBagScreen> {
+  List<Trip> _trips = [];
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTrips();
+  }
+
+  Future<void> _loadTrips() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final api = context.read<ApiClient>();
+      final response = await api.get('/api/trips');
+      final data = response.data as Map<String, dynamic>;
+      setState(() {
+        _trips = (data['trips'] as List? ?? [])
+            .map((e) => Trip.fromJson(e as Map<String, dynamic>))
+            .toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = ApiClient.getErrorMessage(e);
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Trash Bag')),
-      body: Padding(
+      appBar: AppBar(title: const Text('Trash Bag / Trip')),
+      body: RefreshIndicator(
+        onRefresh: _loadTrips,
+        child: _buildBody(),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return ListView(
         padding: const EdgeInsets.all(16),
+        children: const [
+          SkeletonListTile(),
+          SizedBox(height: 8),
+          SkeletonListTile(),
+          SizedBox(height: 8),
+          SkeletonListTile(),
+        ],
+      );
+    }
+
+    if (_error != null) {
+      return Center(
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: ReLoopColors.brand50,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: ReLoopColors.brand200),
-              ),
+            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+            const SizedBox(height: 12),
+            Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
+            const SizedBox(height: 12),
+            TextButton(onPressed: _loadTrips, child: const Text('Coba Lagi')),
+          ],
+        ),
+      );
+    }
+
+    if (_trips.isEmpty) {
+      return ListView(
+        children: [
+          const SizedBox(height: 80),
+          const Center(
+            child: Column(
+              children: [
+                Icon(Icons.delete_outline, size: 48, color: ReLoopColors.mutedSoft),
+                SizedBox(height: 12),
+                Text(
+                  'Belum ada trip',
+                  style: TextStyle(
+                      color: ReLoopColors.foreground,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Belum ada penugasan kantong atau perjalanan',
+                  style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text(
+          'Daftar Rombongan & Kantong',
+          style: TextStyle(
+            color: ReLoopColors.foreground,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 12),
+        ..._trips.map((trip) {
+          final bagCount = trip.count?.bagAssignments ?? 0;
+          final valCount = trip.count?.validations ?? 0;
+          final title = trip.groupName ?? trip.campaign?.name ?? 'Rombongan';
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ReLoopCard(
+              padding: const EdgeInsets.all(16),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.delete_outline, size: 48, color: ReLoopColors.brand500),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Punya sampah tapi jauh dari mesin?\nGunakan Trash Bag!',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: ReLoopColors.brand800,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: ReLoopColors.foreground,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
+                      StatusBadge(statusKey: trip.status),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${trip.campaign?.name ?? '-'} • ${trip.participantCount} peserta',
+                    style: const TextStyle(
+                      color: ReLoopColors.muted,
+                      fontSize: 13,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Foto dan submit sampah Anda. Tim kami akan menjemput atau Anda bisa drop-off ke mesin terdekat.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: ReLoopColors.muted.withValues(alpha: 0.8), fontSize: 13),
-                  ),
-                  const SizedBox(height: 20),
+                  if (trip.leaderName != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Ketua: ${trip.leaderName}',
+                      style: const TextStyle(
+                        color: ReLoopColors.mutedSoft,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
-                        child: GestureDetector(
-                          onTap: () => context.push('/trash-bags/create'),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            decoration: BoxDecoration(
-                              color: ReLoopColors.brand600,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.add_photo_alternate_outlined,
-                                    color: Colors.white, size: 18),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Submit Sampah',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
-                                  ),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F5E9),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Trash Bag QR',
+                                style: TextStyle(
+                                  color: ReLoopColors.brand800,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                bagCount > 0
+                                    ? '$bagCount kantong'
+                                    : 'Belum di-assign',
+                                style: TextStyle(
+                                  color: bagCount > 0
+                                      ? ReLoopColors.brand600
+                                      : ReLoopColors.muted,
+                                  fontSize: 13,
+                                  fontWeight: bagCount > 0
+                                      ? FontWeight.w700
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: GestureDetector(
-                          onTap: () => context.push('/trash-bags/history'),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: ReLoopColors.brand200),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.history,
-                                    color: ReLoopColors.brand600, size: 18),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Riwayat',
-                                  style: TextStyle(
-                                    color: ReLoopColors.brand600,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
-                                  ),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: ReLoopColors.background,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Validasi Pengembalian',
+                                style: TextStyle(
+                                  color: ReLoopColors.foreground,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                valCount > 0
+                                    ? '$valCount kali validasi'
+                                    : 'Belum diverifikasi',
+                                style: TextStyle(
+                                  color: valCount > 0
+                                      ? ReLoopColors.brand600
+                                      : ReLoopColors.mutedSoft,
+                                  fontSize: 13,
+                                  fontWeight: valCount > 0
+                                      ? FontWeight.w700
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -105,105 +259,8 @@ class TrashBagScreen extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 24),
-            const Text(
-              'Cara Kerja Trash Bag',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: ReLoopColors.foreground,
-              ),
-            ),
-            const SizedBox(height: 12),
-            ReLoopCard(
-              child: Column(
-                children: [
-                  _StepItem(
-                    step: '1',
-                    title: 'Pisahkan & Foto',
-                    description: 'Pisahkan sampah per jenis dan ambil foto',
-                  ),
-                  const Divider(height: 24),
-                  _StepItem(
-                    step: '2',
-                    title: 'Submit',
-                    description: 'Isi jenis dan jumlah sampah',
-                  ),
-                  const Divider(height: 24),
-                  _StepItem(
-                    step: '3',
-                    title: 'Verifikasi',
-                    description: 'Admin akan verifikasi foto dan data',
-                  ),
-                  const Divider(height: 24),
-                  _StepItem(
-                    step: '4',
-                    title: 'Dapatkan Reward',
-                    description: 'Reward masuk ke saldo setelah diverifikasi',
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StepItem extends StatelessWidget {
-  final String step;
-  final String title;
-  final String description;
-
-  const _StepItem({
-    required this.step,
-    required this.title,
-    required this.description,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            color: ReLoopColors.brand500,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Center(
-            child: Text(
-              step,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: ReLoopColors.foreground,
-                  fontSize: 14,
-                ),
-              ),
-              Text(
-                description,
-                style: const TextStyle(color: ReLoopColors.mutedSoft, fontSize: 12),
-              ),
-            ],
-          ),
-        ),
+          );
+        }),
       ],
     );
   }

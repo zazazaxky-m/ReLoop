@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
@@ -19,6 +20,12 @@ class SuperadminDashboardScreen extends StatefulWidget {
 }
 
 class _SuperadminDashboardScreenState extends State<SuperadminDashboardScreen> {
+  final _money = NumberFormat.currency(
+    symbol: 'Rp',
+    decimalDigits: 0,
+    locale: 'id_ID',
+  );
+
   Map<String, dynamic>? _data;
   String? _error;
 
@@ -110,10 +117,43 @@ class _SuperadminDashboardScreenState extends State<SuperadminDashboardScreen> {
               tone: MetricTone.blue,
             ),
             MetricCard(
-              label: 'Alert 24 jam',
-              value: '${security['alerts24h'] ?? 0}',
-              icon: Icons.shield_outlined,
+              label: 'Reward tersedia',
+              value: _money.format(data['rewardAvailable'] ?? 0),
+              icon: Icons.account_balance_wallet_outlined,
               tone: MetricTone.amber,
+            ),
+          ],
+        ),
+        if (security['alerts24h'] != null && security['alerts24h'] > 0) ...[
+          const SizedBox(height: 12),
+          _SecuritySummaryCard(count: security['alerts24h']),
+        ],
+        const SizedBox(height: 12),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: .9,
+          children: [
+            MetricCard(
+              label: 'Item diterima',
+              value: '${data['depositCount'] ?? 0}',
+              tone: MetricTone.teal,
+              icon: Icons.inventory_2_outlined,
+            ),
+            MetricCard(
+              label: 'Mitra pending',
+              value: '${data['pendingPartners'] ?? 0}',
+              tone: MetricTone.amber,
+              icon: Icons.handshake_outlined,
+            ),
+            MetricCard(
+              label: 'Min. pencairan',
+              value: _money.format(data['minRedemption'] ?? 0),
+              tone: MetricTone.slate,
+              icon: Icons.payments_outlined,
             ),
           ],
         ),
@@ -193,6 +233,79 @@ class _SuperadminDashboardScreenState extends State<SuperadminDashboardScreen> {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _SecuritySummaryCard extends StatelessWidget {
+  const _SecuritySummaryCard({required this.count});
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: ReLoopColors.warning.withValues(alpha: .1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: ReLoopColors.warning.withValues(alpha: .3)),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: ReLoopColors.warning.withValues(alpha: .2),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.warning_amber_rounded,
+                  color: ReLoopColors.warning,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Peringatan Fraud & Vandalisme',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$count alert terdeteksi dalam 24 jam terakhir.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: ReLoopColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ReLoopColors.warning,
+                side: BorderSide(color: ReLoopColors.warning.withValues(alpha: .5)),
+              ),
+              onPressed: () => context.push('/superadmin/security'),
+              child: const Text('Buka log keamanan'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

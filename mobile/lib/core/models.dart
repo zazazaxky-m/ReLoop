@@ -1,5 +1,5 @@
 // Data models mirroring Prisma schema and API responses
-
+export 'models/trip.dart';
 enum AppRole { USER, PENGEPUL, ADMIN, SUPERADMIN }
 
 extension AppRoleX on AppRole {

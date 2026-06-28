@@ -51,9 +51,17 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
     String type = existing?['campaignType'] ?? 'MACHINE_DEPOSIT';
     String visibility = existing?['visibility'] ?? 'PUBLIC';
     String status = existing?['status'] ?? 'DRAFT';
-    String startAt = existing?['startAt'] ?? '';
-    String endAt = existing?['endAt'] ?? '';
+    String startAt = existing?['startAt'] != null ? (existing!['startAt'] as String).substring(0, 10) : '';
+    String endAt = existing?['endAt'] != null ? (existing!['endAt'] as String).substring(0, 10) : '';
     String rewardMult = existing?['rewardMultiplier']?.toString() ?? '';
+    final domainsCtrl = TextEditingController(
+      text: existing?['allowedEmailDomains'] != null
+          ? (existing!['allowedEmailDomains'] as List).join('\n')
+          : '',
+    );
+
+    final startAtCtrl = TextEditingController(text: startAt);
+    final endAtCtrl = TextEditingController(text: endAt);
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -73,16 +81,77 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
               DropdownButtonFormField<String>(value: visibility, isExpanded: true, decoration: const InputDecoration(labelText: 'Visibilitas'),
                 items: const [DropdownMenuItem(value: 'PUBLIC', child: Text('Publik')), DropdownMenuItem(value: 'PRIVATE', child: Text('Privat'))],
                 onChanged: (v) => setSt(() => visibility = v ?? 'PUBLIC')),
+              if (visibility == 'PRIVATE') ...[
+                const SizedBox(height: 10),
+                TextField(
+                  controller: domainsCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Domain Email yang Diizinkan',
+                    hintText: 'Cth: @domain.com\nSatu domain per baris',
+                  ),
+                  maxLines: 3,
+                ),
+              ],
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(value: status, isExpanded: true, decoration: const InputDecoration(labelText: 'Status'),
                 items: _statuses.map((s) => DropdownMenuItem(value: s, child: Text(_statusLabel(s)))).toList(),
                 onChanged: (v) => setSt(() => status = v ?? 'DRAFT')),
               const SizedBox(height: 10),
-              TextField(controller: TextEditingController(text: startAt), decoration: const InputDecoration(labelText: 'Mulai (YYYY-MM-DD)', hintText: 'opsional'),
-                onChanged: (v) => startAt = v),
+              GestureDetector(
+                onTap: () async {
+                  final initial = DateTime.tryParse(startAt) ?? DateTime.now();
+                  final picked = await showDatePicker(
+                    context: ctx,
+                    initialDate: initial,
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                  );
+                  if (picked != null) {
+                    setSt(() {
+                      startAt = picked.toString().substring(0, 10);
+                      startAtCtrl.text = startAt;
+                    });
+                  }
+                },
+                child: AbsorbPointer(
+                  child: TextField(
+                    controller: startAtCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Mulai (YYYY-MM-DD)',
+                      hintText: 'opsional',
+                      suffixIcon: Icon(Icons.calendar_today, size: 18),
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(height: 10),
-              TextField(controller: TextEditingController(text: endAt), decoration: const InputDecoration(labelText: 'Selesai (YYYY-MM-DD)', hintText: 'opsional'),
-                onChanged: (v) => endAt = v),
+              GestureDetector(
+                onTap: () async {
+                  final initial = DateTime.tryParse(endAt) ?? DateTime.now();
+                  final picked = await showDatePicker(
+                    context: ctx,
+                    initialDate: initial,
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                  );
+                  if (picked != null) {
+                    setSt(() {
+                      endAt = picked.toString().substring(0, 10);
+                      endAtCtrl.text = endAt;
+                    });
+                  }
+                },
+                child: AbsorbPointer(
+                  child: TextField(
+                    controller: endAtCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Selesai (YYYY-MM-DD)',
+                      hintText: 'opsional',
+                      suffixIcon: Icon(Icons.calendar_today, size: 18),
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(height: 10),
               TextField(controller: TextEditingController(text: rewardMult), decoration: const InputDecoration(labelText: 'Multiplier Reward', hintText: 'cth: 1.5'),
                 keyboardType: TextInputType.number, onChanged: (v) => rewardMult = v),
@@ -90,16 +159,26 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
-            TextButton(onPressed: () => Navigator.pop(ctx, {
-              'name': nameCtrl.text.trim(),
-              'description': descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim(),
-              'campaignType': type,
-              'visibility': visibility,
-              'status': status,
-              'startAt': startAt.isEmpty ? null : startAt,
-              'endAt': endAt.isEmpty ? null : endAt,
-              'rewardMultiplier': rewardMult.isEmpty ? null : double.tryParse(rewardMult),
-            }), child: const Text('Simpan')),
+            TextButton(onPressed: () {
+              final domains = visibility == 'PRIVATE'
+                  ? domainsCtrl.text
+                      .split('\n')
+                      .map((e) => e.trim())
+                      .where((e) => e.isNotEmpty)
+                      .toList()
+                  : [];
+              Navigator.pop(ctx, {
+                'name': nameCtrl.text.trim(),
+                'description': descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim(),
+                'campaignType': type,
+                'visibility': visibility,
+                'status': status,
+                'startAt': startAt.isEmpty ? null : startAt,
+                'endAt': endAt.isEmpty ? null : endAt,
+                'rewardMultiplier': rewardMult.isEmpty ? null : double.tryParse(rewardMult),
+                'allowedEmailDomains': domains,
+              });
+            }, child: const Text('Simpan')),
           ],
         ),
       ),
@@ -174,6 +253,7 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
     final status = (campaign['status'] as String?) ?? 'DRAFT';
     final sessions = (campaign['_count']?['sessions'] as num?)?.toInt() ?? 0;
     final id = (campaign['id'] as String?) ?? '';
+    final allowedDomains = campaign['allowedEmailDomains'] as List?;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -186,6 +266,13 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
           if (campaign['description'] != null) ...[
             const SizedBox(height: 4),
             Text(campaign['description'] as String, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: ReLoopColors.mutedSoft)),
+          ],
+          if (campaign['visibility'] == 'PRIVATE' && allowedDomains != null && allowedDomains.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Domain: ${allowedDomains.join(", ")}',
+              style: const TextStyle(fontSize: 11, color: ReLoopColors.brand600, fontWeight: FontWeight.w500),
+            ),
           ],
           const SizedBox(height: 6),
           Wrap(spacing: 6, runSpacing: 4, children: [
