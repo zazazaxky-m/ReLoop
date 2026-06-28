@@ -1,9 +1,7 @@
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../lib/prisma";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 import { generateIngestSecret } from "../lib/machine-auth";
-
-const prisma = new PrismaClient();
 
 function token() {
   return randomUUID().replace(/-/g, "");
