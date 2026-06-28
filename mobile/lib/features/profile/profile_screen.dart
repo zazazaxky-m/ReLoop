@@ -141,6 +141,82 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _toggleBiometric(bool enable, String email) async {
+    if (!enable) {
+      await BiometricService().setEnabled(false);
+      await BiometricService().clearCredentials();
+      if (mounted) {
+        setState(() => _biometricEnabled = false);
+      }
+      return;
+    }
+
+    final passwordCtrl = TextEditingController();
+    bool obscure = true;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text('Konfirmasi Password', style: TextStyle(color: context.reloopForeground)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Masukkan password Anda untuk mengaktifkan $_biometricType.', style: TextStyle(color: context.reloopMuted)),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: passwordCtrl,
+                obscureText: obscure,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Password Anda',
+                  suffixIcon: IconButton(
+                    icon: Icon(obscure ? Icons.visibility_off : Icons.visibility),
+                    onPressed: () => setDialogState(() => obscure = !obscure),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Lanjut'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || passwordCtrl.text.isEmpty) return;
+
+    final authenticated = await BiometricService().authenticate(
+      reason: 'Verifikasi identitas untuk mengaktifkan $_biometricType',
+    );
+
+    if (authenticated) {
+      await BiometricService().saveCredentials(email, passwordCtrl.text);
+      await BiometricService().setEnabled(true);
+      if (mounted) {
+        setState(() => _biometricEnabled = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$_biometricType berhasil diaktifkan')),
+        );
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal memverifikasi identitas')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -423,13 +499,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     label: 'Login dengan $_biometricType',
                     trailing: Switch.adaptive(
                       value: _biometricEnabled,
-                      onChanged: (v) async {
-                        await BiometricService().setEnabled(v);
-                        setState(() => _biometricEnabled = v);
-                        if (!v) {
-                          await BiometricService().clearCredentials();
-                        }
-                      },
+                      onChanged: (v) => _toggleBiometric(v, user.email),
                     ),
                   ),
                 ],
