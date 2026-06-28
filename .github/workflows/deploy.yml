@@ -1,0 +1,94 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - ".github/**"
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Build application
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Deploy via Docker Compose
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: >
+            .next/,
+            public/,
+            node_modules/,
+            package.json,
+            next.config.ts,
+            Dockerfile,
+            Dockerfile.realtime,
+            docker-compose.yml,
+            nginx.conf,
+            realtime/server.mjs,
+            .env.production
+          target: ${{ secrets.DEPLOY_PATH }}/reloop
+          strip_components: 0
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.DEPLOY_PATH }}/reloop
+
+            # Copy production env
+            cp .env.production .env
+
+            # Run database migrations
+            docker compose run --rm db-migrate
+
+            # Rebuild and restart services
+            docker compose up -d --build web realtime nginx
+
+            # Clean up old images
+            docker image prune -f
+
+      - name: Health check
+        uses: appleboy/ssh-action@v1.2.1
+        continue-on-error: true
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            sleep 10
+            STATUS=$(curl -so /dev/null -w '%{http_code}' http://127.0.0.1:8111/api/auth/me || echo "000")
+            if [ "$STATUS" != "000" ]; then
+              echo "Health check passed (HTTP $STATUS)"
+            else
+              echo "Health check failed"
+              docker compose logs --tail=20 web realtime
+              exit 1
+            fi

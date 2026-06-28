@@ -817,10 +817,27 @@ model AuditLog {
   entityType   String
   entityId     String?
   metadataJson Json?
+  // Tamper-evident chain: SHA-256 of (previousHash + canonical payload)
+  previousHash String?
+  checksum     String?
   createdAt    DateTime @default(now())
 
   @@index([entityType, entityId])
   @@index([actorId])
+  @@index([createdAt])
+  @@index([previousHash])
+}
+
+model ConsentRecord {
+  id           String   @id @default(cuid())
+  userId       String
+  consentType  String
+  granted      Boolean
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId, consentType])
   @@index([createdAt])
 }
 

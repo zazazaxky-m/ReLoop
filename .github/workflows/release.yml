@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: notes
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: log } = await github.rest.repos.compareCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              base: context.payload.before || (await github.rest.repos.listTags({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 2
+              })).data[1]?.commit.sha || context.payload.before,
+              head: context.sha,
+            });
+            const notes = log.commits
+              .map(c => `- ${c.commit.message.split('\n')[0]} (${c.sha.slice(0, 7)})`)
+              .join('\n');
+            core.setOutput('notes', notes || 'No changes');
+
+      - name: Build Docker images
+        run: |
+          docker compose build web realtime
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Tag and push images
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          docker tag reloop-web:latest ${{ secrets.DOCKER_USERNAME }}/reloop-web:$TAG
+          docker tag reloop-web:latest ${{ secrets.DOCKER_USERNAME }}/reloop-web:latest
+          docker tag reloop-realtime:latest ${{ secrets.DOCKER_USERNAME }}/reloop-realtime:$TAG
+          docker tag reloop-realtime:latest ${{ secrets.DOCKER_USERNAME }}/reloop-realtime:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/reloop-web:$TAG
+          docker push ${{ secrets.DOCKER_USERNAME }}/reloop-web:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/reloop-realtime:$TAG
+          docker push ${{ secrets.DOCKER_USERNAME }}/reloop-realtime:latest
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: |
+            ## What's Changed
+
+            ${{ steps.notes.outputs.notes }}
+
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.ref_name }}
+          generate_release_notes: false

@@ -7,7 +7,16 @@ export const SESSION_COOKIE = "reloop_session";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 const secret = new TextEncoder().encode(
-  process.env.AUTH_JWT_SECRET || "dev-insecure-secret-change-me",
+  (() => {
+    const s = process.env.AUTH_JWT_SECRET;
+    if (!s || s === "dev-insecure-secret-change-me") {
+      if (process.env.NODE_ENV === "production") {
+        throw new Error("AUTH_JWT_SECRET must be set in production");
+      }
+      return "dev-insecure-secret-change-me";
+    }
+    return s;
+  })(),
 );
 
 export interface SessionPayload {

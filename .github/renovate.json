@@ -1,0 +1,46 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":automergePatch",
+    ":automergeTypes"
+  ],
+  "labels": ["dependencies"],
+  "schedule": ["before 9am on monday"],
+  "timezone": "Asia/Jakarta",
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": true
+  },
+  "packageRules": [
+    {
+      "matchDepTypes": ["devDependencies"],
+      "automerge": true
+    },
+    {
+      "matchPackageNames": ["node"],
+      "enabled": false
+    },
+    {
+      "matchPackagePatterns": ["^@types/"],
+      "automerge": true
+    },
+    {
+      "matchPackageNames": ["next"],
+      "groupName": "Next.js",
+      "labels": ["framework"]
+    },
+    {
+      "matchPackageNames": ["prisma", "@prisma/client"],
+      "groupName": "Prisma",
+      "labels": ["database"]
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "enabled": false
+    }
+  ],
+  "prConcurrentLimit": 5,
+  "rebaseWhen": "conflicted"
+}

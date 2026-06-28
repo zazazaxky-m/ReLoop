@@ -1,0 +1,44 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  scan:
+    name: Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: npm audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Secret scan with Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for hardcoded secrets
+        run: |
+          echo "Checking for common secret patterns..."
+          ! rg -n '(?i)(password|secret|key|token|credential).*['"'"'"].{8,}['"'"'"]' \
+            --glob '!node_modules' \
+            --glob '!.git' \
+            --glob '!*.test.ts' \
+            --glob '!.env*' \
+            --glob '!*.md' \
+            --type ts --type json --type yaml
+
+      - name: Dependency license audit
+        run: npx license-checker --summary --failOn 'GPL;AGPL' \
+          --onlyAllow 'MIT;Apache-2.0;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense'

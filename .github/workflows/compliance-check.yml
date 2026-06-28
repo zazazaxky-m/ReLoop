@@ -1,0 +1,41 @@
+name: Compliance Checks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  compliance-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Dependency license check
+        run: npx license-checker --onlyAllow 'MIT;Apache-2.0;BSD-3-Clause;ISC;0BSD;CC0-1.0' --summary --failOn 'GPL;AGPL'
+
+      - name: Run tests
+        run: npm test
+        env:
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || '' }}
+
+      - name: Generate compliance report
+        run: |
+          echo "Compliance report generated at $(date)" > compliance-report.txt
+          echo "Node: $(node -v)" >> compliance-report.txt
+          echo "Dependencies: $(wc -l < node_modules/.package-lock.json) files" >> compliance-report.txt

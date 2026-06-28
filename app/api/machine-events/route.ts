@@ -3,67 +3,63 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { verifyMachineSignature } from "@/lib/machine-auth";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
+import { ingestMachineEvent } from "@/lib/machine-events";
 
-const eventsSchema = z.object({
+const batchSchema = z.object({
   machineCode: z.string(),
-  events: z.array(z.record(z.unknown())),
+  events: z.array(z.object({
+    localEventId: z.string(),
+    eventType: z.string(),
+    payload: z.record(z.unknown()).optional().nullable(),
+    sessionId: z.string().optional().nullable(),
+    depositItemId: z.string().optional().nullable(),
+    occurredAt: z.string().optional().nullable(),
+  })),
 });
 
 export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.clone().text();
-    const body = eventsSchema.parse(JSON.parse(rawBody));
+    const body = batchSchema.parse(JSON.parse(rawBody));
 
     const machine = await prisma.machine.findUnique({
       where: { machineCode: body.machineCode },
       select: { id: true, ingestSecret: true },
     });
-
     if (!machine || !machine.ingestSecret) {
       return jsonError(404, "Mesin tidak ditemukan");
     }
 
-    const timestamp = req.headers.get("x-reloop-timestamp");
-    const nonce = req.headers.get("x-reloop-nonce");
-    const signature = req.headers.get("x-reloop-signature");
-
     const verify = verifyMachineSignature({
       secret: machine.ingestSecret,
-      timestamp: timestamp ?? undefined,
-      nonce: nonce ?? undefined,
+      timestamp: req.headers.get("x-reloop-timestamp"),
+      nonce: req.headers.get("x-reloop-nonce"),
       rawBody,
-      signature: signature ?? undefined,
+      signature: req.headers.get("x-reloop-signature"),
     });
-
     if (!verify.ok) {
       return jsonError(401, verify.reason ?? "Unauthorised");
     }
 
-    for (const event of body.events) {
-      const record = event as Record<string, unknown>;
-      let payload = record;
-      if (typeof record.payload_json === 'string') {
-        try { payload = JSON.parse(record.payload_json); } catch (_) {}
-      }
-      const eventTypeVal = (record.event_type as string) || (record.eventType as string) || 'UNKNOWN';
-      const localId = (record.local_event_id as string) || (record.localEventId as string) || 'unknown';
-
+    const results = [];
+    for (const evt of body.events) {
       try {
-        await prisma.machineEvent.create({
-          data: {
-            machineId: machine.id,
-            localEventId: localId,
-            eventType: eventTypeVal as any,
-            payloadJson: payload as any,
-            occurredAt: record.occurred_at ? new Date(record.occurred_at as string) : undefined,
-          },
+        const result = await ingestMachineEvent({
+          machineCode: body.machineCode,
+          localEventId: evt.localEventId,
+          eventType: evt.eventType as any,
+          payload: evt.payload ?? null,
+          sessionId: evt.sessionId ?? null,
+          depositItemId: evt.depositItemId ?? null,
+          occurredAt: evt.occurredAt ?? null,
         });
-      } catch (_) {
-        // Skip duplicate events gracefully
+        results.push({ localEventId: evt.localEventId, status: result.duplicate ? "duplicate" : "accepted", eventId: result.eventId });
+      } catch (err) {
+        results.push({ localEventId: evt.localEventId, status: "error", error: (err as Error).message });
       }
     }
 
-    return jsonOk({ received: body.events.length });
+    return jsonOk({ received: results.length, results });
   } catch (error) {
     return handleApiError(error);
   }
