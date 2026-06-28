@@ -196,6 +196,15 @@ export function TripManager({
           >
             Validasi
           </Button>
+          {r.bagCount > 0 ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => window.open(`/print/trips/${r.id}`, "_blank")}
+            >
+              Print
+            </Button>
+          ) : null}
         </div>
       ),
     },
@@ -313,6 +322,12 @@ export function TripManager({
               </FormField>
               <Button disabled={busy} onClick={() => assignBags(bagTripId)}>
                 Terbitkan
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => window.open(`/print/trips/${bagTripId}`, "_blank")}
+              >
+                Cetak QR
               </Button>
               <Button variant="ghost" onClick={() => setBagTripId(null)}>
                 Tutup
