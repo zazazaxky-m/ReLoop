@@ -239,7 +239,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                     children: [
                       const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
                       const SizedBox(height: 12),
-                      Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
+                      Text(_error!, style: TextStyle(color: context.reloopMuted)),
                       const SizedBox(height: 12),
                       TextButton(onPressed: _loadData, child: const Text('Coba Lagi')),
                     ],
@@ -347,12 +347,12 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
+                          Text(
                             'Rekening Tujuan',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
-                              color: ReLoopColors.foreground,
+                              color: context.reloopForeground,
                             ),
                           ),
                           TextButton(
@@ -371,11 +371,11 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                                 width: 44,
                                 height: 44,
                                 decoration: BoxDecoration(
-                                  color: ReLoopColors.brand50,
+                                  color: context.reloopBrandSoft,
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Icon(Icons.account_balance,
-                                    color: ReLoopColors.brand500),
+                                child: Icon(Icons.account_balance,
+                                    color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -384,16 +384,16 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                                   children: [
                                     Text(
                                       a.provider,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontWeight: FontWeight.w600,
-                                        color: ReLoopColors.foreground,
+                                        color: context.reloopForeground,
                                         fontSize: 14,
                                       ),
                                     ),
                                     Text(
                                       a.accountIdentifier,
-                                      style: const TextStyle(
-                                        color: ReLoopColors.mutedSoft,
+                                      style: TextStyle(
+                                        color: context.reloopMutedSoft,
                                         fontSize: 13,
                                       ),
                                     ),
@@ -410,12 +410,12 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
+                        Text(
                           'Riwayat Pencairan',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
-                            color: ReLoopColors.foreground,
+                            color: context.reloopForeground,
                           ),
                         ),
                         TextButton(
@@ -435,9 +435,9 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                                 const Icon(Icons.history,
                                     size: 40, color: ReLoopColors.mutedSoft),
                                 const SizedBox(height: 8),
-                                const Text(
+                                Text(
                                   'Belum ada pencairan',
-                                  style: TextStyle(color: ReLoopColors.mutedSoft),
+                                  style: TextStyle(color: context.reloopMutedSoft),
                                 ),
                               ],
                             ),
@@ -454,11 +454,11 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                                     width: 40,
                                     height: 40,
                                     decoration: BoxDecoration(
-                                      color: ReLoopColors.brand50,
+                                      color: context.reloopBrandSoft,
                                       borderRadius: BorderRadius.circular(8),
                                     ),
-                                    child: const Icon(Icons.payment,
-                                        color: ReLoopColors.brand500, size: 20),
+                                    child: Icon(Icons.payment,
+                                        color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500, size: 20),
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
@@ -467,16 +467,16 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                                       children: [
                                         Text(
                                           r.amountFormatted,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontWeight: FontWeight.w600,
-                                            color: ReLoopColors.foreground,
+                                            color: context.reloopForeground,
                                             fontSize: 14,
                                           ),
                                         ),
                                         Text(
                                           '${r.provider} - ${_formatDate(r.createdAt)}',
-                                          style: const TextStyle(
-                                            color: ReLoopColors.mutedSoft,
+                                          style: TextStyle(
+                                            color: context.reloopMutedSoft,
                                             fontSize: 12,
                                           ),
                                         ),

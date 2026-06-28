@@ -113,8 +113,8 @@ class _PromoCarouselState extends State<PromoCarousel> {
                               child: CachedNetworkImage(
                                 imageUrl: slide.imageUrl,
                                 fit: BoxFit.cover,
-                                placeholder: (_, _) => const ColoredBox(
-                                  color: ReLoopColors.brand100,
+                                placeholder: (_, _) => ColoredBox(
+                                  color: context.reloopBrandSoftStrong,
                                 ),
                                 errorWidget: (_, _, _) =>
                                     const _PromoPlaceholder(),

@@ -265,11 +265,11 @@ class _WalletScreenState extends State<WalletScreen> {
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            color: ReLoopColors.brand50,
+                            color: context.reloopBrandSoft,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.account_balance,
-                              color: ReLoopColors.brand500),
+                          child: Icon(Icons.account_balance,
+                              color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -278,16 +278,16 @@ class _WalletScreenState extends State<WalletScreen> {
                             children: [
                               Text(
                                 account.provider,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w600,
-                                  color: ReLoopColors.foreground,
+                                  color: context.reloopForeground,
                                   fontSize: 14,
                                 ),
                               ),
                               Text(
                                 account.accountIdentifier,
-                                style: const TextStyle(
-                                  color: ReLoopColors.mutedSoft,
+                                style: TextStyle(
+                                  color: context.reloopMutedSoft,
                                   fontSize: 13,
                                 ),
                               ),
@@ -296,7 +296,7 @@ class _WalletScreenState extends State<WalletScreen> {
                         ),
                         StatusBadge(statusKey: account.status),
                         IconButton(
-                          icon: const Icon(Icons.delete_outline, size: 18, color: ReLoopColors.mutedSoft),
+                          icon: Icon(Icons.delete_outline, size: 18, color: context.reloopMutedSoft),
                           tooltip: 'Nonaktifkan Akun',
                           onPressed: () => _disableAccount(account.id),
                         ),
@@ -328,11 +328,11 @@ class _WalletScreenState extends State<WalletScreen> {
                             width: 40,
                             height: 40,
                             decoration: BoxDecoration(
-                              color: ReLoopColors.brand50,
+                              color: context.reloopBrandSoft,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: const Icon(Icons.payment,
-                                color: ReLoopColors.brand500, size: 20),
+                            child: Icon(Icons.payment,
+                                color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500, size: 20),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -341,16 +341,16 @@ class _WalletScreenState extends State<WalletScreen> {
                               children: [
                                 Text(
                                   r.amountFormatted,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontWeight: FontWeight.w600,
-                                    color: ReLoopColors.foreground,
+                                    color: context.reloopForeground,
                                     fontSize: 14,
                                   ),
                                 ),
                                 Text(
                                   '${r.provider} · ${_formatDate(r.createdAt)}',
-                                  style: const TextStyle(
-                                    color: ReLoopColors.mutedSoft,
+                                  style: TextStyle(
+                                    color: context.reloopMutedSoft,
                                     fontSize: 12,
                                   ),
                                 ),
@@ -396,9 +396,9 @@ class _WalletScreenState extends State<WalletScreen> {
                               const Icon(Icons.receipt_long_outlined,
                                   size: 40, color: ReLoopColors.mutedSoft),
                               const SizedBox(height: 8),
-                              const Text(
+                              Text(
                                 'Belum ada transaksi',
-                                style: TextStyle(color: ReLoopColors.mutedSoft),
+                                style: TextStyle(color: context.reloopMutedSoft),
                               ),
                             ],
                           ),
@@ -409,8 +409,8 @@ class _WalletScreenState extends State<WalletScreen> {
                         physics: const NeverScrollableScrollPhysics(),
                         padding: EdgeInsets.zero,
                         itemCount: _history.length,
-                        separatorBuilder: (context, index) => const Divider(
-                          color: ReLoopColors.border,
+                        separatorBuilder: (context, index) => Divider(
+                          color: context.reloopBorder,
                           height: 24,
                         ),
                         itemBuilder: (context, index) {
@@ -422,8 +422,8 @@ class _WalletScreenState extends State<WalletScreen> {
                                 height: 40,
                                 decoration: BoxDecoration(
                                   color: entry.amount >= 0
-                                      ? ReLoopColors.brand50
-                                      : ReLoopColors.tones['danger']!.bg,
+                                      ? context.reloopBrandSoft
+                                      : (context.isDarkMode ? const Color(0xFF2D1414) : ReLoopColors.tones['danger']!.bg),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Icon(
@@ -431,7 +431,7 @@ class _WalletScreenState extends State<WalletScreen> {
                                       ? Icons.add_circle_outline
                                       : Icons.remove_circle_outline,
                                   color: entry.amount >= 0
-                                      ? ReLoopColors.brand500
+                                      ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500)
                                       : ReLoopColors.danger,
                                   size: 20,
                                 ),
@@ -448,7 +448,7 @@ class _WalletScreenState extends State<WalletScreen> {
                                           style: TextStyle(
                                             fontWeight: FontWeight.w600,
                                             color: entry.amount >= 0
-                                                ? ReLoopColors.brand700
+                                                ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand700)
                                                 : ReLoopColors.danger,
                                             fontSize: 14,
                                           ),
@@ -460,8 +460,8 @@ class _WalletScreenState extends State<WalletScreen> {
                                     if (entry.wasteTypeName != null)
                                       Text(
                                         entry.wasteTypeName!,
-                                        style: const TextStyle(
-                                          color: ReLoopColors.mutedSoft,
+                                        style: TextStyle(
+                                          color: context.reloopMutedSoft,
                                           fontSize: 12,
                                         ),
                                       ),
@@ -470,8 +470,8 @@ class _WalletScreenState extends State<WalletScreen> {
                               ),
                               Text(
                                 _formatDate(entry.createdAt),
-                                style: const TextStyle(
-                                  color: ReLoopColors.mutedSoft,
+                                style: TextStyle(
+                                  color: context.reloopMutedSoft,
                                   fontSize: 11,
                                 ),
                               ),

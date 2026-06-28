@@ -145,11 +145,11 @@ class _ManagementBottomBar extends StatelessWidget {
           color: context.reloopSurfaceRaised.withValues(alpha: .98),
           borderRadius: BorderRadius.circular(22),
           border: Border.all(color: context.reloopBorder),
-          boxShadow: const [
+          boxShadow: [
             BoxShadow(
-              color: Color(0x140D1710),
+              color: Colors.black.withValues(alpha: context.isDarkMode ? .38 : .08),
               blurRadius: 16,
-              offset: Offset(0, 6),
+              offset: const Offset(0, 6),
             ),
           ],
         ),

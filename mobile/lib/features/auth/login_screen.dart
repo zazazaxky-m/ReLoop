@@ -102,8 +102,8 @@ class _LoginScreenState extends State<LoginScreen> {
       child: RichText(
         text: TextSpan(
           text: text,
-          style: const TextStyle(
-            color: Color(0xFF0F3D21), // emerald-950
+          style: TextStyle(
+            color: context.reloopForeground,
             fontSize: 13,
             fontWeight: FontWeight.w700,
           ),
@@ -123,7 +123,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final auth = context.watch<AuthProvider>();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7FAF7),
+      backgroundColor: context.reloopBackground,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
@@ -137,44 +137,44 @@ class _LoginScreenState extends State<LoginScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: context.reloopSurfaceRaised,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: const Color(0x0D064E3B)),
-                  boxShadow: const [
+                  border: Border.all(color: context.reloopBorder),
+                  boxShadow: [
                     BoxShadow(
-                      color: Color(0x1A064E3B),
-                      blurRadius: 70,
-                      offset: Offset(0, 24),
+                      color: Colors.black.withValues(alpha: context.isDarkMode ? .38 : .08),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
                     ),
                   ],
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'SELAMAT DATANG KEMBALI',
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 1.6,
-                        color: ReLoopColors.brand600,
+                        color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
                       ),
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       'Masuk ke ReLoop',
                       style: TextStyle(
                         fontSize: 26,
                         fontWeight: FontWeight.w900,
-                        color: Color(0xFF0F3D21),
+                        color: context.reloopForeground,
                         letterSpacing: -0.5,
                       ),
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       'Lanjutkan aksi baikmu dari sini.',
                       style: TextStyle(
-                        color: Color(0x8C0F3D21),
+                        color: context.reloopMuted,
                         fontSize: 14,
                         height: 1.5,
                       ),
@@ -187,19 +187,19 @@ class _LoginScreenState extends State<LoginScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                           _buildLabel('Email'),
-                          TextFormField(
+                           TextFormField(
                             controller: _emailCtrl,
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
                             autofillHints: const [AutofillHints.email],
-                            style: const TextStyle(fontSize: 15),
+                            style: TextStyle(fontSize: 15, color: context.reloopForeground),
                             decoration: InputDecoration(
                               hintText: 'nama@email.com',
-                              hintStyle: const TextStyle(
-                                color: ReLoopColors.mutedSoft,
+                              hintStyle: TextStyle(
+                                color: context.reloopMutedSoft,
                                 fontSize: 15,
                               ),
-                              fillColor: const Color(0xFFFBFDFB),
+                              fillColor: context.reloopSurface,
                               filled: true,
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -207,18 +207,19 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x330F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                                    width: 1.5),
                               ),
                             ),
                             validator: (v) {
@@ -235,21 +236,21 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 16),
                           _buildLabel('Password'),
-                          TextFormField(
+                           TextFormField(
                             controller: _passwordCtrl,
                             obscureText: _obscurePassword,
                             textInputAction: TextInputAction.done,
                             autofillHints: const [AutofillHints.password],
                             onFieldSubmitted: (_) => _login(),
-                            style: const TextStyle(fontSize: 15),
+                            style: TextStyle(fontSize: 15, color: context.reloopForeground),
                             decoration: InputDecoration(
                               hintText: '••••••••',
-                              hintStyle: const TextStyle(
-                                color: ReLoopColors.mutedSoft,
+                              hintStyle: TextStyle(
+                                color: context.reloopMutedSoft,
                                 fontSize: 15,
                                 letterSpacing: 2.0,
                               ),
-                              fillColor: const Color(0xFFFBFDFB),
+                              fillColor: context.reloopSurface,
                               filled: true,
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -257,18 +258,19 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x330F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                                    width: 1.5),
                               ),
                               suffixIcon: IconButton(
                                 icon: Icon(
@@ -276,7 +278,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ? Icons.visibility_off_outlined
                                       : Icons.visibility_outlined,
                                   size: 20,
-                                  color: ReLoopColors.mutedSoft,
+                                  color: context.reloopMutedSoft,
                                 ),
                                 onPressed: () {
                                   setState(() {
@@ -299,15 +301,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       ),
                     ),
-                    if (auth.error != null) ...[
+                             if (auth.error != null) ...[
                       const SizedBox(height: 16),
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFEF2F2),
+                          color: context.isDarkMode ? const Color(0xFF2D1414) : const Color(0xFFFEF2F2),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFFFECACA)),
+                          border: Border.all(color: context.isDarkMode ? const Color(0xFF4A1F1F) : const Color(0xFFFECACA)),
                         ),
                         child: Row(
                           children: [
@@ -339,11 +341,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     if (_biometricAvailable && _biometricEnabled) ...[
                       const SizedBox(height: 16),
-                      const Center(
+                      Center(
                         child: Text(
                           'atau',
                           style: TextStyle(
-                              color: ReLoopColors.mutedSoft, fontSize: 13),
+                              color: context.reloopMutedSoft, fontSize: 13),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -355,7 +357,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             _biometricType == 'Face ID'
                                 ? Icons.face
                                 : Icons.fingerprint,
-                            color: ReLoopColors.brand600,
+                            color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
                           ),
                           label: Text(
                             'Login dengan $_biometricType',
@@ -365,9 +367,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: ReLoopColors.brand600,
-                            side: const BorderSide(
-                                color: ReLoopColors.brand200),
+                            foregroundColor: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                            side: BorderSide(
+                                color: context.isDarkMode ? ReLoopColors.brand800 : ReLoopColors.brand200),
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -381,18 +383,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       alignment: Alignment.center,
                       child: GestureDetector(
                         onTap: () => context.push('/register'),
-                        child: const Text.rich(
+                        child: Text.rich(
                           TextSpan(
                             text: 'Belum punya akun? ',
                             style: TextStyle(
-                              color: ReLoopColors.mutedSoft,
+                              color: context.reloopMutedSoft,
                               fontSize: 14,
                             ),
                             children: [
                               TextSpan(
                                 text: 'Daftar',
                                 style: TextStyle(
-                                  color: ReLoopColors.brand600,
+                                  color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
@@ -411,10 +413,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   onTap: () {
                     context.go('/onboarding');
                   },
-                  child: const Text(
+                  child: Text(
                     '← Kembali ke pengenalan',
                     style: TextStyle(
-                      color: Color(0x730F3D21), // emerald-950/45
+                      color: context.reloopMutedSoft,
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                     ),

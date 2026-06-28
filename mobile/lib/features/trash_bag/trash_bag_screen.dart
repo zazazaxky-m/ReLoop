@@ -93,7 +93,7 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
       return ListView(
         children: [
           const SizedBox(height: 80),
-          const Center(
+          Center(
             child: Column(
               children: [
                 Icon(Icons.delete_outline, size: 48, color: ReLoopColors.mutedSoft),
@@ -101,14 +101,14 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
                 Text(
                   'Belum ada trip',
                   style: TextStyle(
-                      color: ReLoopColors.foreground,
+                      color: context.reloopForeground,
                       fontSize: 16,
                       fontWeight: FontWeight.w700),
                 ),
                 SizedBox(height: 4),
                 Text(
                   'Belum ada penugasan kantong atau perjalanan',
-                  style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
+                  style: TextStyle(color: context.reloopMutedSoft, fontSize: 13),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -121,10 +121,10 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text(
+        Text(
           'Daftar Rombongan & Kantong',
           style: TextStyle(
-            color: ReLoopColors.foreground,
+            color: context.reloopForeground,
             fontSize: 14,
             fontWeight: FontWeight.w600,
           ),
@@ -148,9 +148,9 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
                       Expanded(
                         child: Text(
                           title,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w700,
-                            color: ReLoopColors.foreground,
+                            color: context.reloopForeground,
                             fontSize: 15,
                           ),
                         ),
@@ -161,8 +161,8 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
                   const SizedBox(height: 6),
                   Text(
                     '${trip.campaign?.name ?? '-'} • ${trip.participantCount} peserta',
-                    style: const TextStyle(
-                      color: ReLoopColors.muted,
+                    style: TextStyle(
+                      color: context.reloopMuted,
                       fontSize: 13,
                     ),
                   ),
@@ -170,8 +170,8 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
                     const SizedBox(height: 2),
                     Text(
                       'Ketua: ${trip.leaderName}',
-                      style: const TextStyle(
-                        color: ReLoopColors.mutedSoft,
+                      style: TextStyle(
+                        color: context.reloopMutedSoft,
                         fontSize: 12,
                       ),
                     ),
@@ -183,16 +183,16 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
                         child: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFE8F5E9),
+                            color: context.reloopBrandSoft,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Trash Bag QR',
                                 style: TextStyle(
-                                  color: ReLoopColors.brand800,
+                                  color: context.reloopBrandText,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -204,8 +204,8 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
                                     : 'Belum di-assign',
                                 style: TextStyle(
                                   color: bagCount > 0
-                                      ? ReLoopColors.brand600
-                                      : ReLoopColors.muted,
+                                      ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600)
+                                      : context.reloopMuted,
                                   fontSize: 13,
                                   fontWeight: bagCount > 0
                                       ? FontWeight.w700
@@ -221,16 +221,16 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
                         child: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: ReLoopColors.background,
+                            color: context.reloopSurfaceSoft,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Validasi Pengembalian',
                                 style: TextStyle(
-                                  color: ReLoopColors.foreground,
+                                  color: context.reloopForeground,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -242,8 +242,8 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
                                     : 'Belum diverifikasi',
                                 style: TextStyle(
                                   color: valCount > 0
-                                      ? ReLoopColors.brand600
-                                      : ReLoopColors.mutedSoft,
+                                      ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600)
+                                      : context.reloopMutedSoft,
                                   fontSize: 13,
                                   fontWeight: valCount > 0
                                       ? FontWeight.w700

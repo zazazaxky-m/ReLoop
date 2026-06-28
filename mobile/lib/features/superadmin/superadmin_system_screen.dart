@@ -226,10 +226,10 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
                   label: Text(f.isEmpty ? 'Semua' : f),
                   selected: isSelected,
                   onSelected: (_) => setState(() => _auditFilter = f),
-                  selectedColor: ReLoopColors.brand50,
-                  checkmarkColor: ReLoopColors.brand700,
+                  selectedColor: context.reloopBrandSoft,
+                  checkmarkColor: context.reloopBrandText,
                   labelStyle: TextStyle(
-                    color: isSelected ? ReLoopColors.brand700 : ReLoopColors.foreground,
+                    color: isSelected ? context.reloopBrandText : context.reloopForeground,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
@@ -263,9 +263,9 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
           style: Theme.of(context).textTheme.headlineMedium,
         ),
         const SizedBox(height: 6),
-        const Text(
+        Text(
           'Perubahan berlaku untuk seluruh organisasi dan aplikasi.',
-          style: TextStyle(color: ReLoopColors.muted),
+          style: TextStyle(color: context.reloopMuted),
         ),
         const SizedBox(height: 20),
         ReLoopCard(
@@ -368,12 +368,12 @@ class _LogCard extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: security ? const Color(0xFFFFF7E8) : ReLoopColors.brand50,
+              color: security ? (context.isDarkMode ? const Color(0xFF3A2D17) : const Color(0xFFFFF7E8)) : context.reloopBrandSoft,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
               security ? Icons.warning_amber_rounded : Icons.history_rounded,
-              color: security ? ReLoopColors.warning : ReLoopColors.brand700,
+              color: security ? ReLoopColors.warning : context.reloopBrandText,
               size: 20,
             ),
           ),
@@ -394,8 +394,8 @@ class _LogCard extends StatelessWidget {
                     data['entityType'],
                     data['occurredAt'] ?? data['createdAt'],
                   ].whereType<Object>().join(' · '),
-                  style: const TextStyle(
-                    color: ReLoopColors.muted,
+                  style: TextStyle(
+                    color: context.reloopMuted,
                     fontSize: 11.5,
                   ),
                 ),

@@ -54,8 +54,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       child: RichText(
         text: TextSpan(
           text: text,
-          style: const TextStyle(
-            color: Color(0xFF0F3D21), // emerald-950
+          style: TextStyle(
+            color: context.reloopForeground,
             fontSize: 13,
             fontWeight: FontWeight.w700,
           ),
@@ -75,7 +75,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final auth = context.watch<AuthProvider>();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7FAF7),
+      backgroundColor: context.reloopBackground,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
@@ -89,44 +89,44 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: context.reloopSurfaceRaised,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: const Color(0x0D064E3B)),
-                  boxShadow: const [
+                  border: Border.all(color: context.reloopBorder),
+                  boxShadow: [
                     BoxShadow(
-                      color: Color(0x1A064E3B),
-                      blurRadius: 70,
-                      offset: Offset(0, 24),
+                      color: Colors.black.withValues(alpha: context.isDarkMode ? .38 : .08),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
                     ),
                   ],
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'MULAI PERJALANANMU',
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 1.6,
-                        color: ReLoopColors.brand600,
+                        color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
                       ),
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       'Daftar ReLoop',
                       style: TextStyle(
                         fontSize: 26,
                         fontWeight: FontWeight.w900,
-                        color: Color(0xFF0F3D21),
+                        color: context.reloopForeground,
                         letterSpacing: -0.5,
                       ),
                     ),
                     const SizedBox(height: 8),
-                    const Text(
+                    Text(
                       'Satu menit untuk mulai memberi dampak.',
                       style: TextStyle(
-                        color: Color(0x8C0F3D21),
+                        color: context.reloopMuted,
                         fontSize: 14,
                         height: 1.5,
                       ),
@@ -139,19 +139,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                           _buildLabel('Nama Lengkap'),
-                          TextFormField(
+                           TextFormField(
                             controller: _nameCtrl,
                             textInputAction: TextInputAction.next,
                             textCapitalization: TextCapitalization.words,
                             autofillHints: const [AutofillHints.name],
-                            style: const TextStyle(fontSize: 15),
+                            style: TextStyle(fontSize: 15, color: context.reloopForeground),
                             decoration: InputDecoration(
                               hintText: 'Nama Anda',
-                              hintStyle: const TextStyle(
-                                color: ReLoopColors.mutedSoft,
+                              hintStyle: TextStyle(
+                                color: context.reloopMutedSoft,
                                 fontSize: 15,
                               ),
-                              fillColor: const Color(0xFFFBFDFB),
+                              fillColor: context.reloopSurface,
                               filled: true,
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -159,18 +159,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x330F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                                    width: 1.5),
                               ),
                             ),
                             validator: (v) {
@@ -182,19 +183,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                           const SizedBox(height: 16),
                           _buildLabel('Email'),
-                          TextFormField(
+                           TextFormField(
                             controller: _emailCtrl,
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
                             autofillHints: const [AutofillHints.email],
-                            style: const TextStyle(fontSize: 15),
+                            style: TextStyle(fontSize: 15, color: context.reloopForeground),
                             decoration: InputDecoration(
                               hintText: 'nama@email.com',
-                              hintStyle: const TextStyle(
-                                color: ReLoopColors.mutedSoft,
+                              hintStyle: TextStyle(
+                                color: context.reloopMutedSoft,
                                 fontSize: 15,
                               ),
-                              fillColor: const Color(0xFFFBFDFB),
+                              fillColor: context.reloopSurface,
                               filled: true,
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -202,18 +203,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x330F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                                    width: 1.5),
                               ),
                             ),
                             validator: (v) {
@@ -230,19 +232,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                           const SizedBox(height: 16),
                           _buildLabel('No. Telepon'),
-                          TextFormField(
+                           TextFormField(
                             controller: _phoneCtrl,
                             keyboardType: TextInputType.phone,
                             textInputAction: TextInputAction.next,
                             autofillHints: const [AutofillHints.telephoneNumber],
-                            style: const TextStyle(fontSize: 15),
+                            style: TextStyle(fontSize: 15, color: context.reloopForeground),
                             decoration: InputDecoration(
                               hintText: '08123456789',
-                              hintStyle: const TextStyle(
-                                color: ReLoopColors.mutedSoft,
+                              hintStyle: TextStyle(
+                                color: context.reloopMutedSoft,
                                 fontSize: 15,
                               ),
-                              fillColor: const Color(0xFFFBFDFB),
+                              fillColor: context.reloopSurface,
                               filled: true,
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -250,18 +252,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x330F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                                    width: 1.5),
                               ),
                             ),
                             validator: (v) {
@@ -277,21 +280,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                           const SizedBox(height: 16),
                           _buildLabel('Password'),
-                          TextFormField(
+                           TextFormField(
                             controller: _passwordCtrl,
                             obscureText: _obscurePassword,
                             textInputAction: TextInputAction.done,
                             autofillHints: const [AutofillHints.newPassword],
                             onFieldSubmitted: (_) => _register(),
-                            style: const TextStyle(fontSize: 15),
+                            style: TextStyle(fontSize: 15, color: context.reloopForeground),
                             decoration: InputDecoration(
                               hintText: '••••••••',
-                              hintStyle: const TextStyle(
-                                color: ReLoopColors.mutedSoft,
+                              hintStyle: TextStyle(
+                                color: context.reloopMutedSoft,
                                 fontSize: 15,
                                 letterSpacing: 2.0,
                               ),
-                              fillColor: const Color(0xFFFBFDFB),
+                              fillColor: context.reloopSurface,
                               filled: true,
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -299,18 +302,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x1A0F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.reloopBorder),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                    color: Color(0x330F3D21)),
+                                borderSide: BorderSide(
+                                    color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                                    width: 1.5),
                               ),
                               suffixIcon: IconButton(
                                 icon: Icon(
@@ -318,7 +322,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       ? Icons.visibility_off_outlined
                                       : Icons.visibility_outlined,
                                   size: 20,
-                                  color: ReLoopColors.mutedSoft,
+                                  color: context.reloopMutedSoft,
                                 ),
                                 onPressed: () {
                                   setState(() {
@@ -336,17 +340,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                         ],
                       ),
-                      ),
                     ),
-                    if (auth.error != null) ...[
+                    ),
+                             if (auth.error != null) ...[
                       const SizedBox(height: 16),
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFEF2F2),
+                          color: context.isDarkMode ? const Color(0xFF2D1414) : const Color(0xFFFEF2F2),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFFFECACA)),
+                          border: Border.all(color: context.isDarkMode ? const Color(0xFF4A1F1F) : const Color(0xFFFECACA)),
                         ),
                         child: Row(
                           children: [
@@ -381,18 +385,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       alignment: Alignment.center,
                       child: GestureDetector(
                         onTap: () => context.pop(),
-                        child: const Text.rich(
+                        child: Text.rich(
                           TextSpan(
                             text: 'Sudah punya akun? ',
                             style: TextStyle(
-                              color: ReLoopColors.mutedSoft,
+                              color: context.reloopMutedSoft,
                               fontSize: 14,
                             ),
                             children: [
                               TextSpan(
                                 text: 'Masuk',
                                 style: TextStyle(
-                                  color: ReLoopColors.brand600,
+                                  color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
@@ -411,10 +415,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   onTap: () {
                     context.go('/onboarding');
                   },
-                  child: const Text(
+                  child: Text(
                     '← Kembali ke pengenalan',
                     style: TextStyle(
-                      color: Color(0x730F3D21), // emerald-950/45
+                      color: context.reloopMutedSoft,
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                     ),

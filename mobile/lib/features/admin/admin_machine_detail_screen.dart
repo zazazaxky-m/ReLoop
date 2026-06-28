@@ -78,7 +78,7 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
                       children: [
                         const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
                         const SizedBox(height: 12),
-                        Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
+                        Text(_error!, style: TextStyle(color: context.reloopMuted)),
                         const SizedBox(height: 12),
                         TextButton(onPressed: _loadMachine, child: const Text('Coba Lagi')),
                       ],
@@ -154,8 +154,8 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
               const SizedBox(width: 8),
               Text(
                 'Kode: $code',
-                style: const TextStyle(
-                  color: ReLoopColors.muted,
+                style: TextStyle(
+                  color: context.reloopMuted,
                   fontSize: 13,
                 ),
               ),
@@ -213,7 +213,7 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
       children: [
         Icon(
           icon,
-          color: active ? ReLoopColors.brand500 : ReLoopColors.mutedSoft,
+          color: active ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500) : context.reloopMutedSoft,
           size: 28,
         ),
         const SizedBox(height: 4),
@@ -227,7 +227,7 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
           style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.bold,
-            color: active ? ReLoopColors.brand600 : ReLoopColors.mutedSoft,
+            color: active ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600) : context.reloopMutedSoft,
           ),
         ),
       ],
@@ -268,15 +268,15 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
             width: 130,
             child: Text(
               label,
-              style: const TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
+              style: TextStyle(color: context.reloopMutedSoft, fontSize: 13),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: ReLoopColors.foreground,
+                color: context.reloopForeground,
                 fontSize: 13,
               ),
             ),
@@ -308,14 +308,14 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
               return Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: ReLoopColors.brand50,
+                  color: context.reloopBrandSoft,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: ReLoopColors.brand200),
+                  border: Border.all(color: context.reloopBorder),
                 ),
                 child: Text(
                   name,
-                  style: const TextStyle(
-                    color: ReLoopColors.brand700,
+                  style: TextStyle(
+                    color: context.reloopBrandText,
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
                   ),
@@ -339,7 +339,7 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
             Center(
               child: Text(
                 'Belum ada sesi di mesin ini',
-                style: const TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
+                style: TextStyle(color: context.reloopMutedSoft, fontSize: 13),
               ),
             ),
           ],
@@ -361,18 +361,18 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: ReLoopColors.brand50,
+                        color: context.reloopBrandSoft,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(Icons.history_rounded,
-                          color: ReLoopColors.brand500, size: 18),
+                      child: Icon(Icons.history_rounded,
+                          color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500, size: 18),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         _formatDate(s['startedAt'] as String? ?? ''),
-                        style: const TextStyle(
-                          color: ReLoopColors.foreground,
+                        style: TextStyle(
+                          color: context.reloopForeground,
                           fontWeight: FontWeight.w500,
                           fontSize: 13,
                         ),

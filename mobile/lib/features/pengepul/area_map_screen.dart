@@ -264,17 +264,17 @@ class _AreaMapScreenState extends State<AreaMapScreen>
       body: Column(
         children: [
           Container(
-            decoration: const BoxDecoration(
-              color: ReLoopColors.surface,
+            decoration: BoxDecoration(
+              color: context.reloopSurface,
               border: Border(
-                bottom: BorderSide(color: ReLoopColors.border, width: 0.5),
+                bottom: BorderSide(color: context.reloopBorder, width: 0.5),
               ),
             ),
             child: TabBar(
               controller: _tabController,
-              labelColor: ReLoopColors.brand600,
-              unselectedLabelColor: ReLoopColors.mutedSoft,
-              indicatorColor: ReLoopColors.brand500,
+              labelColor: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+              unselectedLabelColor: context.reloopMutedSoft,
+              indicatorColor: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500,
               tabs: const [
                 Tab(text: 'Kemitraan'),
                 Tab(text: 'Peta Mesin'),
@@ -544,18 +544,18 @@ class _AreaMapScreenState extends State<AreaMapScreen>
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: ReLoopColors.surface,
+        color: context.reloopSurfaceRaised,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ReLoopColors.border),
-        boxShadow: const [
+        border: Border.all(color: context.reloopBorder),
+        boxShadow: [
           BoxShadow(
-              color: Colors.black12, blurRadius: 8, offset: Offset(0, 2)),
+              color: Colors.black.withValues(alpha: context.isDarkMode ? .3 : .08), blurRadius: 8, offset: const Offset(0, 2)),
         ],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _statItem('Total', '${_machines.length}', ReLoopColors.brand500),
+          _statItem('Total', '${_machines.length}', context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500),
           _statItem('Online', '$_onlineCount', ReLoopColors.statusOnline),
           _statItem('Penuh', '$_fullCount', ReLoopColors.statusFull),
         ],
@@ -577,8 +577,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
         const SizedBox(height: 2),
         Text(
           label,
-          style:
-              const TextStyle(color: ReLoopColors.mutedSoft, fontSize: 11),
+          style: TextStyle(color: context.reloopMutedSoft, fontSize: 11),
         ),
       ],
     );
@@ -591,14 +590,14 @@ class _AreaMapScreenState extends State<AreaMapScreen>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: ReLoopColors.surface,
+        color: context.reloopSurfaceRaised,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ReLoopColors.border),
-        boxShadow: const [
+        border: Border.all(color: context.reloopBorder),
+        boxShadow: [
           BoxShadow(
-              color: Colors.black12,
+              color: Colors.black.withValues(alpha: context.isDarkMode ? .3 : .08),
               blurRadius: 12,
-              offset: Offset(0, 4)),
+              offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -610,32 +609,32 @@ class _AreaMapScreenState extends State<AreaMapScreen>
               Expanded(
                 child: Text(
                   m.name,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w700,
-                    color: ReLoopColors.foreground,
+                    color: context.reloopForeground,
                     fontSize: 15,
                   ),
                 ),
               ),
               GestureDetector(
                 onTap: () => setState(() => _selectedMachine = null),
-                child: const Icon(Icons.close,
-                    size: 20, color: ReLoopColors.mutedSoft),
+                child: Icon(Icons.close,
+                    size: 20, color: context.reloopMutedSoft),
               ),
             ],
           ),
           const SizedBox(height: 4),
           Text(
             m.machineCode,
-            style: const TextStyle(
-                color: ReLoopColors.mutedSoft, fontSize: 12),
+            style: TextStyle(
+                color: context.reloopMutedSoft, fontSize: 12),
           ),
           if (m.organizationName != null) ...[
             const SizedBox(height: 2),
             Text(
               m.organizationName!,
-              style: const TextStyle(
-                  color: ReLoopColors.mutedSoft, fontSize: 12),
+              style: TextStyle(
+                  color: context.reloopMutedSoft, fontSize: 12),
             ),
           ],
           const SizedBox(height: 8),
@@ -646,8 +645,8 @@ class _AreaMapScreenState extends State<AreaMapScreen>
               if (m.fillLevelPercent > 0)
                 Text(
                   'Isi: ${m.fillLevelPercent}%',
-                  style: const TextStyle(
-                    color: ReLoopColors.muted,
+                  style: TextStyle(
+                    color: context.reloopMuted,
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
                   ),
