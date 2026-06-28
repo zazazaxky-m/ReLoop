@@ -44,8 +44,8 @@ export function DataTable<T>({
     >
       <div className="overflow-x-auto">
         <table className="w-full min-w-[700px] border-collapse text-sm">
-          <thead className="bg-slate-100/80">
-            <tr className="border-b border-border bg-slate-50/80">
+          <thead className="bg-surface-soft/80">
+            <tr className="border-b border-border bg-surface-soft/80">
               {columns.map((col) => (
                 <th
                   key={col.key}
@@ -64,7 +64,7 @@ export function DataTable<T>({
             {rows.map((row, i) => (
               <tr
                 key={getRowKey(row, i)}
-                className="border-b border-border last:border-0 transition-colors hover:bg-brand-50/50"
+                className="border-b border-border last:border-0 transition-colors hover:bg-surface-soft"
               >
                 {columns.map((col) => (
                   <td

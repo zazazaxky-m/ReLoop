@@ -20,7 +20,7 @@ export function CardHeader({
   return (
     <div
       className={cn(
-        "flex flex-col gap-1 border-b border-border bg-slate-50/60 px-4 py-3.5 sm:px-5 sm:py-4",
+        "flex flex-col gap-1 border-b border-border bg-surface-soft/60 px-4 py-3.5 sm:px-5 sm:py-4",
         className,
       )}
       {...props}
@@ -61,7 +61,7 @@ export function CardFooter({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 border-t border-border bg-slate-50/50 px-4 py-3.5 sm:px-5",
+        "flex items-center gap-3 border-t border-border bg-surface-soft/50 px-4 py-3.5 sm:px-5",
         className,
       )}
       {...props}

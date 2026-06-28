@@ -55,12 +55,13 @@ export function MachineRemoteConsole({
       });
       if (!response.ok) return;
       setData(await response.json());
-    } catch (error) {
+    } catch {
       // Abaikan error fetch jika server mati sementara
     }
   }, [machineId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
     const timer = window.setInterval(() => void load(), 2000);
     return () => window.clearInterval(timer);
@@ -206,7 +207,7 @@ export function MachineRemoteConsole({
             {data?.commands.slice(0, 6).map((item) => (
               <div
                 key={item.id}
-                className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-xs"
+                className="flex items-center justify-between gap-2 rounded-lg bg-surface-soft px-2.5 py-2 text-xs"
               >
                 <span className="truncate font-medium text-foreground">
                   {remoteCommandLabels[item.command]}
@@ -223,7 +224,7 @@ export function MachineRemoteConsole({
 
 function State({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border bg-slate-50 px-3 py-2">
+    <div className="rounded-lg border border-border bg-surface-soft px-3 py-2">
       <span className="block text-[10px] uppercase tracking-wide text-muted">
         {label}
       </span>

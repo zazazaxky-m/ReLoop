@@ -10,28 +10,28 @@ const toneStyles: Record<
 > = {
   green: {
     border: "border-t-brand-500",
-    icon: "bg-brand-50 text-brand-700",
-    value: "text-brand-800",
+    icon: "bg-brand-50 text-brand-700 dark:bg-brand-950/20 dark:text-brand-400",
+    value: "text-brand-800 dark:text-brand-400",
   },
   blue: {
     border: "border-t-blue-500",
-    icon: "bg-blue-50 text-blue-700",
-    value: "text-blue-800",
+    icon: "bg-blue-50 text-blue-700 dark:bg-blue-950/20 dark:text-blue-400",
+    value: "text-blue-800 dark:text-blue-400",
   },
   amber: {
     border: "border-t-amber-500",
-    icon: "bg-amber-50 text-amber-700",
-    value: "text-amber-800",
+    icon: "bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400",
+    value: "text-amber-800 dark:text-amber-400",
   },
   teal: {
     border: "border-t-teal-500",
-    icon: "bg-teal-50 text-teal-700",
-    value: "text-teal-800",
+    icon: "bg-teal-50 text-teal-700 dark:bg-teal-950/20 dark:text-teal-400",
+    value: "text-teal-800 dark:text-teal-400",
   },
   slate: {
     border: "border-t-slate-500",
-    icon: "bg-slate-100 text-slate-700",
-    value: "text-slate-800",
+    icon: "bg-slate-100 text-slate-700 dark:bg-surface-soft dark:text-muted",
+    value: "text-slate-800 dark:text-foreground",
   },
 };
 

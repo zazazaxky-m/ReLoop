@@ -51,15 +51,15 @@ export default async function UserTrashBagPage() {
                 {t.leaderName ? ` · ${t.leaderName}` : ""} · {t.participantCount} peserta
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl bg-mint/40 px-3 py-2">
-                  <p className="font-semibold text-brand-800">Trash bag ({t.bagAssignments.length})</p>
+                <div className="rounded-xl bg-mint/40 dark:bg-brand-950/20 px-3 py-2">
+                  <p className="font-semibold text-brand-800 dark:text-brand-400">Trash bag ({t.bagAssignments.length})</p>
                   <p className="mt-1 font-mono text-xs text-muted">
                     {t.bagAssignments.length
                       ? t.bagAssignments.map((b) => b.bagQrCode).join(", ")
                       : "Belum ada tas"}
                   </p>
                 </div>
-                <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <div className="rounded-xl bg-surface-soft px-3 py-2">
                   <p className="font-semibold text-foreground">Validasi ({t.validations.length})</p>
                   {t.validations.length ? (
                     <ul className="mt-1 space-y-1 text-xs text-muted">

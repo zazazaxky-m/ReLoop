@@ -98,19 +98,19 @@ export default async function Home() {
 
           <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-10 px-5 pb-14 pt-7 sm:px-8 sm:pt-9 lg:grid-cols-[1.02fr_.98fr] lg:px-10 lg:pb-20 lg:pt-10">
             <div className="relative z-10 min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-900/10 bg-white/75 px-3.5 py-2 text-xs font-bold uppercase tracking-[0.13em] text-emerald-800 shadow-sm backdrop-blur">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-900/10 dark:border-emerald-900/30 bg-white/75 dark:bg-emerald-950/20 px-3.5 py-2 text-xs font-bold uppercase tracking-[0.13em] text-emerald-800 dark:text-emerald-400 shadow-sm backdrop-blur">
                 <Leaf className="text-base" />
                 Satu aksi, dampak berulang
               </div>
 
-              <h1 className="mt-7 max-w-3xl text-[2.85rem] font-black leading-[0.94] tracking-[-0.065em] text-emerald-950 min-[370px]:text-[3.15rem] sm:text-7xl lg:text-[5.35rem]">
+              <h1 className="mt-7 max-w-3xl text-[2.85rem] font-black leading-[0.94] tracking-[-0.065em] text-emerald-950 dark:text-emerald-100 min-[370px]:text-[3.15rem] sm:text-7xl lg:text-[5.35rem]">
                 Sampah selesai.
                 <span className="mt-2 block text-emerald-600">
                   Dampak dimulai.
                 </span>
               </h1>
 
-              <p className="mt-7 max-w-xl text-base leading-7 text-emerald-950/62 sm:text-lg sm:leading-8">
+              <p className="mt-7 max-w-xl text-base leading-7 text-muted sm:text-lg sm:leading-8">
                 ReLoop membuat setoran, reward, dan pengambilan material bergerak
                 dalam satu alur yang sederhana—untuk warga, komunitas, dan kota.
               </p>
@@ -122,7 +122,7 @@ export default async function Home() {
                     variant: "primary",
                     size: "lg",
                     className:
-                      "h-14 rounded-full bg-emerald-700 px-7 shadow-[0_12px_30px_rgba(4,120,87,0.24)] hover:bg-emerald-800",
+                      "h-14 rounded-full bg-emerald-700 px-7 shadow-[0_12px_30px_rgba(4,120,87,0.24)] hover:bg-emerald-800 dark:bg-brand-600 dark:hover:bg-brand-500",
                   })}
                 >
                   Mulai setor <ArrowRight />
@@ -133,14 +133,14 @@ export default async function Home() {
                     variant: "outline",
                     size: "lg",
                     className:
-                      "h-14 rounded-full border-emerald-950/10 bg-white/70 px-7 shadow-none backdrop-blur hover:bg-white",
+                      "h-14 rounded-full border-emerald-950/10 dark:border-border bg-white/70 dark:bg-surface/70 px-7 shadow-none backdrop-blur hover:bg-white dark:hover:bg-surface",
                   })}
                 >
                   Buka dashboard
                 </Link>
               </div>
 
-              <div className="mt-10 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold text-emerald-950/65">
+              <div className="mt-10 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold text-muted">
                 <span className="flex items-center gap-2">
                   <CheckCircle className="text-lg text-emerald-600" />
                   Reward transparan
@@ -207,13 +207,13 @@ export default async function Home() {
             <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">
               Dibangun untuk bergerak bersama
             </p>
-            <h2 className="mt-4 max-w-xl text-4xl font-black leading-[1.05] tracking-[-0.05em] text-emerald-950 sm:text-5xl">
+            <h2 className="mt-4 max-w-xl text-4xl font-black leading-[1.05] tracking-[-0.05em] text-emerald-950 dark:text-emerald-100 sm:text-5xl">
               Semua orang punya peran dalam satu putaran.
             </h2>
           </div>
 
           <div className="lg:pt-3">
-            <p className="max-w-xl text-base leading-7 text-emerald-950/60 sm:text-lg sm:leading-8">
+            <p className="max-w-xl text-base leading-7 text-muted sm:text-lg sm:leading-8">
               Dari setoran harian hingga pengangkutan skala organisasi, ReLoop
               menjaga data dan pekerjaan tetap terhubung.
             </p>
@@ -223,13 +223,13 @@ export default async function Home() {
                 return (
                   <div
                     key={item}
-                    className="flex items-center gap-4 rounded-2xl border border-emerald-950/8 bg-white p-4 shadow-[0_8px_30px_rgba(6,78,59,0.05)]"
+                    className="flex items-center gap-4 rounded-2xl border border-emerald-950/8 dark:border-border bg-surface p-4 shadow-[0_8px_30px_rgba(6,78,59,0.05)] dark:shadow-none"
                   >
-                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-xl text-emerald-700">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-xl text-emerald-700 dark:bg-brand-950/20 dark:text-brand-400">
                       <Icon />
                     </span>
-                    <p className="font-bold text-emerald-950">{item}</p>
-                    <ArrowRight className="ml-auto text-emerald-900/25" />
+                    <p className="font-bold text-foreground">{item}</p>
+                    <ArrowRight className="ml-auto text-emerald-900/25 dark:text-muted-soft" />
                   </div>
                 );
               })}

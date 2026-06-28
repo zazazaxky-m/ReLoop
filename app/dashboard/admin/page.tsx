@@ -96,7 +96,7 @@ export default async function AdminDashboardPage() {
           <CardContent>
             <ul className="space-y-2">
               {machines.map((m) => (
-                <li key={m.id} className="rounded-md border border-border bg-slate-50/60 px-3 py-3 text-sm">
+                <li key={m.id} className="rounded-md border border-border bg-surface-soft/60 px-3 py-3 text-sm">
                   <div className="flex items-center justify-between gap-3">
                     <Link
                       href={`/dashboard/admin/machines/${m.id}`}
@@ -107,7 +107,7 @@ export default async function AdminDashboardPage() {
                     <StatusBadge status={m.status} />
                   </div>
                   <div className="mt-2 flex items-center gap-3">
-                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-border">
                       <div
                         className={m.fillLevelPercent >= 80 ? "h-full bg-amber-500" : "h-full bg-brand-500"}
                         style={{ width: `${Math.min(m.fillLevelPercent, 100)}%` }}

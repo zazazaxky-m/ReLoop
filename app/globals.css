@@ -4,6 +4,7 @@
   /* Surfaces */
   --color-background: #f3f7f5;
   --color-surface: #ffffff;
+  --color-surface-soft: #f8faf9;
   --color-foreground: #14211a;
   --color-muted: #5f6f66;
   --color-muted-soft: #8b9a91;
@@ -78,5 +79,21 @@ button:not(:disabled),
   ::-webkit-scrollbar-thumb {
     background: #bdcbc2;
     border-radius: 9999px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: #0b0f0d;
+    --color-surface: #101613;
+    --color-surface-soft: #161e1a;
+    --color-foreground: #e4e9e6;
+    --color-muted: #8b9a91;
+    --color-muted-soft: #5f6f66;
+    --color-border: #1d2722;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #2b3a32;
   }
 }

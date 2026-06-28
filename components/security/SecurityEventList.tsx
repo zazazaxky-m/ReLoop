@@ -29,23 +29,23 @@ export function SecurityEventList({
 }) {
   if (!events.length) {
     return (
-      <div className="rounded-xl border border-brand-100 bg-brand-50/60 p-6 text-center">
+      <div className="rounded-xl border border-brand-100 dark:border-brand-900/30 bg-brand-50/60 dark:bg-brand-950/20 p-6 text-center">
         <ShieldCheck className="mx-auto text-3xl text-brand-600" />
-        <p className="mt-2 font-semibold text-brand-800">Tidak ada peringatan keamanan</p>
+        <p className="mt-2 font-semibold text-brand-800 dark:text-brand-400">Tidak ada peringatan keamanan</p>
         <p className="mt-1 text-sm text-muted">Event fraud dan vandalisme akan muncul di sini.</p>
       </div>
     );
   }
 
   return (
-    <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-white">
+    <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
       {events.map((event) => (
         <div key={event.id} className="flex gap-3 p-4">
           <span
             className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
               event.eventType === "VANDALISM_DETECTED"
-                ? "bg-red-50 text-red-700"
-                : "bg-amber-50 text-amber-700"
+                ? "bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-400"
+                : "bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400"
             }`}
           >
             <AlertTriangle />
@@ -63,11 +63,11 @@ export function SecurityEventList({
               </div>
               <p className="text-xs text-muted">{formatDateTime(event.occurredAt)}</p>
             </div>
-            <p className="mt-2 text-sm text-slate-600">{detail(event.payload)}</p>
+            <p className="mt-2 text-sm text-muted">{detail(event.payload)}</p>
             {!compact ? (
               <Link
                 href={`/dashboard/superadmin/machines/${event.machine.id}`}
-                className="mt-2 inline-block text-xs font-semibold text-brand-700 hover:underline"
+                className="mt-2 inline-block text-xs font-semibold text-brand-700 dark:text-brand-400 hover:underline"
               >
                 Buka detail mesin
               </Link>

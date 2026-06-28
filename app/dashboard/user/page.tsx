@@ -137,7 +137,7 @@ export default async function UserDashboardPage() {
                 {sessions.map((session) => (
                   <li
                     key={session.id}
-                    className="flex items-center justify-between gap-3 rounded-md border border-border bg-slate-50/70 px-3 py-3 text-sm"
+                    className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-soft/70 px-3 py-3 text-sm"
                   >
                     <span className="min-w-0">
                       <span className="block truncate font-semibold">

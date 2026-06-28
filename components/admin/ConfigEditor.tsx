@@ -286,7 +286,7 @@ function SlideEditor({
           return (
             <div
               key={index}
-              className="rounded-2xl border border-border bg-slate-50/60 p-4"
+              className="rounded-2xl border border-border bg-surface-soft/60 p-4"
             >
               <div className="mb-4 flex items-center justify-between">
                 <p className="font-semibold text-foreground">Slide {index + 1}</p>
@@ -320,7 +320,7 @@ function SlideEditor({
                         Belum ada gambar
                       </div>
                     ) : null}
-                    <label className="absolute bottom-3 right-3 inline-flex h-9 cursor-pointer items-center justify-center rounded-lg bg-white px-3 text-sm font-semibold text-emerald-950 shadow-md hover:bg-emerald-50">
+                    <label className="absolute bottom-3 right-3 inline-flex h-9 cursor-pointer items-center justify-center rounded-lg bg-surface px-3 text-sm font-semibold text-foreground border border-border shadow-md hover:bg-surface-soft">
                       {uploading === uploadKey
                         ? "Mengunggah..."
                         : "Upload gambar"}

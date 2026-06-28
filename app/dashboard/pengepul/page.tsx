@@ -115,7 +115,7 @@ export default async function PengepulDashboardPage() {
                 {tasks.map((task) => (
                   <li
                     key={task.id}
-                    className="rounded-md border border-border bg-slate-50/60 px-3 py-3 text-sm"
+                    className="rounded-md border border-border bg-surface-soft/60 px-3 py-3 text-sm"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <span className="truncate font-semibold">

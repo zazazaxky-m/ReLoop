@@ -82,7 +82,7 @@ export function MachineDisplay({ code, kiosk = false }: { code: string; kiosk?: 
 
   return (
     <div className={`flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-brand-700 to-brand-900 text-white ${kiosk ? "cursor-none p-8" : "p-6"}`}>
-      <div className="rounded-2xl bg-white px-4 py-2.5 shadow-lg">
+      <div className="rounded-2xl bg-surface px-4 py-2.5 shadow-lg border border-border">
         <Image
           src="/reloop-logo-name.svg"
           alt="ReLoop"
@@ -93,7 +93,7 @@ export function MachineDisplay({ code, kiosk = false }: { code: string; kiosk?: 
         />
       </div>
 
-      <div className={`mt-8 w-full rounded-3xl bg-white text-center text-foreground shadow-2xl ${kiosk ? "max-w-lg p-9" : "max-w-sm p-6"}`}>
+      <div className={`mt-8 w-full rounded-3xl bg-surface text-center text-foreground shadow-2xl border border-border/80 ${kiosk ? "max-w-lg p-9" : "max-w-sm p-6"}`}>
         {error ? (
           <div className="py-12">
             <p className="text-lg font-semibold text-status-error">{error}</p>
@@ -111,7 +111,7 @@ export function MachineDisplay({ code, kiosk = false }: { code: string; kiosk?: 
               alt="QR dinamis mesin"
               className={`mx-auto mt-4 rounded-xl ${kiosk ? "h-80 w-80" : "h-64 w-64"}`}
             />
-            <p className="mt-3 font-medium text-brand-700">
+            <p className="mt-3 font-medium text-brand-600 dark:text-brand-400">
               Scan untuk mulai setor sampah
             </p>
             <p className="mt-1 text-xs text-muted">

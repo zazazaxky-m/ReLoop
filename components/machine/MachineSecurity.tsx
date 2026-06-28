@@ -74,14 +74,14 @@ export function MachineSecurity({
       {expanded ? (
         <CardContent className="space-y-3 border-t border-border text-sm">
           {error ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-status-error">
+            <div className="rounded-xl border border-red-200 bg-red-50 dark:border-red-900/30 dark:bg-red-950/20 px-3 py-2 text-status-error">
               {error}
             </div>
           ) : null}
           <p className="text-muted">
             Event mesin ditandatangani menggunakan HMAC-SHA256. Jaga secret ini tetap rahasia.
           </p>
-          <div className="break-all rounded-xl border border-border bg-slate-50 px-3 py-2 font-mono text-xs">
+          <div className="break-all rounded-xl border border-border bg-surface-soft px-3 py-2 font-mono text-xs">
             {secret ? (revealed ? secret : masked) : "Belum ada secret"}
           </div>
           <div className="flex flex-wrap gap-2">

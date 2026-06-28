@@ -172,8 +172,8 @@ export function AppShell({
                   active && variant === "mobile"
                     ? "bg-brand-600 text-white shadow-sm"
                     : active
-                      ? "bg-brand-50 text-brand-800"
-                      : "text-slate-600 hover:bg-slate-100 hover:text-foreground",
+                      ? "bg-brand-50 text-brand-800 dark:bg-brand-950/20 dark:text-brand-400"
+                      : "text-muted hover:bg-surface-soft hover:text-foreground",
                 )}
               >
                 {active && variant === "desktop" ? (
@@ -186,7 +186,7 @@ export function AppShell({
                       ? "bg-white/15 text-white"
                       : active
                         ? "bg-brand-600 text-white"
-                      : "bg-slate-100 text-slate-500 group-hover:bg-white group-hover:text-brand-700",
+                      : "bg-surface-soft text-muted-soft group-hover:bg-surface group-hover:text-brand-700",
                   )}
                 >
                   <Icon className="text-base" />
@@ -201,7 +201,7 @@ export function AppShell({
 
   const userFooter = (
     <div className="flex items-center gap-3 border-t border-border px-2 py-4">
-      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-sm font-semibold text-white">
+      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-sm font-semibold text-white dark:bg-brand-950 dark:text-brand-300 border border-transparent dark:border-brand-900/30">
         {user.name.charAt(0).toUpperCase()}
       </span>
       <div className="min-w-0 flex-1">
@@ -213,7 +213,7 @@ export function AppShell({
       <button
         onClick={logout}
         title="Keluar"
-        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-red-50 hover:text-status-error"
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-red-50 hover:text-status-error dark:hover:bg-red-950/20"
       >
         <LogOut className="text-lg" />
       </button>
@@ -227,7 +227,7 @@ export function AppShell({
           <Brand />
         </div>
         {user.organizationName ? (
-          <div className="border-b border-border bg-slate-50 px-5 py-3.5">
+          <div className="border-b border-border bg-surface-soft px-5 py-3.5">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-soft">
               Organisasi aktif
             </p>
@@ -246,7 +246,7 @@ export function AppShell({
         <header className="sticky top-0 z-30 hidden h-18 items-center justify-between border-b border-border bg-surface/95 px-8 backdrop-blur lg:flex">
           <div className="flex min-w-0 items-center gap-3">
             {CurrentIcon ? (
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-700 dark:bg-brand-950/20 dark:text-brand-400">
                 <CurrentIcon className="text-lg" />
               </span>
             ) : null}
@@ -260,10 +260,10 @@ export function AppShell({
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="rounded-md border border-border bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600">
+            <span className="rounded-md border border-border bg-surface-soft px-2.5 py-1.5 text-xs font-semibold text-muted">
               {ROLE_LABELS[user.role]}
             </span>
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white dark:bg-brand-950 dark:text-brand-300 border border-transparent dark:border-brand-900/30">
               {user.name.charAt(0).toUpperCase()}
             </span>
           </div>
@@ -283,7 +283,7 @@ export function AppShell({
           </div>
           <button
             onClick={logout}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-white text-muted shadow-sm hover:bg-red-50 hover:text-status-error"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-sm hover:bg-red-50 hover:text-status-error dark:hover:bg-red-950/20"
             aria-label="Keluar"
             title="Keluar"
           >
