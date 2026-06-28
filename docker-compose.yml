@@ -24,6 +24,8 @@ services:
     command: npx prisma migrate deploy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-reloop}:${POSTGRES_PASSWORD:-reloop}@db:5432/${POSTGRES_DB:-reloop}?schema=public
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-change-me-to-a-long-random-string}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -53,6 +55,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-reloop}:${POSTGRES_PASSWORD:-reloop}@db:5432/${POSTGRES_DB:-reloop}?schema=public
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-change-me-to-a-long-random-string}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-ReLoop}
       NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
       REALTIME_INTERNAL_SECRET: ${REALTIME_INTERNAL_SECRET:-reloop-dev-realtime-secret}
