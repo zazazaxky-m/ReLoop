@@ -6,18 +6,16 @@ import type { AppRole } from "./roles";
 export const SESSION_COOKIE = "reloop_session";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
-const secret = new TextEncoder().encode(
-  (() => {
-    const s = process.env.AUTH_JWT_SECRET;
-    if (!s || s === "dev-insecure-secret-change-me") {
-      if (process.env.NODE_ENV === "production") {
-        throw new Error("AUTH_JWT_SECRET must be set in production");
-      }
-      return "dev-insecure-secret-change-me";
+function getJwtSecret(): Uint8Array {
+  const s = process.env.AUTH_JWT_SECRET;
+  if (!s || s === "dev-insecure-secret-change-me") {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("AUTH_JWT_SECRET must be set in production");
     }
-    return s;
-  })(),
-);
+    return new TextEncoder().encode("dev-insecure-secret-change-me");
+  }
+  return new TextEncoder().encode(s);
+}
 
 export interface SessionPayload {
   sub: string;
@@ -43,14 +41,14 @@ export async function signSession(payload: SessionPayload): Promise<string> {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
-    .sign(secret);
+    .sign(getJwtSecret());
 }
 
 export async function verifySessionToken(
   token: string,
 ): Promise<SessionPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, getJwtSecret());
     return {
       sub: String(payload.sub),
       email: String(payload.email),
