@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_provider.dart';
@@ -82,6 +83,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     if (success && mounted) {
+      TextInput.finishAutofillContext();
       final bio = BiometricService();
       if (await bio.isEnabled) {
         await bio.saveCredentials(
@@ -89,6 +91,7 @@ class _LoginScreenState extends State<LoginScreen> {
           _passwordCtrl.text,
         );
       }
+      if (!mounted) return;
       context.go(auth.dashboardRoute);
     }
   }
@@ -179,14 +182,16 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 28),
                     Form(
                       key: _formKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
+                      child: AutofillGroup(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                           _buildLabel('Email'),
                           TextFormField(
                             controller: _emailCtrl,
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
+                            autofillHints: const [AutofillHints.email],
                             style: const TextStyle(fontSize: 15),
                             decoration: InputDecoration(
                               hintText: 'nama@email.com',
@@ -234,6 +239,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             controller: _passwordCtrl,
                             obscureText: _obscurePassword,
                             textInputAction: TextInputAction.done,
+                            autofillHints: const [AutofillHints.password],
                             onFieldSubmitted: (_) => _login(),
                             style: const TextStyle(fontSize: 15),
                             decoration: InputDecoration(
@@ -290,6 +296,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             },
                           ),
                         ],
+                      ),
                       ),
                     ),
                     if (auth.error != null) ...[

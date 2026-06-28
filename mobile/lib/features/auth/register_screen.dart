@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_provider.dart';
@@ -42,6 +43,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
 
     if (success && mounted) {
+      TextInput.finishAutofillContext();
       context.go(auth.dashboardRoute);
     }
   }
@@ -132,14 +134,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     const SizedBox(height: 28),
                     Form(
                       key: _formKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
+                      child: AutofillGroup(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                           _buildLabel('Nama Lengkap'),
                           TextFormField(
                             controller: _nameCtrl,
                             textInputAction: TextInputAction.next,
                             textCapitalization: TextCapitalization.words,
+                            autofillHints: const [AutofillHints.name],
                             style: const TextStyle(fontSize: 15),
                             decoration: InputDecoration(
                               hintText: 'Nama Anda',
@@ -182,6 +186,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             controller: _emailCtrl,
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
+                            autofillHints: const [AutofillHints.email],
                             style: const TextStyle(fontSize: 15),
                             decoration: InputDecoration(
                               hintText: 'nama@email.com',
@@ -229,6 +234,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             controller: _phoneCtrl,
                             keyboardType: TextInputType.phone,
                             textInputAction: TextInputAction.next,
+                            autofillHints: const [AutofillHints.telephoneNumber],
                             style: const TextStyle(fontSize: 15),
                             decoration: InputDecoration(
                               hintText: '08123456789',
@@ -275,6 +281,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             controller: _passwordCtrl,
                             obscureText: _obscurePassword,
                             textInputAction: TextInputAction.done,
+                            autofillHints: const [AutofillHints.newPassword],
                             onFieldSubmitted: (_) => _register(),
                             style: const TextStyle(fontSize: 15),
                             decoration: InputDecoration(
@@ -328,6 +335,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             },
                           ),
                         ],
+                      ),
                       ),
                     ),
                     if (auth.error != null) ...[
