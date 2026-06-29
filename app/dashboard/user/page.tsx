@@ -170,9 +170,9 @@ export default async function UserDashboardPage() {
                 {eligibleCampaigns.slice(0, 4).map((campaign) => (
                   <li
                     key={campaign.id}
-                    className="rounded-md border border-brand-100 bg-brand-50/70 px-3 py-2.5 text-sm"
+                    className="rounded-md border border-brand-100 bg-brand-50/70 px-3 py-2.5 text-sm dark:border-brand-900/30"
                   >
-                    <p className="font-semibold text-brand-800">
+                    <p className="font-semibold text-brand-800 dark:text-brand-400">
                       {campaign.name}
                     </p>
                     <p className="text-xs text-muted">

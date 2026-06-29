@@ -41,7 +41,7 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
         startX.current = null;
       }}
     >
-      <article className="relative aspect-[4/5] w-full overflow-hidden rounded-[2rem] bg-emerald-950 shadow-[0_28px_75px_rgba(6,78,59,0.18)] sm:aspect-[5/4.75] sm:rounded-[2.5rem]">
+      <article className="relative aspect-[4/5] w-full overflow-hidden rounded-[2rem] bg-brand-950 shadow-[0_28px_75px_rgba(6,78,59,0.18)] sm:aspect-[5/4.75] sm:rounded-[2.5rem]">
         {slides.map((slide, index) => (
           <div
             key={`${slide.title}-${index}`}
@@ -59,14 +59,14 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
               />
             ) : (
               <>
-                <div className="absolute -right-[17%] -top-[12%] h-[75%] w-[75%] rounded-full border-[4.5rem] border-lime-300 sm:border-[5.5rem]" />
-                <div className="absolute -bottom-[31%] -left-[20%] h-[70%] w-[70%] rounded-full border-[4rem] border-emerald-700 sm:border-[5rem]" />
-                <div className="absolute left-[12%] top-[15%] flex h-24 w-24 items-center justify-center rounded-[1.75rem] bg-white text-5xl text-emerald-700 shadow-2xl sm:h-28 sm:w-28 sm:text-6xl">
+                <div className="absolute -right-[17%] -top-[12%] h-[75%] w-[75%] rounded-full border-[4.5rem] border-lime-300 dark:border-lime-300/10 sm:border-[5.5rem]" />
+                <div className="absolute -bottom-[31%] -left-[20%] h-[70%] w-[70%] rounded-full border-[4rem] border-emerald-700 dark:border-brand-700/30 sm:border-[5rem]" />
+                <div className="absolute left-[12%] top-[15%] flex h-24 w-24 items-center justify-center rounded-[1.75rem] bg-surface text-5xl text-emerald-700 shadow-2xl dark:bg-surface/10 dark:text-brand-300 sm:h-28 sm:w-28 sm:text-6xl">
                   <Recycle />
                 </div>
               </>
             )}
-            <div className="absolute inset-0 bg-gradient-to-t from-emerald-950 via-emerald-950/45 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-brand-950 via-brand-950/45 to-transparent" />
           </div>
         ))}
 
@@ -84,7 +84,7 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
             <Link
               href={current.href}
               aria-label={`Buka: ${current.title}`}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-lime-300 text-xl text-emerald-950 transition-transform hover:scale-105"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-lime-300 text-xl text-brand-950 transition-transform hover:scale-105 dark:bg-lime-400"
             >
               <ArrowRight />
             </Link>
@@ -103,8 +103,8 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
                 onClick={() => setActive(index)}
                 className={`h-2 rounded-full transition-all ${
                   active === index
-                    ? "w-8 bg-emerald-700"
-                    : "w-2 bg-emerald-950/15 hover:bg-emerald-950/30"
+                    ? "w-8 bg-brand-700 dark:bg-brand-500"
+                    : "w-2 bg-brand-950/15 hover:bg-brand-950/30 dark:bg-brand-100/15 dark:hover:bg-brand-100/30"
                 }`}
               />
             ))}
@@ -114,7 +114,7 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
               type="button"
               aria-label="Slide sebelumnya"
               onClick={() => move(-1)}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-emerald-950/10 bg-white text-emerald-950 shadow-sm hover:bg-emerald-50"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface text-foreground shadow-sm hover:bg-surface-soft"
             >
               <ArrowRight className="rotate-180" />
             </button>
@@ -122,7 +122,7 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
               type="button"
               aria-label="Slide berikutnya"
               onClick={() => move(1)}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-emerald-950/10 bg-white text-emerald-950 shadow-sm hover:bg-emerald-50"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface text-foreground shadow-sm hover:bg-surface-soft"
             >
               <ArrowRight />
             </button>

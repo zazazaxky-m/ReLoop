@@ -94,6 +94,11 @@ button:not(:disabled),
   --color-muted-soft: #5f6f66;
   --color-border: #1d2722;
   --color-brand-950: #061d10;
+  --color-mint: #0f3d21;
+  --color-mint-soft: #082818;
+  --color-brand-50: #0a2e18;
+  --color-brand-100: #0f3d21;
+  --color-brand-200: #14532d;
 }
 
 .dark ::-webkit-scrollbar-thumb {

@@ -87,7 +87,7 @@ export function QrScanner({
         <p className="text-center text-sm text-muted">Membuka kamera…</p>
       ) : null}
       {error ? (
-        <p className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-status-error">
+        <p className="rounded-xl border border-red-200 bg-red-50 dark:border-red-900/30 dark:bg-red-950/20 px-3.5 py-2.5 text-sm text-status-error">
           {error}
         </p>
       ) : (

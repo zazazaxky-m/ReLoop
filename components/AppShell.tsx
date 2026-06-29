@@ -319,7 +319,7 @@ export function AppShell({
                 <span
                   className={cn(
                     "flex h-8 w-8 items-center justify-center rounded-lg",
-                    active ? "bg-brand-50 text-lg" : "text-lg",
+                    active ? "bg-brand-50 text-lg dark:bg-brand-950/30" : "text-lg",
                   )}
                 >
                   <Icon />

@@ -65,7 +65,7 @@ export default async function SuperadminDashboardPage() {
         />
       </div>
 
-      <Card className={securitySummary.alerts24h ? "border-amber-300 bg-amber-50/40" : ""}>
+      <Card className={securitySummary.alerts24h ? "border-amber-300 bg-amber-50/40 dark:border-amber-900/30 dark:bg-amber-950/20" : ""}>
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -76,7 +76,7 @@ export default async function SuperadminDashboardPage() {
                   : "Tidak ada alert dalam 24 jam terakhir."}
               </p>
             </div>
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100 text-xl text-amber-700">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100 text-xl text-amber-700 dark:bg-amber-950/20 dark:text-amber-400">
               <AlertTriangle />
             </span>
           </div>
@@ -144,7 +144,7 @@ export default async function SuperadminDashboardPage() {
               kecamatan, serta desa atau kelurahan di seluruh Indonesia.
             </p>
             <div className="mt-4 flex items-center gap-3 border-t border-border pt-4">
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-700 dark:bg-brand-950/20 dark:text-brand-400">
                 <Building />
               </span>
               <div>

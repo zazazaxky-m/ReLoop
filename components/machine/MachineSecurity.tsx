@@ -95,7 +95,7 @@ export function MachineSecurity({
               {busy ? "Memproses..." : "Rotasi Secret"}
             </Button>
           </div>
-          <div className="rounded-xl bg-mint/40 px-3 py-2 text-xs text-brand-800">
+          <div className="rounded-xl bg-mint/40 px-3 py-2 text-xs text-brand-800 dark:text-brand-400">
             <p className="font-semibold">Konfigurasi simulator</p>
             <p className="mt-1 break-all font-mono">
               python simulator.py -m {machineCode} --secret &lt;SECRET&gt; ...

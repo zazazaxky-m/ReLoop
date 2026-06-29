@@ -55,7 +55,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
   }
 
   const inputClass =
-    "h-11 rounded-xl border-emerald-950/10 bg-[#fbfdfb] px-4 text-[15px] shadow-none hover:border-emerald-900/20 sm:h-12";
+    "h-11 rounded-xl border-border bg-surface px-4 text-[15px] shadow-none hover:border-muted sm:h-12";
 
   return (
     <form
@@ -63,7 +63,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
       className={isRegister ? "grid gap-3.5 sm:grid-cols-2 sm:gap-4" : "space-y-4"}
     >
       {error ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-status-error sm:col-span-2">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-status-error dark:border-red-900/30 dark:bg-red-950/20 sm:col-span-2">
           {error}
         </div>
       ) : null}
@@ -130,7 +130,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
       <Button
         type="submit"
         size="lg"
-        className={`h-12 w-full rounded-xl bg-emerald-700 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-emerald-800 sm:h-13 ${
+        className={`h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 sm:h-13 ${
           isRegister ? "sm:col-span-2" : "mt-2"
         }`}
         disabled={loading}
@@ -139,14 +139,14 @@ export function AuthForm({ mode }: { mode: Mode }) {
       </Button>
 
       <p
-        className={`text-center text-sm text-emerald-950/55 ${
+        className={`text-center text-sm text-muted ${
           isRegister ? "sm:col-span-2" : "pt-1"
         }`}
       >
         {isRegister ? "Sudah punya akun? " : "Belum punya akun? "}
         <Link
           href={isRegister ? "/login" : "/register"}
-          className="font-bold text-emerald-700 hover:underline"
+          className="font-bold text-brand-700 hover:underline dark:text-brand-400"
         >
           {isRegister ? "Masuk" : "Daftar"}
         </Link>
