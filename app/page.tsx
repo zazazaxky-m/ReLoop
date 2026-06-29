@@ -240,13 +240,13 @@ export default async function Home() {
         </section>
 
         <section className="px-5 pb-8 sm:px-8 lg:px-10 lg:pb-10">
-          <div className="relative mx-auto max-w-7xl overflow-hidden rounded-[2rem] bg-lime-300 px-7 py-12 sm:px-12 sm:py-16 lg:flex lg:items-center lg:justify-between">
-            <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full border-[55px] border-emerald-950/5" />
+          <div className="relative mx-auto max-w-7xl overflow-hidden rounded-[2rem] bg-lime-300 px-7 py-12 dark:bg-brand-600 sm:px-12 sm:py-16 lg:flex lg:items-center lg:justify-between">
+            <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full border-[55px] border-emerald-950/5 dark:border-brand-950/30" />
             <div className="relative">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-800">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-800 dark:text-brand-100">
                 Giliranmu ikut memutar
               </p>
-              <h2 className="mt-3 max-w-2xl text-3xl font-black leading-tight tracking-[-0.045em] text-emerald-950 sm:text-5xl">
+              <h2 className="mt-3 max-w-2xl text-3xl font-black leading-tight tracking-[-0.045em] text-emerald-950 dark:text-white sm:text-5xl">
                 Mulai dari satu setoran hari ini.
               </h2>
             </div>
@@ -256,7 +256,7 @@ export default async function Home() {
                 variant: "primary",
                 size: "lg",
                 className:
-                  "relative mt-8 h-14 rounded-full bg-emerald-950 px-7 shadow-none hover:bg-emerald-800 lg:mt-0",
+                  "relative mt-8 h-14 rounded-full bg-emerald-950 px-7 shadow-none hover:bg-emerald-800 dark:bg-brand-950 dark:hover:bg-brand-900 lg:mt-0",
               })}
             >
               Buat akun gratis <ArrowRight />
@@ -266,7 +266,7 @@ export default async function Home() {
       </main>
 
       <footer className="px-5 py-8 sm:px-8 lg:px-10">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 border-t border-emerald-950/8 pt-7 text-sm text-emerald-950/48 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 border-t border-border pt-7 text-sm text-muted sm:flex-row sm:items-center sm:justify-between">
           <Image
             src="/reloop-logo-name.svg"
             alt="ReLoop"
