@@ -30,6 +30,7 @@ import {
   Users,
   Wallet,
 } from "@/components/ui/icons";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -260,6 +261,7 @@ export function AppShell({
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <span className="rounded-md border border-border bg-surface-soft px-2.5 py-1.5 text-xs font-semibold text-muted">
               {ROLE_LABELS[user.role]}
             </span>
@@ -281,14 +283,17 @@ export function AppShell({
               </p>
             </div>
           </div>
-          <button
-            onClick={logout}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-sm hover:bg-red-50 hover:text-status-error dark:hover:bg-red-950/20"
-            aria-label="Keluar"
-            title="Keluar"
-          >
-            <LogOut className="text-lg" />
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <button
+              onClick={logout}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-sm hover:bg-red-50 hover:text-status-error dark:hover:bg-red-950/20"
+              aria-label="Keluar"
+              title="Keluar"
+            >
+              <LogOut className="text-lg" />
+            </button>
+          </div>
         </header>
 
         <main className="mx-auto w-full max-w-7xl px-4 py-5 pb-28 sm:px-6 sm:py-7 lg:px-8 lg:pb-10">

@@ -195,6 +195,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (confirmed != true || passwordCtrl.text.isEmpty) return;
 
+    final auth = context.read<AuthProvider>();
+    final valid = await auth.verifyPassword(passwordCtrl.text);
+    if (!valid) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(auth.error ?? 'Password tidak sesuai')),
+        );
+      }
+      return;
+    }
+
     final authenticated = await BiometricService().authenticate(
       reason: 'Verifikasi identitas untuk mengaktifkan $_biometricType',
     );

@@ -15,6 +15,7 @@ import {
   Truck,
   Wallet,
 } from "@/components/ui/icons";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -51,8 +52,8 @@ export default async function Home() {
   );
 
   return (
-    <div className="min-h-screen overflow-hidden bg-[#f7faf7]">
-      <header className="relative z-30 border-b border-emerald-950/5 bg-[#f7faf7]/90 backdrop-blur-xl">
+    <div className="min-h-screen overflow-hidden bg-background">
+      <header className="relative z-30 border-b border-border bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex h-18 max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
           <Link href="/" className="flex items-center">
             <Image
@@ -66,6 +67,7 @@ export default async function Home() {
           </Link>
 
           <nav className="flex items-center gap-1 sm:gap-2">
+            <ThemeToggle />
             <Link
               href="/login"
               className={buttonVariants({

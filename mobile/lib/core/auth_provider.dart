@@ -86,6 +86,22 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> verifyPassword(String password) async {
+    try {
+      final response = await _api.post('/api/auth/verify-password', data: {
+        'password': password,
+      });
+      final data = response.data as Map<String, dynamic>;
+      return data['valid'] == true;
+    } on DioException catch (e) {
+      _error = ApiClient.getErrorMessage(e);
+      return false;
+    } catch (_) {
+      _error = 'Terjadi kesalahan. Coba lagi.';
+      return false;
+    }
+  }
+
   Future<bool> register(String name, String email, String password, String phone) async {
     _isLoading = true;
     _error = null;

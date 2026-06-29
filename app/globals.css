@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   /* Surfaces */
   --color-background: #f3f7f5;
@@ -21,6 +23,7 @@
   --color-brand-700: #14532d;
   --color-brand-800: #134e2a;
   --color-brand-900: #0f3d21;
+  --color-brand-950: #082818;
 
   /* Semantic helpers */
   --color-mint: #dcfce7;
@@ -82,18 +85,17 @@ button:not(:disabled),
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-background: #0b0f0d;
-    --color-surface: #101613;
-    --color-surface-soft: #161e1a;
-    --color-foreground: #e4e9e6;
-    --color-muted: #8b9a91;
-    --color-muted-soft: #5f6f66;
-    --color-border: #1d2722;
-  }
+.dark {
+  --color-background: #0b0f0d;
+  --color-surface: #101613;
+  --color-surface-soft: #161e1a;
+  --color-foreground: #e4e9e6;
+  --color-muted: #8b9a91;
+  --color-muted-soft: #5f6f66;
+  --color-border: #1d2722;
+  --color-brand-950: #061d10;
+}
 
-  ::-webkit-scrollbar-thumb {
-    background: #2b3a32;
-  }
+.dark ::-webkit-scrollbar-thumb {
+  background: #2b3a32;
 }
