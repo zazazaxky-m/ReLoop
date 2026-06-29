@@ -77,7 +77,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
         return ElevatedButton.styleFrom(
           backgroundColor: ReLoopColors.brand600,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: ReLoopColors.brand300,
+          disabledBackgroundColor: context.isDarkMode ? ReLoopColors.brand800 : ReLoopColors.brand300,
           disabledForegroundColor: Colors.white70,
           padding: size.padding,
           shape: RoundedRectangleBorder(

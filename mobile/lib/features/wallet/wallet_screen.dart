@@ -423,7 +423,7 @@ class _WalletScreenState extends State<WalletScreen> {
                                 decoration: BoxDecoration(
                                   color: entry.amount >= 0
                                       ? context.reloopBrandSoft
-                                      : (context.isDarkMode ? const Color(0xFF2D1414) : ReLoopColors.tones['danger']!.bg),
+                                      : context.reloopTone('danger').bg,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Icon(
@@ -432,7 +432,7 @@ class _WalletScreenState extends State<WalletScreen> {
                                       : Icons.remove_circle_outline,
                                   color: entry.amount >= 0
                                       ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500)
-                                      : ReLoopColors.danger,
+                                      : context.reloopTone('danger').text,
                                   size: 20,
                                 ),
                               ),

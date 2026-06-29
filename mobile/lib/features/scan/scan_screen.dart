@@ -160,7 +160,7 @@ class _ScanScreenState extends State<ScanScreen> {
                   height: 250,
                   decoration: BoxDecoration(
                     border: Border.all(
-                      color: ReLoopColors.brand500,
+                      color: context.reloopBrandText,
                       width: 2.5,
                     ),
                     borderRadius: BorderRadius.circular(16),
@@ -196,14 +196,14 @@ class _ScanScreenState extends State<ScanScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: ReLoopColors.tones['danger']!.bg,
+                    color: context.reloopTone('danger').bg,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: ReLoopColors.tones['danger']!.border),
+                    border: Border.all(color: context.reloopTone('danger').border),
                   ),
                   child: Text(
                     _error!,
-                    style: const TextStyle(
-                      color: ReLoopColors.danger,
+                    style: TextStyle(
+                      color: context.reloopTone('danger').text,
                       fontSize: 13,
                     ),
                     textAlign: TextAlign.center,
@@ -211,9 +211,9 @@ class _ScanScreenState extends State<ScanScreen> {
                 ),
                 const SizedBox(height: 16),
               ],
-              const Text(
+              Text(
                 'Arahkan kamera ke QR code mesin',
-                style: TextStyle(color: ReLoopColors.muted, fontSize: 13),
+                style: TextStyle(color: context.reloopMuted, fontSize: 13),
               ),
             ],
           ),
@@ -242,10 +242,10 @@ class _ScanScreenState extends State<ScanScreen> {
                 const SizedBox(height: 12),
                 Text(
                   result.resumed ? 'Sesi Dilanjutkan' : 'Sesi Dimulai!',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
-                    color: ReLoopColors.foreground,
+                    color: context.reloopForeground,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -253,7 +253,7 @@ class _ScanScreenState extends State<ScanScreen> {
                   result.resumed
                       ? 'Anda sudah memiliki sesi aktif di mesin ini'
                       : 'Silakan masukkan sampah ke mesin',
-                  style: const TextStyle(color: ReLoopColors.muted, fontSize: 13),
+                  style: TextStyle(color: context.reloopMuted, fontSize: 13),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -264,12 +264,12 @@ class _ScanScreenState extends State<ScanScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Info Mesin',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: ReLoopColors.foreground,
+                    color: context.reloopForeground,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -280,14 +280,14 @@ class _ScanScreenState extends State<ScanScreen> {
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    const Text('Status: ', style: TextStyle(color: ReLoopColors.muted)),
+                    Text('Status: ', style: TextStyle(color: context.reloopMuted)),
                     StatusBadge(statusKey: machine.status),
                   ],
                 ),
                 if (machine.supportedWasteTypes != null &&
                     machine.supportedWasteTypes!.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  const Text('Jenis sampah:', style: TextStyle(color: ReLoopColors.muted)),
+                  Text('Jenis sampah:', style: TextStyle(color: context.reloopMuted)),
                   const SizedBox(height: 4),
                   Wrap(
                     spacing: 6,
@@ -297,14 +297,14 @@ class _ScanScreenState extends State<ScanScreen> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: ReLoopColors.brand50,
+                                color: context.reloopBrandSoft,
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: ReLoopColors.brand200),
+                                border: Border.all(color: context.reloopBrandSoftStrong),
                               ),
                               child: Text(
                                 wt.name,
-                                style: const TextStyle(
-                                  color: ReLoopColors.brand700,
+                                style: TextStyle(
+                                  color: context.reloopBrandText,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -336,15 +336,15 @@ class _ScanScreenState extends State<ScanScreen> {
             width: 90,
             child: Text(
               label,
-              style: const TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
+              style: TextStyle(color: context.reloopMutedSoft, fontSize: 13),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: ReLoopColors.foreground,
+                color: context.reloopForeground,
                 fontSize: 13,
               ),
             ),

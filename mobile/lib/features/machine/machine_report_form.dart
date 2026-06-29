@@ -97,19 +97,19 @@ class _MachineReportFormState extends State<MachineReportForm> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: ReLoopColors.tones['warning']!.bg,
+                  color: context.reloopTone('warning').bg,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: ReLoopColors.tones['warning']!.border),
+                  border: Border.all(color: context.reloopTone('warning').border),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.info_outline, color: ReLoopColors.warning, size: 20),
+                    Icon(Icons.info_outline, color: context.reloopTone('warning').text, size: 20),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         'Laporkan kondisi mesin ${widget.machineCode}. Tim kami akan segera menindaklanjuti.',
-                        style: const TextStyle(
-                          color: ReLoopColors.warning,
+                        style: TextStyle(
+                          color: context.reloopTone('warning').text,
                           fontSize: 13,
                         ),
                       ),
