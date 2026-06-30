@@ -108,18 +108,11 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.cloud_off,
-              size: 48,
-              color: context.reloopMutedSoft,
-            ),
+            Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
             const SizedBox(height: 12),
             Text(_error!, style: TextStyle(color: context.reloopMuted)),
             const SizedBox(height: 12),
-            TextButton(
-              onPressed: _loadDashboard,
-              child: Text('Coba Lagi'),
-            ),
+            TextButton(onPressed: _loadDashboard, child: Text('Coba Lagi')),
           ],
         ),
       );

@@ -25,10 +25,16 @@ class AppTheme {
       brightness: brightness,
       primary: dark ? ReLoopColors.brand400 : ReLoopColors.brand600,
       surface: surface,
-      surfaceContainerLowest: dark ? const Color(0xFF111814) : ReLoopColors.background,
-      surfaceContainerLow: dark ? const Color(0xFF151D18) : const Color(0xFFF8FAF9),
+      surfaceContainerLowest: dark
+          ? const Color(0xFF111814)
+          : ReLoopColors.background,
+      surfaceContainerLow: dark
+          ? const Color(0xFF151D18)
+          : const Color(0xFFF8FAF9),
       surfaceContainer: dark ? const Color(0xFF19221C) : ReLoopColors.surface,
-      surfaceContainerHigh: dark ? const Color(0xFF202A23) : const Color(0xFFF1F5F2),
+      surfaceContainerHigh: dark
+          ? const Color(0xFF202A23)
+          : const Color(0xFFF1F5F2),
       onSurface: foreground,
       outline: border,
       outlineVariant: dark ? const Color(0xFF29362E) : const Color(0xFFEEF2EF),
@@ -90,7 +96,9 @@ class AppTheme {
           color: foreground,
         ),
       ),
-      iconTheme: IconThemeData(color: dark ? ReLoopColors.mutedDark : ReLoopColors.muted),
+      iconTheme: IconThemeData(
+        color: dark ? ReLoopColors.mutedDark : ReLoopColors.muted,
+      ),
       listTileTheme: ListTileThemeData(
         textColor: foreground,
         iconColor: muted,

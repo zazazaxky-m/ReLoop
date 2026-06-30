@@ -37,7 +37,8 @@ class ReLoopButton extends StatelessWidget {
                 width: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.5,
-                  color: variant == ReLoopButtonVariant.primary ||
+                  color:
+                      variant == ReLoopButtonVariant.primary ||
                           variant == ReLoopButtonVariant.danger
                       ? Colors.white
                       : ReLoopColors.brand600,
@@ -80,9 +81,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           disabledBackgroundColor: context.isDarkMode ? ReLoopColors.brand800 : ReLoopColors.brand300,
           disabledForegroundColor: Colors.white70,
           padding: size.padding,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         );
       case ReLoopButtonVariant.secondary:
         return ElevatedButton.styleFrom(
@@ -92,26 +91,20 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           disabledBackgroundColor: context.reloopBrandSoft,
           disabledForegroundColor: context.reloopMutedSoft,
           padding: size.padding,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         );
       case ReLoopButtonVariant.outline:
         return OutlinedButton.styleFrom(
           foregroundColor: context.reloopForeground,
           side: BorderSide(color: context.reloopBorder),
           padding: size.padding,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         );
       case ReLoopButtonVariant.ghost:
         return TextButton.styleFrom(
           foregroundColor: context.reloopForeground,
           padding: size.padding,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         );
       case ReLoopButtonVariant.danger:
         return ElevatedButton.styleFrom(
@@ -119,9 +112,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           foregroundColor: Colors.white,
           disabledBackgroundColor: ReLoopColors.danger.withValues(alpha: 0.5),
           padding: size.padding,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         );
     }
   }
@@ -132,28 +123,40 @@ enum ReLoopButtonSize { sm, md, lg, icon }
 extension _ButtonSizeStyle on ReLoopButtonSize {
   double get height {
     switch (this) {
-      case ReLoopButtonSize.sm: return 32;
-      case ReLoopButtonSize.md: return 40;
-      case ReLoopButtonSize.lg: return 48;
-      case ReLoopButtonSize.icon: return 40;
+      case ReLoopButtonSize.sm:
+        return 32;
+      case ReLoopButtonSize.md:
+        return 40;
+      case ReLoopButtonSize.lg:
+        return 48;
+      case ReLoopButtonSize.icon:
+        return 40;
     }
   }
 
   double get fontSize {
     switch (this) {
-      case ReLoopButtonSize.sm: return 13;
-      case ReLoopButtonSize.md: return 14;
-      case ReLoopButtonSize.lg: return 15;
-      case ReLoopButtonSize.icon: return 14;
+      case ReLoopButtonSize.sm:
+        return 13;
+      case ReLoopButtonSize.md:
+        return 14;
+      case ReLoopButtonSize.lg:
+        return 15;
+      case ReLoopButtonSize.icon:
+        return 14;
     }
   }
 
   double get iconSize {
     switch (this) {
-      case ReLoopButtonSize.sm: return 16;
-      case ReLoopButtonSize.md: return 18;
-      case ReLoopButtonSize.lg: return 20;
-      case ReLoopButtonSize.icon: return 20;
+      case ReLoopButtonSize.sm:
+        return 16;
+      case ReLoopButtonSize.md:
+        return 18;
+      case ReLoopButtonSize.lg:
+        return 20;
+      case ReLoopButtonSize.icon:
+        return 20;
     }
   }
 

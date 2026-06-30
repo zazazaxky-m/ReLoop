@@ -39,22 +39,30 @@ class QuickAction extends StatelessWidget {
       QuickActionTone.green => (
         background: ReLoopColors.brand600,
         icon: Colors.white,
-        soft: context.isDarkMode ? const Color(0xFF173D26) : ReLoopColors.brand50,
+        soft: context.isDarkMode
+            ? const Color(0xFF173D26)
+            : ReLoopColors.brand50,
       ),
       QuickActionTone.blue => (
         background: const Color(0xFF2877D5),
         icon: Colors.white,
-        soft: context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEDF5FF),
+        soft: context.isDarkMode
+            ? const Color(0xFF172D49)
+            : const Color(0xFFEDF5FF),
       ),
       QuickActionTone.amber => (
         background: const Color(0xFFE48B19),
         icon: Colors.white,
-        soft: context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFF5E7),
+        soft: context.isDarkMode
+            ? const Color(0xFF3E2B18)
+            : const Color(0xFFFFF5E7),
       ),
       QuickActionTone.teal => (
         background: const Color(0xFF159A91),
         icon: Colors.white,
-        soft: context.isDarkMode ? const Color(0xFF173936) : const Color(0xFFEAF9F7),
+        soft: context.isDarkMode
+            ? const Color(0xFF173936)
+            : const Color(0xFFEAF9F7),
       ),
     };
   }

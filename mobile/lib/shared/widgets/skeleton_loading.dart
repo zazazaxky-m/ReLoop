@@ -29,9 +29,10 @@ class _SkeletonBoxState extends State<SkeletonBox>
       duration: const Duration(milliseconds: 1500),
       vsync: this,
     )..repeat();
-    _animation = Tween<double>(begin: -1, end: 2).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _animation = Tween<double>(
+      begin: -1,
+      end: 2,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
@@ -83,10 +84,7 @@ class AnimatedBuilder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder2(
-      animation: animation,
-      builder: builder,
-    );
+    return AnimatedBuilder2(animation: animation, builder: builder);
   }
 }
 
@@ -206,11 +204,17 @@ class SkeletonDashboard extends StatelessWidget {
               const SizedBox(height: 20),
               Row(
                 children: [
-                  Expanded(child: SkeletonBox(width: double.infinity, height: 40)),
+                  Expanded(
+                    child: SkeletonBox(width: double.infinity, height: 40),
+                  ),
                   const SizedBox(width: 16),
-                  Expanded(child: SkeletonBox(width: double.infinity, height: 40)),
+                  Expanded(
+                    child: SkeletonBox(width: double.infinity, height: 40),
+                  ),
                   const SizedBox(width: 16),
-                  Expanded(child: SkeletonBox(width: double.infinity, height: 40)),
+                  Expanded(
+                    child: SkeletonBox(width: double.infinity, height: 40),
+                  ),
                 ],
               ),
             ],
@@ -219,11 +223,29 @@ class SkeletonDashboard extends StatelessWidget {
         const SizedBox(height: 20),
         Row(
           children: [
-            Expanded(child: SkeletonBox(width: double.infinity, height: 100, borderRadius: 12)),
+            Expanded(
+              child: SkeletonBox(
+                width: double.infinity,
+                height: 100,
+                borderRadius: 12,
+              ),
+            ),
             const SizedBox(width: 12),
-            Expanded(child: SkeletonBox(width: double.infinity, height: 100, borderRadius: 12)),
+            Expanded(
+              child: SkeletonBox(
+                width: double.infinity,
+                height: 100,
+                borderRadius: 12,
+              ),
+            ),
             const SizedBox(width: 12),
-            Expanded(child: SkeletonBox(width: double.infinity, height: 100, borderRadius: 12)),
+            Expanded(
+              child: SkeletonBox(
+                width: double.infinity,
+                height: 100,
+                borderRadius: 12,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 20),

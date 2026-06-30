@@ -85,16 +85,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.cloud_off,
-              size: 48,
-              color: context.reloopMutedSoft,
-            ),
+            Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
             const SizedBox(height: 12),
-            Text(
-              _error ?? '',
-              style: TextStyle(color: context.reloopMuted),
-            ),
+            Text(_error ?? '', style: TextStyle(color: context.reloopMuted)),
             TextButton(onPressed: _load, child: Text('Coba Lagi')),
           ],
         ),
@@ -256,10 +249,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             child: Center(
               child: Text(
                 emptyText,
-                style: TextStyle(
-                  color: context.reloopMutedSoft,
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: context.reloopMutedSoft, fontSize: 13),
               ),
             ),
           )

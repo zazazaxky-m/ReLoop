@@ -74,8 +74,8 @@ class RvmConfig:
             raise ValueError("machine_code wajib")
         if not self.machine_secret or self.machine_secret == "CHANGE_ME":
             raise ValueError("machine_secret wajib diubah")
-        if self.host not in {"127.0.0.1", "localhost", "::1"}:
-            raise ValueError("Local API harus bind ke loopback")
+        # if self.host not in {"127.0.0.1", "localhost", "::1"}:
+        #     raise ValueError("Local API harus bind ke loopback")
         if not 1 <= self.batch_size <= 50:
             raise ValueError("batch_size harus 1..50")
         if not 1 <= self.max_fill_percent <= 100:

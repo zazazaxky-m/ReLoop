@@ -24,9 +24,16 @@ class EmptyState extends StatelessWidget {
       decoration: BoxDecoration(
         color: context.reloopSurfaceRaised,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: context.reloopBorder, strokeAlign: BorderSide.strokeAlignInside),
+        border: Border.all(
+          color: context.reloopBorder,
+          strokeAlign: BorderSide.strokeAlignInside,
+        ),
         boxShadow: const [
-          BoxShadow(color: Color(0x0A0F172A), blurRadius: 2, offset: Offset(0, 1)),
+          BoxShadow(
+            color: Color(0x0A0F172A),
+            blurRadius: 2,
+            offset: Offset(0, 1),
+          ),
         ],
       ),
       child: Column(
@@ -57,16 +64,10 @@ class EmptyState extends StatelessWidget {
             Text(
               description!,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                color: context.reloopMuted,
-              ),
+              style: TextStyle(fontSize: 13, color: context.reloopMuted),
             ),
           ],
-          if (action != null) ...[
-            const SizedBox(height: 16),
-            action!,
-          ],
+          if (action != null) ...[const SizedBox(height: 16), action!],
         ],
       ),
     );

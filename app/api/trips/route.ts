@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit";
 
 const createSchema = z.object({
   campaignId: z.string().min(1),
+  travelAgentId: z.string().min(1).optional(),
   groupName: z.string().max(160).optional(),
   leaderName: z.string().max(120).optional(),
   leaderContact: z.string().max(60).optional(),
@@ -30,7 +31,8 @@ export async function GET() {
       where,
       orderBy: { createdAt: "desc" },
       include: {
-        campaign: { select: { id: true, name: true, organizationId: true } },
+        campaign: { select: { id: true, name: true, organizationId: true, rewardMode: true } },
+        travelAgent: { select: { id: true, name: true, email: true } },
         _count: { select: { bagAssignments: true, validations: true } },
       },
     });
@@ -49,6 +51,23 @@ export async function POST(req: Request) {
     if (!campaign) throw new HttpError(404, "Campaign tidak ditemukan");
     assertOrgScope(user, campaign.organizationId);
 
+    let travelAgentName = data.travelAgentName ?? null;
+    if (data.travelAgentId) {
+      const agentLink = await prisma.travelAgentOrganization.findUnique({
+        where: {
+          travelAgentId_organizationId: {
+            travelAgentId: data.travelAgentId,
+            organizationId: campaign.organizationId,
+          },
+        },
+        include: { travelAgent: { select: { name: true } } },
+      });
+      if (!agentLink || agentLink.status !== "INVITED") {
+        throw new HttpError(422, "Travel agent belum berstatus invited di organisasi ini");
+      }
+      travelAgentName = agentLink.travelAgent.name;
+    }
+
     let userId: string | null = null;
     if (data.userEmail) {
       const u = await prisma.user.findUnique({ where: { email: data.userEmail.toLowerCase() } });
@@ -60,7 +79,8 @@ export async function POST(req: Request) {
       data: {
         campaignId: campaign.id,
         userId,
-        travelAgentName: data.travelAgentName ?? null,
+        travelAgentId: data.travelAgentId ?? null,
+        travelAgentName,
         groupName: data.groupName ?? null,
         leaderName: data.leaderName ?? null,
         leaderContact: data.leaderContact ?? null,

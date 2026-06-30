@@ -259,10 +259,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                   ],
                 ),
               ),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: context.reloopMutedSoft,
-              ),
+              Icon(Icons.chevron_right_rounded, color: context.reloopMutedSoft),
             ],
           ),
         ),

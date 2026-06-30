@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { MetricCard, PageHeader } from "@/components/ui";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { displayUserField } from "@/lib/display-user";
 import { ShieldCheck, Clock } from "@/components/ui/icons";
 import { PartnershipPanel, type PartnerRow } from "@/components/pickup/PartnershipPanel";
 
@@ -39,9 +40,9 @@ export default async function SuperadminPartnershipsPage() {
         id: p.id,
         status: p.status,
         organizationName: p.organization.name,
-        collectorName: p.collectorUser.name,
-        collectorEmail: p.collectorUser.email,
-        collectorPhone: p.collectorUser.phone,
+        collectorName: displayUserField(p.collectorUser.name) ?? "-",
+        collectorEmail: displayUserField(p.collectorUser.email) ?? "-",
+        collectorPhone: displayUserField(p.collectorUser.phone),
         serviceRegions: area.regions ?? [],
         serviceNote: area.note ?? null,
       };

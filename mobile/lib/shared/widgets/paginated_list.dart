@@ -28,11 +28,7 @@ class PaginatedResult<T> {
   final String? nextCursor;
   final bool hasMore;
 
-  PaginatedResult({
-    required this.items,
-    this.nextCursor,
-    this.hasMore = false,
-  });
+  PaginatedResult({required this.items, this.nextCursor, this.hasMore = false});
 }
 
 class _PaginatedListState<T> extends State<PaginatedList<T>> {

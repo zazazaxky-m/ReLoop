@@ -3,12 +3,7 @@ import 'package:flutter/material.dart';
 import '../../theme/colors.dart';
 
 class ReLoopCard extends StatelessWidget {
-  const ReLoopCard({
-    super.key,
-    required this.child,
-    this.padding,
-    this.margin,
-  });
+  const ReLoopCard({super.key, required this.child, this.padding, this.margin});
 
   final Widget child;
   final EdgeInsetsGeometry? padding;

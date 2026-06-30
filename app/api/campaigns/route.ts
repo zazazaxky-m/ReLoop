@@ -13,6 +13,7 @@ const createSchema = z
     campaignType: z
       .enum(["MACHINE_DEPOSIT", "TRASH_BAG", "EVENT", "SCHOOL_PROGRAM", "TOURISM_PROGRAM"])
       .default("MACHINE_DEPOSIT"),
+    rewardMode: z.enum(["MONEY_REWARD", "COMPLIANCE_ONLY"]).default("MONEY_REWARD"),
     visibility: z.enum(["PUBLIC", "PRIVATE"]).default("PUBLIC"),
     allowedEmailDomains: z.array(z.string()).optional(),
     startAt: z.string().datetime().nullable().optional(),
@@ -81,6 +82,7 @@ export async function POST(req: Request) {
         name: data.name,
         description: data.description ?? null,
         campaignType: data.campaignType,
+        rewardMode: data.rewardMode,
         visibility: data.visibility,
         allowedEmailDomainsJson: domains ?? undefined,
         startAt: data.startAt ? new Date(data.startAt) : null,

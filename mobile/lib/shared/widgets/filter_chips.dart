@@ -23,7 +23,11 @@ class ReLoopFilterChips extends StatelessWidget {
         if (label != null) ...[
           Text(
             label!,
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.reloopMuted),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: context.reloopMuted,
+            ),
           ),
           const SizedBox(height: 8),
         ],
@@ -48,7 +52,9 @@ class ReLoopFilterChips extends StatelessWidget {
         decoration: BoxDecoration(
           color: isSelected ? ReLoopColors.brand500 : context.reloopSurfaceSoft,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: isSelected ? ReLoopColors.brand500 : context.reloopBorder),
+          border: Border.all(
+            color: isSelected ? ReLoopColors.brand500 : context.reloopBorder,
+          ),
         ),
         child: Text(
           label,

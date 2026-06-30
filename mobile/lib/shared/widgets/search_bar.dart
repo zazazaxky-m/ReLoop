@@ -29,10 +29,18 @@ class ReLoopSearchBar extends StatelessWidget {
         onChanged: onChanged,
         decoration: InputDecoration(
           hintText: hintText,
-          prefixIcon: Icon(Icons.search, size: 20, color: context.reloopMutedSoft),
+          prefixIcon: Icon(
+            Icons.search,
+            size: 20,
+            color: context.reloopMutedSoft,
+          ),
           suffixIcon: controller != null && controller!.text.isNotEmpty
               ? IconButton(
-                  icon: Icon(Icons.clear, size: 18, color: context.reloopMutedSoft),
+                  icon: Icon(
+                    Icons.clear,
+                    size: 18,
+                    color: context.reloopMutedSoft,
+                  ),
                   onPressed: () {
                     controller!.clear();
                     onChanged('');

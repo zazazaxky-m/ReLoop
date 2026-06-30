@@ -127,10 +127,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(
-              'Keluar',
-              style: TextStyle(color: ReLoopColors.danger),
-            ),
+            child: Text('Keluar', style: TextStyle(color: ReLoopColors.danger)),
           ),
         ],
       ),
@@ -275,10 +272,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 4),
                   Text(
                     user.email,
-                    style: TextStyle(
-                      color: context.reloopMuted,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(color: context.reloopMuted, fontSize: 14),
                   ),
                   const SizedBox(height: 8),
                   StatusBadge(statusKey: user.status),
@@ -602,10 +596,7 @@ class _InfoRow extends StatelessWidget {
             children: [
               Text(
                 label,
-                style: TextStyle(
-                  color: context.reloopMutedSoft,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: context.reloopMutedSoft, fontSize: 12),
               ),
               const SizedBox(height: 2),
               Text(
@@ -638,11 +629,7 @@ class _LegalLink extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
           children: [
-            Icon(
-              Icons.chevron_right,
-              size: 18,
-              color: context.reloopMutedSoft,
-            ),
+            Icon(Icons.chevron_right, size: 18, color: context.reloopMutedSoft),
             const SizedBox(width: 8),
             Text(
               label,

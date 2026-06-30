@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { PrintControls } from "@/components/trip/PrintControls";
 
 export const metadata: Metadata = { title: "Cetak QR Trash Bag" };
 
@@ -18,7 +19,10 @@ export default async function PrintTripQrsPage({ params }: PageProps) {
     where: { id },
     include: {
       campaign: { select: { name: true, organizationId: true } },
-      bagAssignments: { orderBy: { assignedAt: "asc" } },
+      bagAssignments: {
+        orderBy: { assignedAt: "asc" },
+        include: { wasteType: { select: { name: true } } },
+      },
     },
   });
 
@@ -40,9 +44,10 @@ export default async function PrintTripQrsPage({ params }: PageProps) {
       return {
         id: bag.id,
         code: bag.bagQrCode,
+        wasteTypeName: bag.wasteType?.name ?? "Campuran",
         qrDataUrl,
       };
-    })
+    }),
   );
 
   return (
@@ -55,20 +60,7 @@ export default async function PrintTripQrsPage({ params }: PageProps) {
             {trip.groupName ?? "Rombongan"} &middot; {trip.campaign.name}
           </p>
         </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => window.close()}
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Tutup Tab
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-          >
-            Cetak Sekarang
-          </button>
-        </div>
+        <PrintControls />
       </div>
 
       {/* Printable Area */}
@@ -101,26 +93,15 @@ export default async function PrintTripQrsPage({ params }: PageProps) {
                 <span className="mt-2 font-mono text-xs font-bold uppercase tracking-wider text-gray-900">
                   {bag.code}
                 </span>
+                <span className="mt-1 rounded-full border border-gray-300 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-700">
+                  {bag.wasteTypeName}
+                </span>
                 <span className="mt-0.5 text-[9px] text-gray-500">ReLoop Smart Waste Bank</span>
               </div>
             ))}
           </div>
         )}
       </div>
-
-      {/* Auto-print trigger scripts */}
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `
-            // Auto trigger print when loaded
-            window.addEventListener('load', function() {
-              setTimeout(function() {
-                window.print();
-              }, 500);
-            });
-          `,
-        }}
-      />
 
       <style dangerouslySetInnerHTML={{
         __html: `

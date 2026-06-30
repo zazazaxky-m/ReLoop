@@ -20,6 +20,10 @@ async function wipe() {
   await prisma.trashBagAssignment.deleteMany();
   await prisma.manualValidation.deleteMany();
   await prisma.trip.deleteMany();
+  await prisma.travelAgentInvite.deleteMany();
+  await prisma.travelAgentUser.deleteMany();
+  await prisma.travelAgentOrganization.deleteMany();
+  await prisma.travelAgent.deleteMany();
   await prisma.redemption.deleteMany();
   await prisma.payoutAccount.deleteMany();
   await prisma.rewardRate.deleteMany();
@@ -93,6 +97,21 @@ async function main() {
       status: "ACTIVE",
     },
   });
+  const orgC = await prisma.organization.create({
+    data: {
+      name: "Pantai Batu Hiu",
+      type: "TOURISM_SITE",
+      provinceId: jabar.id,
+      regencyId: pangandaranRegency.id,
+      districtId: pangandaranDistrict.id,
+      villageId: wonoharjo.id,
+      regionId: wonoharjo.id,
+      address: "Jl. Pantai Batu Hiu, Pangandaran",
+      contactName: "Dewi Lestari",
+      contactPhone: "081200000003",
+      status: "ACTIVE",
+    },
+  });
 
   // ---------- Users ----------
   const superadmin = await prisma.user.create({
@@ -101,11 +120,20 @@ async function main() {
   const admin = await prisma.user.create({
     data: { name: "Admin Pangandaran", email: "admin@reloop.id", phone: "081100000001", passwordHash, role: "ADMIN", organizationId: orgA.id },
   });
+  const adminTourism = await prisma.user.create({
+    data: { name: "Admin Batu Hiu", email: "admin.batuhiu@reloop.id", phone: "081100000004", passwordHash, role: "ADMIN", organizationId: orgC.id },
+  });
   const pengepul = await prisma.user.create({
     data: { name: "Pengepul Sejahtera", email: "pengepul@reloop.id", phone: "081100000002", passwordHash, role: "PENGEPUL" },
   });
   const user = await prisma.user.create({
     data: { name: "Warga Pangandaran", email: "user@reloop.id", phone: "081100000003", passwordHash, role: "USER" },
+  });
+  const travelAgentOwner = await prisma.user.create({
+    data: { name: "Owner Cahaya Tour", email: "cahaya@travel.test", phone: "081177700001", passwordHash, role: "USER" },
+  });
+  const multiAgentOwner = await prisma.user.create({
+    data: { name: "Owner Nusantara Holiday", email: "nusantara@travel.test", phone: "081177700003", passwordHash, role: "USER" },
   });
 
   // ---------- Collector partnerships ----------
@@ -221,18 +249,225 @@ async function main() {
     data: {
       organizationId: orgA.id, name: "Gerakan Bersih Pantai",
       description: "Setor botol & kaleng selama musim liburan, reward ekstra!",
-      campaignType: "MACHINE_DEPOSIT", visibility: "PUBLIC", status: "ACTIVE",
+      campaignType: "MACHINE_DEPOSIT", rewardMode: "MONEY_REWARD", visibility: "PUBLIC", status: "ACTIVE",
       startAt: daysAgo(7), endAt: new Date(Date.now() + 30 * 86_400_000), rewardMultiplier: 1.2,
+    },
+  });
+  const campaignTourism = await prisma.campaign.create({
+    data: {
+      organizationId: orgA.id,
+      name: "Uji Coba Trash Bag Wisata Pangandaran",
+      description: "Program compliance-only untuk wisatawan travel agent di gerbang masuk dan gerbang pulang.",
+      campaignType: "TOURISM_PROGRAM",
+      rewardMode: "COMPLIANCE_ONLY",
+      visibility: "PUBLIC",
+      status: "ACTIVE",
+      startAt: daysAgo(1),
+      endAt: new Date(Date.now() + 30 * 86_400_000),
     },
   });
   await prisma.campaign.create({
     data: {
       organizationId: orgB.id, name: "Bank Sampah Sekolah SMAN 1",
       description: "Program khusus warga sekolah (validasi domain email).",
-      campaignType: "SCHOOL_PROGRAM", visibility: "PRIVATE",
+      campaignType: "SCHOOL_PROGRAM", rewardMode: "MONEY_REWARD", visibility: "PRIVATE",
       allowedEmailDomainsJson: ["@sman1pangandaran.sch.id"], status: "ACTIVE",
       startAt: daysAgo(3), endAt: new Date(Date.now() + 60 * 86_400_000),
     },
+  });
+
+  // ---------- Demo tourism compliance ----------
+  const invitedAgent = await prisma.travelAgent.create({
+    data: {
+      name: "Cahaya Pangandaran Tour",
+      email: travelAgentOwner.email,
+      phone: travelAgentOwner.phone,
+      contactPerson: "Pak Rian Travel",
+    },
+  });
+  await prisma.travelAgentOrganization.create({
+    data: {
+      travelAgentId: invitedAgent.id,
+      organizationId: orgA.id,
+      status: "INVITED",
+      invitedById: admin.id,
+      approvedAt: new Date(),
+    },
+  });
+  await prisma.travelAgentInvite.create({
+    data: {
+      travelAgentId: invitedAgent.id,
+      organizationId: orgA.id,
+      email: invitedAgent.email,
+      status: "INVITED",
+      invitedById: admin.id,
+    },
+  });
+  await prisma.travelAgentUser.create({
+    data: { travelAgentId: invitedAgent.id, userId: travelAgentOwner.id, roleInAgent: "OWNER" },
+  });
+
+  const pendingAgent = await prisma.travelAgent.create({
+    data: {
+      name: "Laut Selatan Travel",
+      email: "pending.agent@travel.test",
+      phone: "081177700005",
+      contactPerson: "Mbak Nia",
+    },
+  });
+  await prisma.travelAgentOrganization.create({
+    data: {
+      travelAgentId: pendingAgent.id,
+      organizationId: orgA.id,
+      status: "PENDING",
+      invitedById: admin.id,
+      notes: "Email belum punya akun user. Akan otomatis INVITED setelah register memakai email ini.",
+    },
+  });
+  await prisma.travelAgentInvite.create({
+    data: {
+      travelAgentId: pendingAgent.id,
+      organizationId: orgA.id,
+      email: pendingAgent.email,
+      status: "PENDING",
+      invitedById: admin.id,
+    },
+  });
+
+  const multiOrgAgent = await prisma.travelAgent.create({
+    data: {
+      name: "Nusantara Holiday",
+      email: multiAgentOwner.email,
+      phone: multiAgentOwner.phone,
+      contactPerson: "Kak Dimas",
+    },
+  });
+  await prisma.travelAgentOrganization.createMany({
+    data: [
+      {
+        travelAgentId: multiOrgAgent.id,
+        organizationId: orgA.id,
+        status: "INVITED",
+        invitedById: admin.id,
+        approvedAt: new Date(),
+        notes: "Agent yang sama aktif di program Pangandaran.",
+      },
+      {
+        travelAgentId: multiOrgAgent.id,
+        organizationId: orgC.id,
+        status: "INVITED",
+        invitedById: adminTourism.id,
+        approvedAt: new Date(),
+        notes: "Agent yang sama juga terhubung ke tempat wisata lain.",
+      },
+    ],
+  });
+  await prisma.travelAgentInvite.createMany({
+    data: [
+      {
+        travelAgentId: multiOrgAgent.id,
+        organizationId: orgA.id,
+        email: multiOrgAgent.email,
+        status: "INVITED",
+        invitedById: admin.id,
+      },
+      {
+        travelAgentId: multiOrgAgent.id,
+        organizationId: orgC.id,
+        email: multiOrgAgent.email,
+        status: "INVITED",
+        invitedById: adminTourism.id,
+      },
+    ],
+  });
+  await prisma.travelAgentUser.create({
+    data: { travelAgentId: multiOrgAgent.id, userId: multiAgentOwner.id, roleInAgent: "OWNER" },
+  });
+  const tourismTrip = await prisma.trip.create({
+    data: {
+      campaignId: campaignTourism.id,
+      travelAgentId: invitedAgent.id,
+      travelAgentName: invitedAgent.name,
+      userId: travelAgentOwner.id,
+      groupName: "Rombongan Pantai Barat",
+      leaderName: "Ibu Sari",
+      leaderContact: "081177700002",
+      participantCount: 32,
+      status: "ACTIVE",
+      complianceStatus: "CHECKED_IN",
+      complianceScore: 30,
+      checkInAt: new Date(),
+    },
+  });
+  await prisma.trashBagAssignment.createMany({
+    data: [
+      { tripId: tourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-001", wasteTypeId: botol.id },
+      { tripId: tourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-002", wasteTypeId: kaleng.id },
+    ],
+  });
+  await prisma.manualValidation.create({
+    data: {
+      tripId: tourismTrip.id,
+      validatedById: admin.id,
+      validationStage: "CHECK_IN",
+      gateType: "ENTRY",
+      appCompleted: true,
+      complianceScore: 30,
+      complianceStatus: "CHECKED_IN",
+      notes: "Demo check-in gerbang masuk.",
+    },
+  });
+
+  const completedTourismTrip = await prisma.trip.create({
+    data: {
+      campaignId: campaignTourism.id,
+      travelAgentId: multiOrgAgent.id,
+      travelAgentName: multiOrgAgent.name,
+      userId: multiAgentOwner.id,
+      groupName: "Rombongan Green Trip",
+      leaderName: "Pak Dimas",
+      leaderContact: "081177700004",
+      participantCount: 24,
+      status: "COMPLETED",
+      complianceStatus: "COMPLIANT",
+      complianceScore: 100,
+      checkInAt: daysAgo(1),
+      checkOutAt: new Date(),
+    },
+  });
+  await prisma.trashBagAssignment.createMany({
+    data: [
+      { tripId: completedTourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-101", wasteTypeId: botol.id },
+      { tripId: completedTourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-102", wasteTypeId: kaleng.id },
+    ],
+  });
+  await prisma.manualValidation.createMany({
+    data: [
+      {
+        tripId: completedTourismTrip.id,
+        validatedById: admin.id,
+        validationStage: "CHECK_IN",
+        gateType: "ENTRY",
+        appCompleted: true,
+        complianceScore: 30,
+        complianceStatus: "CHECKED_IN",
+        notes: "Aplikasi sudah diisi saat kedatangan.",
+      },
+      {
+        tripId: completedTourismTrip.id,
+        validatedById: admin.id,
+        validationStage: "CHECK_OUT",
+        gateType: "EXIT",
+        bagQrCode: "BAG-DEMO-101",
+        returnedBagCount: 2,
+        actualWeightKg: 4.8,
+        conditionStatus: "GOOD",
+        appCompleted: true,
+        complianceScore: 100,
+        complianceStatus: "COMPLIANT",
+        notes: "Trash bag kembali lengkap dan sampah terpilah.",
+      },
+    ],
   });
 
   // ---------- System config ----------
@@ -302,8 +537,12 @@ async function main() {
   console.log("Demo accounts (password: password123):");
   console.log("  superadmin@reloop.id  (SUPERADMIN)");
   console.log("  admin@reloop.id       (ADMIN - Bank Sampah Pangandaran)");
+  console.log("  admin.batuhiu@reloop.id (ADMIN - Pantai Batu Hiu)");
   console.log("  pengepul@reloop.id    (PENGEPUL - active partner of org A)");
   console.log("  user@reloop.id        (USER - balance Rp12.500, Rp200 pending)");
+  console.log("  cahaya@travel.test    (USER - Travel Agent INVITED)");
+  console.log("  nusantara@travel.test (USER - Travel Agent multi-tempat wisata)");
+  console.log("  pending.agent@travel.test belum punya akun, status seed = PENDING");
   console.log("\nMachines: RLP-001 (ONLINE), RLP-002 (FULL), SMA-001 (ONLINE)");
   console.log("\nPer-machine ingest secrets (for the Python simulator):");
   for (const [codeName, sec] of Object.entries(secrets)) {

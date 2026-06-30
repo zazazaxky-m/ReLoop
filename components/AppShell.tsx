@@ -58,6 +58,7 @@ const NAV: Record<AppRole, NavItem[]> = {
   PENGEPUL: [
     { label: "Dashboard", href: "/dashboard/pengepul", icon: LayoutDashboard, group: "Utama", exact: true, primary: true },
     { label: "Tugas Pickup", mobileLabel: "Tugas", href: "/dashboard/pengepul/tasks", icon: Truck, group: "Utama", primary: true, emphasis: true },
+    { label: "Pickup Wisata", mobileLabel: "Wisata", href: "/dashboard/pengepul/tourism-pickups", icon: Trash, group: "Utama", primary: true },
     { label: "Peta Mesin", mobileLabel: "Peta", href: "/dashboard/pengepul/map", icon: Map, group: "Operasional", primary: true },
     { label: "Area Layanan", mobileLabel: "Area", href: "/dashboard/pengepul/area", icon: MapPin, group: "Operasional", primary: true },
     { label: "Profil", href: "/dashboard/pengepul/profile", icon: User, group: "Manajemen" },
@@ -69,7 +70,9 @@ const NAV: Record<AppRole, NavItem[]> = {
     { label: "Campaign", mobileLabel: "Program", href: "/dashboard/admin/campaigns", icon: Megaphone, group: "Operasional" },
     { label: "Jenis Sampah & Tarif", mobileLabel: "Jenis", href: "/dashboard/admin/waste-types", icon: Trash, group: "Operasional" },
     { label: "Mitra Pengepul", mobileLabel: "Mitra", href: "/dashboard/admin/partners", icon: Users, group: "Manajemen" },
+    { label: "Travel Agent", mobileLabel: "Agent", href: "/dashboard/admin/travel-agents", icon: Users, group: "Manajemen" },
     { label: "Trip / Trash Bag", mobileLabel: "Trip", href: "/dashboard/admin/trips", icon: Trash, group: "Manajemen" },
+    { label: "Compliance", mobileLabel: "Patuh", href: "/dashboard/admin/compliance", icon: ShieldCheck, group: "Manajemen" },
     { label: "Laporan", href: "/dashboard/admin/reports", icon: FileText, group: "Manajemen", primary: true },
   ],
   SUPERADMIN: [

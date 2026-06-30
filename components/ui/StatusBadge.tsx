@@ -88,6 +88,14 @@ const REGISTRY: Record<string, StatusMeta> = {
   PAID: { label: "Dibayar", tone: "success", Icon: CheckCircle },
   PICKUP_REQUESTED: { label: "Pickup Diminta", tone: "info", Icon: Truck },
   PENDING_REWARD: { label: "Reward Pending", tone: "warning", Icon: Clock },
+  NOT_STARTED: { label: "Belum Mulai", tone: "neutral", Icon: Dot },
+  CHECKED_IN: { label: "Sudah Masuk", tone: "info", Icon: MapPin },
+  COMPLIANT: { label: "Patuh", tone: "success", Icon: CheckCircle },
+  NEEDS_REVIEW: { label: "Perlu Evaluasi", tone: "warning", Icon: AlertTriangle },
+  NON_COMPLIANT: { label: "Tidak Patuh", tone: "danger", Icon: XCircle },
+  CHECK_IN: { label: "Gerbang Masuk", tone: "info", Icon: MapPin },
+  CHECK_OUT: { label: "Gerbang Pulang", tone: "brand", Icon: MapPin },
+  BANK_SAMPAH_PICKUP: { label: "Pickup Bank Sampah", tone: "success", Icon: Truck },
 };
 
 function humanize(status: string) {
