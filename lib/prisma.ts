@@ -29,30 +29,39 @@ export const prisma = basePrisma.$extends({
       async $allOperations({ args, query }) {
         const a = args as Record<string, unknown>;
 
+        const processEncrypt = (val: unknown, deterministic = false): unknown => {
+          if (typeof val === "string") return deterministic ? encryptDeterministic(val) : encrypt(val);
+          if (val && typeof val === "object") {
+            const obj = val as Record<string, unknown>;
+            if (typeof obj.equals === "string") obj.equals = deterministic ? encryptDeterministic(obj.equals) : encrypt(obj.equals);
+            if (typeof obj.set === "string") obj.set = deterministic ? encryptDeterministic(obj.set) : encrypt(obj.set);
+            if (Array.isArray(obj.in)) obj.in = obj.in.map(e => typeof e === "string" ? (deterministic ? encryptDeterministic(e) : encrypt(e)) : e);
+          }
+          return val;
+        };
+
         const where = a.where as Record<string, unknown> | undefined;
-        if (where?.email) {
-          where.email = encryptDeterministic(where.email as string);
-        }
+        if (where?.email) where.email = processEncrypt(where.email, true);
 
         const data = a.data as Record<string, unknown> | undefined;
         if (data) {
-          if (data.name) data.name = encrypt(data.name as string);
-          if (data.phone) data.phone = encrypt(data.phone as string);
-          if (data.email) data.email = encryptDeterministic(data.email as string);
+          if (data.name) data.name = processEncrypt(data.name);
+          if (data.phone) data.phone = processEncrypt(data.phone);
+          if (data.email) data.email = processEncrypt(data.email, true);
         }
 
         const createData = a.create as Record<string, unknown> | undefined;
         if (createData) {
-          if (createData.name) createData.name = encrypt(createData.name as string);
-          if (createData.phone) createData.phone = encrypt(createData.phone as string);
-          if (createData.email) createData.email = encryptDeterministic(createData.email as string);
+          if (createData.name) createData.name = processEncrypt(createData.name);
+          if (createData.phone) createData.phone = processEncrypt(createData.phone);
+          if (createData.email) createData.email = processEncrypt(createData.email, true);
         }
 
         const updateData = a.update as Record<string, unknown> | undefined;
         if (updateData) {
-          if (updateData.name) updateData.name = encrypt(updateData.name as string);
-          if (updateData.phone) updateData.phone = encrypt(updateData.phone as string);
-          if (updateData.email) updateData.email = encryptDeterministic(updateData.email as string);
+          if (updateData.name) updateData.name = processEncrypt(updateData.name);
+          if (updateData.phone) updateData.phone = processEncrypt(updateData.phone);
+          if (updateData.email) updateData.email = processEncrypt(updateData.email, true);
         }
 
         const result = await query(args);
