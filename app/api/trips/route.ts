@@ -7,13 +7,13 @@ import { logAudit } from "@/lib/audit";
 
 const createSchema = z.object({
   campaignId: z.string().min(1),
-  travelAgentId: z.string().min(1).optional(),
-  groupName: z.string().max(160).optional(),
-  leaderName: z.string().max(120).optional(),
-  leaderContact: z.string().max(60).optional(),
-  travelAgentName: z.string().max(160).optional(),
-  participantCount: z.number().int().min(1).max(1000).optional(),
-  userEmail: z.string().email().optional(),
+  travelAgentId: z.string().min(1).nullable().optional(),
+  groupName: z.string().max(160).nullable().optional(),
+  leaderName: z.string().max(120).nullable().optional(),
+  leaderContact: z.string().max(60).nullable().optional(),
+  travelAgentName: z.string().max(160).nullable().optional(),
+  participantCount: z.number().int().min(1).max(1000).nullable().optional(),
+  userEmail: z.string().email().nullable().optional(),
 });
 
 export async function GET() {
