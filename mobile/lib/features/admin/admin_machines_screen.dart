@@ -275,7 +275,7 @@ class _AdminMachinesScreenState extends State<AdminMachinesScreen> {
                   child: LinearProgressIndicator(
                     value: fillLevel / 100,
                     minHeight: 6,
-                    backgroundColor: ReLoopColors.border,
+                    backgroundColor: context.reloopBorder,
                     valueColor: AlwaysStoppedAnimation<Color>(fillColor),
                   ),
                 ),

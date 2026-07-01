@@ -125,7 +125,7 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                 Icon(
                   Icons.campaign_outlined,
                   size: 48,
-                  color: ReLoopColors.mutedSoft,
+                  color: context.reloopMutedSoft,
                 ),
                 SizedBox(height: 12),
                 Text(

@@ -722,6 +722,37 @@ async function main() {
     ],
   });
 
+  // Travel-agent users keep role USER; the link in TravelAgentUser enables the
+  // extra points UI. Seed a little wallet activity so the points card is visible.
+  await prisma.rewardLedger.createMany({
+    data: [
+      {
+        userId: travelAgentOwner.id,
+        organizationId: orgA.id,
+        campaignId: campaignTourism.id,
+        entryType: "EARN",
+        amount: 7800,
+        status: "AVAILABLE",
+        reasonCode: "TOURISM_COMPLIANCE_BONUS",
+        referenceType: "Trip",
+        referenceId: tourismTrip.id,
+        createdAt: daysAgo(1),
+      },
+      {
+        userId: multiAgentOwner.id,
+        organizationId: orgA.id,
+        campaignId: campaignTourism.id,
+        entryType: "EARN",
+        amount: 12500,
+        status: "AVAILABLE",
+        reasonCode: "TOURISM_COMPLIANCE_BONUS",
+        referenceType: "Trip",
+        referenceId: completedTourismTrip.id,
+        createdAt: daysAgo(1),
+      },
+    ],
+  });
+
   // ==========================================================
   // Deposit sessions — User 3 (Eko Prasetyo) — multiple sessions
   // ==========================================================
@@ -1482,8 +1513,8 @@ async function main() {
   console.log("  siti@reloop.id            (USER - balance Rp4.400, Rp4k redemption processing)");
   console.log("  eko@reloop.id             (USER - balance Rp4.900, Rp5k redeemed successfully)");
   console.log("  suspended@reloop.id       (USER - SUSPENDED)");
-  console.log("  cahaya@travel.test        (USER - Travel Agent INVITED)");
-  console.log("  nusantara@travel.test     (USER - Travel Agent multi-tempat wisata)");
+  console.log("  cahaya@travel.test        (USER - Travel Agent INVITED, points visible)");
+  console.log("  nusantara@travel.test     (USER - Travel Agent multi-tempat wisata, points visible)");
   console.log("  pending.agent@travel.test belum punya akun, status seed = PENDING");
   console.log("\nMachines: RLP-001 (ONLINE), RLP-002 (FULL), SMA-001 (ONLINE), BTH-001 (MAINTENANCE)");
   console.log("\nPer-machine ingest secrets (for the Python simulator):");
