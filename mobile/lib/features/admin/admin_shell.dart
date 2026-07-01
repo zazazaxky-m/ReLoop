@@ -73,7 +73,7 @@ class AdminShell extends StatelessWidget {
               ],
             ),
             actions: [
-              if (actions != null) ...actions!,
+              ...?actions,
               Padding(
                 padding: const EdgeInsets.only(right: 14),
                 child: InkWell(
@@ -412,6 +412,8 @@ void _showMoreBottomSheet(BuildContext context, bool isSuper) {
           _AdminNavItem('Jenis & Tarif', Icons.delete_outline, '/admin/waste-types'),
           _AdminNavItem('Mitra Pengepul', Icons.handshake_outlined, '/admin/partners'),
           _AdminNavItem('Trip / Trash Bag', Icons.luggage_outlined, '/admin/trips'),
+          _AdminNavItem('Travel Agent', Icons.badge_outlined, '/admin/travel-agents'),
+          _AdminNavItem('Compliance', Icons.fact_check_outlined, '/admin/compliance'),
           _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
         ];
 
@@ -527,6 +529,8 @@ const _adminDesktop = [
   ),
   _AdminNavItem('Mitra Pengepul', Icons.handshake_outlined, '/admin/partners'),
   _AdminNavItem('Trip / Trash Bag', Icons.luggage_outlined, '/admin/trips'),
+  _AdminNavItem('Travel Agent', Icons.badge_outlined, '/admin/travel-agents'),
+  _AdminNavItem('Compliance', Icons.fact_check_outlined, '/admin/compliance'),
   _AdminNavItem('Laporan', Icons.description_outlined, '/admin/reports'),
   _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
 ];

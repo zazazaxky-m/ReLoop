@@ -130,12 +130,10 @@ class NotificationService {
 
   Future<void> _registerDeviceToken() async {
     if (_deviceToken == null) return;
-    try {
-      await ApiClient.dioForNotification?.post('/api/devices/register', data: {
-        'token': _deviceToken,
-        'platform': defaultTargetPlatform == TargetPlatform.android ? 'android' : 'ios',
-      });
-    } catch (_) {}
+    debugPrint(
+      'Skipping device token registration because `/api/devices/register` '
+      'is not available on the current backend.',
+    );
   }
 
   void setApiClient(ApiClient api) {
@@ -144,10 +142,9 @@ class NotificationService {
 
   Future<void> unregisterDeviceToken() async {
     if (_deviceToken == null) return;
-    try {
-      await ApiClient.dioForNotification?.post('/api/devices/unregister', data: {
-        'token': _deviceToken,
-      });
-    } catch (_) {}
+    debugPrint(
+      'Skipping device token unregister because `/api/devices/unregister` '
+      'is not available on the current backend.',
+    );
   }
 }

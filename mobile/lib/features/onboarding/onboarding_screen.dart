@@ -31,6 +31,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: context.reloopBackground,
       body: SafeArea(
         child: Column(
           children: [
@@ -76,9 +77,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           curve: Curves.easeInOut,
                         );
                       },
-                      child: const Text(
+                      child: Text(
                         'Lewati',
-                        style: TextStyle(color: ReLoopColors.muted),
+                        style: TextStyle(color: context.reloopMuted),
                       ),
                     )
                   else
@@ -87,8 +88,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     controller: _controller,
                     count: 3,
                     effect: ExpandingDotsEffect(
-                      activeDotColor: ReLoopColors.brand500,
-                      dotColor: ReLoopColors.border,
+                      activeDotColor: context.reloopBrandText,
+                      dotColor: context.reloopBorder,
                       dotHeight: 8,
                       dotWidth: 8,
                       expansionFactor: 3,
@@ -99,10 +100,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: _isLastPage
                         ? TextButton(
                             onPressed: _complete,
-                            child: const Text(
+                            child: Text(
                               'Mulai',
                               style: TextStyle(
-                                color: ReLoopColors.brand600,
+                                color: context.reloopBrandText,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 15,
                               ),
@@ -115,10 +116,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 curve: Curves.easeInOut,
                               );
                             },
-                            child: const Text(
+                            child: Text(
                               'Lanjut',
                               style: TextStyle(
-                                color: ReLoopColors.brand600,
+                                color: context.reloopBrandText,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -174,19 +175,19 @@ class _OnboardingPage extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.w800,
-                color: ReLoopColors.foreground,
+                color: context.reloopForeground,
               ),
             ),
             const SizedBox(height: 16),
             Text(
               description,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 15,
-                color: ReLoopColors.muted,
+                color: context.reloopMuted,
                 height: 1.5,
               ),
             ),

@@ -31,6 +31,7 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
   String _auditFilter = '';
   final Map<String, TextEditingController> _controllers = {};
   List<Map<String, dynamic>> _mobileSlides = [];
+  List<Map<String, dynamic>> _landingSlides = [];
 
   @override
   void initState() {
@@ -55,11 +56,18 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
       final data = response.data as Map<String, dynamic>;
       if (widget.mode == SuperadminSystemMode.config) {
         final config = data['config'] as Map<String, dynamic>? ?? {};
-        
+
         try {
           if (config['mobile_hero_slides'] != null) {
             _mobileSlides = List<Map<String, dynamic>>.from(
               jsonDecode(config['mobile_hero_slides'].toString()),
+            );
+          }
+        } catch (_) {}
+        try {
+          if (config['landing_hero_slides'] != null) {
+            _landingSlides = List<Map<String, dynamic>>.from(
+              jsonDecode(config['landing_hero_slides'].toString()),
             );
           }
         } catch (_) {}
@@ -87,6 +95,7 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
           for (final entry in _controllers.entries)
             entry.key: int.tryParse(entry.value.text) ?? entry.value.text,
           'mobile_hero_slides': jsonEncode(_mobileSlides),
+          'landing_hero_slides': jsonEncode(_landingSlides),
         },
       );
       if (mounted) {
@@ -332,6 +341,62 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
                 'title': 'Judul baru',
                 'description': 'Deskripsi singkat.',
                 'href': '/campaigns',
+              });
+            });
+          },
+          icon: const Icon(Icons.add),
+          label: const Text('Tambah Slide'),
+        ),
+        const SizedBox(height: 32),
+        Text(
+          'Konten Carousel Landing Page',
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        const SizedBox(height: 12),
+        for (int i = 0; i < _landingSlides.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ReLoopCard(
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Slide ${i + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: ReLoopColors.warning),
+                        onPressed: () => setState(() => _landingSlides.removeAt(i)),
+                      ),
+                    ],
+                  ),
+                  TextField(
+                    decoration: const InputDecoration(labelText: 'Title'),
+                    controller: TextEditingController(text: _landingSlides[i]['title'])..selection = TextSelection.collapsed(offset: _landingSlides[i]['title']?.length ?? 0),
+                    onChanged: (v) => _landingSlides[i]['title'] = v,
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    decoration: const InputDecoration(labelText: 'Description'),
+                    controller: TextEditingController(text: _landingSlides[i]['description'])..selection = TextSelection.collapsed(offset: _landingSlides[i]['description']?.length ?? 0),
+                    onChanged: (v) => _landingSlides[i]['description'] = v,
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    decoration: const InputDecoration(labelText: 'Link (opsional)'),
+                    controller: TextEditingController(text: _landingSlides[i]['href'])..selection = TextSelection.collapsed(offset: _landingSlides[i]['href']?.length ?? 0),
+                    onChanged: (v) => _landingSlides[i]['href'] = v,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        OutlinedButton.icon(
+          onPressed: () {
+            setState(() {
+              _landingSlides.add({
+                'title': 'Judul baru',
+                'description': 'Deskripsi singkat.',
+                'href': '/register',
               });
             });
           },

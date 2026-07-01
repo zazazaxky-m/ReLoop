@@ -17,9 +17,12 @@ class AdminReportsScreen extends StatefulWidget {
 }
 
 class _AdminReportsScreenState extends State<AdminReportsScreen> {
-  int _depositCount = 0;
+  int _depositItemAccepted = 0;
+  int _depositItemCount = 0;
+  int _pickupCompleted = 0;
   int _pickupCount = 0;
   int _rewardTotal = 0;
+  int _userCount = 0;
   bool _isLoading = true;
 
   @override
@@ -32,24 +35,29 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     setState(() { _isLoading = true; });
     try {
       final api = context.read<ApiClient>();
-      
-      // Load overview metrics
-      final res = await api.get('/api/mobile/overview');
+
+      // Use the dedicated mobile reports endpoint so the metrics match the
+      // values shown on the web admin Reports page.
+      final res = await api.get('/api/mobile/reports');
       final data = res.data as Map<String, dynamic>;
-      
-      // Fetch rewards to compute aggregate total
-      final resRewards = await api.get('/api/reports', queryParameters: {'type': 'rewards'});
+
+      // Compute total reward issued from the rewards CSV (the same source
+      // the web dashboard uses for the aggregate card).
+      final resRewards = await api.get(
+        '/api/reports',
+        queryParameters: {'type': 'rewards'},
+      );
       final csvData = resRewards.data.toString();
-      
+
       int computedReward = 0;
       final lines = csvData.split('\n');
       for (var i = 1; i < lines.length; i++) {
         final line = lines[i].trim();
         if (line.isEmpty) continue;
-        final parts = line.split(',');
-        if (parts.length >= 4) {
-          final type = parts[2].replaceAll('"', '').trim();
-          final amountStr = parts[3].replaceAll('"', '').trim();
+        final cells = _parseCsvLine(line);
+        if (cells.length >= 4) {
+          final type = cells[2].trim();
+          final amountStr = cells[3].trim();
           if (type == 'EARN') {
             computedReward += int.tryParse(amountStr) ?? 0;
           }
@@ -57,14 +65,43 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       }
 
       setState(() {
-        _depositCount = (data['depositCount'] as num?)?.toInt() ?? 0;
-        _pickupCount = data['pickups'] is List ? (data['pickups'] as List).length : 0;
+        _depositItemAccepted =
+            (data['depositItemAccepted'] as num?)?.toInt() ?? 0;
+        _depositItemCount = (data['depositItemCount'] as num?)?.toInt() ?? 0;
+        _pickupCompleted = (data['pickupCompleted'] as num?)?.toInt() ?? 0;
+        _pickupCount = (data['pickupCount'] as num?)?.toInt() ?? 0;
         _rewardTotal = computedReward;
+        _userCount = (data['userCount'] as num?)?.toInt() ?? 0;
         _isLoading = false;
       });
     } catch (_) {
       setState(() { _isLoading = false; });
     }
+  }
+
+  // Minimal CSV line parser that respects quoted fields with commas.
+  List<String> _parseCsvLine(String line) {
+    final out = <String>[];
+    final buf = StringBuffer();
+    var inQuotes = false;
+    for (var i = 0; i < line.length; i++) {
+      final ch = line[i];
+      if (ch == '"') {
+        if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+          buf.write('"');
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch == ',' && !inQuotes) {
+        out.add(buf.toString());
+        buf.clear();
+      } else {
+        buf.write(ch);
+      }
+    }
+    out.add(buf.toString());
+    return out;
   }
 
   Future<void> _download(String type, String filename) async {
@@ -104,15 +141,25 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       child: _isLoading
           ? ListView(padding: const EdgeInsets.all(16), children: const [SkeletonListTile(), SizedBox(height: 8), SkeletonListTile()])
           : ListView(padding: const EdgeInsets.all(16), children: [
-        // Summary metrics
+        // Summary metrics — sourced from /api/mobile/reports so the numbers
+        // match the web admin Reports page (Pickup Selesai = status COMPLETED,
+        // Item Diterima = deposit item status ACCEPTED).
         Row(children: [
-          Expanded(child: MetricCard(label: 'Item Diterima', value: _depositCount.toString(), icon: Icons.inventory_2, tone: MetricTone.green)),
+          Expanded(child: MetricCard(label: 'Item Diterima', value: _depositItemAccepted.toString(), icon: Icons.inventory_2, tone: MetricTone.green)),
           const SizedBox(width: 12),
-          Expanded(child: MetricCard(label: 'Pickup Selesai', value: _pickupCount.toString(), icon: Icons.local_shipping, tone: MetricTone.blue)),
+          Expanded(child: MetricCard(label: 'Pickup Selesai', value: _pickupCompleted.toString(), icon: Icons.local_shipping, tone: MetricTone.blue)),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: MetricCard(label: 'Total Item Deposit', value: _depositItemCount.toString(), icon: Icons.assessment, tone: MetricTone.teal)),
+          const SizedBox(width: 12),
+          Expanded(child: MetricCard(label: 'Total Pickup', value: _pickupCount.toString(), icon: Icons.assignment_turned_in, tone: MetricTone.teal)),
         ]),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(child: MetricCard(label: 'Reward Diterbitkan', value: 'Rp ${_formatRupiah(_rewardTotal)}', icon: Icons.paid_outlined, tone: MetricTone.amber)),
+          const SizedBox(width: 12),
+          Expanded(child: MetricCard(label: 'Pengguna Terdaftar', value: _userCount.toString(), icon: Icons.people, tone: MetricTone.blue)),
         ]),
         const SizedBox(height: 20),
         const Text('Unduh Laporan CSV', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ReLoopColors.foreground)),

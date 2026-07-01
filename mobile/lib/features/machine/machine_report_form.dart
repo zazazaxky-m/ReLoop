@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../core/api_client.dart';
 import '../../shared/widgets/reloop_button.dart';
 import '../../theme/colors.dart';
 
@@ -56,28 +54,13 @@ class _MachineReportFormState extends State<MachineReportForm> {
     setState(() => _isSubmitting = true);
 
     try {
-      final api = context.read<ApiClient>();
-      await api.post('/api/machines/${widget.machineCode}/report', data: {
-        'issueType': _issueType,
-        'description': _descCtrl.text.trim(),
-      });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Laporan berhasil dikirim. Terima kasih!'),
-          backgroundColor: ReLoopColors.success,
+          content: Text('Fitur laporan mesin belum tersedia di backend saat ini.'),
+          backgroundColor: ReLoopColors.warning,
         ),
       );
-      Navigator.pop(context);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(ApiClient.getErrorMessage(e)),
-            backgroundColor: ReLoopColors.danger,
-          ),
-        );
-      }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -107,7 +90,8 @@ class _MachineReportFormState extends State<MachineReportForm> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Laporkan kondisi mesin ${widget.machineCode}. Tim kami akan segera menindaklanjuti.',
+                        'Pencatatan laporan mesin dari mobile belum didukung backend. '
+                        'Gunakan kanal operasional lain untuk sementara.',
                         style: TextStyle(
                           color: context.reloopTone('warning').text,
                           fontSize: 13,
@@ -128,7 +112,7 @@ class _MachineReportFormState extends State<MachineReportForm> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _issueType,
+                initialValue: _issueType,
                 decoration: const InputDecoration(
                   hintText: 'Pilih jenis masalah',
                   prefixIcon: Icon(Icons.warning_amber_rounded),

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
+import '../../core/auth_provider.dart';
+import '../../core/models.dart';
 import '../../shared/widgets/reloop_card.dart';
+import '../../shared/widgets/reloop_button.dart';
 import '../../shared/widgets/status_badge.dart';
 import '../../shared/widgets/skeleton_loading.dart';
 import '../../theme/colors.dart';
@@ -18,8 +21,11 @@ class AdminMachineDetailScreen extends StatefulWidget {
 class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
   Map<String, dynamic>? _machine;
   List<dynamic> _sessions = [];
+  List<dynamic> _securityEvents = [];
+  List<dynamic> _remoteCommands = [];
   bool _isLoading = true;
   String? _error;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -35,12 +41,37 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
 
     try {
       final api = context.read<ApiClient>();
+      final auth = context.read<AuthProvider>();
       final response = await api.get('/api/machines/${widget.machineId}');
       final data = response.data as Map<String, dynamic>;
+      final machine = data['machine'] as Map<String, dynamic>;
+
+      // Superadmin gets the extra surfaces: security events and remote commands.
+      List<dynamic> securityEvents = const [];
+      List<dynamic> remoteCommands = const [];
+      if (auth.user?.role == AppRole.SUPERADMIN) {
+        try {
+          final auditRes = await api.get(
+            '/api/mobile/audit-security',
+            queryParameters: {'machineId': widget.machineId},
+          );
+          final auditData = auditRes.data as Map<String, dynamic>;
+          securityEvents =
+              (auditData['securityEvents'] as List?)?.cast<dynamic>() ?? const [];
+        } catch (_) {}
+        try {
+          final cmdRes = await api.get('/api/machines/${widget.machineId}/remote-commands');
+          final cmdData = cmdRes.data as Map<String, dynamic>;
+          remoteCommands =
+              (cmdData['commands'] as List?)?.cast<dynamic>() ?? const [];
+        } catch (_) {}
+      }
 
       setState(() {
-        _machine = data['machine'] as Map<String, dynamic>;
-        _sessions = (_machine?['sessions'] as List? ?? []);
+        _machine = machine;
+        _sessions = (machine['sessions'] as List? ?? []);
+        _securityEvents = securityEvents;
+        _remoteCommands = remoteCommands;
         _isLoading = false;
       });
     } catch (e) {
@@ -48,6 +79,141 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
         _error = ApiClient.getErrorMessage(e);
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _updateMachine(Map<String, dynamic> body) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await context
+          .read<ApiClient>()
+          .patch('/api/machines/${widget.machineId}', data: body);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Mesin diperbarui'),
+          backgroundColor: ReLoopColors.success,
+        ),
+      );
+      await _loadMachine();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ApiClient.getErrorMessage(e)),
+          backgroundColor: ReLoopColors.danger,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _changeStatus(String status) async {
+    await _updateMachine({'status': status});
+  }
+
+  Future<void> _rotateSecret() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rotasi ingest secret?'),
+        content: const Text(
+          'Secret baru akan ditampilkan sekali. Perangkat harus dikonfigurasi ulang.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Lanjutkan'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final res = await context
+          .read<ApiClient>()
+          .post('/api/machines/${widget.machineId}/rotate-secret');
+      final data = res.data as Map<String, dynamic>;
+      final secret = (data['ingestSecret'] as String?) ?? '';
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Ingest Secret Baru'),
+          content: SelectableText(secret),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Tutup'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ApiClient.getErrorMessage(e)),
+          backgroundColor: ReLoopColors.danger,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _deleteMachine() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hapus mesin?'),
+        content: const Text(
+          'Penghapusan hanya berhasil jika mesin belum memiliki riwayat.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: ReLoopColors.danger),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await context
+          .read<ApiClient>()
+          .delete('/api/machines/${widget.machineId}');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Mesin dihapus'),
+          backgroundColor: ReLoopColors.success,
+        ),
+      );
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ApiClient.getErrorMessage(e)),
+          backgroundColor: ReLoopColors.danger,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -89,6 +255,8 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
                     children: [
                       _buildStatusCard(),
                       const SizedBox(height: 16),
+                      _buildControlsCard(),
+                      const SizedBox(height: 16),
                       _buildHardwareConfigCard(),
                       const SizedBox(height: 16),
                       _buildInfoCard(),
@@ -96,6 +264,14 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
                       _buildWasteTypesCard(),
                       const SizedBox(height: 16),
                       _buildSessionsCard(),
+                      if (_securityEvents.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        _buildSecurityCard(),
+                      ],
+                      if (_remoteCommands.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        _buildRemoteCommandsCard(),
+                      ],
                       const SizedBox(height: 80),
                     ],
                   ),
@@ -203,6 +379,144 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
               _hwStatusItem('Kamera', hasCamera, Icons.videocam_outlined),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControlsCard() {
+    final auth = context.watch<AuthProvider>();
+    final isSuperadmin = auth.user?.role == AppRole.SUPERADMIN;
+    final currentStatus = (_machine!['status'] as String?) ?? 'OFFLINE';
+    const quickStatuses = ['ONLINE', 'OFFLINE', 'MAINTENANCE', 'FULL'];
+
+    return ReLoopCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const ReLoopCardTitle(title: 'Kontrol Mesin'),
+          const SizedBox(height: 12),
+          const Text(
+            'Ubah Status',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: quickStatuses
+                .map(
+                  (s) => ReLoopButton(
+                    label: s,
+                    size: ReLoopButtonSize.sm,
+                    expanded: false,
+                    variant: currentStatus == s
+                        ? ReLoopButtonVariant.primary
+                        : ReLoopButtonVariant.outline,
+                    onPressed: _busy ? null : () => _changeStatus(s),
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 14),
+          if (isSuperadmin) ...[
+            const Divider(height: 24),
+            const Text(
+              'Operasi Superadmin',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: ReLoopButton(
+                    label: 'Rotasi Secret',
+                    icon: Icons.vpn_key,
+                    size: ReLoopButtonSize.sm,
+                    expanded: false,
+                    onPressed: _busy ? null : _rotateSecret,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ReLoopButton(
+                    label: 'Hapus Mesin',
+                    icon: Icons.delete_outline,
+                    variant: ReLoopButtonVariant.ghost,
+                    size: ReLoopButtonSize.sm,
+                    expanded: false,
+                    onPressed: _busy ? null : _deleteMachine,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSecurityCard() {
+    return ReLoopCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const ReLoopCardTitle(title: 'Log Keamanan (24 terakhir)'),
+          const SizedBox(height: 8),
+          ..._securityEvents.take(10).map((e) {
+            final data = e as Map<String, dynamic>;
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.shield_outlined, size: 16, color: ReLoopColors.warning),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      (data['eventType'] ?? data['action'] ?? 'Event').toString(),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  Text(
+                    _formatDate((data['occurredAt'] ?? data['createdAt'])?.toString() ?? ''),
+                    style: const TextStyle(fontSize: 10, color: ReLoopColors.muted),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRemoteCommandsCard() {
+    return ReLoopCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const ReLoopCardTitle(title: 'Remote Commands (20 terakhir)'),
+          const SizedBox(height: 8),
+          ..._remoteCommands.take(10).map((c) {
+            final data = c as Map<String, dynamic>;
+            final status = (data['status'] as String?) ?? '-';
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.terminal_outlined, size: 16, color: ReLoopColors.info),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      (data['command'] ?? '-').toString(),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  StatusBadge(statusKey: status),
+                ],
+              ),
+            );
+          }),
         ],
       ),
     );

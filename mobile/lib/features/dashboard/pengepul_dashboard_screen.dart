@@ -176,6 +176,13 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
               onTap: () => context.push('/pickup'),
             ),
             QuickAction(
+              icon: Icons.tour_outlined,
+              title: 'Pickup Wisata',
+              description: 'Catat jemput trash bag',
+              tone: QuickActionTone.amber,
+              onTap: () => context.push('/pengepul/tourism-pickups'),
+            ),
+            QuickAction(
               icon: Icons.map_outlined,
               title: 'Peta Mesin',
               description: 'Cari mesin',

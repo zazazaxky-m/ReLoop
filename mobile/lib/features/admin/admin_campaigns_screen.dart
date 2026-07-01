@@ -21,6 +21,7 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
   String? _error;
 
   static const _types = ['MACHINE_DEPOSIT', 'TRASH_BAG', 'EVENT', 'SCHOOL_PROGRAM', 'TOURISM_PROGRAM'];
+  static const _rewardModes = ['MONEY_REWARD', 'COMPLIANCE_ONLY'];
   static const _statuses = ['DRAFT', 'ACTIVE', 'PAUSED', 'ENDED'];
 
   @override
@@ -49,6 +50,7 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
     final nameCtrl = TextEditingController(text: existing?['name'] ?? '');
     final descCtrl = TextEditingController(text: existing?['description'] ?? '');
     String type = existing?['campaignType'] ?? 'MACHINE_DEPOSIT';
+    String rewardMode = existing?['rewardMode'] ?? 'MONEY_REWARD';
     String visibility = existing?['visibility'] ?? 'PUBLIC';
     String status = existing?['status'] ?? 'DRAFT';
     String startAt = existing?['startAt'] != null ? (existing!['startAt'] as String).substring(0, 10) : '';
@@ -74,11 +76,21 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
               const SizedBox(height: 10),
               TextField(controller: descCtrl, decoration: const InputDecoration(labelText: 'Deskripsi'), maxLines: 2),
               const SizedBox(height: 10),
-              DropdownButtonFormField<String>(value: type, isExpanded: true, decoration: const InputDecoration(labelText: 'Tipe'),
+              DropdownButtonFormField<String>(initialValue: type, isExpanded: true, decoration: const InputDecoration(labelText: 'Tipe'),
                 items: _types.map((t) => DropdownMenuItem(value: t, child: Text(_typeLabel(t)))).toList(),
                 onChanged: (v) => setSt(() => type = v ?? 'MACHINE_DEPOSIT')),
               const SizedBox(height: 10),
-              DropdownButtonFormField<String>(value: visibility, isExpanded: true, decoration: const InputDecoration(labelText: 'Visibilitas'),
+              DropdownButtonFormField<String>(
+                initialValue: rewardMode,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Mode Reward'),
+                items: _rewardModes
+                    .map((mode) => DropdownMenuItem(value: mode, child: Text(_rewardModeLabel(mode))))
+                    .toList(),
+                onChanged: (v) => setSt(() => rewardMode = v ?? 'MONEY_REWARD'),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(initialValue: visibility, isExpanded: true, decoration: const InputDecoration(labelText: 'Visibilitas'),
                 items: const [DropdownMenuItem(value: 'PUBLIC', child: Text('Publik')), DropdownMenuItem(value: 'PRIVATE', child: Text('Privat'))],
                 onChanged: (v) => setSt(() => visibility = v ?? 'PUBLIC')),
               if (visibility == 'PRIVATE') ...[
@@ -93,7 +105,7 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
                 ),
               ],
               const SizedBox(height: 10),
-              DropdownButtonFormField<String>(value: status, isExpanded: true, decoration: const InputDecoration(labelText: 'Status'),
+              DropdownButtonFormField<String>(initialValue: status, isExpanded: true, decoration: const InputDecoration(labelText: 'Status'),
                 items: _statuses.map((s) => DropdownMenuItem(value: s, child: Text(_statusLabel(s)))).toList(),
                 onChanged: (v) => setSt(() => status = v ?? 'DRAFT')),
               const SizedBox(height: 10),
@@ -171,6 +183,7 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
                 'name': nameCtrl.text.trim(),
                 'description': descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim(),
                 'campaignType': type,
+                'rewardMode': rewardMode,
                 'visibility': visibility,
                 'status': status,
                 'startAt': startAt.isEmpty ? null : startAt,
@@ -277,10 +290,11 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
           const SizedBox(height: 6),
           Wrap(spacing: 6, runSpacing: 4, children: [
             _chip(_typeLabel(campaign['campaignType'] as String? ?? 'MACHINE_DEPOSIT')),
+            _chip(_rewardModeLabel(campaign['rewardMode'] as String? ?? 'MONEY_REWARD')),
             _chip((campaign['visibility'] as String?) ?? 'PUBLIC'),
             if (sessions > 0) _chip('$sessions sesi'),
             if (campaign['rewardMultiplier'] != null) _chip('${campaign['rewardMultiplier']}x'),
-            if (campaign['startAt'] != null) _chip('${(campaign['startAt'] as String).substring(0, 10)}'),
+            if (campaign['startAt'] != null) _chip((campaign['startAt'] as String).substring(0, 10)),
             if (campaign['endAt'] != null) _chip('s/d ${(campaign['endAt'] as String).substring(0, 10)}'),
           ]),
           const SizedBox(height: 8),
@@ -318,6 +332,17 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
       case 'PAUSED': return 'Dijeda';
       case 'ENDED': return 'Berakhir';
       default: return s;
+    }
+  }
+
+  String _rewardModeLabel(String rewardMode) {
+    switch (rewardMode) {
+      case 'COMPLIANCE_ONLY':
+        return 'Compliance Only';
+      case 'MONEY_REWARD':
+        return 'Hadiah Uang';
+      default:
+        return rewardMode;
     }
   }
 }

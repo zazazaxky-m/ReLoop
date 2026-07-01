@@ -15,6 +15,7 @@ import '../features/wallet/payout_account_form.dart';
 import '../features/map/map_screen.dart';
 import '../features/campaigns/campaigns_screen.dart';
 import '../features/pickup/pickup_screen.dart';
+import '../features/pickup/tourism_pickups_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/trash_bag/trash_bag_screen.dart';
 import '../features/machine/machine_detail_screen.dart';
@@ -32,6 +33,8 @@ import '../features/admin/admin_campaigns_screen.dart';
 import '../features/admin/admin_waste_types_screen.dart';
 import '../features/admin/admin_partners_screen.dart';
 import '../features/admin/admin_trips_screen.dart';
+import '../features/admin/admin_travel_agents_screen.dart';
+import '../features/admin/admin_compliance_screen.dart';
 import '../features/admin/admin_reports_screen.dart';
 import '../features/admin/admin_shell.dart';
 import '../features/superadmin/superadmin_dashboard_screen.dart';
@@ -155,6 +158,10 @@ class AppRouter {
             builder: (context, state) => const PickupScreen(),
           ),
           GoRoute(
+            path: '/pengepul/tourism-pickups',
+            builder: (context, state) => const TourismPickupsScreen(),
+          ),
+          GoRoute(
             path: '/profile',
             builder: (context, state) => const ProfileScreen(),
           ),
@@ -197,6 +204,14 @@ class AppRouter {
           GoRoute(
             path: '/admin/trips',
             builder: (context, state) => const AdminTripsScreen(),
+          ),
+          GoRoute(
+            path: '/admin/travel-agents',
+            builder: (context, state) => const AdminTravelAgentsScreen(),
+          ),
+          GoRoute(
+            path: '/admin/compliance',
+            builder: (context, state) => const AdminComplianceScreen(),
           ),
           GoRoute(
             path: '/admin/reports',
