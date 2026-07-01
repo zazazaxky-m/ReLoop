@@ -523,6 +523,37 @@ async function main() {
     ],
   });
 
+  // Travel-agent users keep role USER; the link in TravelAgentUser enables the
+  // extra points UI. Seed a little wallet activity so the points card is visible.
+  await prisma.rewardLedger.createMany({
+    data: [
+      {
+        userId: travelAgentOwner.id,
+        organizationId: orgA.id,
+        campaignId: campaignTourism.id,
+        entryType: "EARN",
+        amount: 7800,
+        status: "AVAILABLE",
+        reasonCode: "TOURISM_COMPLIANCE_BONUS",
+        referenceType: "Trip",
+        referenceId: tourismTrip.id,
+        createdAt: daysAgo(1),
+      },
+      {
+        userId: multiAgentOwner.id,
+        organizationId: orgA.id,
+        campaignId: campaignTourism.id,
+        entryType: "EARN",
+        amount: 12500,
+        status: "AVAILABLE",
+        reasonCode: "TOURISM_COMPLIANCE_BONUS",
+        referenceType: "Trip",
+        referenceId: completedTourismTrip.id,
+        createdAt: daysAgo(1),
+      },
+    ],
+  });
+
   // ---------- Demo payout account ----------
   await prisma.payoutAccount.create({
     data: { userId: user.id, provider: "GOPAY", accountIdentifier: "081100000003", accountName: "Warga Pangandaran", status: "UNVERIFIED" },
@@ -540,8 +571,8 @@ async function main() {
   console.log("  admin.batuhiu@reloop.id (ADMIN - Pantai Batu Hiu)");
   console.log("  pengepul@reloop.id    (PENGEPUL - active partner of org A)");
   console.log("  user@reloop.id        (USER - balance Rp12.500, Rp200 pending)");
-  console.log("  cahaya@travel.test    (USER - Travel Agent INVITED)");
-  console.log("  nusantara@travel.test (USER - Travel Agent multi-tempat wisata)");
+  console.log("  cahaya@travel.test    (USER - Travel Agent INVITED, points visible)");
+  console.log("  nusantara@travel.test (USER - Travel Agent multi-tempat wisata, points visible)");
   console.log("  pending.agent@travel.test belum punya akun, status seed = PENDING");
   console.log("\nMachines: RLP-001 (ONLINE), RLP-002 (FULL), SMA-001 (ONLINE)");
   console.log("\nPer-machine ingest secrets (for the Python simulator):");

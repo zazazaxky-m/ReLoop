@@ -217,7 +217,7 @@ class _TourismPickupsScreenState extends State<TourismPickupsScreen> {
   Widget _chip(String text) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
-      color: ReLoopColors.background,
+      color: context.reloopSurfaceSoft,
       borderRadius: BorderRadius.circular(6),
     ),
     child: Text(

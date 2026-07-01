@@ -96,7 +96,7 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
                 Icon(
                   Icons.delete_outline,
                   size: 48,
-                  color: ReLoopColors.mutedSoft,
+                  color: context.reloopMutedSoft,
                 ),
                 SizedBox(height: 12),
                 Text(

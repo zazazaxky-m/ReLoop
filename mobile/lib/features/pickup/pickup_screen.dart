@@ -214,7 +214,7 @@ class _PickupScreenState extends State<PickupScreen>
       body: Column(
         children: [
           Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: context.reloopSurface,
               border: Border(
                 bottom: BorderSide(color: context.reloopBorder, width: 0.5),
@@ -223,7 +223,7 @@ class _PickupScreenState extends State<PickupScreen>
             child: TabBar(
               controller: _tabController,
               labelColor: ReLoopColors.brand600,
-              unselectedLabelColor: ReLoopColors.mutedSoft,
+              unselectedLabelColor: context.reloopMutedSoft,
               indicatorColor: ReLoopColors.brand500,
               isScrollable: true,
               tabAlignment: TabAlignment.start,
@@ -465,7 +465,7 @@ class _PickupScreenState extends State<PickupScreen>
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: ReLoopColors.background,
+                  color: context.reloopSurfaceSoft,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Column(
@@ -702,7 +702,7 @@ class _PickupScreenState extends State<PickupScreen>
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: ReLoopColors.background,
+          color: context.reloopSurfaceSoft,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: context.reloopBorder),
         ),
@@ -829,13 +829,13 @@ class _PickupScreenState extends State<PickupScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: ReLoopColors.background,
+        color: context.reloopSurfaceSoft,
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: ReLoopColors.mutedSoft),
+          Icon(icon, size: 12, color: context.reloopMutedSoft),
           const SizedBox(width: 4),
           Text(
             label,
