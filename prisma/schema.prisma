@@ -100,6 +100,11 @@ enum CampaignStatus {
   ENDED
 }
 
+enum CampaignRewardMode {
+  MONEY_REWARD
+  COMPLIANCE_ONLY
+}
+
 enum SessionStatus {
   RESERVED
   ACTIVE
@@ -256,6 +261,48 @@ enum ConditionStatus {
   NOT_RETURNED
 }
 
+enum TravelAgentStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum TravelAgentOrgStatus {
+  PENDING
+  INVITED
+}
+
+enum TravelAgentInviteStatus {
+  PENDING
+  INVITED
+}
+
+enum TravelAgentUserRole {
+  OWNER
+  STAFF
+  TOUR_LEADER
+}
+
+enum ValidationStage {
+  CHECK_IN
+  CHECK_OUT
+  BANK_SAMPAH_PICKUP
+}
+
+enum GateType {
+  ENTRY
+  EXIT
+  BANK_SAMPAH
+}
+
+enum ComplianceStatus {
+  NOT_STARTED
+  CHECKED_IN
+  COMPLIANT
+  NEEDS_REVIEW
+  NON_COMPLIANT
+}
+
 // ============================================================
 // Core identity & tenancy
 // ============================================================
@@ -281,6 +328,7 @@ model User {
   redemptions           Redemption[]
   collectorPartnerships OrganizationCollectorPartner[] @relation("CollectorPartnerships")
   assignedPickups       PickupRequest[]                @relation("AssignedCollector")
+  travelAgentLinks      TravelAgentUser[]
 
   @@index([organizationId])
   @@index([role])
@@ -304,13 +352,15 @@ model Organization {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  users             User[]
-  machines          Machine[]
-  campaigns         Campaign[]
-  rewardRates       RewardRate[]
-  collectorPartners OrganizationCollectorPartner[]
-  pickupRequests    PickupRequest[]
-  ledgerEntries     RewardLedger[]
+  users              User[]
+  machines           Machine[]
+  campaigns          Campaign[]
+  rewardRates        RewardRate[]
+  collectorPartners  OrganizationCollectorPartner[]
+  pickupRequests     PickupRequest[]
+  ledgerEntries      RewardLedger[]
+  travelAgentLinks   TravelAgentOrganization[]
+  travelAgentInvites TravelAgentInvite[]
 
   @@index([regionId])
   @@index([type])
@@ -418,6 +468,7 @@ model WasteType {
   rewardRates  RewardRate[]
   depositItems DepositItem[]
   pickupItems  PickupItem[]
+  trashBags    TrashBagAssignment[]
 
   @@index([organizationId])
 }
@@ -469,6 +520,7 @@ model Campaign {
   name                    String
   description             String?
   campaignType            CampaignType       @default(MACHINE_DEPOSIT)
+  rewardMode              CampaignRewardMode @default(MONEY_REWARD)
   visibility              CampaignVisibility @default(PUBLIC)
   allowedEmailDomainsJson Json?
   startAt                 DateTime?
@@ -758,52 +810,137 @@ model PickupItem {
 // Optional Trip / Trash bag mode
 // ============================================================
 
+model TravelAgent {
+  id            String            @id @default(cuid())
+  name          String
+  email         String            @unique
+  phone         String?
+  contactPerson String?
+  status        TravelAgentStatus @default(ACTIVE)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  organizations TravelAgentOrganization[]
+  users         TravelAgentUser[]
+  invites       TravelAgentInvite[]
+  trips         Trip[]
+
+  @@index([status])
+}
+
+model TravelAgentOrganization {
+  id             String               @id @default(cuid())
+  travelAgentId  String
+  travelAgent    TravelAgent          @relation(fields: [travelAgentId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status         TravelAgentOrgStatus @default(PENDING)
+  invitedById    String?
+  approvedAt     DateTime?
+  notes          String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@unique([travelAgentId, organizationId])
+  @@index([organizationId, status])
+  @@index([travelAgentId, status])
+}
+
+model TravelAgentInvite {
+  id             String                  @id @default(cuid())
+  travelAgentId  String?
+  travelAgent    TravelAgent?            @relation(fields: [travelAgentId], references: [id], onDelete: SetNull)
+  organizationId String
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  status         TravelAgentInviteStatus @default(PENDING)
+  invitedById    String?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  @@index([email, status])
+  @@index([organizationId, status])
+}
+
+model TravelAgentUser {
+  id            String              @id @default(cuid())
+  travelAgentId String
+  travelAgent   TravelAgent         @relation(fields: [travelAgentId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleInAgent   TravelAgentUserRole @default(OWNER)
+  createdAt     DateTime            @default(now())
+
+  @@unique([travelAgentId, userId])
+  @@index([userId])
+}
+
 model Trip {
-  id               String     @id @default(cuid())
+  id               String           @id @default(cuid())
   campaignId       String
-  campaign         Campaign   @relation(fields: [campaignId], references: [id])
+  campaign         Campaign         @relation(fields: [campaignId], references: [id])
   userId           String?
+  travelAgentId    String?
+  travelAgent      TravelAgent?     @relation(fields: [travelAgentId], references: [id])
   travelAgentName  String?
   groupName        String?
   leaderName       String?
   leaderContact    String?
-  participantCount Int        @default(1)
-  status           TripStatus @default(PLANNED)
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  participantCount Int              @default(1)
+  status           TripStatus       @default(PLANNED)
+  complianceStatus ComplianceStatus @default(NOT_STARTED)
+  complianceScore  Int              @default(0)
+  checkInAt        DateTime?
+  checkOutAt       DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   bagAssignments TrashBagAssignment[]
   validations    ManualValidation[]
 
   @@index([campaignId])
+  @@index([travelAgentId])
+  @@index([complianceStatus])
 }
 
 model TrashBagAssignment {
-  id           String   @id @default(cuid())
+  id           String     @id @default(cuid())
   tripId       String
-  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip         Trip       @relation(fields: [tripId], references: [id], onDelete: Cascade)
   assignedById String?
-  bagQrCode    String   @unique
-  bagCount     Int      @default(1)
-  assignedAt   DateTime @default(now())
+  wasteTypeId  String?
+  wasteType    WasteType? @relation(fields: [wasteTypeId], references: [id])
+  bagQrCode    String     @unique
+  bagCount     Int        @default(1)
+  status       ConditionStatus?
+  returnedAt   DateTime?
+  assignedAt   DateTime   @default(now())
 
   @@index([tripId])
+  @@index([wasteTypeId])
 }
 
 model ManualValidation {
-  id               String           @id @default(cuid())
+  id               String            @id @default(cuid())
   tripId           String?
-  trip             Trip?            @relation(fields: [tripId], references: [id])
+  trip             Trip?             @relation(fields: [tripId], references: [id])
   validatedById    String?
+  validationStage  ValidationStage   @default(CHECK_OUT)
+  gateType         GateType?
   bagQrCode        String?
   returnedBagCount Int?
   actualWeightKg   Float?
   conditionStatus  ConditionStatus?
+  appCompleted     Boolean           @default(false)
+  complianceScore  Int?
+  complianceStatus ComplianceStatus?
   notes            String?
   evidenceUrl      String?
-  createdAt        DateTime         @default(now())
+  createdAt        DateTime          @default(now())
 
   @@index([tripId])
+  @@index([validationStage])
+  @@index([complianceStatus])
 }
 
 // ============================================================
@@ -829,13 +966,13 @@ model AuditLog {
 }
 
 model ConsentRecord {
-  id           String   @id @default(cuid())
-  userId       String
-  consentType  String
-  granted      Boolean
-  ipAddress    String?
-  userAgent    String?
-  createdAt    DateTime @default(now())
+  id          String   @id @default(cuid())
+  userId      String
+  consentType String
+  granted     Boolean
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
 
   @@index([userId, consentType])
   @@index([createdAt])

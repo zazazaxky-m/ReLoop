@@ -755,9 +755,6 @@ class RvmController:
                 "abnormal-weight",
                 "abnormal-underweight",
             }:
-                self._simulation_waste_type_key = (
-                    "kaleng" if scenario == "normal-can" else "botol"
-                )
                 self._simulation_patch(chamber_open=True)
                 self._simulation_pulse("item_present")
                 weight = {
@@ -767,6 +764,9 @@ class RvmController:
                     "abnormal-weight": 900.0,
                     "abnormal-underweight": 1.0,
                 }[scenario]
+                self._simulation_waste_type_key = (
+                    "anorganik" if scenario == "normal-can" else "organik"
+                )
                 self._simulation_patch(weight_grams=weight, weight_stable=True)
                 if scenario not in {"abnormal-weight", "abnormal-underweight"}:
                     self._simulation_pulse("acceptance_triggered")

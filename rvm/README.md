@@ -49,7 +49,22 @@ mencegah alarm kamera tertutup yang palsu.
 ```powershell
 Copy-Item rvm\config.example.json rvm\config.local.json
 # isi machine_secret dan maintenance_pin_hash
+```
+
+Secara default, aplikasi berjalan di environment `dev` (menggunakan konfigurasi standar):
+```powershell
 python -m rvm.main --config rvm/config.local.json
+```
+
+Untuk menjalankan di environment `prod` (menggunakan server production dan secret yang spesifik), Anda dapat menggunakan flag `--env prod`:
+```powershell
+python -m rvm.main --env prod
+```
+
+Atau menggunakan Environment Variable:
+```powershell
+$env:RVM_ENV="prod"
+python -m rvm.main
 ```
 
 Kiosk: `http://127.0.0.1:8765`

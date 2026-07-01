@@ -132,8 +132,8 @@ void main() {
         'latitude': -6.2088,
         'longitude': 106.8456,
         'supportedWasteTypes': [
-          {'id': 'wt-1', 'name': 'Botol Plastik'},
-          {'id': 'wt-2', 'name': 'Kaleng'},
+          {'id': 'wt-1', 'name': 'Organik'},
+          {'id': 'wt-2', 'name': 'Anorganik'},
         ],
       };
 
@@ -147,7 +147,7 @@ void main() {
       expect(machine.latitude, -6.2088);
       expect(machine.longitude, 106.8456);
       expect(machine.supportedWasteTypes?.length, 2);
-      expect(machine.supportedWasteTypes?[0].name, 'Botol Plastik');
+      expect(machine.supportedWasteTypes?[0].name, 'Organik');
     });
 
     test('fromJson handles nested organization', () {
