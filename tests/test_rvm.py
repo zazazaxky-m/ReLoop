@@ -284,14 +284,14 @@ class ControllerTest(unittest.TestCase):
                 b"test-secret", canonical.encode(), hashlib.sha256
             ).hexdigest()
             self.assertTrue(controller.activate_lease(lease))
-            controller._simulation_waste_type_key = "kaleng"
+            controller._simulation_waste_type_key = "anorganik"
             hardware.patch(item_present=True)
             controller._process_sensors(hardware.read())
             event = next(
                 row for row in controller.db.pending(20)
                 if row["eventType"] == "ITEM_DETECTED"
             )
-            self.assertEqual(event["payload"]["wasteTypeKey"], "kaleng")
+            self.assertEqual(event["payload"]["wasteTypeKey"], "anorganik")
             controller.db.close()
 
     def test_interactive_fraud_scenarios_expose_alert(self):

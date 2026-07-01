@@ -11,7 +11,7 @@ Architecture:
 
 Examples:
   python simulator.py -m RLP-001 --secret <SECRET> --daemon
-  python simulator.py -m RLP-001 --secret <SECRET> --session <ID> --deposit botol
+  python simulator.py -m RLP-001 --secret <SECRET> --session <ID> --deposit organik
   python simulator.py -m RLP-001 --secret <SECRET> --session <ID> --fraud string-pull
   python simulator.py -m RLP-001 --secret <SECRET> --vandalism panel-open
   python simulator.py -m RLP-001 --secret <SECRET> --interactive
@@ -46,21 +46,32 @@ DEFAULT_BASE = os.environ.get("RELOOP_BASE_URL", "http://localhost:3000")
 DEFAULT_SECRET = os.environ.get("MACHINE_INGEST_SECRET", "")
 
 WASTE_TYPES = {
-    "botol": {
-        "name": "Botol Plastik (PET)",
+    "organik": {
+        "name": "Organik",
         "weight_mean": 22.0,
         "weight_sigma": 2.5,
         "ai": "bottle_pet",
         "barcode": "8991002100012",
     },
-    "kaleng": {
-        "name": "Kaleng Aluminium",
+    "anorganik": {
+        "name": "Anorganik",
         "weight_mean": 15.0,
         "weight_sigma": 1.8,
         "ai": "can_aluminium",
         "barcode": "8991002200019",
     },
 }
+
+WASTE_TYPE_ALIASES = {
+    "botol": "organik",
+    "kaleng": "anorganik",
+    "organik": "organik",
+    "anorganik": "anorganik",
+}
+
+
+def canonical_waste_type(kind: str) -> str | None:
+    return WASTE_TYPE_ALIASES.get(kind.strip().lower())
 
 
 def iso_now() -> str:
@@ -245,8 +256,8 @@ class MachineSimulator:
         elif command == "flush":
             self.buffer.flush()
         elif command == "deposit":
-            kind = str(data.get("kind", "botol"))
-            if kind not in WASTE_TYPES:
+            kind = canonical_waste_type(str(data.get("kind", "organik")))
+            if kind is None:
                 return 422, {"error": "Jenis material tidak dikenal"}
             if not session_id:
                 # Local offline inspection mode: sensors still execute and all
@@ -379,6 +390,7 @@ class MachineSimulator:
     def simulate_deposit(self, kind: str, session_id: str,
                          fraud: str | None = None,
                          bad_weight: bool = False) -> None:
+        kind = canonical_waste_type(kind) or "organik"
         material = WASTE_TYPES[kind]
         self.state.chamber_open = True
         self.emit("CHAMBER_OPENED", {"doorSensor": "OPEN"}, session_id)
@@ -546,7 +558,7 @@ class MachineSimulator:
 
     def interactive(self) -> None:
         while True:
-            print("\n1 Heartbeat  2 Botol  3 Kaleng  4 Fraud string-pull")
+            print("\n1 Heartbeat  2 Organik  3 Anorganik  4 Fraud string-pull")
             print("5 Fraud sensor-bypass  6 Vandalisme panel  7 Impact  8 Flush  0 Keluar")
             choice = input("> ").strip()
             if choice == "0":
@@ -556,7 +568,7 @@ class MachineSimulator:
                 self.heartbeat(force=True)
             elif choice in {"2", "3"}:
                 session = input("Session ID: ").strip()
-                self.simulate_deposit("botol" if choice == "2" else "kaleng", session)
+                self.simulate_deposit("organik" if choice == "2" else "anorganik", session)
             elif choice == "4":
                 session = input("Session ID (boleh kosong): ").strip() or None
                 self.report_fraud("string-pull", session)

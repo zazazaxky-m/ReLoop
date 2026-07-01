@@ -266,7 +266,9 @@ async function processEventSideEffects(
       if (!wasteTypeId && payload.wasteTypeKey) {
         const key = String(payload.wasteTypeKey).toLowerCase();
         const mappedName =
-          key.includes("organik") && !key.includes("anorganik")
+          key.includes("anorganik") || key.includes("kaleng")
+            ? "Anorganik"
+            : key.includes("organik") || key.includes("botol")
             ? "Organik"
             : "Anorganik";
         const wt = await tx.wasteType.findFirst({

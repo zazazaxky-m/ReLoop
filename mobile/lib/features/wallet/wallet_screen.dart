@@ -22,6 +22,8 @@ class _WalletScreenState extends State<WalletScreen> {
   List<RewardLedgerEntry> _history = [];
   List<PayoutAccount> _accounts = [];
   List<Redemption> _redemptions = [];
+  bool _showPoints = false;
+  int _pointsToRupiah = 1;
   bool _isLoading = true;
   String? _error;
 
@@ -55,6 +57,8 @@ class _WalletScreenState extends State<WalletScreen> {
         _redemptions = (data['redemptions'] as List? ?? [])
             .map((e) => Redemption.fromJson(e as Map<String, dynamic>))
             .toList();
+        _showPoints = data['isTravelAgent'] as bool? ?? false;
+        _pointsToRupiah = (data['pointsToRupiah'] as num?)?.toInt() ?? 1;
         _isLoading = false;
       });
     } catch (e) {
@@ -219,6 +223,17 @@ class _WalletScreenState extends State<WalletScreen> {
                   fontWeight: FontWeight.w800,
                 ),
               ),
+              if (_showPoints) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '${_points(balance.available, _pointsToRupiah)} poin tersedia',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -570,6 +585,15 @@ class _WalletScreenState extends State<WalletScreen> {
 
   String _fmt(int amount) {
     return amount.toString().replaceAllMapped(
+      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+      (m) => '${m[1]}.',
+    );
+  }
+
+  String _points(int amount, int pointsToRupiah) {
+    if (pointsToRupiah <= 0) return '0';
+    final points = amount ~/ pointsToRupiah;
+    return points.toString().replaceAllMapped(
       RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
       (m) => '${m[1]}.',
     );
