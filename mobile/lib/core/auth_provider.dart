@@ -8,6 +8,7 @@ import '../services/analytics_service.dart';
 import '../services/crashlytics_service.dart';
 
 class AuthProvider extends ChangeNotifier {
+  static const _userEmailKey = 'user_email';
   final ApiClient _api;
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
@@ -79,7 +80,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e) {
-      _error = 'Terjadi kesalahan. Coba lagi.';
+      _error = ApiClient.getErrorMessage(e);
       _isLoading = false;
       notifyListeners();
       return false;
@@ -96,8 +97,8 @@ class AuthProvider extends ChangeNotifier {
     } on DioException catch (e) {
       _error = ApiClient.getErrorMessage(e);
       return false;
-    } catch (_) {
-      _error = 'Terjadi kesalahan. Coba lagi.';
+    } catch (e) {
+      _error = ApiClient.getErrorMessage(e);
       return false;
     }
   }
@@ -128,7 +129,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e) {
-      _error = 'Terjadi kesalahan. Coba lagi.';
+      _error = ApiClient.getErrorMessage(e);
       _isLoading = false;
       notifyListeners();
       return false;
@@ -143,7 +144,7 @@ class AuthProvider extends ChangeNotifier {
       await NotificationService().unregisterDeviceToken();
     } catch (_) {}
     await _api.clearCookies();
-    await _storage.deleteAll();
+    await _storage.delete(key: _userEmailKey);
     _user = null;
     _error = null;
     notifyListeners();

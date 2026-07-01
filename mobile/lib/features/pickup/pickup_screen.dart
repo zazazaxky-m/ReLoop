@@ -139,7 +139,7 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Gagal mencatat material: ${ApiClient.getErrorMessage(e)}'),
+            content: Text(ApiClient.getErrorMessage(e)),
             backgroundColor: ReLoopColors.danger,
           ),
         );
@@ -644,7 +644,8 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: form['wasteTypeId'] as String?,
+              key: ValueKey('wasteType-$pickupId-${form['wasteTypeId'] ?? ''}'),
+              initialValue: form['wasteTypeId'] as String?,
               isExpanded: true,
               decoration: const InputDecoration(
                 labelText: 'Jenis Material',

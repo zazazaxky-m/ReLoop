@@ -25,10 +25,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _emailCtrl = TextEditingController();
   final _currentPasswordCtrl = TextEditingController();
   final _newPasswordCtrl = TextEditingController();
+  final _confirmNewPasswordCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isSaving = false;
   bool _biometricAvailable = false;
   bool _biometricEnabled = false;
+  bool _obscureCurrentPassword = true;
+  bool _obscureNewPassword = true;
+  bool _obscureConfirmNewPassword = true;
   String? _biometricType;
 
   @override
@@ -62,6 +66,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _emailCtrl.dispose();
     _currentPasswordCtrl.dispose();
     _newPasswordCtrl.dispose();
+    _confirmNewPasswordCtrl.dispose();
     super.dispose();
   }
 
@@ -91,6 +96,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _isEditing = false;
         _currentPasswordCtrl.clear();
         _newPasswordCtrl.clear();
+        _confirmNewPasswordCtrl.clear();
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -101,8 +107,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Gagal memperbarui profil'),
+          SnackBar(
+            content: Text(ApiClient.getErrorMessage(e)),
             backgroundColor: ReLoopColors.danger,
           ),
         );
@@ -190,7 +196,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
 
-    if (confirmed != true || passwordCtrl.text.isEmpty) return;
+    if (!mounted || confirmed != true || passwordCtrl.text.isEmpty) return;
 
     final auth = context.read<AuthProvider>();
     final valid = await auth.verifyPassword(passwordCtrl.text);
@@ -203,11 +209,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    final authenticated = await BiometricService().authenticate(
+    final authResult = await BiometricService().authenticateWithResult(
       reason: 'Verifikasi identitas untuk mengaktifkan $_biometricType',
     );
 
-    if (authenticated) {
+    if (authResult.authenticated) {
       await BiometricService().saveCredentials(email, passwordCtrl.text);
       await BiometricService().setEnabled(true);
       if (mounted) {
@@ -217,12 +223,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       }
     } else {
-      if (mounted) {
+      if (mounted && authResult.errorMessage != null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Gagal memverifikasi identitas')),
+          SnackBar(content: Text(authResult.errorMessage!)),
         );
       }
     }
+  }
+
+  bool get _isChangingSensitiveData =>
+      _newPasswordCtrl.text.isNotEmpty ||
+      _confirmNewPasswordCtrl.text.isNotEmpty ||
+      _emailCtrl.text.trim() != (context.read<AuthProvider>().user?.email ?? '');
+
+  InputDecoration _passwordDecoration({
+    required IconData prefixIcon,
+    required String hintText,
+    required bool obscureText,
+    required VoidCallback onToggle,
+  }) {
+    return InputDecoration(
+      prefixIcon: Icon(prefixIcon),
+      hintText: hintText,
+      suffixIcon: IconButton(
+        icon: Icon(
+          obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+        ),
+        onPressed: onToggle,
+      ),
+    );
   }
 
   @override
@@ -298,6 +327,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         _emailCtrl.text = user.email;
                         _currentPasswordCtrl.clear();
                         _newPasswordCtrl.clear();
+                        _confirmNewPasswordCtrl.clear();
                       });
                     },
                     icon: Icon(Icons.close, size: 16),
@@ -398,11 +428,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 8),
                   TextFormField(
                     controller: _currentPasswordCtrl,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.lock_outline_rounded),
+                    obscureText: _obscureCurrentPassword,
+                    decoration: _passwordDecoration(
+                      prefixIcon: Icons.lock_outline_rounded,
                       hintText: 'Wajib untuk ganti email atau password',
+                      obscureText: _obscureCurrentPassword,
+                      onToggle: () => setState(
+                        () => _obscureCurrentPassword = !_obscureCurrentPassword,
+                      ),
                     ),
+                    validator: (value) {
+                      if (_isChangingSensitiveData && (value == null || value.isEmpty)) {
+                        return 'Password saat ini wajib diisi';
+                      }
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 20),
                   Text(
@@ -416,16 +456,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 8),
                   TextFormField(
                     controller: _newPasswordCtrl,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.password_rounded),
+                    obscureText: _obscureNewPassword,
+                    decoration: _passwordDecoration(
+                      prefixIcon: Icons.password_rounded,
                       hintText: 'Kosongkan jika tidak ingin mengganti',
+                      obscureText: _obscureNewPassword,
+                      onToggle: () =>
+                          setState(() => _obscureNewPassword = !_obscureNewPassword),
                     ),
                     validator: (value) {
                       if (value != null &&
                           value.isNotEmpty &&
                           value.length < 6) {
                         return 'Password minimal 6 karakter';
+                      }
+                      if (_confirmNewPasswordCtrl.text.isNotEmpty &&
+                          (value == null || value.isEmpty)) {
+                        return 'Password baru wajib diisi';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Ulangi Password Baru',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: context.reloopMuted,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _confirmNewPasswordCtrl,
+                    obscureText: _obscureConfirmNewPassword,
+                    decoration: _passwordDecoration(
+                      prefixIcon: Icons.verified_user_outlined,
+                      hintText: 'Ulangi password baru',
+                      obscureText: _obscureConfirmNewPassword,
+                      onToggle: () => setState(
+                        () => _obscureConfirmNewPassword = !_obscureConfirmNewPassword,
+                      ),
+                    ),
+                    validator: (value) {
+                      final hasNewPassword = _newPasswordCtrl.text.isNotEmpty;
+                      final hasConfirmPassword = value != null && value.isNotEmpty;
+                      if (hasNewPassword && !hasConfirmPassword) {
+                        return 'Ulangi password baru';
+                      }
+                      if (!hasNewPassword && hasConfirmPassword) {
+                        return 'Isi password baru terlebih dahulu';
+                      }
+                      if (hasNewPassword && value != _newPasswordCtrl.text) {
+                        return 'Konfirmasi password baru tidak cocok';
                       }
                       return null;
                     },

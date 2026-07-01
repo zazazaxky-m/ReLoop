@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/api_client.dart';
 import '../../theme/colors.dart';
 
 class PaginatedList<T> extends StatefulWidget {
@@ -89,7 +90,7 @@ class _PaginatedListState<T> extends State<PaginatedList<T>> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Gagal memuat data';
+        _error = ApiClient.getErrorMessage(e);
         _isLoading = false;
         _isInitialLoading = false;
       });

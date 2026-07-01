@@ -53,10 +53,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _attemptBiometricLogin() async {
     final bio = BiometricService();
-    final authenticated = await bio.authenticate(
+    final result = await bio.authenticateWithResult(
       reason: 'Gunakan $_biometricType untuk login ke ReLoop',
     );
-    if (!authenticated || !mounted) return;
+    if (!result.authenticated) {
+      if (mounted && result.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.errorMessage!)),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
 
     final creds = await bio.getCredentials();
     if (creds == null || !mounted) return;

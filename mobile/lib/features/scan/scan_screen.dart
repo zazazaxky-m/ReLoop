@@ -1,4 +1,3 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -105,16 +104,9 @@ class _ScanScreenState extends State<ScanScreen> {
         _isProcessing = false;
       });
     } on Exception catch (e) {
-      String msg = 'Gagal memproses QR';
       HapticFeedback.vibrate();
-      if (e is DioException) {
-        final errData = e.response?.data;
-        if (errData is Map) {
-          msg = errData['error'] as String? ?? msg;
-        }
-      }
       setState(() {
-        _error = msg;
+        _error = ApiClient.getErrorMessage(e);
         _isProcessing = false;
         _isScanning = true;
       });

@@ -121,7 +121,10 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal: ${e.toString()}'), backgroundColor: ReLoopColors.danger),
+          SnackBar(
+            content: Text(ApiClient.getErrorMessage(e)),
+            backgroundColor: ReLoopColors.danger,
+          ),
         );
       }
     }

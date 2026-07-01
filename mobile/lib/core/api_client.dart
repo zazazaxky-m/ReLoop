@@ -63,6 +63,55 @@ class ApiClient {
     await _cookieJar.deleteAll();
   }
 
+  static String? _extractErrorMessageFromData(dynamic data) {
+    if (data is String) {
+      final message = data.trim();
+      return message.isEmpty ? null : message;
+    }
+
+    if (data is! Map) return null;
+
+    final directMessage = [
+      data['error'],
+      data['message'],
+      data['detail'],
+    ].whereType<String>().map((value) => value.trim()).firstWhere(
+          (value) => value.isNotEmpty,
+          orElse: () => '',
+        );
+
+    final issueMessages = <String>[];
+    final issues = data['issues'];
+    if (issues is List) {
+      for (final issue in issues) {
+        if (issue is String && issue.trim().isNotEmpty) {
+          issueMessages.add(issue.trim());
+          continue;
+        }
+        if (issue is Map) {
+          final message = issue['message'];
+          if (message is String && message.trim().isNotEmpty) {
+            issueMessages.add(message.trim());
+          }
+        }
+      }
+    }
+
+    final uniqueIssueMessages = issueMessages.toSet().toList();
+    final issueSummary = uniqueIssueMessages.isEmpty
+        ? null
+        : uniqueIssueMessages.take(2).join(', ');
+
+    if (directMessage.isNotEmpty && issueSummary != null) {
+      return directMessage == 'Validasi gagal'
+          ? '$directMessage: $issueSummary'
+          : directMessage;
+    }
+
+    if (directMessage.isNotEmpty) return directMessage;
+    return issueSummary;
+  }
+
   static String getErrorMessage(Object error, {bool includeDetails = false}) {
     if (error is DioException) {
       switch (error.type) {
@@ -74,10 +123,8 @@ class ApiClient {
           return 'Server tidak merespons. Coba lagi.';
         case DioExceptionType.badResponse:
           final statusCode = error.response?.statusCode;
-          final errData = error.response?.data;
-          if (errData is Map && errData['error'] != null) {
-            return errData['error'] as String;
-          }
+          final message = _extractErrorMessageFromData(error.response?.data);
+          if (message != null) return message;
           switch (statusCode) {
             case 400:
               return 'Permintaan tidak valid.';
