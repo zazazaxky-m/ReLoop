@@ -157,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 1.6,
-                        color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                        color: context.reloopBrandText,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -218,7 +218,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide(
-                                    color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                                    color: context.reloopBrandText,
                                     width: 1.5),
                               ),
                             ),
@@ -269,7 +269,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide(
-                                    color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                                    color: context.reloopBrandText,
                                     width: 1.5),
                               ),
                               suffixIcon: IconButton(
@@ -307,20 +307,20 @@ class _LoginScreenState extends State<LoginScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: context.isDarkMode ? const Color(0xFF2D1414) : const Color(0xFFFEF2F2),
+                          color: context.reloopTone('danger').bg,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: context.isDarkMode ? const Color(0xFF4A1F1F) : const Color(0xFFFECACA)),
+                          border: Border.all(color: context.reloopTone('danger').border),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.error_outline,
-                                size: 16, color: ReLoopColors.danger),
+                            Icon(Icons.error_outline,
+                                size: 16, color: context.reloopTone('danger').text),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 auth.error!,
-                                style: const TextStyle(
-                                  color: ReLoopColors.danger,
+                                style: TextStyle(
+                                  color: context.reloopTone('danger').text,
                                   fontSize: 13,
                                 ),
                               ),
@@ -357,7 +357,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             _biometricType == 'Face ID'
                                 ? Icons.face
                                 : Icons.fingerprint,
-                            color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                            color: context.reloopBrandText,
                           ),
                           label: Text(
                             'Login dengan $_biometricType',
@@ -367,9 +367,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                            foregroundColor: context.reloopBrandText,
                             side: BorderSide(
-                                color: context.isDarkMode ? ReLoopColors.brand800 : ReLoopColors.brand200),
+                                color: context.reloopBrandSoftStrong),
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -394,7 +394,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               TextSpan(
                                 text: 'Daftar',
                                 style: TextStyle(
-                                  color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+                                  color: context.reloopBrandText,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),

@@ -488,17 +488,29 @@ class _ActivityIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (tone) {
-      QuickActionTone.green => ReLoopColors.brand600,
-      QuickActionTone.blue => ReLoopColors.info,
-      QuickActionTone.amber => ReLoopColors.warning,
-      QuickActionTone.teal => const Color(0xFF159A91),
+    final (color, softColor) = switch (tone) {
+      QuickActionTone.green => (
+          context.reloopBrandText,
+          context.reloopBrandSoft,
+        ),
+      QuickActionTone.blue => (
+          context.isDarkMode ? const Color(0xFF93C5FD) : ReLoopColors.info,
+          context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEDF5FF),
+        ),
+      QuickActionTone.amber => (
+          context.isDarkMode ? const Color(0xFFFCD34D) : ReLoopColors.warning,
+          context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFF5E7),
+        ),
+      QuickActionTone.teal => (
+          context.isDarkMode ? const Color(0xFF5EEAD4) : const Color(0xFF159A91),
+          context.isDarkMode ? const Color(0xFF173936) : const Color(0xFFEAF9F7),
+        ),
     };
     return Container(
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: color.withValues(alpha: .1),
+        color: softColor,
         borderRadius: BorderRadius.circular(13),
       ),
       child: Icon(icon, color: color, size: 20),

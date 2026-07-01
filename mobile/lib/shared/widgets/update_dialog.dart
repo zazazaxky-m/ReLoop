@@ -44,13 +44,13 @@ class ForceUpdateDialog extends StatelessWidget {
               decoration: BoxDecoration(
                 color: context.reloopBrandSoft,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: ReLoopColors.brand200),
+                border: Border.all(color: context.reloopBrandSoftStrong),
               ),
               child: Row(
                 children: [
                   Icon(Icons.new_releases, color: ReLoopColors.brand500, size: 18),
                   const SizedBox(width: 8),
-                  Text('Versi $latestVersion', style: TextStyle(fontWeight: FontWeight.w700, color: ReLoopColors.brand700, fontSize: 14)),
+                  Text('Versi $latestVersion', style: TextStyle(fontWeight: FontWeight.w700, color: context.reloopBrandText, fontSize: 14)),
                 ],
               ),
             ),

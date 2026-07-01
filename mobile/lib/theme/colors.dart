@@ -85,6 +85,39 @@ class ReLoopColors {
       border: Color(0xFF83D59D),
     ),
   };
+
+  static const Map<String, ToneColors> tonesDark = {
+    'success': ToneColors(
+      bg: Color(0xFF0A2E18),
+      text: Color(0xFF86EFAC),
+      border: Color(0xFF14532D),
+    ),
+    'warning': ToneColors(
+      bg: Color(0xFF3A2D17),
+      text: Color(0xFFFCD34D),
+      border: Color(0xFF713F12),
+    ),
+    'danger': ToneColors(
+      bg: Color(0xFF2D1414),
+      text: Color(0xFFFCA5A5),
+      border: Color(0xFF4A1F1F),
+    ),
+    'info': ToneColors(
+      bg: Color(0xFF172554),
+      text: Color(0xFF93C5FD),
+      border: Color(0xFF1E40AF),
+    ),
+    'neutral': ToneColors(
+      bg: Color(0xFF1E293B),
+      text: Color(0xFFCBD5E1),
+      border: Color(0xFF334155),
+    ),
+    'brand': ToneColors(
+      bg: Color(0xFF0A2E18),
+      text: Color(0xFF86EFAC),
+      border: Color(0xFF14532D),
+    ),
+  };
 }
 
 class ToneColors {
@@ -97,6 +130,7 @@ class ToneColors {
     required this.border,
   });
 }
+
 extension ReLoopThemeColors on BuildContext {
   bool get isDarkMode => Theme.of(this).brightness == Brightness.dark;
 
@@ -122,4 +156,10 @@ extension ReLoopThemeColors on BuildContext {
       isDarkMode ? const Color(0xFF205232) : ReLoopColors.brand100;
   Color get reloopBrandText =>
       isDarkMode ? ReLoopColors.brand300 : ReLoopColors.brand700;
+
+  ToneColors reloopTone(String tone) {
+    return isDarkMode
+        ? ReLoopColors.tonesDark[tone] ?? ReLoopColors.tonesDark['neutral']!
+        : ReLoopColors.tones[tone] ?? ReLoopColors.tones['neutral']!;
+  }
 }
