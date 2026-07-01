@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { handleApiError, jsonOk } from "@/lib/api";
-import { getMinRedemption } from "@/lib/config";
+import { CONFIG_KEYS, getConfigInt, getMinRedemption } from "@/lib/config";
 import { getWalletBalance, getLedgerHistory } from "@/lib/ledger";
 import { requireApiUser, activePartnerOrgIds } from "@/lib/rbac";
 import { isCampaignEligible } from "@/lib/campaign";
@@ -11,7 +11,15 @@ export async function GET() {
     const user = await requireApiUser();
 
     if (user.role === "USER") {
-      const [balance, sessions, campaigns, ledger, minRedemption] =
+      const [
+        balance,
+        sessions,
+        campaigns,
+        ledger,
+        minRedemption,
+        travelAgentLinkCount,
+        pointsToRupiah,
+      ] =
         await Promise.all([
           getWalletBalance(user.id),
           prisma.depositSession.findMany({
@@ -31,11 +39,15 @@ export async function GET() {
           }),
           getLedgerHistory(user.id, 8),
           getMinRedemption(),
+          prisma.travelAgentUser.count({ where: { userId: user.id } }),
+          getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
         ]);
 
       return jsonOk({
         role: user.role,
         balance,
+        isTravelAgent: travelAgentLinkCount > 0,
+        pointsToRupiah,
         recentSessions: sessions,
         campaigns: campaigns.filter((campaign) =>
           isCampaignEligible(campaign, user.email).eligible,

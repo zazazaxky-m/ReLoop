@@ -13,6 +13,7 @@ const updateSchema = z
     campaignType: z
       .enum(["MACHINE_DEPOSIT", "TRASH_BAG", "EVENT", "SCHOOL_PROGRAM", "TOURISM_PROGRAM"])
       .optional(),
+    rewardMode: z.enum(["MONEY_REWARD", "COMPLIANCE_ONLY"]).optional(),
     visibility: z.enum(["PUBLIC", "PRIVATE"]).optional(),
     allowedEmailDomains: z.array(z.string()).optional(),
     startAt: z.string().datetime().nullable().optional(),
@@ -64,6 +65,7 @@ export async function PATCH(
         name: data.name,
         description: data.description,
         campaignType: data.campaignType,
+        rewardMode: data.rewardMode,
         visibility: data.visibility,
         allowedEmailDomainsJson: domainsValue,
         startAt:

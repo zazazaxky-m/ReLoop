@@ -57,7 +57,26 @@ export async function GET() {
       },
     });
 
-    return jsonOk({ wasteTypes });
+    // Soft-join ke Organization (WasteType.organizationId tidak punya @relation).
+    const orgIds = Array.from(
+      new Set(
+        wasteTypes.map((w) => w.organizationId).filter((x): x is string => Boolean(x)),
+      ),
+    );
+    const orgs = orgIds.length
+      ? await prisma.organization.findMany({
+          where: { id: { in: orgIds } },
+          select: { id: true, name: true, type: true },
+        })
+      : [];
+    const orgById = new Map(orgs.map((o) => [o.id, o]));
+
+    const enriched = wasteTypes.map((w) => ({
+      ...w,
+      organization: w.organizationId ? orgById.get(w.organizationId) ?? null : null,
+    }));
+
+    return jsonOk({ wasteTypes: enriched });
   } catch (error) {
     return handleApiError(error);
   }

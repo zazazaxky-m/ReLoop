@@ -7,12 +7,13 @@ import { logAudit } from "@/lib/audit";
 
 const createSchema = z.object({
   campaignId: z.string().min(1),
-  groupName: z.string().max(160).optional(),
-  leaderName: z.string().max(120).optional(),
-  leaderContact: z.string().max(60).optional(),
-  travelAgentName: z.string().max(160).optional(),
-  participantCount: z.number().int().min(1).max(1000).optional(),
-  userEmail: z.string().email().optional(),
+  travelAgentId: z.string().min(1).nullable().optional(),
+  groupName: z.string().max(160).nullable().optional(),
+  leaderName: z.string().max(120).nullable().optional(),
+  leaderContact: z.string().max(60).nullable().optional(),
+  travelAgentName: z.string().max(160).nullable().optional(),
+  participantCount: z.number().int().min(1).max(1000).nullable().optional(),
+  userEmail: z.string().email().nullable().optional(),
 });
 
 export async function GET() {
@@ -30,7 +31,8 @@ export async function GET() {
       where,
       orderBy: { createdAt: "desc" },
       include: {
-        campaign: { select: { id: true, name: true, organizationId: true } },
+        campaign: { select: { id: true, name: true, organizationId: true, rewardMode: true } },
+        travelAgent: { select: { id: true, name: true, email: true } },
         _count: { select: { bagAssignments: true, validations: true } },
       },
     });
@@ -49,6 +51,23 @@ export async function POST(req: Request) {
     if (!campaign) throw new HttpError(404, "Campaign tidak ditemukan");
     assertOrgScope(user, campaign.organizationId);
 
+    let travelAgentName = data.travelAgentName ?? null;
+    if (data.travelAgentId) {
+      const agentLink = await prisma.travelAgentOrganization.findUnique({
+        where: {
+          travelAgentId_organizationId: {
+            travelAgentId: data.travelAgentId,
+            organizationId: campaign.organizationId,
+          },
+        },
+        include: { travelAgent: { select: { name: true } } },
+      });
+      if (!agentLink || agentLink.status !== "INVITED") {
+        throw new HttpError(422, "Travel agent belum berstatus invited di organisasi ini");
+      }
+      travelAgentName = agentLink.travelAgent.name;
+    }
+
     let userId: string | null = null;
     if (data.userEmail) {
       const u = await prisma.user.findUnique({ where: { email: data.userEmail.toLowerCase() } });
@@ -60,7 +79,8 @@ export async function POST(req: Request) {
       data: {
         campaignId: campaign.id,
         userId,
-        travelAgentName: data.travelAgentName ?? null,
+        travelAgentId: data.travelAgentId ?? null,
+        travelAgentName,
         groupName: data.groupName ?? null,
         leaderName: data.leaderName ?? null,
         leaderContact: data.leaderContact ?? null,

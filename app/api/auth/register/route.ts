@@ -26,14 +26,56 @@ export async function POST(req: NextRequest) {
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) return jsonError(409, "Email sudah terdaftar");
 
-    const user = await prisma.user.create({
-      data: {
-        name: data.name.trim(),
-        email,
-        phone: data.phone,
-        passwordHash: await hashPassword(data.password),
-        role: "USER",
-      },
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          name: data.name.trim(),
+          email,
+          phone: data.phone,
+          passwordHash: await hashPassword(data.password),
+          role: "USER",
+        },
+      });
+
+      const pendingInvites = await tx.travelAgentInvite.findMany({
+        where: { email, status: "PENDING", travelAgentId: { not: null } },
+        select: { travelAgentId: true, organizationId: true },
+      });
+
+      for (const invite of pendingInvites) {
+        const travelAgentId = invite.travelAgentId as string;
+        await tx.travelAgentUser.upsert({
+          where: {
+            travelAgentId_userId: {
+              travelAgentId,
+              userId: created.id,
+            },
+          },
+          update: { roleInAgent: "OWNER" },
+          create: {
+            travelAgentId,
+            userId: created.id,
+            roleInAgent: "OWNER",
+          },
+        });
+        await tx.travelAgentOrganization.updateMany({
+          where: {
+            travelAgentId,
+            organizationId: invite.organizationId,
+            status: "PENDING",
+          },
+          data: { status: "INVITED", approvedAt: new Date() },
+        });
+      }
+
+      if (pendingInvites.length) {
+        await tx.travelAgentInvite.updateMany({
+          where: { email, status: "PENDING" },
+          data: { status: "INVITED" },
+        });
+      }
+
+      return created;
     });
 
     await setSessionCookie({
