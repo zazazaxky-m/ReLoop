@@ -38,11 +38,15 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
 
     try {
       final api = context.read<ApiClient>();
-      final response = await api.get('/api/public/machines/${widget.machineCode}');
+      final response = await api.get(
+        '/api/public/machines/${widget.machineCode}',
+      );
       final data = response.data as Map<String, dynamic>;
 
       setState(() {
-        _machine = MachineInfo.fromJson(data['machine'] as Map<String, dynamic>);
+        _machine = MachineInfo.fromJson(
+          data['machine'] as Map<String, dynamic>,
+        );
         _sessions = (data['recentSessions'] as List? ?? [])
             .map((e) => DepositSession.fromJson(e as Map<String, dynamic>))
             .toList();
@@ -72,33 +76,37 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
       body: _isLoading
           ? const SkeletonDashboard()
           : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
-                      const SizedBox(height: 12),
-                      Text(_error!, style: TextStyle(color: context.reloopMuted)),
-                      const SizedBox(height: 12),
-                      TextButton(onPressed: _loadMachine, child: const Text('Coba Lagi')),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.cloud_off,
+                    size: 48,
+                    color: context.reloopMutedSoft,
                   ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    _buildStatusCard(),
-                    const SizedBox(height: 16),
-                    _buildInfoCard(),
-                    const SizedBox(height: 16),
-                    _buildWasteTypesCard(),
-                    const SizedBox(height: 16),
-                    _buildSessionsCard(),
-                    const SizedBox(height: 16),
-                    _buildReportButton(),
-                    const SizedBox(height: 80),
-                  ],
-                ),
+                  const SizedBox(height: 12),
+                  Text(_error!, style: TextStyle(color: context.reloopMuted)),
+                  const SizedBox(height: 12),
+                  TextButton(onPressed: _loadMachine, child: Text('Coba Lagi')),
+                ],
+              ),
+            )
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                _buildStatusCard(),
+                const SizedBox(height: 16),
+                _buildInfoCard(),
+                const SizedBox(height: 16),
+                _buildWasteTypesCard(),
+                const SizedBox(height: 16),
+                _buildSessionsCard(),
+                const SizedBox(height: 16),
+                _buildReportButton(),
+                const SizedBox(height: 80),
+              ],
+            ),
     );
   }
 
@@ -107,11 +115,20 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
 
     Color statusColor;
     switch (m.status) {
-      case 'ONLINE': statusColor = ReLoopColors.statusOnline; break;
-      case 'FULL': statusColor = ReLoopColors.statusFull; break;
-      case 'ERROR': statusColor = ReLoopColors.statusError; break;
-      case 'MAINTENANCE': statusColor = ReLoopColors.statusMaintenance; break;
-      default: statusColor = ReLoopColors.statusOffline;
+      case 'ONLINE':
+        statusColor = ReLoopColors.statusOnline;
+        break;
+      case 'FULL':
+        statusColor = ReLoopColors.statusFull;
+        break;
+      case 'ERROR':
+        statusColor = ReLoopColors.statusError;
+        break;
+      case 'MAINTENANCE':
+        statusColor = ReLoopColors.statusMaintenance;
+        break;
+      default:
+        statusColor = ReLoopColors.statusOffline;
     }
 
     return Container(
@@ -149,10 +166,7 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
               const SizedBox(width: 8),
               Text(
                 'Kode: ${m.machineCode}',
-                style: TextStyle(
-                  color: context.reloopMuted,
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: context.reloopMuted, fontSize: 13),
               ),
             ],
           ),
@@ -170,7 +184,11 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
             const SizedBox(height: 6),
             Text(
               'Kapasitas: ${m.fillLevelPercent}%',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.reloopForeground),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: context.reloopForeground,
+              ),
             ),
           ],
         ],
@@ -194,7 +212,10 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
           _infoRow('Status', m.status),
           _infoRow('Kapasitas', '${m.fillLevelPercent}%'),
           if (m.latitude != null && m.longitude != null)
-            _infoRow('Lokasi', '${m.latitude!.toStringAsFixed(6)}, ${m.longitude!.toStringAsFixed(6)}'),
+            _infoRow(
+              'Lokasi',
+              '${m.latitude!.toStringAsFixed(6)}, ${m.longitude!.toStringAsFixed(6)}',
+            ),
         ],
       ),
     );
@@ -244,22 +265,27 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
             spacing: 8,
             runSpacing: 8,
             children: m.supportedWasteTypes!
-                .map((wt) => Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: context.reloopBrandSoft,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: context.reloopBrandSoftStrong),
+                .map(
+                  (wt) => Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: context.reloopBrandSoft,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: context.reloopBrandSoftStrong),
+                    ),
+                    child: Text(
+                      wt.name,
+                      style: TextStyle(
+                        color: context.reloopBrandText,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
                       ),
-                      child: Text(
-                        wt.name,
-                        style: TextStyle(
-                          color: context.reloopBrandText,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ))
+                    ),
+                  ),
+                )
                 .toList(),
           ),
         ],
@@ -276,40 +302,45 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
         children: [
           const Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              ReLoopCardTitle(title: 'Sesi Terakhir'),
-            ],
+            children: [ReLoopCardTitle(title: 'Sesi Terakhir')],
           ),
           const SizedBox(height: 12),
-          ..._sessions.take(5).map((s) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: context.reloopBrandSoft,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(Icons.recycling,
-                          color: context.reloopBrandText, size: 18),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        _formatDate(s.startedAt),
-                        style: TextStyle(
-                          color: context.reloopForeground,
-                          fontWeight: FontWeight.w500,
-                          fontSize: 13,
+          ..._sessions
+              .take(5)
+              .map(
+                (s) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: context.reloopBrandSoft,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          Icons.recycling,
+                          color: context.reloopBrandText,
+                          size: 18,
                         ),
                       ),
-                    ),
-                    StatusBadge(statusKey: s.status),
-                  ],
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _formatDate(s.startedAt),
+                          style: TextStyle(
+                            color: context.reloopForeground,
+                            fontWeight: FontWeight.w500,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      StatusBadge(statusKey: s.status),
+                    ],
+                  ),
                 ),
-              )),
+              ),
         ],
       ),
     );

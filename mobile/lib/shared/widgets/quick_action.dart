@@ -124,7 +124,10 @@ class QuickAction extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: const Color(0xFF1D211E),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: context.reloopBackground, width: 2),
+                            border: Border.all(
+                              color: context.reloopBackground,
+                              width: 2,
+                            ),
                           ),
                           child: Text(
                             badge!,

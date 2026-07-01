@@ -62,7 +62,7 @@ Setiap trip mewakili satu rombongan wisatawan dari satu travel agent.
 
 1. Di halaman `Trip / Trash Bag`, klik `Tas` pada trip.
 2. Isi jumlah trash bag.
-3. Pilih jenis sampah jika kantong ingin dipetakan, misalnya `Botol Plastik` atau `Kaleng Aluminium`.
+3. Pilih jenis sampah jika kantong ingin dipetakan, misalnya `Organik` atau `Anorganik`.
 4. Klik `Terbitkan`.
 5. Sistem membuat kode QR unik per trash bag, misalnya `BAG-XXXX`.
 
@@ -132,7 +132,7 @@ Sistem mencatat validasi `BANK_SAMPAH_PICKUP` sebagai bukti bahwa sampah terpila
 Flow mesin tidak berubah:
 
 - user scan mesin
-- setor botol/kaleng
+- setor sampah organik/anorganik
 - item divalidasi
 - reward uang masuk ke `RewardLedger`
 - saldo tampil di wallet user

@@ -52,9 +52,12 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
           if (c.startAt != null && c.startAt!.isAfter(now)) return false;
           if (c.endAt != null && c.endAt!.isBefore(now)) return false;
           if (c.visibility == 'PRIVATE') {
-            if (c.allowedEmailDomains == null || c.allowedEmailDomains!.isEmpty) return false;
+            if (c.allowedEmailDomains == null || c.allowedEmailDomains!.isEmpty)
+              return false;
             final userDomain = '@${userEmail.split('@').last}';
-            return c.allowedEmailDomains!.any((d) => d.toLowerCase() == userDomain.toLowerCase());
+            return c.allowedEmailDomains!.any(
+              (d) => d.toLowerCase() == userDomain.toLowerCase(),
+            );
           }
           return true;
         }).toList();
@@ -71,13 +74,8 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Program Aktif'),
-      ),
-      body: RefreshIndicator(
-        onRefresh: _loadCampaigns,
-        child: _buildBody(),
-      ),
+      appBar: AppBar(title: Text('Program Aktif')),
+      body: RefreshIndicator(onRefresh: _loadCampaigns, child: _buildBody()),
     );
   }
 
@@ -102,12 +100,15 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+              Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
               const SizedBox(height: 12),
-              Text(_error!, textAlign: TextAlign.center,
-                  style: const TextStyle(color: ReLoopColors.muted)),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: context.reloopMuted),
+              ),
               const SizedBox(height: 12),
-              TextButton(onPressed: _loadCampaigns, child: const Text('Coba Lagi')),
+              TextButton(onPressed: _loadCampaigns, child: Text('Coba Lagi')),
             ],
           ),
         ),
@@ -118,15 +119,21 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
       return ListView(
         children: [
           const SizedBox(height: 80),
-          const Center(
+          Center(
             child: Column(
               children: [
-                Icon(Icons.campaign_outlined,
-                    size: 48, color: ReLoopColors.mutedSoft),
+                Icon(
+                  Icons.campaign_outlined,
+                  size: 48,
+                  color: ReLoopColors.mutedSoft,
+                ),
                 SizedBox(height: 12),
                 Text(
                   'Tidak ada program yang memenuhi syarat Anda.',
-                  style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 14),
+                  style: TextStyle(
+                    color: context.reloopMutedSoft,
+                    fontSize: 14,
+                  ),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -185,17 +192,17 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                     children: [
                       Text(
                         c.name,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontWeight: FontWeight.w600,
-                          color: ReLoopColors.foreground,
+                          color: context.reloopForeground,
                           fontSize: 14,
                         ),
                       ),
                       if (c.organizationName != null)
                         Text(
                           c.organizationName!,
-                          style: const TextStyle(
-                            color: ReLoopColors.mutedSoft,
+                          style: TextStyle(
+                            color: context.reloopMutedSoft,
                             fontSize: 12,
                           ),
                         ),
@@ -203,8 +210,11 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.share_outlined,
-                      size: 20, color: ReLoopColors.mutedSoft),
+                  icon: Icon(
+                    Icons.share_outlined,
+                    size: 20,
+                    color: context.reloopMutedSoft,
+                  ),
                   onPressed: () {
                     Share.share(
                       'Yuk ikutan program ${c.name} di ReLoop! '
@@ -222,10 +232,7 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                 c.description!,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: ReLoopColors.muted,
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: context.reloopMuted, fontSize: 13),
               ),
             ],
             if (c.rewardMultiplier != null) ...[
@@ -252,7 +259,7 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                 '${c.startAt != null ? '${c.startAt!.day}/${c.startAt!.month}/${c.startAt!.year}' : ''}'
                 '${c.startAt != null && c.endAt != null ? ' - ' : ''}'
                 '${c.endAt != null ? '${c.endAt!.day}/${c.endAt!.month}/${c.endAt!.year}' : ''}',
-                style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                style: TextStyle(fontSize: 11, color: context.reloopMutedSoft),
               ),
             ],
           ],

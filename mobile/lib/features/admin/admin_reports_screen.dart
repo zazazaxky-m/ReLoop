@@ -32,7 +32,9 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   }
 
   Future<void> _loadSummary() async {
-    setState(() { _isLoading = true; });
+    setState(() {
+      _isLoading = true;
+    });
     try {
       final api = context.read<ApiClient>();
 
@@ -75,7 +77,9 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         _isLoading = false;
       });
     } catch (_) {
-      setState(() { _isLoading = false; });
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -107,17 +111,19 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   Future<void> _download(String type, String filename) async {
     try {
       final api = context.read<ApiClient>();
-      final res = await api.get('/api/reports', queryParameters: {'type': type});
+      final res = await api.get(
+        '/api/reports',
+        queryParameters: {'type': type},
+      );
       final csv = res.data.toString();
 
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/$filename');
       await file.writeAsString(csv);
 
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'text/csv')],
-        subject: filename,
-      );
+      await Share.shareXFiles([
+        XFile(file.path, mimeType: 'text/csv'),
+      ], subject: filename);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -142,50 +148,156 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     return AdminShell(
       title: 'Laporan',
       child: _isLoading
-          ? ListView(padding: const EdgeInsets.all(16), children: const [SkeletonListTile(), SizedBox(height: 8), SkeletonListTile()])
-          : ListView(padding: const EdgeInsets.all(16), children: [
-        // Summary metrics — sourced from /api/mobile/reports so the numbers
-        // match the web admin Reports page (Pickup Selesai = status COMPLETED,
-        // Item Diterima = deposit item status ACCEPTED).
-        Row(children: [
-          Expanded(child: MetricCard(label: 'Item Diterima', value: _depositItemAccepted.toString(), icon: Icons.inventory_2, tone: MetricTone.green)),
-          const SizedBox(width: 12),
-          Expanded(child: MetricCard(label: 'Pickup Selesai', value: _pickupCompleted.toString(), icon: Icons.local_shipping, tone: MetricTone.blue)),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: MetricCard(label: 'Total Item Deposit', value: _depositItemCount.toString(), icon: Icons.assessment, tone: MetricTone.teal)),
-          const SizedBox(width: 12),
-          Expanded(child: MetricCard(label: 'Total Pickup', value: _pickupCount.toString(), icon: Icons.assignment_turned_in, tone: MetricTone.teal)),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: MetricCard(label: 'Reward Diterbitkan', value: 'Rp ${_formatRupiah(_rewardTotal)}', icon: Icons.paid_outlined, tone: MetricTone.amber)),
-          const SizedBox(width: 12),
-          Expanded(child: MetricCard(label: 'Pengguna Terdaftar', value: _userCount.toString(), icon: Icons.people, tone: MetricTone.blue)),
-        ]),
-        const SizedBox(height: 20),
-        const Text('Unduh Laporan CSV', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ReLoopColors.foreground)),
-        const SizedBox(height: 12),
-        _reportCard('Laporan Deposit', 'Data deposit per mesin, jenis sampah, dan user.', Icons.inventory_2, 'deposits', 'laporan-deposit.csv'),
-        const SizedBox(height: 8),
-        _reportCard('Laporan Reward', 'Riwayat reward (earn, redeem, penalty, adjustment).', Icons.paid_outlined, 'rewards', 'laporan-reward.csv'),
-        const SizedBox(height: 8),
-        _reportCard('Laporan Pickup', 'Riwayat pickup per mesin, status, dan pengepul.', Icons.local_shipping, 'pickups', 'laporan-pickup.csv'),
-        const SizedBox(height: 16),
-        _infoBox(),
-        const SizedBox(height: 80),
-      ]),
+          ? ListView(
+              padding: const EdgeInsets.all(16),
+              children: const [
+                SkeletonListTile(),
+                SizedBox(height: 8),
+                SkeletonListTile(),
+              ],
+            )
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // Summary metrics — sourced from /api/mobile/reports so the numbers
+                // match the web admin Reports page (Pickup Selesai = status COMPLETED,
+                // Item Diterima = deposit item status ACCEPTED).
+                Row(
+                  children: [
+                    Expanded(
+                      child: MetricCard(
+                        label: 'Item Diterima',
+                        value: _depositItemAccepted.toString(),
+                        icon: Icons.inventory_2,
+                        tone: MetricTone.green,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: MetricCard(
+                        label: 'Pickup Selesai',
+                        value: _pickupCompleted.toString(),
+                        icon: Icons.local_shipping,
+                        tone: MetricTone.blue,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: MetricCard(
+                        label: 'Total Item Deposit',
+                        value: _depositItemCount.toString(),
+                        icon: Icons.assessment,
+                        tone: MetricTone.teal,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: MetricCard(
+                        label: 'Total Pickup',
+                        value: _pickupCount.toString(),
+                        icon: Icons.assignment_turned_in,
+                        tone: MetricTone.teal,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: MetricCard(
+                        label: 'Reward Diterbitkan',
+                        value: 'Rp ${_formatRupiah(_rewardTotal)}',
+                        icon: Icons.paid_outlined,
+                        tone: MetricTone.amber,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: MetricCard(
+                        label: 'Pengguna Terdaftar',
+                        value: _userCount.toString(),
+                        icon: Icons.people,
+                        tone: MetricTone.blue,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Unduh Laporan CSV',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: context.reloopForeground,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _reportCard(
+                  'Laporan Deposit',
+                  'Data deposit per mesin, jenis sampah, dan user.',
+                  Icons.inventory_2,
+                  'deposits',
+                  'laporan-deposit.csv',
+                ),
+                const SizedBox(height: 8),
+                _reportCard(
+                  'Laporan Reward',
+                  'Riwayat reward (earn, redeem, penalty, adjustment).',
+                  Icons.paid_outlined,
+                  'rewards',
+                  'laporan-reward.csv',
+                ),
+                const SizedBox(height: 8),
+                _reportCard(
+                  'Laporan Pickup',
+                  'Riwayat pickup per mesin, status, dan pengepul.',
+                  Icons.local_shipping,
+                  'pickups',
+                  'laporan-pickup.csv',
+                ),
+                const SizedBox(height: 16),
+                _infoBox(),
+                const SizedBox(height: 80),
+              ],
+            ),
     );
   }
 
-  Widget _reportCard(String title, String desc, IconData icon, String type, String filename) {
+  Widget _reportCard(
+    String title,
+    String desc,
+    IconData icon,
+    String type,
+    String filename,
+  ) {
     return ReLoopCard(
       child: ListTile(
-        leading: Container(width: 44, height: 44, decoration: BoxDecoration(color: ReLoopColors.brand50, borderRadius: BorderRadius.circular(10)),
-          child: Icon(icon, color: ReLoopColors.brand600, size: 22)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: ReLoopColors.foreground)),
-        subtitle: Text(desc, style: const TextStyle(fontSize: 12, color: ReLoopColors.mutedSoft)),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: ReLoopColors.brand50,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: ReLoopColors.brand600, size: 22),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+            color: context.reloopForeground,
+          ),
+        ),
+        subtitle: Text(
+          desc,
+          style: TextStyle(fontSize: 12, color: context.reloopMutedSoft),
+        ),
         trailing: const Icon(Icons.download, color: ReLoopColors.brand500),
         onTap: () => _download(type, filename),
       ),
@@ -195,12 +307,22 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   Widget _infoBox() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: ReLoopColors.brand50, borderRadius: BorderRadius.circular(12)),
-      child: const Row(children: [
-        Icon(Icons.info_outline, size: 18, color: ReLoopColors.brand600),
-        SizedBox(width: 10),
-        Expanded(child: Text('Laporan CSV disimpan ke folder sementara dan dapat dibagikan langsung. Data dibatasi 5000 baris per laporan.', style: TextStyle(fontSize: 12, color: ReLoopColors.brand700))),
-      ]),
+      decoration: BoxDecoration(
+        color: ReLoopColors.brand50,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.info_outline, size: 18, color: ReLoopColors.brand600),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Laporan CSV disimpan ke folder sementara dan dapat dibagikan langsung. Data dibatasi 5000 baris per laporan.',
+              style: TextStyle(fontSize: 12, color: ReLoopColors.brand700),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

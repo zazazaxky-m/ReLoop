@@ -73,7 +73,9 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
         } catch (_) {}
 
         for (final entry in config.entries) {
-          if (entry.key == 'landing_hero_slides' || entry.key == 'mobile_hero_slides') continue;
+          if (entry.key == 'landing_hero_slides' ||
+              entry.key == 'mobile_hero_slides')
+            continue;
           _controllers.putIfAbsent(
             entry.key,
             () => TextEditingController(text: entry.value.toString()),
@@ -129,12 +131,12 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
         children: [
           const SizedBox(height: 120),
           if (_error == null)
-            const Center(child: CircularProgressIndicator())
+            Center(child: CircularProgressIndicator())
           else ...[
-            const Icon(
+            Icon(
               Icons.cloud_off_rounded,
               size: 48,
-              color: ReLoopColors.mutedSoft,
+              color: context.reloopMutedSoft,
             ),
             const SizedBox(height: 12),
             Text(_error!, textAlign: TextAlign.center),
@@ -200,7 +202,7 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
 
   Widget _audit() {
     final logs = _data!['auditLogs'] as List? ?? const [];
-    
+
     final filters = [
       '',
       'Machine',
@@ -238,8 +240,12 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
                   selectedColor: context.reloopBrandSoft,
                   checkmarkColor: context.reloopBrandText,
                   labelStyle: TextStyle(
-                    color: isSelected ? context.reloopBrandText : context.reloopForeground,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isSelected
+                        ? context.reloopBrandText
+                        : context.reloopForeground,
+                    fontWeight: isSelected
+                        ? FontWeight.bold
+                        : FontWeight.normal,
                   ),
                 ),
               );
@@ -306,28 +312,52 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Slide ${i + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      Text(
+                        'Slide ${i + 1}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
                       IconButton(
-                        icon: const Icon(Icons.delete_outline, color: ReLoopColors.warning),
-                        onPressed: () => setState(() => _mobileSlides.removeAt(i)),
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          color: ReLoopColors.warning,
+                        ),
+                        onPressed: () =>
+                            setState(() => _mobileSlides.removeAt(i)),
                       ),
                     ],
                   ),
                   TextField(
                     decoration: const InputDecoration(labelText: 'Title'),
-                    controller: TextEditingController(text: _mobileSlides[i]['title'])..selection = TextSelection.collapsed(offset: _mobileSlides[i]['title']?.length ?? 0),
+                    controller:
+                        TextEditingController(text: _mobileSlides[i]['title'])
+                          ..selection = TextSelection.collapsed(
+                            offset: _mobileSlides[i]['title']?.length ?? 0,
+                          ),
                     onChanged: (v) => _mobileSlides[i]['title'] = v,
                   ),
                   const SizedBox(height: 8),
                   TextField(
                     decoration: const InputDecoration(labelText: 'Description'),
-                    controller: TextEditingController(text: _mobileSlides[i]['description'])..selection = TextSelection.collapsed(offset: _mobileSlides[i]['description']?.length ?? 0),
+                    controller:
+                        TextEditingController(
+                            text: _mobileSlides[i]['description'],
+                          )
+                          ..selection = TextSelection.collapsed(
+                            offset:
+                                _mobileSlides[i]['description']?.length ?? 0,
+                          ),
                     onChanged: (v) => _mobileSlides[i]['description'] = v,
                   ),
                   const SizedBox(height: 8),
                   TextField(
-                    decoration: const InputDecoration(labelText: 'Link (opsional)'),
-                    controller: TextEditingController(text: _mobileSlides[i]['href'])..selection = TextSelection.collapsed(offset: _mobileSlides[i]['href']?.length ?? 0),
+                    decoration: const InputDecoration(
+                      labelText: 'Link (opsional)',
+                    ),
+                    controller:
+                        TextEditingController(text: _mobileSlides[i]['href'])
+                          ..selection = TextSelection.collapsed(
+                            offset: _mobileSlides[i]['href']?.length ?? 0,
+                          ),
                     onChanged: (v) => _mobileSlides[i]['href'] = v,
                   ),
                 ],
@@ -345,7 +375,7 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
             });
           },
           icon: const Icon(Icons.add),
-          label: const Text('Tambah Slide'),
+          label: Text('Tambah Slide'),
         ),
         const SizedBox(height: 32),
         Text(
@@ -362,28 +392,52 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Slide ${i + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      Text(
+                        'Slide ${i + 1}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
                       IconButton(
-                        icon: const Icon(Icons.delete_outline, color: ReLoopColors.warning),
-                        onPressed: () => setState(() => _landingSlides.removeAt(i)),
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          color: ReLoopColors.warning,
+                        ),
+                        onPressed: () =>
+                            setState(() => _landingSlides.removeAt(i)),
                       ),
                     ],
                   ),
                   TextField(
                     decoration: const InputDecoration(labelText: 'Title'),
-                    controller: TextEditingController(text: _landingSlides[i]['title'])..selection = TextSelection.collapsed(offset: _landingSlides[i]['title']?.length ?? 0),
+                    controller:
+                        TextEditingController(text: _landingSlides[i]['title'])
+                          ..selection = TextSelection.collapsed(
+                            offset: _landingSlides[i]['title']?.length ?? 0,
+                          ),
                     onChanged: (v) => _landingSlides[i]['title'] = v,
                   ),
                   const SizedBox(height: 8),
                   TextField(
                     decoration: const InputDecoration(labelText: 'Description'),
-                    controller: TextEditingController(text: _landingSlides[i]['description'])..selection = TextSelection.collapsed(offset: _landingSlides[i]['description']?.length ?? 0),
+                    controller:
+                        TextEditingController(
+                            text: _landingSlides[i]['description'],
+                          )
+                          ..selection = TextSelection.collapsed(
+                            offset:
+                                _landingSlides[i]['description']?.length ?? 0,
+                          ),
                     onChanged: (v) => _landingSlides[i]['description'] = v,
                   ),
                   const SizedBox(height: 8),
                   TextField(
-                    decoration: const InputDecoration(labelText: 'Link (opsional)'),
-                    controller: TextEditingController(text: _landingSlides[i]['href'])..selection = TextSelection.collapsed(offset: _landingSlides[i]['href']?.length ?? 0),
+                    decoration: const InputDecoration(
+                      labelText: 'Link (opsional)',
+                    ),
+                    controller:
+                        TextEditingController(text: _landingSlides[i]['href'])
+                          ..selection = TextSelection.collapsed(
+                            offset: _landingSlides[i]['href']?.length ?? 0,
+                          ),
                     onChanged: (v) => _landingSlides[i]['href'] = v,
                   ),
                 ],
@@ -401,7 +455,7 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
             });
           },
           icon: const Icon(Icons.add),
-          label: const Text('Tambah Slide'),
+          label: Text('Tambah Slide'),
         ),
         const SizedBox(height: 32),
         SizedBox(
@@ -433,7 +487,11 @@ class _LogCard extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: security ? (context.isDarkMode ? const Color(0xFF3A2D17) : const Color(0xFFFFF7E8)) : context.reloopBrandSoft,
+              color: security
+                  ? (context.isDarkMode
+                        ? const Color(0xFF3A2D17)
+                        : const Color(0xFFFFF7E8))
+                  : context.reloopBrandSoft,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
@@ -459,10 +517,7 @@ class _LogCard extends StatelessWidget {
                     data['entityType'],
                     data['occurredAt'] ?? data['createdAt'],
                   ].whereType<Object>().join(' · '),
-                  style: TextStyle(
-                    color: context.reloopMuted,
-                    fontSize: 11.5,
-                  ),
+                  style: TextStyle(color: context.reloopMuted, fontSize: 11.5),
                 ),
               ],
             ),

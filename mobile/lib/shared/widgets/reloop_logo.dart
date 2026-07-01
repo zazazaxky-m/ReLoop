@@ -9,10 +9,9 @@ class ReLoopLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final asset = compact ? 'assets/images/reloop-logo.svg' : 'assets/images/reloop-logo-name.svg';
-    return SvgPicture.asset(
-      asset,
-      height: height,
-    );
+    final asset = compact
+        ? 'assets/images/reloop-logo.svg'
+        : 'assets/images/reloop-logo-name.svg';
+    return SvgPicture.asset(asset, height: height);
   }
 }

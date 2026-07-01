@@ -12,7 +12,8 @@ class SuperadminRegionsScreen extends StatefulWidget {
   const SuperadminRegionsScreen({super.key});
 
   @override
-  State<SuperadminRegionsScreen> createState() => _SuperadminRegionsScreenState();
+  State<SuperadminRegionsScreen> createState() =>
+      _SuperadminRegionsScreenState();
 }
 
 class _SuperadminRegionsScreenState extends State<SuperadminRegionsScreen> {
@@ -57,9 +58,7 @@ class _SuperadminRegionsScreenState extends State<SuperadminRegionsScreen> {
 
     return AdminShell(
       title: 'Wilayah',
-      actions: [
-        IconButton(icon: const Icon(Icons.add), onPressed: _showForm),
-      ],
+      actions: [IconButton(icon: const Icon(Icons.add), onPressed: _showForm)],
       child: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
@@ -78,7 +77,12 @@ class _SuperadminRegionsScreenState extends State<SuperadminRegionsScreen> {
             else if (_error != null)
               Center(child: Text(_error!))
             else if (rows.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.only(top: 80), child: Text('Belum ada wilayah.')))
+              Center(
+                child: Padding(
+                  padding: EdgeInsets.only(top: 80),
+                  child: Text('Belum ada wilayah.'),
+                ),
+              )
             else
               for (final raw in rows)
                 Padding(
@@ -109,23 +113,45 @@ class _RegionCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(row['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text(
+                      row['name'] ?? '',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     if (row['parent']?['name'] != null) ...[
                       const SizedBox(height: 2),
-                      Text('↳ ${row['parent']?['name']}', style: const TextStyle(color: ReLoopColors.muted, fontSize: 12)),
-                    ]
+                      Text(
+                        '↳ ${row['parent']?['name']}',
+                        style: TextStyle(
+                          color: context.reloopMuted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: ReLoopColors.info.withValues(alpha: .1), borderRadius: BorderRadius.circular(8)),
-                child: Text(row['type'] ?? '', style: const TextStyle(color: ReLoopColors.info, fontSize: 10, fontWeight: FontWeight.bold)),
+                decoration: BoxDecoration(
+                  color: ReLoopColors.info.withValues(alpha: .1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  row['type'] ?? '',
+                  style: const TextStyle(
+                    color: ReLoopColors.info,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          Text('Sub-wilayah: ${row['childCount'] ?? 0} | Organisasi: ${row['orgCount'] ?? 0}', style: const TextStyle(fontSize: 12)),
+          Text(
+            'Sub-wilayah: ${row['childCount'] ?? 0} | Organisasi: ${row['orgCount'] ?? 0}',
+            style: const TextStyle(fontSize: 12),
+          ),
         ],
       ),
     );
@@ -153,16 +179,21 @@ class _RegionFormState extends State<_RegionForm> {
     if (_name.text.isEmpty) return;
     setState(() => _saving = true);
     try {
-      await context.read<ApiClient>().post('/api/regions', data: {
-        'name': _name.text,
-        'type': _type,
-        if (_parentId != null) 'parentId': _parentId,
-      });
+      await context.read<ApiClient>().post(
+        '/api/regions',
+        data: {
+          'name': _name.text,
+          'type': _type,
+          if (_parentId != null) 'parentId': _parentId,
+        },
+      );
       widget.onSaved();
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ApiClient.getErrorMessage(e))));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(ApiClient.getErrorMessage(e))));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -182,25 +213,47 @@ class _RegionFormState extends State<_RegionForm> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Tambah Wilayah', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(
+            'Tambah Wilayah',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
             value: _type,
-            items: _types.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+            items: _types
+                .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                .toList(),
             onChanged: (v) => setState(() => _type = v!),
-            decoration: const InputDecoration(labelText: 'Tipe', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Tipe',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 12),
-          TextField(controller: _name, decoration: const InputDecoration(labelText: 'Nama', border: OutlineInputBorder())),
+          TextField(
+            controller: _name,
+            decoration: const InputDecoration(
+              labelText: 'Nama',
+              border: OutlineInputBorder(),
+            ),
+          ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
             value: _parentId,
             items: [
-              const DropdownMenuItem(value: null, child: Text('- Tidak ada -')),
-              ...widget.regions.map((r) => DropdownMenuItem(value: r['id'] as String, child: Text('${r['name']} (${r['type']})'))),
+              DropdownMenuItem(value: null, child: Text('- Tidak ada -')),
+              ...widget.regions.map(
+                (r) => DropdownMenuItem(
+                  value: r['id'] as String,
+                  child: Text('${r['name']} (${r['type']})'),
+                ),
+              ),
             ],
             onChanged: (v) => setState(() => _parentId = v),
-            decoration: const InputDecoration(labelText: 'Induk (Kosong untuk provinsi)', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Induk (Kosong untuk provinsi)',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 24),
           ElevatedButton(

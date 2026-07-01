@@ -55,8 +55,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
       final results = await Future.wait([
         api.get('/api/partnerships'),
         api.get('/api/organizations'),
-        api.get('/api/public/machines',
-            queryParameters: {'scope': 'partners'}),
+        api.get('/api/public/machines', queryParameters: {'scope': 'partners'}),
       ]);
 
       final partnershipsData = results[0].data as Map<String, dynamic>;
@@ -64,16 +63,15 @@ class _AreaMapScreenState extends State<AreaMapScreen>
       final machinesData = results[2].data as Map<String, dynamic>;
 
       setState(() {
-        _partnerships =
-            (partnershipsData['partnerships'] as List? ?? []).cast<dynamic>();
-        _organizations =
-            (orgsData['organizations'] as List? ?? []).cast<dynamic>();
+        _partnerships = (partnershipsData['partnerships'] as List? ?? [])
+            .cast<dynamic>();
+        _organizations = (orgsData['organizations'] as List? ?? [])
+            .cast<dynamic>();
         _machines = (machinesData['machines'] as List? ?? [])
             .map((e) => MachineInfo.fromJson(e as Map<String, dynamic>))
             .where((m) => m.latitude != null && m.longitude != null)
             .toList();
-        _onlineCount =
-            _machines.where((m) => m.status == 'ONLINE').length;
+        _onlineCount = _machines.where((m) => m.status == 'ONLINE').length;
         _fullCount = _machines.where((m) => m.status == 'FULL').length;
         _isLoading = false;
       });
@@ -88,9 +86,10 @@ class _AreaMapScreenState extends State<AreaMapScreen>
   Future<void> _createPartnership(String organizationId) async {
     try {
       final api = context.read<ApiClient>();
-      await api.post('/api/partnerships', data: {
-        'organizationId': organizationId,
-      });
+      await api.post(
+        '/api/partnerships',
+        data: {'organizationId': organizationId},
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -129,8 +128,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
     }
   }
 
-  Future<void> _saveArea(
-      String id, String regionsText, String noteText) async {
+  Future<void> _saveArea(String id, String regionsText, String noteText) async {
     try {
       final api = context.read<ApiClient>();
       final regions = regionsText
@@ -138,13 +136,16 @@ class _AreaMapScreenState extends State<AreaMapScreen>
           .map((s) => s.trim())
           .where((s) => s.isNotEmpty)
           .toList();
-      await api.patch('/api/partnerships/$id', data: {
-        'action': 'set_area',
-        'serviceArea': {
-          'regions': regions,
-          'note': noteText.trim().isEmpty ? null : noteText.trim(),
+      await api.patch(
+        '/api/partnerships/$id',
+        data: {
+          'action': 'set_area',
+          'serviceArea': {
+            'regions': regions,
+            'note': noteText.trim().isEmpty ? null : noteText.trim(),
+          },
         },
-      });
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -169,7 +170,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Ajukan Kemitraan'),
+        title: Text('Ajukan Kemitraan'),
         content: SizedBox(
           width: double.maxFinite,
           child: ListView(
@@ -187,18 +188,14 @@ class _AreaMapScreenState extends State<AreaMapScreen>
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Batal'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Batal')),
         ],
       ),
     );
   }
 
   void _showAreaEditor(Map<String, dynamic> partnership) {
-    final serviceArea =
-        partnership['serviceAreaJson'] as Map<String, dynamic>?;
+    final serviceArea = partnership['serviceAreaJson'] as Map<String, dynamic>?;
     final currentRegions =
         (serviceArea?['regions'] as List<dynamic>?)?.join(', ') ?? '';
     final currentNote = (serviceArea?['note'] as String?) ?? '';
@@ -211,7 +208,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Atur Area Layanan'),
+        title: Text('Atur Area Layanan'),
         content: Form(
           key: formKey,
           child: Column(
@@ -240,7 +237,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
               noteCtrl.dispose();
               Navigator.pop(ctx);
             },
-            child: const Text('Batal'),
+            child: Text('Batal'),
           ),
           TextButton(
             onPressed: () {
@@ -251,7 +248,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
               Navigator.pop(ctx);
               _saveArea(id, regions, note);
             },
-            child: const Text('Simpan'),
+            child: Text('Simpan'),
           ),
         ],
       ),
@@ -272,9 +269,13 @@ class _AreaMapScreenState extends State<AreaMapScreen>
             ),
             child: TabBar(
               controller: _tabController,
-              labelColor: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+              labelColor: context.isDarkMode
+                  ? ReLoopColors.brand400
+                  : ReLoopColors.brand600,
               unselectedLabelColor: context.reloopMutedSoft,
-              indicatorColor: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500,
+              indicatorColor: context.isDarkMode
+                  ? ReLoopColors.brand400
+                  : ReLoopColors.brand500,
               tabs: const [
                 Tab(text: 'Kemitraan'),
                 Tab(text: 'Peta Mesin'),
@@ -283,31 +284,34 @@ class _AreaMapScreenState extends State<AreaMapScreen>
           ),
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? Center(child: CircularProgressIndicator())
                 : _error != null
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.cloud_off,
-                                size: 48, color: ReLoopColors.mutedSoft),
-                            const SizedBox(height: 12),
-                            Text(_error ?? '',
-                                style: const TextStyle(color: ReLoopColors.muted)),
-                            const SizedBox(height: 12),
-                            TextButton(
-                                onPressed: _loadAll,
-                                child: const Text('Coba Lagi')),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.cloud_off,
+                          size: 48,
+                          color: context.reloopMutedSoft,
                         ),
-                      )
-                    : TabBarView(
-                        controller: _tabController,
-                        children: [
-                          _buildPartnershipTab(),
-                          _buildMapTab(),
-                        ],
-                      ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _error ?? '',
+                          style: TextStyle(color: context.reloopMuted),
+                        ),
+                        const SizedBox(height: 12),
+                        TextButton(
+                          onPressed: _loadAll,
+                          child: Text('Coba Lagi'),
+                        ),
+                      ],
+                    ),
+                  )
+                : TabBarView(
+                    controller: _tabController,
+                    children: [_buildPartnershipTab(), _buildMapTab()],
+                  ),
           ),
         ],
       ),
@@ -336,24 +340,22 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                 child: Text(
                   'Belum ada kemitraan.\nAjukan kemitraan dengan organisasi\nuntuk menerima tugas pickup.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: ReLoopColors.mutedSoft, fontSize: 13),
+                  style: TextStyle(
+                    color: context.reloopMutedSoft,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             )
           else
             ..._partnerships.map((p) {
               final partnership = p as Map<String, dynamic>;
-              final org =
-                  partnership['organization'] as Map<String, dynamic>?;
-              final status =
-                  partnership['status'] as String? ?? 'REQUESTED';
+              final org = partnership['organization'] as Map<String, dynamic>?;
+              final status = partnership['status'] as String? ?? 'REQUESTED';
               final serviceArea =
                   partnership['serviceAreaJson'] as Map<String, dynamic>?;
               final regions =
-                  (serviceArea?['regions'] as List<dynamic>?)
-                      ?.join(', ') ??
-                  '';
+                  (serviceArea?['regions'] as List<dynamic>?)?.join(', ') ?? '';
               final note = serviceArea?['note'] as String?;
               final id = (partnership['id'] as String?) ?? '';
 
@@ -368,10 +370,10 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                           Expanded(
                             child: Text(
                               (org?['name'] as String?) ?? 'Organisasi',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 fontSize: 14,
-                                color: ReLoopColors.foreground,
+                                color: context.reloopForeground,
                               ),
                             ),
                           ),
@@ -382,9 +384,9 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                         const SizedBox(height: 6),
                         Text(
                           'Wilayah: $regions',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: ReLoopColors.mutedSoft,
+                            color: context.reloopMutedSoft,
                           ),
                         ),
                       ],
@@ -392,9 +394,9 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                         const SizedBox(height: 2),
                         Text(
                           note,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11,
-                            color: ReLoopColors.mutedSoft,
+                            color: context.reloopMutedSoft,
                             fontStyle: FontStyle.italic,
                           ),
                         ),
@@ -430,8 +432,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                                 size: ReLoopButtonSize.sm,
                                 expanded: false,
                                 icon: Icons.edit_location_outlined,
-                                onPressed: () =>
-                                    _showAreaEditor(partnership),
+                                onPressed: () => _showAreaEditor(partnership),
                               ),
                           ],
                         ),
@@ -454,18 +455,14 @@ class _AreaMapScreenState extends State<AreaMapScreen>
         FlutterMap(
           options: MapOptions(
             initialCenter: _machines.isNotEmpty
-                ? LatLng(
-                    _machines.first.latitude!,
-                    _machines.first.longitude!,
-                  )
+                ? LatLng(_machines.first.latitude!, _machines.first.longitude!)
                 : const LatLng(-6.2088, 106.8456),
             initialZoom: 13.0,
             onTap: (_, _) => setState(() => _selectedMachine = null),
           ),
           children: [
             TileLayer(
-              urlTemplate:
-                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'id.reloop.mobile',
             ),
             MarkerLayer(
@@ -493,8 +490,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                   width: isSelected ? 44 : 36,
                   height: isSelected ? 44 : 36,
                   child: GestureDetector(
-                    onTap: () =>
-                        setState(() => _selectedMachine = m),
+                    onTap: () => setState(() => _selectedMachine = m),
                     child: Container(
                       decoration: BoxDecoration(
                         color: markerColor,
@@ -523,12 +519,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
             ),
           ],
         ),
-        Positioned(
-          top: 16,
-          left: 16,
-          right: 16,
-          child: _buildStatsBar(),
-        ),
+        Positioned(top: 16, left: 16, right: 16, child: _buildStatsBar()),
         if (_selectedMachine != null)
           Positioned(
             bottom: 16,
@@ -549,13 +540,22 @@ class _AreaMapScreenState extends State<AreaMapScreen>
         border: Border.all(color: context.reloopBorder),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: context.isDarkMode ? .3 : .08), blurRadius: 8, offset: const Offset(0, 2)),
+            color: Colors.black.withValues(
+              alpha: context.isDarkMode ? .3 : .08,
+            ),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _statItem('Total', '${_machines.length}', context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500),
+          _statItem(
+            'Total',
+            '${_machines.length}',
+            context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500,
+          ),
           _statItem('Online', '$_onlineCount', ReLoopColors.statusOnline),
           _statItem('Penuh', '$_fullCount', ReLoopColors.statusFull),
         ],
@@ -595,9 +595,12 @@ class _AreaMapScreenState extends State<AreaMapScreen>
         border: Border.all(color: context.reloopBorder),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: context.isDarkMode ? .3 : .08),
-              blurRadius: 12,
-              offset: const Offset(0, 4)),
+            color: Colors.black.withValues(
+              alpha: context.isDarkMode ? .3 : .08,
+            ),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
@@ -618,23 +621,24 @@ class _AreaMapScreenState extends State<AreaMapScreen>
               ),
               GestureDetector(
                 onTap: () => setState(() => _selectedMachine = null),
-                child: Icon(Icons.close,
-                    size: 20, color: context.reloopMutedSoft),
+                child: Icon(
+                  Icons.close,
+                  size: 20,
+                  color: context.reloopMutedSoft,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 4),
           Text(
             m.machineCode,
-            style: TextStyle(
-                color: context.reloopMutedSoft, fontSize: 12),
+            style: TextStyle(color: context.reloopMutedSoft, fontSize: 12),
           ),
           if (m.organizationName != null) ...[
             const SizedBox(height: 2),
             Text(
               m.organizationName!,
-              style: TextStyle(
-                  color: context.reloopMutedSoft, fontSize: 12),
+              style: TextStyle(color: context.reloopMutedSoft, fontSize: 12),
             ),
           ],
           const SizedBox(height: 8),
@@ -655,10 +659,8 @@ class _AreaMapScreenState extends State<AreaMapScreen>
               TextButton.icon(
                 onPressed: () =>
                     context.push('/machine/${m.machineCode}/detail'),
-                icon:
-                    const Icon(Icons.info_outline, size: 16),
-                label: const Text('Detail',
-                    style: TextStyle(fontSize: 12)),
+                icon: const Icon(Icons.info_outline, size: 16),
+                label: Text('Detail', style: TextStyle(fontSize: 12)),
               ),
             ],
           ),

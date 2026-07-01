@@ -97,6 +97,8 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
         _WalletSummary(
           firstName: firstName,
           balance: dashboard.balance,
+          showPoints: dashboard.isTravelAgent,
+          pointsToRupiah: dashboard.pointsToRupiah,
           onWallet: () => context.push('/wallet'),
           onHistory: () => context.push('/wallet'),
           onProfile: () => context.push('/profile'),
@@ -326,6 +328,8 @@ class _WalletSummary extends StatelessWidget {
   const _WalletSummary({
     required this.firstName,
     required this.balance,
+    required this.showPoints,
+    required this.pointsToRupiah,
     required this.onWallet,
     required this.onHistory,
     required this.onProfile,
@@ -333,6 +337,8 @@ class _WalletSummary extends StatelessWidget {
 
   final String firstName;
   final WalletBalance balance;
+  final bool showPoints;
+  final int pointsToRupiah;
   final VoidCallback onWallet;
   final VoidCallback onHistory;
   final VoidCallback onProfile;
@@ -367,9 +373,13 @@ class _WalletSummary extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    balance.availableFormatted,
+                    showPoints
+                        ? '${balance.availableFormatted} • ${_points(balance.available, pointsToRupiah)} poin'
+                        : balance.availableFormatted,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 18,
+                      fontSize: showPoints ? 15.5 : 18,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -.3,
                     ),
@@ -487,21 +497,21 @@ class _ActivityIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final (color, softColor) = switch (tone) {
       QuickActionTone.green => (
-          context.reloopBrandText,
-          context.reloopBrandSoft,
-        ),
+        context.reloopBrandText,
+        context.reloopBrandSoft,
+      ),
       QuickActionTone.blue => (
-          context.isDarkMode ? const Color(0xFF93C5FD) : ReLoopColors.info,
-          context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEDF5FF),
-        ),
+        context.isDarkMode ? const Color(0xFF93C5FD) : ReLoopColors.info,
+        context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEDF5FF),
+      ),
       QuickActionTone.amber => (
-          context.isDarkMode ? const Color(0xFFFCD34D) : ReLoopColors.warning,
-          context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFF5E7),
-        ),
+        context.isDarkMode ? const Color(0xFFFCD34D) : ReLoopColors.warning,
+        context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFF5E7),
+      ),
       QuickActionTone.teal => (
-          context.isDarkMode ? const Color(0xFF5EEAD4) : const Color(0xFF159A91),
-          context.isDarkMode ? const Color(0xFF173936) : const Color(0xFFEAF9F7),
-        ),
+        context.isDarkMode ? const Color(0xFF5EEAD4) : const Color(0xFF159A91),
+        context.isDarkMode ? const Color(0xFF173936) : const Color(0xFFEAF9F7),
+      ),
     };
     return Container(
       width: 40,
@@ -539,6 +549,15 @@ String _currency(int amount) {
     (match) => '${match[1]}.',
   );
   return 'Rp $formatted';
+}
+
+String _points(int amount, int pointsToRupiah) {
+  if (pointsToRupiah <= 0) return '0';
+  final points = amount ~/ pointsToRupiah;
+  return points.toString().replaceAllMapped(
+    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+    (match) => '${match[1]}.',
+  );
 }
 
 String _formatDate(String iso) {

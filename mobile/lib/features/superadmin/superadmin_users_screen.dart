@@ -34,7 +34,7 @@ class _SuperadminUsersScreenState extends State<SuperadminUsersScreen> {
       final api = context.read<ApiClient>();
       final resUser = await api.get('/api/users');
       final resOrg = await api.get('/api/organizations');
-      
+
       if (mounted) {
         setState(() {
           _rows = (resUser.data['users'] as List?) ?? [];
@@ -51,11 +51,15 @@ class _SuperadminUsersScreenState extends State<SuperadminUsersScreen> {
       await context.read<ApiClient>().patch('/api/users/$id', data: data);
       await _load();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Perubahan berhasil disimpan')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Perubahan berhasil disimpan')),
+        );
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ApiClient.getErrorMessage(error))));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ApiClient.getErrorMessage(error))),
+        );
       }
     }
   }
@@ -64,7 +68,8 @@ class _SuperadminUsersScreenState extends State<SuperadminUsersScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => _UserForm(organizations: _organizations ?? [], onSaved: _load),
+      builder: (ctx) =>
+          _UserForm(organizations: _organizations ?? [], onSaved: _load),
     );
   }
 
@@ -77,9 +82,7 @@ class _SuperadminUsersScreenState extends State<SuperadminUsersScreen> {
 
     return AdminShell(
       title: 'Pengguna & Peran',
-      actions: [
-        IconButton(icon: const Icon(Icons.add), onPressed: _showForm),
-      ],
+      actions: [IconButton(icon: const Icon(Icons.add), onPressed: _showForm)],
       child: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
@@ -98,7 +101,12 @@ class _SuperadminUsersScreenState extends State<SuperadminUsersScreen> {
             else if (_error != null)
               Center(child: Text(_error!))
             else if (rows.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.only(top: 80), child: Text('Belum ada pengguna.')))
+              Center(
+                child: Padding(
+                  padding: EdgeInsets.only(top: 80),
+                  child: Text('Belum ada pengguna.'),
+                ),
+              )
             else
               for (final raw in rows)
                 Padding(
@@ -133,9 +141,18 @@ class _UserCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(row['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text(
+                      row['name'] ?? '',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 4),
-                    Text('${row['email']} · ${row['organization']?['name'] ?? 'No organization'}', style: const TextStyle(color: ReLoopColors.muted, fontSize: 12)),
+                    Text(
+                      '${row['email']} · ${row['organization']?['name'] ?? 'No organization'}',
+                      style: TextStyle(
+                        color: context.reloopMuted,
+                        fontSize: 12,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -149,31 +166,39 @@ class _UserCard extends StatelessWidget {
               DropdownButton<String>(
                 value: row['role'] ?? 'USER',
                 items: const [
-                  DropdownMenuItem(value: 'SUPERADMIN', child: Text('SUPERADMIN')),
+                  DropdownMenuItem(
+                    value: 'SUPERADMIN',
+                    child: Text('SUPERADMIN'),
+                  ),
                   DropdownMenuItem(value: 'ADMIN', child: Text('ADMIN')),
                   DropdownMenuItem(value: 'PENGEPUL', child: Text('PENGEPUL')),
                   DropdownMenuItem(value: 'USER', child: Text('USER')),
                 ],
                 onChanged: (val) {
-                  if (val != null && val != row['role']) onUpdate({'role': val});
+                  if (val != null && val != row['role'])
+                    onUpdate({'role': val});
                 },
                 isDense: true,
                 underline: const SizedBox(),
-                style: const TextStyle(fontSize: 13, color: ReLoopColors.foreground),
+                style: TextStyle(fontSize: 13, color: context.reloopForeground),
               ),
               DropdownButton<String>(
                 value: row['status'] ?? 'ACTIVE',
                 items: const [
                   DropdownMenuItem(value: 'ACTIVE', child: Text('ACTIVE')),
                   DropdownMenuItem(value: 'INACTIVE', child: Text('INACTIVE')),
-                  DropdownMenuItem(value: 'SUSPENDED', child: Text('SUSPENDED')),
+                  DropdownMenuItem(
+                    value: 'SUSPENDED',
+                    child: Text('SUSPENDED'),
+                  ),
                 ],
                 onChanged: (val) {
-                  if (val != null && val != row['status']) onUpdate({'status': val});
+                  if (val != null && val != row['status'])
+                    onUpdate({'status': val});
                 },
                 isDense: true,
                 underline: const SizedBox(),
-                style: const TextStyle(fontSize: 13, color: ReLoopColors.foreground),
+                style: TextStyle(fontSize: 13, color: context.reloopForeground),
               ),
             ],
           ),
@@ -204,22 +229,28 @@ class _UserFormState extends State<_UserForm> {
   final _roles = ["SUPERADMIN", "ADMIN", "PENGEPUL", "USER"];
 
   Future<void> _save() async {
-    if (_name.text.isEmpty || _email.text.isEmpty || _password.text.isEmpty) return;
+    if (_name.text.isEmpty || _email.text.isEmpty || _password.text.isEmpty)
+      return;
     setState(() => _saving = true);
     try {
-      await context.read<ApiClient>().post('/api/users', data: {
-        'name': _name.text,
-        'email': _email.text,
-        'password': _password.text,
-        'role': _role,
-        if (_organizationId != null) 'organizationId': _organizationId,
-        if (_phone.text.isNotEmpty) 'phone': _phone.text,
-      });
+      await context.read<ApiClient>().post(
+        '/api/users',
+        data: {
+          'name': _name.text,
+          'email': _email.text,
+          'password': _password.text,
+          'role': _role,
+          if (_organizationId != null) 'organizationId': _organizationId,
+          if (_phone.text.isNotEmpty) 'phone': _phone.text,
+        },
+      );
       widget.onSaved();
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ApiClient.getErrorMessage(e))));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(ApiClient.getErrorMessage(e))));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -239,32 +270,75 @@ class _UserFormState extends State<_UserForm> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Tambah Pengguna', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(
+            'Tambah Pengguna',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 16),
-          TextField(controller: _name, decoration: const InputDecoration(labelText: 'Nama', border: OutlineInputBorder())),
+          TextField(
+            controller: _name,
+            decoration: const InputDecoration(
+              labelText: 'Nama',
+              border: OutlineInputBorder(),
+            ),
+          ),
           const SizedBox(height: 12),
-          TextField(controller: _email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder())),
+          TextField(
+            controller: _email,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Email',
+              border: OutlineInputBorder(),
+            ),
+          ),
           const SizedBox(height: 12),
-          TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder())),
+          TextField(
+            controller: _password,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Password',
+              border: OutlineInputBorder(),
+            ),
+          ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: _role,
-            items: _roles.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
+            items: _roles
+                .map((r) => DropdownMenuItem(value: r, child: Text(r)))
+                .toList(),
             onChanged: (v) => setState(() => _role = v!),
-            decoration: const InputDecoration(labelText: 'Peran', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Peran',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
             value: _organizationId,
             items: [
-              const DropdownMenuItem(value: null, child: Text('- Tidak ada -')),
-              ...widget.organizations.map((o) => DropdownMenuItem(value: o['id'] as String, child: Text(o['name']))),
+              DropdownMenuItem(value: null, child: Text('- Tidak ada -')),
+              ...widget.organizations.map(
+                (o) => DropdownMenuItem(
+                  value: o['id'] as String,
+                  child: Text(o['name']),
+                ),
+              ),
             ],
             onChanged: (v) => setState(() => _organizationId = v),
-            decoration: const InputDecoration(labelText: 'Organisasi (wajib untuk Admin)', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Organisasi (wajib untuk Admin)',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 12),
-          TextField(controller: _phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Telepon', border: OutlineInputBorder())),
+          TextField(
+            controller: _phone,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(
+              labelText: 'Telepon',
+              border: OutlineInputBorder(),
+            ),
+          ),
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: _saving ? null : _save,

@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { requirePageUser } from "@/lib/rbac";
 import { getWalletBalance, getLedgerHistory } from "@/lib/ledger";
+import { CONFIG_KEYS, getConfigInt } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { isCampaignEligible } from "@/lib/campaign";
+import { formatRewardPoints } from "@/lib/reward-points";
 import {
   Button,
   Card,
@@ -27,7 +29,14 @@ import { formatDateTime, formatRupiah } from "@/lib/format";
 
 export default async function UserDashboardPage() {
   const user = await requirePageUser(["USER"]);
-  const [balance, sessions, campaigns, ledger] = await Promise.all([
+  const [
+    balance,
+    sessions,
+    campaigns,
+    ledger,
+    travelAgentLinkCount,
+    pointsToRupiah,
+  ] = await Promise.all([
     getWalletBalance(user.id),
     prisma.depositSession.findMany({
       where: { userId: user.id },
@@ -44,8 +53,11 @@ export default async function UserDashboardPage() {
       take: 6,
     }),
     getLedgerHistory(user.id, 5),
+    prisma.travelAgentUser.count({ where: { userId: user.id } }),
+    getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
   ]);
 
+  const isTravelAgentUser = travelAgentLinkCount > 0;
   const eligibleCampaigns = campaigns.filter((campaign) =>
     isCampaignEligible(campaign, user.email).eligible,
   );
@@ -65,7 +77,7 @@ export default async function UserDashboardPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
+      <div className={`grid grid-cols-2 gap-3 sm:gap-4 ${isTravelAgentUser ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
         <MetricCard
           label="Saldo tersedia"
           value={formatRupiah(balance.available)}
@@ -78,6 +90,19 @@ export default async function UserDashboardPage() {
           tone="green"
           className="col-span-2 lg:col-span-1"
         />
+        {isTravelAgentUser ? (
+          <MetricCard
+            label="Poin tersedia"
+            value={formatRewardPoints(balance.available, pointsToRupiah)}
+            hint={
+              balance.pending > 0
+                ? `+${formatRewardPoints(balance.pending, pointsToRupiah)} menunggu tinjauan`
+                : undefined
+            }
+            icon={Coins}
+            tone="teal"
+          />
+        ) : null}
         <MetricCard
           label="Total diperoleh"
           value={formatRupiah(balance.totalEarned)}

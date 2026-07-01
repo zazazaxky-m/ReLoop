@@ -43,7 +43,9 @@ class _WalletScreenState extends State<WalletScreen> {
       final data = response.data as Map<String, dynamic>;
 
       setState(() {
-        _balance = WalletBalance.fromJson(data['balance'] as Map<String, dynamic>);
+        _balance = WalletBalance.fromJson(
+          data['balance'] as Map<String, dynamic>,
+        );
         _history = (data['history'] as List? ?? [])
             .map((e) => RewardLedgerEntry.fromJson(e as Map<String, dynamic>))
             .toList();
@@ -67,14 +69,17 @@ class _WalletScreenState extends State<WalletScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Nonaktifkan Akun?'),
-        content: const Text('Akun pencairan ini akan dinonaktifkan.'),
+        title: Text('Nonaktifkan Akun?'),
+        content: Text('Akun pencairan ini akan dinonaktifkan.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Batal'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: ReLoopColors.danger),
-            child: const Text('Nonaktifkan'),
+            child: Text('Nonaktifkan'),
           ),
         ],
       ),
@@ -87,13 +92,19 @@ class _WalletScreenState extends State<WalletScreen> {
       await api.delete('/api/payout-accounts/$accountId');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Akun dinonaktifkan'), backgroundColor: ReLoopColors.success),
+        const SnackBar(
+          content: Text('Akun dinonaktifkan'),
+          backgroundColor: ReLoopColors.success,
+        ),
       );
       _loadWallet();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(ApiClient.getErrorMessage(e)), backgroundColor: ReLoopColors.danger),
+          SnackBar(
+            content: Text(ApiClient.getErrorMessage(e)),
+            backgroundColor: ReLoopColors.danger,
+          ),
         );
       }
     }
@@ -103,14 +114,19 @@ class _WalletScreenState extends State<WalletScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Batalkan Pencairan?'),
-        content: const Text('Pencairan yang dibatalkan akan mengembalikan saldo ke akun Anda.'),
+        title: Text('Batalkan Pencairan?'),
+        content: Text(
+          'Pencairan yang dibatalkan akan mengembalikan saldo ke akun Anda.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Tidak')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Tidak'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: ReLoopColors.danger),
-            child: const Text('Ya, Batalkan'),
+            child: Text('Ya, Batalkan'),
           ),
         ],
       ),
@@ -120,16 +136,25 @@ class _WalletScreenState extends State<WalletScreen> {
 
     try {
       final api = context.read<ApiClient>();
-      await api.patch('/api/redemptions/$redemptionId', data: {'action': 'cancel'});
+      await api.patch(
+        '/api/redemptions/$redemptionId',
+        data: {'action': 'cancel'},
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pencairan dibatalkan'), backgroundColor: ReLoopColors.success),
+        const SnackBar(
+          content: Text('Pencairan dibatalkan'),
+          backgroundColor: ReLoopColors.success,
+        ),
       );
       _loadWallet();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(ApiClient.getErrorMessage(e)), backgroundColor: ReLoopColors.danger),
+          SnackBar(
+            content: Text(ApiClient.getErrorMessage(e)),
+            backgroundColor: ReLoopColors.danger,
+          ),
         );
       }
     }
@@ -138,10 +163,7 @@ class _WalletScreenState extends State<WalletScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: RefreshIndicator(
-        onRefresh: _loadWallet,
-        child: _buildBody(),
-      ),
+      body: RefreshIndicator(onRefresh: _loadWallet, child: _buildBody()),
     );
   }
 
@@ -155,11 +177,11 @@ class _WalletScreenState extends State<WalletScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+            Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
+            Text(_error!, style: TextStyle(color: context.reloopMuted)),
             const SizedBox(height: 12),
-            TextButton(onPressed: _loadWallet, child: const Text('Coba Lagi')),
+            TextButton(onPressed: _loadWallet, child: Text('Coba Lagi')),
           ],
         ),
       );
@@ -184,7 +206,7 @@ class _WalletScreenState extends State<WalletScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Saldo Tersedia',
                 style: TextStyle(color: Colors.white70, fontSize: 13),
               ),
@@ -245,12 +267,15 @@ class _WalletScreenState extends State<WalletScreen> {
                 ),
               ),
               if (_accounts.isEmpty)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.all(16),
                   child: Center(
                     child: Text(
                       'Belum ada akun pencairan.',
-                      style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 13),
+                      style: TextStyle(
+                        color: context.reloopMutedSoft,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 )
@@ -258,7 +283,10 @@ class _WalletScreenState extends State<WalletScreen> {
                 ...List.generate(_accounts.length, (index) {
                   final account = _accounts[index];
                   return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
                     child: Row(
                       children: [
                         Container(
@@ -268,8 +296,12 @@ class _WalletScreenState extends State<WalletScreen> {
                             color: context.reloopBrandSoft,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(Icons.account_balance,
-                              color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500),
+                          child: Icon(
+                            Icons.account_balance,
+                            color: context.isDarkMode
+                                ? ReLoopColors.brand400
+                                : ReLoopColors.brand500,
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -296,7 +328,11 @@ class _WalletScreenState extends State<WalletScreen> {
                         ),
                         StatusBadge(statusKey: account.status),
                         IconButton(
-                          icon: Icon(Icons.delete_outline, size: 18, color: context.reloopMutedSoft),
+                          icon: Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: context.reloopMutedSoft,
+                          ),
                           tooltip: 'Nonaktifkan Akun',
                           onPressed: () => _disableAccount(account.id),
                         ),
@@ -320,55 +356,72 @@ class _WalletScreenState extends State<WalletScreen> {
                 const ReLoopCardHeader(
                   child: ReLoopCardTitle(title: 'Riwayat Pencairan'),
                 ),
-                ..._redemptions.map((r) => Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: context.reloopBrandSoft,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(Icons.payment,
-                                color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500, size: 20),
+                ..._redemptions.map(
+                  (r) => Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: context.reloopBrandSoft,
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  r.amountFormatted,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    color: context.reloopForeground,
-                                    fontSize: 14,
-                                  ),
+                          child: Icon(
+                            Icons.payment,
+                            color: context.isDarkMode
+                                ? ReLoopColors.brand400
+                                : ReLoopColors.brand500,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                r.amountFormatted,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: context.reloopForeground,
+                                  fontSize: 14,
                                 ),
-                                Text(
-                                  '${r.provider} · ${_formatDate(r.createdAt)}',
-                                  style: TextStyle(
-                                    color: context.reloopMutedSoft,
-                                    fontSize: 12,
-                                  ),
+                              ),
+                              Text(
+                                '${r.provider} · ${_formatDate(r.createdAt)}',
+                                style: TextStyle(
+                                  color: context.reloopMutedSoft,
+                                  fontSize: 12,
                                 ),
-                              ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        StatusBadge(statusKey: r.status),
+                        if (r.status == 'REQUESTED')
+                          IconButton(
+                            icon: const Icon(
+                              Icons.cancel_outlined,
+                              size: 16,
+                              color: ReLoopColors.danger,
+                            ),
+                            tooltip: 'Batalkan',
+                            onPressed: () => _cancelRedemption(r.id),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 32,
+                              minHeight: 32,
                             ),
                           ),
-                          StatusBadge(statusKey: r.status),
-                          if (r.status == 'REQUESTED')
-                            IconButton(
-                              icon: const Icon(Icons.cancel_outlined, size: 16, color: ReLoopColors.danger),
-                              tooltip: 'Batalkan',
-                              onPressed: () => _cancelRedemption(r.id),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                            ),
-                        ],
-                      ),
-                    )),
+                      ],
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 8),
               ],
             ),
@@ -393,12 +446,17 @@ class _WalletScreenState extends State<WalletScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Column(
                             children: [
-                              const Icon(Icons.receipt_long_outlined,
-                                  size: 40, color: ReLoopColors.mutedSoft),
+                              Icon(
+                                Icons.receipt_long_outlined,
+                                size: 40,
+                                color: context.reloopMutedSoft,
+                              ),
                               const SizedBox(height: 8),
                               Text(
                                 'Belum ada transaksi',
-                                style: TextStyle(color: context.reloopMutedSoft),
+                                style: TextStyle(
+                                  color: context.reloopMutedSoft,
+                                ),
                               ),
                             ],
                           ),
@@ -409,10 +467,8 @@ class _WalletScreenState extends State<WalletScreen> {
                         physics: const NeverScrollableScrollPhysics(),
                         padding: EdgeInsets.zero,
                         itemCount: _history.length,
-                        separatorBuilder: (context, index) => Divider(
-                          color: context.reloopBorder,
-                          height: 24,
-                        ),
+                        separatorBuilder: (context, index) =>
+                            Divider(color: context.reloopBorder, height: 24),
                         itemBuilder: (context, index) {
                           final entry = _history[index];
                           return Row(
@@ -431,7 +487,9 @@ class _WalletScreenState extends State<WalletScreen> {
                                       ? Icons.add_circle_outline
                                       : Icons.remove_circle_outline,
                                   color: entry.amount >= 0
-                                      ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500)
+                                      ? (context.isDarkMode
+                                            ? ReLoopColors.brand400
+                                            : ReLoopColors.brand500)
                                       : context.reloopTone('danger').text,
                                   size: 20,
                                 ),
@@ -448,7 +506,9 @@ class _WalletScreenState extends State<WalletScreen> {
                                           style: TextStyle(
                                             fontWeight: FontWeight.w600,
                                             color: entry.amount >= 0
-                                                ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand700)
+                                                ? (context.isDarkMode
+                                                      ? ReLoopColors.brand400
+                                                      : ReLoopColors.brand700)
                                                 : ReLoopColors.danger,
                                             fontSize: 14,
                                           ),
@@ -491,7 +551,10 @@ class _WalletScreenState extends State<WalletScreen> {
   Widget _balanceItem(String label, String value) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11)),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white60, fontSize: 11),
+        ),
         const SizedBox(height: 4),
         Text(
           value,

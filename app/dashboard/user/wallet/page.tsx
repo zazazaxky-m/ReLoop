@@ -1,7 +1,8 @@
 import { requirePageUser } from "@/lib/rbac";
 import { getWalletBalance, getLedgerHistory } from "@/lib/ledger";
-import { getMinRedemption } from "@/lib/config";
+import { CONFIG_KEYS, getConfigInt, getMinRedemption } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
+import { formatRewardPoints } from "@/lib/reward-points";
 import {
   Card,
   CardContent,
@@ -21,21 +22,32 @@ import {
 
 export default async function UserWalletPage() {
   const user = await requirePageUser(["USER"]);
-  const [balance, history, accounts, redemptions, minRedemption] =
-    await Promise.all([
-      getWalletBalance(user.id),
-      getLedgerHistory(user.id, 30),
-      prisma.payoutAccount.findMany({
-        where: { userId: user.id, status: { not: "DISABLED" } },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.redemption.findMany({
-        where: { userId: user.id },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-      }),
-      getMinRedemption(),
-    ]);
+  const [
+    balance,
+    history,
+    accounts,
+    redemptions,
+    minRedemption,
+    travelAgentLinkCount,
+    pointsToRupiah,
+  ] = await Promise.all([
+    getWalletBalance(user.id),
+    getLedgerHistory(user.id, 30),
+    prisma.payoutAccount.findMany({
+      where: { userId: user.id, status: { not: "DISABLED" } },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.redemption.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
+    getMinRedemption(),
+    prisma.travelAgentUser.count({ where: { userId: user.id } }),
+    getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
+  ]);
+
+  const isTravelAgentUser = travelAgentLinkCount > 0;
 
   const accountRows: AccountRow[] = accounts.map((account) => ({
     id: account.id,
@@ -61,7 +73,7 @@ export default async function UserWalletPage() {
         description="Kelola saldo reward, akun pencairan, dan riwayat transaksi."
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-3 sm:gap-4 ${isTravelAgentUser ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         <MetricCard
           label="Tersedia"
           value={formatRupiah(balance.available)}
@@ -69,6 +81,15 @@ export default async function UserWalletPage() {
           tone="green"
           className="col-span-2 sm:col-span-1"
         />
+        {isTravelAgentUser ? (
+          <MetricCard
+            label="Poin"
+            value={formatRewardPoints(balance.available, pointsToRupiah)}
+            hint="Setara saldo tersedia"
+            icon={Coins}
+            tone="teal"
+          />
+        ) : null}
         <MetricCard
           label="Pending"
           value={formatRupiah(balance.pending)}

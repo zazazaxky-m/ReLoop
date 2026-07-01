@@ -20,7 +20,11 @@ class ErrorBoundary extends StatelessWidget {
     return child;
   }
 
-  static void show(BuildContext context, {String? message, VoidCallback? onRetry}) {
+  static void show(
+    BuildContext context, {
+    String? message,
+    VoidCallback? onRetry,
+  }) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message ?? 'Terjadi kendala. Coba lagi.'),
@@ -41,7 +45,11 @@ class ErrorBoundary extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.error_outline, size: 64, color: context.reloopMutedSoft),
+                Icon(
+                  Icons.error_outline,
+                  size: 64,
+                  color: context.reloopMutedSoft,
+                ),
                 const SizedBox(height: 16),
                 Text(
                   message ?? 'Terjadi kendala saat memuat halaman. Coba lagi.',

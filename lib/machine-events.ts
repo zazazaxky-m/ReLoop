@@ -265,12 +265,14 @@ async function processEventSideEffects(
       }
       if (!wasteTypeId && payload.wasteTypeKey) {
         const key = String(payload.wasteTypeKey).toLowerCase();
+        const mappedName =
+          key.includes("organik") && !key.includes("anorganik")
+            ? "Organik"
+            : "Anorganik";
         const wt = await tx.wasteType.findFirst({
           where: {
             active: true,
-            OR: [
-              { name: { contains: key === "botol" ? "Botol" : "Kaleng", mode: "insensitive" } },
-            ],
+            name: { contains: mappedName, mode: "insensitive" },
           },
         });
         wasteTypeId = wt?.id ?? null;

@@ -45,19 +45,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   _OnboardingPage(
                     logo: true,
                     title: 'Selamat Datang di ReLoop',
-                    description: 'Aplikasi pengelolaan sampah digital.\nSetor sampah, dapatkan reward!',
+                    description:
+                        'Aplikasi pengelolaan sampah digital.\nSetor sampah, dapatkan reward!',
                     color: ReLoopColors.brand500,
                   ),
                   _OnboardingPage(
                     icon: Icons.qr_code_scanner,
                     title: 'Scan & Setor',
-                    description: 'Scan QR code di mesin terdekat, masukkan sampah, dan otomatis dapatkan poin reward.',
+                    description:
+                        'Scan QR code di mesin terdekat, masukkan sampah, dan otomatis dapatkan poin reward.',
                     color: ReLoopColors.statusOnline,
                   ),
                   _OnboardingPage(
                     icon: Icons.wallet,
                     title: 'Kumpulkan & Cairkan',
-                    description: 'Kumpulkan reward dari setiap setoran dan cairkan kapan saja ke rekening atau e-wallet Anda.',
+                    description:
+                        'Kumpulkan reward dari setiap setoran dan cairkan kapan saja ke rekening atau e-wallet Anda.',
                     color: ReLoopColors.statusFull,
                   ),
                 ],

@@ -98,7 +98,7 @@ class _SuperadminResourceScreenState extends State<SuperadminResourceScreen> {
             else if (_error != null)
               _ErrorState(message: _error!, retry: _load)
             else if (rows.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(top: 80),
                 child: Center(child: Text('Belum ada data.')),
               )
@@ -197,8 +197,8 @@ class _ResourceCard extends StatelessWidget {
                             subtitle,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: ReLoopColors.muted,
+                            style: TextStyle(
+                              color: context.reloopMuted,
                               fontSize: 11.5,
                             ),
                           ),
@@ -348,14 +348,14 @@ class _ErrorState extends StatelessWidget {
       padding: const EdgeInsets.only(top: 80),
       child: Column(
         children: [
-          const Icon(
+          Icon(
             Icons.cloud_off_rounded,
             size: 48,
-            color: ReLoopColors.mutedSoft,
+            color: context.reloopMutedSoft,
           ),
           const SizedBox(height: 12),
           Text(message, textAlign: TextAlign.center),
-          TextButton(onPressed: retry, child: const Text('Coba lagi')),
+          TextButton(onPressed: retry, child: Text('Coba lagi')),
         ],
       ),
     );

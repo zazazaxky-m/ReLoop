@@ -15,7 +15,8 @@ class AdminMachineDetailScreen extends StatefulWidget {
   const AdminMachineDetailScreen({super.key, required this.machineId});
 
   @override
-  State<AdminMachineDetailScreen> createState() => _AdminMachineDetailScreenState();
+  State<AdminMachineDetailScreen> createState() =>
+      _AdminMachineDetailScreenState();
 }
 
 class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
@@ -57,10 +58,13 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
           );
           final auditData = auditRes.data as Map<String, dynamic>;
           securityEvents =
-              (auditData['securityEvents'] as List?)?.cast<dynamic>() ?? const [];
+              (auditData['securityEvents'] as List?)?.cast<dynamic>() ??
+              const [];
         } catch (_) {}
         try {
-          final cmdRes = await api.get('/api/machines/${widget.machineId}/remote-commands');
+          final cmdRes = await api.get(
+            '/api/machines/${widget.machineId}/remote-commands',
+          );
           final cmdData = cmdRes.data as Map<String, dynamic>;
           remoteCommands =
               (cmdData['commands'] as List?)?.cast<dynamic>() ?? const [];
@@ -86,9 +90,10 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      await context
-          .read<ApiClient>()
-          .patch('/api/machines/${widget.machineId}', data: body);
+      await context.read<ApiClient>().patch(
+        '/api/machines/${widget.machineId}',
+        data: body,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -118,18 +123,18 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Rotasi ingest secret?'),
-        content: const Text(
+        title: Text('Rotasi ingest secret?'),
+        content: Text(
           'Secret baru akan ditampilkan sekali. Perangkat harus dikonfigurasi ulang.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
+            child: Text('Batal'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Lanjutkan'),
+            child: Text('Lanjutkan'),
           ),
         ],
       ),
@@ -137,21 +142,21 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
     if (confirm != true || !mounted) return;
     setState(() => _busy = true);
     try {
-      final res = await context
-          .read<ApiClient>()
-          .post('/api/machines/${widget.machineId}/rotate-secret');
+      final res = await context.read<ApiClient>().post(
+        '/api/machines/${widget.machineId}/rotate-secret',
+      );
       final data = res.data as Map<String, dynamic>;
       final secret = (data['ingestSecret'] as String?) ?? '';
       if (!mounted) return;
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Ingest Secret Baru'),
+          title: Text('Ingest Secret Baru'),
           content: SelectableText(secret),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Tutup'),
+              child: Text('Tutup'),
             ),
           ],
         ),
@@ -173,19 +178,19 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Hapus mesin?'),
-        content: const Text(
+        title: Text('Hapus mesin?'),
+        content: Text(
           'Penghapusan hanya berhasil jika mesin belum memiliki riwayat.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
+            child: Text('Batal'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: ReLoopColors.danger),
-            child: const Text('Hapus'),
+            child: Text('Hapus'),
           ),
         ],
       ),
@@ -193,9 +198,9 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
     if (confirm != true || !mounted) return;
     setState(() => _busy = true);
     try {
-      await context
-          .read<ApiClient>()
-          .delete('/api/machines/${widget.machineId}');
+      await context.read<ApiClient>().delete(
+        '/api/machines/${widget.machineId}',
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -230,51 +235,56 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
   Widget build(BuildContext context) {
     final name = _machine?['name'] as String? ?? 'Mesin';
     return Scaffold(
-      appBar: AppBar(
-        title: Text(name),
-      ),
+      appBar: AppBar(title: Text(name)),
       body: RefreshIndicator(
         onRefresh: _loadMachine,
         child: _isLoading
             ? const SkeletonDashboard()
             : _error != null
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
-                        const SizedBox(height: 12),
-                        Text(_error!, style: TextStyle(color: context.reloopMuted)),
-                        const SizedBox(height: 12),
-                        TextButton(onPressed: _loadMachine, child: const Text('Coba Lagi')),
-                      ],
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.cloud_off,
+                      size: 48,
+                      color: context.reloopMutedSoft,
                     ),
-                  )
-                : ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _buildStatusCard(),
-                      const SizedBox(height: 16),
-                      _buildControlsCard(),
-                      const SizedBox(height: 16),
-                      _buildHardwareConfigCard(),
-                      const SizedBox(height: 16),
-                      _buildInfoCard(),
-                      const SizedBox(height: 16),
-                      _buildWasteTypesCard(),
-                      const SizedBox(height: 16),
-                      _buildSessionsCard(),
-                      if (_securityEvents.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        _buildSecurityCard(),
-                      ],
-                      if (_remoteCommands.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        _buildRemoteCommandsCard(),
-                      ],
-                      const SizedBox(height: 80),
-                    ],
-                  ),
+                    const SizedBox(height: 12),
+                    Text(_error!, style: TextStyle(color: context.reloopMuted)),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: _loadMachine,
+                      child: Text('Coba Lagi'),
+                    ),
+                  ],
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _buildStatusCard(),
+                  const SizedBox(height: 16),
+                  _buildControlsCard(),
+                  const SizedBox(height: 16),
+                  _buildHardwareConfigCard(),
+                  const SizedBox(height: 16),
+                  _buildInfoCard(),
+                  const SizedBox(height: 16),
+                  _buildWasteTypesCard(),
+                  const SizedBox(height: 16),
+                  _buildSessionsCard(),
+                  if (_securityEvents.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _buildSecurityCard(),
+                  ],
+                  if (_remoteCommands.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _buildRemoteCommandsCard(),
+                  ],
+                  const SizedBox(height: 80),
+                ],
+              ),
       ),
     );
   }
@@ -287,11 +297,20 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
 
     Color statusColor;
     switch (status) {
-      case 'ONLINE': statusColor = ReLoopColors.statusOnline; break;
-      case 'FULL': statusColor = ReLoopColors.statusFull; break;
-      case 'ERROR': statusColor = ReLoopColors.statusError; break;
-      case 'MAINTENANCE': statusColor = ReLoopColors.statusMaintenance; break;
-      default: statusColor = ReLoopColors.statusOffline;
+      case 'ONLINE':
+        statusColor = ReLoopColors.statusOnline;
+        break;
+      case 'FULL':
+        statusColor = ReLoopColors.statusFull;
+        break;
+      case 'ERROR':
+        statusColor = ReLoopColors.statusError;
+        break;
+      case 'MAINTENANCE':
+        statusColor = ReLoopColors.statusMaintenance;
+        break;
+      default:
+        statusColor = ReLoopColors.statusOffline;
     }
 
     return Container(
@@ -330,10 +349,7 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
               const SizedBox(width: 8),
               Text(
                 'Kode: $code',
-                style: TextStyle(
-                  color: context.reloopMuted,
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: context.reloopMuted, fontSize: 13),
               ),
             ],
           ),
@@ -374,7 +390,11 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _hwStatusItem('Chamber', hasChamber, Icons.inbox_outlined),
-              _hwStatusItem('Conveyor', hasConveyor, Icons.view_timeline_outlined),
+              _hwStatusItem(
+                'Conveyor',
+                hasConveyor,
+                Icons.view_timeline_outlined,
+              ),
               _hwStatusItem('Compactor', hasCompactor, Icons.compress),
               _hwStatusItem('Kamera', hasCamera, Icons.videocam_outlined),
             ],
@@ -396,7 +416,7 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
         children: [
           const ReLoopCardTitle(title: 'Kontrol Mesin'),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             'Ubah Status',
             style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
           ),
@@ -421,7 +441,7 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
           const SizedBox(height: 14),
           if (isSuperadmin) ...[
             const Divider(height: 24),
-            const Text(
+            Text(
               'Operasi Superadmin',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
@@ -469,17 +489,25 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: Row(
                 children: [
-                  const Icon(Icons.shield_outlined, size: 16, color: ReLoopColors.warning),
+                  const Icon(
+                    Icons.shield_outlined,
+                    size: 16,
+                    color: ReLoopColors.warning,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      (data['eventType'] ?? data['action'] ?? 'Event').toString(),
+                      (data['eventType'] ?? data['action'] ?? 'Event')
+                          .toString(),
                       style: const TextStyle(fontSize: 12),
                     ),
                   ),
                   Text(
-                    _formatDate((data['occurredAt'] ?? data['createdAt'])?.toString() ?? ''),
-                    style: const TextStyle(fontSize: 10, color: ReLoopColors.muted),
+                    _formatDate(
+                      (data['occurredAt'] ?? data['createdAt'])?.toString() ??
+                          '',
+                    ),
+                    style: TextStyle(fontSize: 10, color: context.reloopMuted),
                   ),
                 ],
               ),
@@ -504,7 +532,11 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: Row(
                 children: [
-                  const Icon(Icons.terminal_outlined, size: 16, color: ReLoopColors.info),
+                  const Icon(
+                    Icons.terminal_outlined,
+                    size: 16,
+                    color: ReLoopColors.info,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -527,7 +559,11 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
       children: [
         Icon(
           icon,
-          color: active ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500) : context.reloopMutedSoft,
+          color: active
+              ? (context.isDarkMode
+                    ? ReLoopColors.brand400
+                    : ReLoopColors.brand500)
+              : context.reloopMutedSoft,
           size: 28,
         ),
         const SizedBox(height: 4),
@@ -541,7 +577,11 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
           style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.bold,
-            color: active ? (context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600) : context.reloopMutedSoft,
+            color: active
+                ? (context.isDarkMode
+                      ? ReLoopColors.brand400
+                      : ReLoopColors.brand600)
+                : context.reloopMutedSoft,
           ),
         ),
       ],
@@ -559,14 +599,25 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
         children: [
           const ReLoopCardTitle(title: 'Spesifikasi & Aturan'),
           const SizedBox(height: 12),
-          if (org != null) _infoRow('Organisasi', org['name'] as String? ?? '-'),
-          if (region != null) _infoRow('Wilayah', region['name'] as String? ?? '-'),
+          if (org != null)
+            _infoRow('Organisasi', org['name'] as String? ?? '-'),
+          if (region != null)
+            _infoRow('Wilayah', region['name'] as String? ?? '-'),
           _infoRow('Kapasitas', '${m['capacityKg'] ?? '-'} kg'),
-          _infoRow('Timeout Chamber', '${m['chamberTimeoutSeconds'] ?? '-'} detik'),
-          _infoRow('Idle Timeout', '${m['sessionIdleTimeoutMinutes'] ?? '-'} menit'),
+          _infoRow(
+            'Timeout Chamber',
+            '${m['chamberTimeoutSeconds'] ?? '-'} detik',
+          ),
+          _infoRow(
+            'Idle Timeout',
+            '${m['sessionIdleTimeoutMinutes'] ?? '-'} menit',
+          ),
           _infoRow('Rotasi QR', '${m['qrRotationSeconds'] ?? '-'} detik'),
           if (m['latitude'] != null && m['longitude'] != null)
-            _infoRow('Koordinat', '${m['latitude'].toStringAsFixed(5)}, ${m['longitude'].toStringAsFixed(5)}'),
+            _infoRow(
+              'Koordinat',
+              '${m['latitude'].toStringAsFixed(5)}, ${m['longitude'].toStringAsFixed(5)}',
+            ),
         ],
       ),
     );
@@ -620,7 +671,10 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
               final wt = item['wasteType'] as Map<String, dynamic>?;
               final name = wt?['name'] as String? ?? 'Material';
               return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: context.reloopBrandSoft,
                   borderRadius: BorderRadius.circular(8),
@@ -667,35 +721,42 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
         children: [
           const ReLoopCardTitle(title: 'Sesi Deposit Terakhir'),
           const SizedBox(height: 12),
-          ..._sessions.map((s) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: context.reloopBrandSoft,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(Icons.history_rounded,
-                          color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500, size: 18),
+          ..._sessions.map(
+            (s) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: context.reloopBrandSoft,
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        _formatDate(s['startedAt'] as String? ?? ''),
-                        style: TextStyle(
-                          color: context.reloopForeground,
-                          fontWeight: FontWeight.w500,
-                          fontSize: 13,
-                        ),
+                    child: Icon(
+                      Icons.history_rounded,
+                      color: context.isDarkMode
+                          ? ReLoopColors.brand400
+                          : ReLoopColors.brand500,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _formatDate(s['startedAt'] as String? ?? ''),
+                      style: TextStyle(
+                        color: context.reloopForeground,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 13,
                       ),
                     ),
-                    StatusBadge(statusKey: s['status'] as String? ?? 'ACTIVE'),
-                  ],
-                ),
-              )),
+                  ),
+                  StatusBadge(statusKey: s['status'] as String? ?? 'ACTIVE'),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );

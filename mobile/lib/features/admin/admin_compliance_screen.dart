@@ -40,8 +40,12 @@ class _AdminComplianceScreenState extends State<AdminComplianceScreen> {
         api.get('/api/travel-agents'),
       ]);
       setState(() {
-        _trips = (((results[0].data as Map)['trips']) as List?)?.cast<dynamic>() ?? [];
-        _agents = (((results[1].data as Map)['agents']) as List?)?.cast<dynamic>() ?? [];
+        _trips =
+            (((results[0].data as Map)['trips']) as List?)?.cast<dynamic>() ??
+            [];
+        _agents =
+            (((results[1].data as Map)['agents']) as List?)?.cast<dynamic>() ??
+            [];
         _isLoading = false;
       });
     } catch (e) {
@@ -53,18 +57,18 @@ class _AdminComplianceScreenState extends State<AdminComplianceScreen> {
   }
 
   int get _totalTrips => _trips.length;
-  int get _compliantTrips => _trips.where((t) => t['complianceStatus'] == 'COMPLIANT').length;
-  int get _reviewTrips => _trips.where((t) => t['complianceStatus'] == 'NEEDS_REVIEW').length;
-  int get _nonCompliantTrips => _trips.where((t) => t['complianceStatus'] == 'NON_COMPLIANT').length;
+  int get _compliantTrips =>
+      _trips.where((t) => t['complianceStatus'] == 'COMPLIANT').length;
+  int get _reviewTrips =>
+      _trips.where((t) => t['complianceStatus'] == 'NEEDS_REVIEW').length;
+  int get _nonCompliantTrips =>
+      _trips.where((t) => t['complianceStatus'] == 'NON_COMPLIANT').length;
 
   @override
   Widget build(BuildContext context) {
     return AdminShell(
       title: 'Compliance Wisata',
-      child: RefreshIndicator(
-        onRefresh: _load,
-        child: _buildBody(),
-      ),
+      child: RefreshIndicator(onRefresh: _load, child: _buildBody()),
     );
   }
 
@@ -84,10 +88,10 @@ class _AdminComplianceScreenState extends State<AdminComplianceScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+            Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
-            TextButton(onPressed: _load, child: const Text('Coba Lagi')),
+            Text(_error!, style: TextStyle(color: context.reloopMuted)),
+            TextButton(onPressed: _load, child: Text('Coba Lagi')),
           ],
         ),
       );
@@ -97,16 +101,19 @@ class _AdminComplianceScreenState extends State<AdminComplianceScreen> {
       final agent = item as Map<String, dynamic>;
       final tripCount = (agent['tripCount'] as num?)?.toInt() ?? 0;
       final compliantCount = (agent['compliantCount'] as num?)?.toInt() ?? 0;
-      final nonCompliantCount = (agent['nonCompliantCount'] as num?)?.toInt() ?? 0;
+      final nonCompliantCount =
+          (agent['nonCompliantCount'] as num?)?.toInt() ?? 0;
       final reviewCount = tripCount - compliantCount - nonCompliantCount;
-      final rate = tripCount > 0 ? ((compliantCount / tripCount) * 100).round() : 0;
+      final rate = tripCount > 0
+          ? ((compliantCount / tripCount) * 100).round()
+          : 0;
       final status = tripCount == 0
           ? 'NOT_STARTED'
           : nonCompliantCount > 0
-              ? 'NON_COMPLIANT'
-              : reviewCount > 0
-                  ? 'NEEDS_REVIEW'
-                  : 'COMPLIANT';
+          ? 'NON_COMPLIANT'
+          : reviewCount > 0
+          ? 'NEEDS_REVIEW'
+          : 'COMPLIANT';
       return {
         'name': agent['name'],
         'email': agent['email'],
@@ -172,7 +179,7 @@ class _AdminComplianceScreenState extends State<AdminComplianceScreen> {
             child: Center(
               child: Text(
                 'Belum ada data compliance.',
-                style: const TextStyle(color: ReLoopColors.mutedSoft),
+                style: TextStyle(color: context.reloopMutedSoft),
               ),
             ),
           )
@@ -192,21 +199,26 @@ class _AdminComplianceScreenState extends State<AdminComplianceScreen> {
                             children: [
                               Text(
                                 (row['name'] as String?) ?? 'Travel Agent',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 14,
-                                  color: ReLoopColors.foreground,
+                                  color: context.reloopForeground,
                                 ),
                               ),
                               if (row['email'] != null)
                                 Text(
                                   row['email'] as String,
-                                  style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: context.reloopMutedSoft,
+                                  ),
                                 ),
                             ],
                           ),
                         ),
-                        StatusBadge(statusKey: row['status'] as String? ?? 'NOT_STARTED'),
+                        StatusBadge(
+                          statusKey: row['status'] as String? ?? 'NOT_STARTED',
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -217,8 +229,10 @@ class _AdminComplianceScreenState extends State<AdminComplianceScreen> {
                         _chip('${row['tripCount']} trip'),
                         _chip('${row['rate']}% patuh'),
                         _chip('${row['compliantCount']} compliant'),
-                        if ((row['reviewCount'] as int) > 0) _chip('${row['reviewCount']} review'),
-                        if ((row['nonCompliantCount'] as int) > 0) _chip('${row['nonCompliantCount']} tidak patuh'),
+                        if ((row['reviewCount'] as int) > 0)
+                          _chip('${row['reviewCount']} review'),
+                        if ((row['nonCompliantCount'] as int) > 0)
+                          _chip('${row['nonCompliantCount']} tidak patuh'),
                       ],
                     ),
                   ],
@@ -232,18 +246,18 @@ class _AdminComplianceScreenState extends State<AdminComplianceScreen> {
   }
 
   Widget _chip(String label) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: ReLoopColors.background,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 10,
-            color: ReLoopColors.muted,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: context.reloopSurfaceSoft,
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 10,
+        color: context.reloopMuted,
+        fontWeight: FontWeight.w500,
+      ),
+    ),
+  );
 }

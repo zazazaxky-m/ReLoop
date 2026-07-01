@@ -12,11 +12,16 @@ class ForceUpdateDialog extends StatelessWidget {
     this.changelog,
   });
 
-  static Future<void> showIfNeeded(BuildContext context, {required String latestVersion, String? changelog}) {
+  static Future<void> showIfNeeded(
+    BuildContext context, {
+    required String latestVersion,
+    String? changelog,
+  }) {
     return showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => ForceUpdateDialog(latestVersion: latestVersion, changelog: changelog),
+      builder: (_) =>
+          ForceUpdateDialog(latestVersion: latestVersion, changelog: changelog),
     );
   }
 
@@ -30,14 +35,20 @@ class ForceUpdateDialog extends StatelessWidget {
           children: [
             Icon(Icons.system_update, color: ReLoopColors.brand500, size: 28),
             const SizedBox(width: 12),
-            Text('Update Tersedia', style: TextStyle(fontWeight: FontWeight.w800)),
+            Text(
+              'Update Tersedia',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Versi baru ReLoop sudah tersedia. Silakan update untuk melanjutkan.', style: TextStyle(color: context.reloopMuted, fontSize: 14)),
+            Text(
+              'Versi baru ReLoop sudah tersedia. Silakan update untuk melanjutkan.',
+              style: TextStyle(color: context.reloopMuted, fontSize: 14),
+            ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
@@ -48,15 +59,29 @@ class ForceUpdateDialog extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.new_releases, color: ReLoopColors.brand500, size: 18),
+                  Icon(
+                    Icons.new_releases,
+                    color: ReLoopColors.brand500,
+                    size: 18,
+                  ),
                   const SizedBox(width: 8),
-                  Text('Versi $latestVersion', style: TextStyle(fontWeight: FontWeight.w700, color: context.reloopBrandText, fontSize: 14)),
+                  Text(
+                    'Versi $latestVersion',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: context.reloopBrandText,
+                      fontSize: 14,
+                    ),
+                  ),
                 ],
               ),
             ),
             if (changelog != null) ...[
               const SizedBox(height: 12),
-              Text(changelog!, style: TextStyle(color: context.reloopMutedSoft, fontSize: 12)),
+              Text(
+                changelog!,
+                style: TextStyle(color: context.reloopMutedSoft, fontSize: 12),
+              ),
             ],
           ],
         ),

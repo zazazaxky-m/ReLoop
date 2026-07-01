@@ -17,22 +17,22 @@ class _MachineReportFormState extends State<MachineReportForm> {
   final _descCtrl = TextEditingController();
   bool _isSubmitting = false;
 
-  static const _issueTypes = [
-    'PENUH',
-    'RUSAK',
-    'BAU',
-    'KOTOR',
-    'LAINNYA',
-  ];
+  static const _issueTypes = ['PENUH', 'RUSAK', 'BAU', 'KOTOR', 'LAINNYA'];
 
   String _issueLabel(String? type) {
     switch (type) {
-      case 'PENUH': return 'Penuh/Tidak bisa menampung';
-      case 'RUSAK': return 'Mesin rusak';
-      case 'BAU': return 'Bau menyengat';
-      case 'KOTOR': return 'Kotor/tidak terawat';
-      case 'LAINNYA': return 'Lainnya';
-      default: return '';
+      case 'PENUH':
+        return 'Penuh/Tidak bisa menampung';
+      case 'RUSAK':
+        return 'Mesin rusak';
+      case 'BAU':
+        return 'Bau menyengat';
+      case 'KOTOR':
+        return 'Kotor/tidak terawat';
+      case 'LAINNYA':
+        return 'Lainnya';
+      default:
+        return '';
     }
   }
 
@@ -45,9 +45,9 @@ class _MachineReportFormState extends State<MachineReportForm> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (_issueType == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pilih jenis masalah')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Pilih jenis masalah')));
       return;
     }
 
@@ -57,7 +57,9 @@ class _MachineReportFormState extends State<MachineReportForm> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Fitur laporan mesin belum tersedia di backend saat ini.'),
+          content: Text(
+            'Fitur laporan mesin belum tersedia di backend saat ini.',
+          ),
           backgroundColor: ReLoopColors.warning,
         ),
       );
@@ -69,7 +71,7 @@ class _MachineReportFormState extends State<MachineReportForm> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Laporkan Masalah')),
+      appBar: AppBar(title: Text('Laporkan Masalah')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Form(
@@ -82,11 +84,17 @@ class _MachineReportFormState extends State<MachineReportForm> {
                 decoration: BoxDecoration(
                   color: context.reloopTone('warning').bg,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: context.reloopTone('warning').border),
+                  border: Border.all(
+                    color: context.reloopTone('warning').border,
+                  ),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline, color: context.reloopTone('warning').text, size: 20),
+                    Icon(
+                      Icons.info_outline,
+                      color: context.reloopTone('warning').text,
+                      size: 20,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -102,12 +110,12 @@ class _MachineReportFormState extends State<MachineReportForm> {
                 ),
               ),
               const SizedBox(height: 24),
-              const Text(
+              Text(
                 'Jenis Masalah',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: ReLoopColors.foreground,
+                  color: context.reloopForeground,
                 ),
               ),
               const SizedBox(height: 12),
@@ -118,7 +126,10 @@ class _MachineReportFormState extends State<MachineReportForm> {
                   prefixIcon: Icon(Icons.warning_amber_rounded),
                 ),
                 items: _issueTypes.map((t) {
-                  return DropdownMenuItem(value: t, child: Text(_issueLabel(t)));
+                  return DropdownMenuItem(
+                    value: t,
+                    child: Text(_issueLabel(t)),
+                  );
                 }).toList(),
                 onChanged: (v) => setState(() => _issueType = v),
               ),

@@ -58,9 +58,9 @@ class _LoginScreenState extends State<LoginScreen> {
     );
     if (!result.authenticated) {
       if (mounted && result.errorMessage != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.errorMessage!)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(result.errorMessage!)));
       }
       return;
     }
@@ -94,10 +94,7 @@ class _LoginScreenState extends State<LoginScreen> {
       TextInput.finishAutofillContext();
       final bio = BiometricService();
       if (await bio.isEnabled) {
-        await bio.saveCredentials(
-          _emailCtrl.text.trim(),
-          _passwordCtrl.text,
-        );
+        await bio.saveCredentials(_emailCtrl.text.trim(), _passwordCtrl.text);
       }
       if (!mounted) return;
       context.go(auth.dashboardRoute);
@@ -150,7 +147,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   border: Border.all(color: context.reloopBorder),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: context.isDarkMode ? .38 : .08),
+                      color: Colors.black.withValues(
+                        alpha: context.isDarkMode ? .38 : .08,
+                      ),
                       blurRadius: 24,
                       offset: const Offset(0, 10),
                     ),
@@ -194,122 +193,135 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                          _buildLabel('Email'),
-                           TextFormField(
-                            controller: _emailCtrl,
-                            keyboardType: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const [AutofillHints.email],
-                            style: TextStyle(fontSize: 15, color: context.reloopForeground),
-                            decoration: InputDecoration(
-                              hintText: 'nama@email.com',
-                              hintStyle: TextStyle(
-                                color: context.reloopMutedSoft,
+                            _buildLabel('Email'),
+                            TextFormField(
+                              controller: _emailCtrl,
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              autofillHints: const [AutofillHints.email],
+                              style: TextStyle(
                                 fontSize: 15,
+                                color: context.reloopForeground,
                               ),
-                              fillColor: context.reloopSurface,
-                              filled: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBorder),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBorder),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBrandText,
-                                    width: 1.5),
-                              ),
-                            ),
-                            validator: (v) {
-                              if (v == null || v.trim().isEmpty) {
-                                return 'Email wajib diisi';
-                              }
-                              final emailRegex =
-                                  RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-                              if (!emailRegex.hasMatch(v.trim())) {
-                                return 'Format email tidak valid';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          _buildLabel('Password'),
-                           TextFormField(
-                            controller: _passwordCtrl,
-                            obscureText: _obscurePassword,
-                            textInputAction: TextInputAction.done,
-                            autofillHints: const [AutofillHints.password],
-                            onFieldSubmitted: (_) => _login(),
-                            style: TextStyle(fontSize: 15, color: context.reloopForeground),
-                            decoration: InputDecoration(
-                              hintText: '••••••••',
-                              hintStyle: TextStyle(
-                                color: context.reloopMutedSoft,
-                                fontSize: 15,
-                                letterSpacing: 2.0,
-                              ),
-                              fillColor: context.reloopSurface,
-                              filled: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBorder),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBorder),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBrandText,
-                                    width: 1.5),
-                              ),
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _obscurePassword
-                                      ? Icons.visibility_off_outlined
-                                      : Icons.visibility_outlined,
-                                  size: 20,
+                              decoration: InputDecoration(
+                                hintText: 'nama@email.com',
+                                hintStyle: TextStyle(
                                   color: context.reloopMutedSoft,
+                                  fontSize: 15,
                                 ),
-                                onPressed: () {
-                                  setState(() {
-                                    _obscurePassword = !_obscurePassword;
-                                  });
-                                },
+                                fillColor: context.reloopSurface,
+                                filled: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: context.reloopBorder,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: context.reloopBorder,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: context.reloopBrandText,
+                                    width: 1.5,
+                                  ),
+                                ),
                               ),
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) {
+                                  return 'Email wajib diisi';
+                                }
+                                final emailRegex = RegExp(
+                                  r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                                );
+                                if (!emailRegex.hasMatch(v.trim())) {
+                                  return 'Format email tidak valid';
+                                }
+                                return null;
+                              },
                             ),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) {
-                                return 'Password wajib diisi';
-                              }
-                              if (v.length < 6) {
-                                return 'Password minimal 6 karakter';
-                              }
-                              return null;
-                            },
-                          ),
-                        ],
-                      ),
+                            const SizedBox(height: 16),
+                            _buildLabel('Password'),
+                            TextFormField(
+                              controller: _passwordCtrl,
+                              obscureText: _obscurePassword,
+                              textInputAction: TextInputAction.done,
+                              autofillHints: const [AutofillHints.password],
+                              onFieldSubmitted: (_) => _login(),
+                              style: TextStyle(
+                                fontSize: 15,
+                                color: context.reloopForeground,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: '••••••••',
+                                hintStyle: TextStyle(
+                                  color: context.reloopMutedSoft,
+                                  fontSize: 15,
+                                  letterSpacing: 2.0,
+                                ),
+                                fillColor: context.reloopSurface,
+                                filled: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: context.reloopBorder,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: context.reloopBorder,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: context.reloopBrandText,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_off_outlined
+                                        : Icons.visibility_outlined,
+                                    size: 20,
+                                    color: context.reloopMutedSoft,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _obscurePassword = !_obscurePassword;
+                                    });
+                                  },
+                                ),
+                              ),
+                              validator: (v) {
+                                if (v == null || v.isEmpty) {
+                                  return 'Password wajib diisi';
+                                }
+                                if (v.length < 6) {
+                                  return 'Password minimal 6 karakter';
+                                }
+                                return null;
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                             if (auth.error != null) ...[
+                    if (auth.error != null) ...[
                       const SizedBox(height: 16),
                       Container(
                         width: double.infinity,
@@ -317,12 +329,17 @@ class _LoginScreenState extends State<LoginScreen> {
                         decoration: BoxDecoration(
                           color: context.reloopTone('danger').bg,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: context.reloopTone('danger').border),
+                          border: Border.all(
+                            color: context.reloopTone('danger').border,
+                          ),
                         ),
                         child: Row(
                           children: [
-                            Icon(Icons.error_outline,
-                                size: 16, color: context.reloopTone('danger').text),
+                            Icon(
+                              Icons.error_outline,
+                              size: 16,
+                              color: context.reloopTone('danger').text,
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
@@ -353,7 +370,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: Text(
                           'atau',
                           style: TextStyle(
-                              color: context.reloopMutedSoft, fontSize: 13),
+                            color: context.reloopMutedSoft,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -377,7 +396,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           style: OutlinedButton.styleFrom(
                             foregroundColor: context.reloopBrandText,
                             side: BorderSide(
-                                color: context.reloopBrandSoftStrong),
+                              color: context.reloopBrandSoftStrong,
+                            ),
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -438,4 +458,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-

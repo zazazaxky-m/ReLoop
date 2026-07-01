@@ -1,33 +1,47 @@
 // Data models mirroring Prisma schema and API responses
 export 'models/trip.dart';
+
 enum AppRole { USER, PENGEPUL, ADMIN, SUPERADMIN }
 
 extension AppRoleX on AppRole {
   String get apiValue {
     switch (this) {
-      case AppRole.USER: return 'USER';
-      case AppRole.PENGEPUL: return 'PENGEPUL';
-      case AppRole.ADMIN: return 'ADMIN';
-      case AppRole.SUPERADMIN: return 'SUPERADMIN';
+      case AppRole.USER:
+        return 'USER';
+      case AppRole.PENGEPUL:
+        return 'PENGEPUL';
+      case AppRole.ADMIN:
+        return 'ADMIN';
+      case AppRole.SUPERADMIN:
+        return 'SUPERADMIN';
     }
   }
 
   String get label {
     switch (this) {
-      case AppRole.USER: return 'User';
-      case AppRole.PENGEPUL: return 'Pengepul';
-      case AppRole.ADMIN: return 'Admin';
-      case AppRole.SUPERADMIN: return 'Superadmin';
+      case AppRole.USER:
+        return 'User';
+      case AppRole.PENGEPUL:
+        return 'Pengepul';
+      case AppRole.ADMIN:
+        return 'Admin';
+      case AppRole.SUPERADMIN:
+        return 'Superadmin';
     }
   }
 
   static AppRole fromString(String role) {
     switch (role) {
-      case 'USER': return AppRole.USER;
-      case 'PENGEPUL': return AppRole.PENGEPUL;
-      case 'ADMIN': return AppRole.ADMIN;
-      case 'SUPERADMIN': return AppRole.SUPERADMIN;
-      default: return AppRole.USER;
+      case 'USER':
+        return AppRole.USER;
+      case 'PENGEPUL':
+        return AppRole.PENGEPUL;
+      case 'ADMIN':
+        return AppRole.ADMIN;
+      case 'SUPERADMIN':
+        return AppRole.SUPERADMIN;
+      default:
+        return AppRole.USER;
     }
   }
 }
@@ -155,8 +169,8 @@ class DepositSession {
           : null,
       items: json['items'] != null
           ? (json['items'] as List)
-              .map((e) => DepositItem.fromJson(e as Map<String, dynamic>))
-              .toList()
+                .map((e) => DepositItem.fromJson(e as Map<String, dynamic>))
+                .toList()
           : null,
     );
   }
@@ -193,7 +207,8 @@ class MachineInfo {
       machineCode: (json['machineCode'] as String?) ?? '',
       name: (json['name'] as String?) ?? '',
       organizationId: json['organizationId'] as String?,
-      organizationName: json['organizationName'] as String? ??
+      organizationName:
+          json['organizationName'] as String? ??
           (json['organization']?['name'] as String?),
       status: json['status'] as String? ?? 'OFFLINE',
       fillLevelPercent: (json['fillLevelPercent'] as num?)?.toInt() ?? 0,
@@ -201,8 +216,8 @@ class MachineInfo {
       longitude: (json['longitude'] as num?)?.toDouble(),
       supportedWasteTypes: json['supportedWasteTypes'] != null
           ? (json['supportedWasteTypes'] as List)
-              .map((e) => WasteTypeRef.fromJson(e as Map<String, dynamic>))
-              .toList()
+                .map((e) => WasteTypeRef.fromJson(e as Map<String, dynamic>))
+                .toList()
           : null,
     );
   }
@@ -307,9 +322,14 @@ class CampaignInfo {
       status: json['status'] as String? ?? 'DRAFT',
       organizationId: json['organizationId'] as String?,
       organizationName: json['organization']?['name'] as String?,
-      startAt: json['startAt'] != null ? DateTime.tryParse(json['startAt'] as String) : null,
-      endAt: json['endAt'] != null ? DateTime.tryParse(json['endAt'] as String) : null,
-      allowedEmailDomains: (json['allowedEmailDomains'] as List<dynamic>?)?.cast<String>(),
+      startAt: json['startAt'] != null
+          ? DateTime.tryParse(json['startAt'] as String)
+          : null,
+      endAt: json['endAt'] != null
+          ? DateTime.tryParse(json['endAt'] as String)
+          : null,
+      allowedEmailDomains: (json['allowedEmailDomains'] as List<dynamic>?)
+          ?.cast<String>(),
       rewardMultiplier: (json['rewardMultiplier'] as num?)?.toDouble(),
     );
   }
@@ -384,12 +404,16 @@ class ScanResult {
 
 class UserDashboard {
   final WalletBalance balance;
+  final bool isTravelAgent;
+  final int pointsToRupiah;
   final List<DepositSession> recentSessions;
   final List<CampaignInfo> campaigns;
   final List<RewardLedgerEntry> recentLedger;
 
   UserDashboard({
     required this.balance,
+    this.isTravelAgent = false,
+    this.pointsToRupiah = 1,
     required this.recentSessions,
     required this.campaigns,
     required this.recentLedger,
@@ -397,9 +421,13 @@ class UserDashboard {
 
   factory UserDashboard.fromJson(Map<String, dynamic> json) {
     final balanceData = json['balance'];
-    if (balanceData == null) throw Exception('Dashboard missing "balance" field');
+    if (balanceData == null) {
+      throw Exception('Dashboard missing "balance" field');
+    }
     return UserDashboard(
       balance: WalletBalance.fromJson(balanceData as Map<String, dynamic>),
+      isTravelAgent: json['isTravelAgent'] as bool? ?? false,
+      pointsToRupiah: (json['pointsToRupiah'] as num?)?.toInt() ?? 1,
       recentSessions: (json['recentSessions'] as List? ?? [])
           .map((e) => DepositSession.fromJson(e as Map<String, dynamic>))
           .toList(),

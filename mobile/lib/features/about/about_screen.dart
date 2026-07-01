@@ -7,7 +7,7 @@ class AboutScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Tentang')),
+      appBar: AppBar(title: Text('Tentang')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -23,18 +23,31 @@ class AboutScreen extends StatelessWidget {
               child: const Icon(Icons.recycling, color: Colors.white, size: 48),
             ),
             const SizedBox(height: 16),
-            const Text('ReLoop', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: ReLoopColors.foreground)),
+            Text(
+              'ReLoop',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                color: context.reloopForeground,
+              ),
+            ),
             const SizedBox(height: 4),
-            const Text('Versi 1.0.0', style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 14)),
+            Text(
+              'Versi 1.0.0',
+              style: TextStyle(color: context.reloopMutedSoft, fontSize: 14),
+            ),
             const SizedBox(height: 8),
-            const Text('Build 1', style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 12)),
+            Text(
+              'Build 1',
+              style: TextStyle(color: context.reloopMutedSoft, fontSize: 12),
+            ),
             const SizedBox(height: 32),
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: ReLoopColors.surface,
+                color: context.reloopSurface,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: ReLoopColors.border),
+                border: Border.all(color: context.reloopBorder),
               ),
               child: const Column(
                 children: [
@@ -47,16 +60,16 @@ class AboutScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 40),
-            const Text(
+            Text(
               'ReLoop - Solusi Pengelolaan Sampah Digital',
               textAlign: TextAlign.center,
-              style: TextStyle(color: ReLoopColors.muted, fontSize: 14),
+              style: TextStyle(color: context.reloopMuted, fontSize: 14),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Dibuat dengan dedikasi untuk lingkungan yang lebih baik',
               textAlign: TextAlign.center,
-              style: TextStyle(color: ReLoopColors.mutedSoft, fontSize: 12),
+              style: TextStyle(color: context.reloopMutedSoft, fontSize: 12),
             ),
             const SizedBox(height: 80),
           ],
@@ -76,8 +89,15 @@ class _AboutRow extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(color: ReLoopColors.muted, fontSize: 14)),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.w600, color: ReLoopColors.foreground, fontSize: 14)),
+        Text(label, style: TextStyle(color: context.reloopMuted, fontSize: 14)),
+        Text(
+          value,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: context.reloopForeground,
+            fontSize: 14,
+          ),
+        ),
       ],
     );
   }

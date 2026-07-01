@@ -14,7 +14,8 @@ class AdminTravelAgentsScreen extends StatefulWidget {
   const AdminTravelAgentsScreen({super.key});
 
   @override
-  State<AdminTravelAgentsScreen> createState() => _AdminTravelAgentsScreenState();
+  State<AdminTravelAgentsScreen> createState() =>
+      _AdminTravelAgentsScreenState();
 }
 
 class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
@@ -57,14 +58,17 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
     final result = await showDialog<Map<String, String>>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Tambah Travel Agent'),
+        title: Text('Tambah Travel Agent'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Nama', hintText: 'wajib'),
+                decoration: const InputDecoration(
+                  labelText: 'Nama',
+                  hintText: 'wajib',
+                ),
               ),
               const SizedBox(height: 10),
               TextField(
@@ -96,7 +100,7 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Batal')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, {
               'name': nameCtrl.text.trim(),
@@ -105,26 +109,33 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
               'phone': phoneCtrl.text.trim(),
               'notes': notesCtrl.text.trim(),
             }),
-            child: const Text('Simpan'),
+            child: Text('Simpan'),
           ),
         ],
       ),
     );
 
     if (result == null) return;
-    if ((result['name']?.isEmpty ?? true) || (result['email']?.isEmpty ?? true) || !mounted) {
+    if ((result['name']?.isEmpty ?? true) ||
+        (result['email']?.isEmpty ?? true) ||
+        !mounted) {
       return;
     }
 
     try {
-      final res = await context.read<ApiClient>().post('/api/travel-agents', data: {
-        'name': result['name'],
-        'email': result['email'],
-        if (result['contactPerson']?.isNotEmpty ?? false) 'contactPerson': result['contactPerson'],
-        if (result['phone']?.isNotEmpty ?? false) 'phone': result['phone'],
-        if (result['notes']?.isNotEmpty ?? false) 'notes': result['notes'],
-      });
-      final invite = (res.data as Map<String, dynamic>)['invite'] as Map<String, dynamic>?;
+      final res = await context.read<ApiClient>().post(
+        '/api/travel-agents',
+        data: {
+          'name': result['name'],
+          'email': result['email'],
+          if (result['contactPerson']?.isNotEmpty ?? false)
+            'contactPerson': result['contactPerson'],
+          if (result['phone']?.isNotEmpty ?? false) 'phone': result['phone'],
+          if (result['notes']?.isNotEmpty ?? false) 'notes': result['notes'],
+        },
+      );
+      final invite =
+          (res.data as Map<String, dynamic>)['invite'] as Map<String, dynamic>?;
       await _load();
       if (!mounted) return;
       final invited = invite?['status'] == 'INVITED';
@@ -149,18 +160,22 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
     }
   }
 
-  int get _invitedCount => _agents.where((a) => a['organizationStatus'] == 'INVITED').length;
-  int get _compliantTrips => _agents.fold<int>(0, (sum, a) => sum + ((a['compliantCount'] as num?)?.toInt() ?? 0));
-  int get _nonCompliantTrips => _agents.fold<int>(0, (sum, a) => sum + ((a['nonCompliantCount'] as num?)?.toInt() ?? 0));
+  int get _invitedCount =>
+      _agents.where((a) => a['organizationStatus'] == 'INVITED').length;
+  int get _compliantTrips => _agents.fold<int>(
+    0,
+    (sum, a) => sum + ((a['compliantCount'] as num?)?.toInt() ?? 0),
+  );
+  int get _nonCompliantTrips => _agents.fold<int>(
+    0,
+    (sum, a) => sum + ((a['nonCompliantCount'] as num?)?.toInt() ?? 0),
+  );
 
   @override
   Widget build(BuildContext context) {
     return AdminShell(
       title: 'Travel Agent',
-      child: RefreshIndicator(
-        onRefresh: _load,
-        child: _buildBody(),
-      ),
+      child: RefreshIndicator(onRefresh: _load, child: _buildBody()),
     );
   }
 
@@ -180,10 +195,10 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+            Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
-            TextButton(onPressed: _load, child: const Text('Coba Lagi')),
+            Text(_error!, style: TextStyle(color: context.reloopMuted)),
+            TextButton(onPressed: _load, child: Text('Coba Lagi')),
           ],
         ),
       );
@@ -249,7 +264,7 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
             child: Center(
               child: Text(
                 'Belum ada travel agent.',
-                style: const TextStyle(color: ReLoopColors.mutedSoft),
+                style: TextStyle(color: context.reloopMutedSoft),
               ),
             ),
           )
@@ -257,9 +272,13 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
           ..._agents.map((item) {
             final agent = item as Map<String, dynamic>;
             final tripCount = (agent['tripCount'] as num?)?.toInt() ?? 0;
-            final compliantCount = (agent['compliantCount'] as num?)?.toInt() ?? 0;
-            final nonCompliantCount = (agent['nonCompliantCount'] as num?)?.toInt() ?? 0;
-            final rate = tripCount > 0 ? ((compliantCount / tripCount) * 100).round() : 0;
+            final compliantCount =
+                (agent['compliantCount'] as num?)?.toInt() ?? 0;
+            final nonCompliantCount =
+                (agent['nonCompliantCount'] as num?)?.toInt() ?? 0;
+            final rate = tripCount > 0
+                ? ((compliantCount / tripCount) * 100).round()
+                : 0;
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: ReLoopCard(
@@ -274,31 +293,44 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
                             children: [
                               Text(
                                 (agent['name'] as String?) ?? 'Travel Agent',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 14,
-                                  color: ReLoopColors.foreground,
+                                  color: context.reloopForeground,
                                 ),
                               ),
                               if (agent['email'] != null)
                                 Text(
                                   agent['email'] as String,
-                                  style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: context.reloopMutedSoft,
+                                  ),
                                 ),
                               if (agent['contactPerson'] != null)
                                 Text(
                                   'CP: ${agent['contactPerson']}',
-                                  style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: context.reloopMutedSoft,
+                                  ),
                                 ),
                               if (agent['phone'] != null)
                                 Text(
                                   'Telp: ${agent['phone']}',
-                                  style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: context.reloopMutedSoft,
+                                  ),
                                 ),
                             ],
                           ),
                         ),
-                        StatusBadge(statusKey: (agent['organizationStatus'] as String?) ?? 'PENDING'),
+                        StatusBadge(
+                          statusKey:
+                              (agent['organizationStatus'] as String?) ??
+                              'PENDING',
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -309,7 +341,8 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
                         _chip('$tripCount trip'),
                         _chip('$rate% patuh'),
                         _chip('$compliantCount compliant'),
-                        if (nonCompliantCount > 0) _chip('$nonCompliantCount tidak patuh'),
+                        if (nonCompliantCount > 0)
+                          _chip('$nonCompliantCount tidak patuh'),
                       ],
                     ),
                   ],
@@ -323,18 +356,18 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
   }
 
   Widget _chip(String label) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: ReLoopColors.background,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 10,
-            color: ReLoopColors.muted,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: context.reloopSurfaceSoft,
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 10,
+        color: context.reloopMuted,
+        fontWeight: FontWeight.w500,
+      ),
+    ),
+  );
 }

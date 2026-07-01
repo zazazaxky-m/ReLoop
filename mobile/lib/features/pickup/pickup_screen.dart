@@ -16,7 +16,8 @@ class PickupScreen extends StatefulWidget {
   State<PickupScreen> createState() => _PickupScreenState();
 }
 
-class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderStateMixin {
+class _PickupScreenState extends State<PickupScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   List<dynamic> _pickups = [];
   List<dynamic> _availablePickups = [];
@@ -60,20 +61,25 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
         api.get('/api/waste-types'),
       ];
       if (auth.user?.role == AppRole.PENGEPUL) {
-        futures.add(api.get('/api/pickups', queryParameters: {'scope': 'available'}));
+        futures.add(
+          api.get('/api/pickups', queryParameters: {'scope': 'available'}),
+        );
       }
 
       final results = await Future.wait(futures);
 
       final pickupsData = results[0].data as Map<String, dynamic>;
       final wasteData = results[1].data as Map<String, dynamic>;
-      final availableData = results.length > 2 ? results[2].data as Map<String, dynamic> : null;
+      final availableData = results.length > 2
+          ? results[2].data as Map<String, dynamic>
+          : null;
 
       setState(() {
         _pickups = (pickupsData['pickups'] as List? ?? []).cast<dynamic>();
         _wasteTypes = (wasteData['wasteTypes'] as List? ?? []).cast<dynamic>();
         if (availableData != null) {
-          _availablePickups = (availableData['pickups'] as List? ?? []).cast<dynamic>();
+          _availablePickups = (availableData['pickups'] as List? ?? [])
+              .cast<dynamic>();
         }
         _isLoading = false;
       });
@@ -85,7 +91,11 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     }
   }
 
-  Future<void> _updatePickupStatus(String pickupId, String action, {String? notes}) async {
+  Future<void> _updatePickupStatus(
+    String pickupId,
+    String action, {
+    String? notes,
+  }) async {
     try {
       final api = context.read<ApiClient>();
       final body = <String, dynamic>{'action': action};
@@ -115,13 +125,17 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
 
     try {
       final api = context.read<ApiClient>();
-      await api.post('/api/pickups/$pickupId/items', data: {
-        if (wasteTypeId != null && wasteTypeId.isNotEmpty) 'wasteTypeId': wasteTypeId,
-        if (itemCountStr.isNotEmpty) 'itemCount': int.parse(itemCountStr),
-        if (weightStr.isNotEmpty) 'actualWeightKg': double.parse(weightStr),
-        'source': 'MANUAL_WEIGHING',
-        if (notes.isNotEmpty) 'notes': notes,
-      });
+      await api.post(
+        '/api/pickups/$pickupId/items',
+        data: {
+          if (wasteTypeId != null && wasteTypeId.isNotEmpty)
+            'wasteTypeId': wasteTypeId,
+          if (itemCountStr.isNotEmpty) 'itemCount': int.parse(itemCountStr),
+          if (weightStr.isNotEmpty) 'actualWeightKg': double.parse(weightStr),
+          'source': 'MANUAL_WEIGHING',
+          if (notes.isNotEmpty) 'notes': notes,
+        },
+      );
       if (!mounted) return;
 
       _materialForms.remove(pickupId);
@@ -151,17 +165,19 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Gagalkan Pickup?'),
-        content: const Text('Apakah Anda yakin ingin menandai pickup ini sebagai gagal?'),
+        title: Text('Gagalkan Pickup?'),
+        content: Text(
+          'Apakah Anda yakin ingin menandai pickup ini sebagai gagal?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
+            child: Text('Batal'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: ReLoopColors.danger),
-            child: const Text('Ya, Gagalkan'),
+            child: Text('Ya, Gagalkan'),
           ),
         ],
       ),
@@ -199,8 +215,10 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
         children: [
           Container(
             decoration: const BoxDecoration(
-              color: ReLoopColors.surface,
-              border: Border(bottom: BorderSide(color: ReLoopColors.border, width: 0.5)),
+              color: context.reloopSurface,
+              border: Border(
+                bottom: BorderSide(color: context.reloopBorder, width: 0.5),
+              ),
             ),
             child: TabBar(
               controller: _tabController,
@@ -246,11 +264,11 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+            Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
+            Text(_error!, style: TextStyle(color: context.reloopMuted)),
             const SizedBox(height: 12),
-            TextButton(onPressed: _loadAll, child: const Text('Coba Lagi')),
+            TextButton(onPressed: _loadAll, child: Text('Coba Lagi')),
           ],
         ),
       );
@@ -269,14 +287,32 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     return TabBarView(
       controller: _tabController,
       children: [
-        _buildList(activeTasks, isCollector, emptyMessage: 'Tidak ada tugas aktif'),
-        _buildList(_availablePickups, isCollector, emptyMessage: 'Tidak ada tugas baru dari mitra', isAvailableTasks: true),
-        _buildList(doneTasks, isCollector, emptyMessage: 'Tidak ada riwayat tugas'),
+        _buildList(
+          activeTasks,
+          isCollector,
+          emptyMessage: 'Tidak ada tugas aktif',
+        ),
+        _buildList(
+          _availablePickups,
+          isCollector,
+          emptyMessage: 'Tidak ada tugas baru dari mitra',
+          isAvailableTasks: true,
+        ),
+        _buildList(
+          doneTasks,
+          isCollector,
+          emptyMessage: 'Tidak ada riwayat tugas',
+        ),
       ],
     );
   }
 
-  Widget _buildList(List<dynamic> list, bool isCollector, {required String emptyMessage, bool isAvailableTasks = false}) {
+  Widget _buildList(
+    List<dynamic> list,
+    bool isCollector, {
+    required String emptyMessage,
+    bool isAvailableTasks = false,
+  }) {
     if (list.isEmpty) {
       return ListView(
         children: [
@@ -286,11 +322,18 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.local_shipping_outlined, size: 48, color: ReLoopColors.mutedSoft),
+                  Icon(
+                    Icons.local_shipping_outlined,
+                    size: 48,
+                    color: context.reloopMutedSoft,
+                  ),
                   const SizedBox(height: 12),
                   Text(
                     emptyMessage,
-                    style: const TextStyle(color: ReLoopColors.mutedSoft, fontSize: 14),
+                    style: TextStyle(
+                      color: context.reloopMutedSoft,
+                      fontSize: 14,
+                    ),
                   ),
                 ],
               ),
@@ -301,11 +344,23 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     }
     return ListView(
       padding: const EdgeInsets.all(16),
-      children: list.map((p) => _buildPickupCard(p, isCollector, isAvailableTasks: isAvailableTasks)).toList(),
+      children: list
+          .map(
+            (p) => _buildPickupCard(
+              p,
+              isCollector,
+              isAvailableTasks: isAvailableTasks,
+            ),
+          )
+          .toList(),
     );
   }
 
-  Widget _buildPickupCard(dynamic p, bool isCollector, {bool isAvailableTasks = false}) {
+  Widget _buildPickupCard(
+    dynamic p,
+    bool isCollector, {
+    bool isAvailableTasks = false,
+  }) {
     final pickup = p as Map<String, dynamic>;
     final machine = pickup['machine'] as Map<String, dynamic>?;
     final org = pickup['organization'] as Map<String, dynamic>?;
@@ -332,8 +387,11 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                     color: ReLoopColors.mintSoft,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.local_shipping,
-                      color: ReLoopColors.brand500, size: 22),
+                  child: const Icon(
+                    Icons.local_shipping,
+                    color: ReLoopColors.brand500,
+                    size: 22,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -341,26 +399,27 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        machine?['name'] as String? ?? 'Mesin #${pickup['machineId']}',
-                        style: const TextStyle(
+                        machine?['name'] as String? ??
+                            'Mesin #${pickup['machineId']}',
+                        style: TextStyle(
                           fontWeight: FontWeight.w600,
-                          color: ReLoopColors.foreground,
+                          color: context.reloopForeground,
                           fontSize: 14,
                         ),
                       ),
                       if (machine?['machineCode'] != null)
                         Text(
                           'Kode: ${machine!['machineCode']}',
-                          style: const TextStyle(
-                            color: ReLoopColors.mutedSoft,
+                          style: TextStyle(
+                            color: context.reloopMutedSoft,
                             fontSize: 11,
                           ),
                         ),
                       if (org != null)
                         Text(
                           org['name'] as String? ?? '',
-                          style: const TextStyle(
-                            color: ReLoopColors.mutedSoft,
+                          style: TextStyle(
+                            color: context.reloopMutedSoft,
                             fontSize: 12,
                           ),
                         ),
@@ -376,9 +435,13 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                         padding: const EdgeInsets.only(top: 4),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: ReLoopColors.statusError.withValues(alpha: 0.1),
+                            color: ReLoopColors.statusError.withValues(
+                              alpha: 0.1,
+                            ),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
@@ -395,7 +458,9 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                 ),
               ],
             ),
-            if (org?['contactName'] != null || org?['contactPhone'] != null || org?['address'] != null) ...[
+            if (org?['contactName'] != null ||
+                org?['contactPhone'] != null ||
+                org?['address'] != null) ...[
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(10),
@@ -409,21 +474,27 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                     if (org?['contactName'] != null)
                       Text(
                         org!['contactName'] as String,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: ReLoopColors.foreground,
+                          color: context.reloopForeground,
                         ),
                       ),
                     if (org?['contactPhone'] != null)
                       Text(
                         org!['contactPhone'] as String,
-                        style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.reloopMutedSoft,
+                        ),
                       ),
                     if (org?['address'] != null)
                       Text(
                         org!['address'] as String,
-                        style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.reloopMutedSoft,
+                        ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -460,7 +531,7 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Material tercatat:',
                       style: TextStyle(
                         fontSize: 11,
@@ -511,7 +582,11 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildActionButtons(String pickupId, String status, bool isFormExpanded) {
+  Widget _buildActionButtons(
+    String pickupId,
+    String status,
+    bool isFormExpanded,
+  ) {
     return Column(
       children: [
         Row(
@@ -629,17 +704,17 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
         decoration: BoxDecoration(
           color: ReLoopColors.background,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: ReLoopColors.border),
+          border: Border.all(color: context.reloopBorder),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Catat Material',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: ReLoopColors.foreground,
+                color: context.reloopForeground,
               ),
             ),
             const SizedBox(height: 12),
@@ -649,12 +724,18 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
               isExpanded: true,
               decoration: const InputDecoration(
                 labelText: 'Jenis Material',
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
               items: [
-                const DropdownMenuItem<String>(
+                DropdownMenuItem<String>(
                   value: null,
-                  child: Text('Pilih jenis...', style: TextStyle(color: ReLoopColors.mutedSoft)),
+                  child: Text(
+                    'Pilih jenis...',
+                    style: TextStyle(color: context.reloopMutedSoft),
+                  ),
                 ),
                 ..._wasteTypes.map((wt) {
                   final w = wt as Map<String, dynamic>;
@@ -674,7 +755,10 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
                 labelText: 'Jumlah (pcs)',
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
               onChanged: (v) {
                 setState(() => form['itemCount'] = v);
@@ -683,10 +767,15 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
             const SizedBox(height: 10),
             TextFormField(
               initialValue: form['weight'] as String?,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: const InputDecoration(
                 labelText: 'Berat aktual (kg)',
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
               onChanged: (v) {
                 setState(() => form['weight'] = v);
@@ -698,7 +787,10 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
               maxLines: 2,
               decoration: const InputDecoration(
                 labelText: 'Catatan',
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
               onChanged: (v) {
                 setState(() => form['notes'] = v);
@@ -747,9 +839,9 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
           const SizedBox(width: 4),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
-              color: ReLoopColors.muted,
+              color: context.reloopMuted,
               fontWeight: FontWeight.w500,
             ),
           ),

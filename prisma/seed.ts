@@ -161,35 +161,35 @@ async function main() {
   });
 
   // ---------- Waste types (global, superadmin-managed) ----------
-  const botol = await prisma.wasteType.create({
+  const organik = await prisma.wasteType.create({
     data: {
-      name: "Botol Plastik (PET)",
-      unit: "ITEM",
-      minWeightGrams: 5,
-      maxWeightGrams: 80,
-      defaultRewardPerItem: 200,
-      description: "Botol plastik PET bekas minuman. Harus kosong (threshold berat menolak botol berisi air).",
+      name: "Organik",
+      unit: "KG",
+      minWeightGrams: 100,
+      maxWeightGrams: 50000,
+      defaultRewardPerItem: 100,
+      description: "Sampah organik seperti sisa makanan, daun, dan material mudah terurai.",
       active: true,
     },
   });
-  const kaleng = await prisma.wasteType.create({
+  const anorganik = await prisma.wasteType.create({
     data: {
-      name: "Kaleng Aluminium",
-      unit: "ITEM",
-      minWeightGrams: 8,
-      maxWeightGrams: 50,
-      defaultRewardPerItem: 250,
-      description: "Kaleng minuman aluminium bekas.",
+      name: "Anorganik",
+      unit: "KG",
+      minWeightGrams: 100,
+      maxWeightGrams: 50000,
+      defaultRewardPerItem: 150,
+      description: "Sampah anorganik seperti plastik, logam, kaca, dan material sulit terurai.",
       active: true,
     },
   });
 
   // ---------- Reward rates (global / per item) ----------
   await prisma.rewardRate.create({
-    data: { wasteTypeId: botol.id, unit: "ITEM", pointsPerItem: 200, minWeightGrams: 5, maxWeightGrams: 80, active: true },
+    data: { wasteTypeId: organik.id, unit: "KG", pointsPerItem: 100, minWeightGrams: 100, maxWeightGrams: 50000, active: true },
   });
   await prisma.rewardRate.create({
-    data: { wasteTypeId: kaleng.id, unit: "ITEM", pointsPerItem: 250, minWeightGrams: 8, maxWeightGrams: 50, active: true },
+    data: { wasteTypeId: anorganik.id, unit: "KG", pointsPerItem: 150, minWeightGrams: 100, maxWeightGrams: 50000, active: true },
   });
 
   // ---------- Machines ----------
@@ -238,8 +238,8 @@ async function main() {
   for (const m of [m1, m2, m3]) {
     await prisma.machineWasteType.createMany({
       data: [
-        { machineId: m.id, wasteTypeId: botol.id, active: true },
-        { machineId: m.id, wasteTypeId: kaleng.id, active: true },
+        { machineId: m.id, wasteTypeId: organik.id, active: true },
+        { machineId: m.id, wasteTypeId: anorganik.id, active: true },
       ],
     });
   }
@@ -248,7 +248,7 @@ async function main() {
   const campaignPublic = await prisma.campaign.create({
     data: {
       organizationId: orgA.id, name: "Gerakan Bersih Pantai",
-      description: "Setor botol & kaleng selama musim liburan, reward ekstra!",
+      description: "Setor sampah organik dan anorganik selama musim liburan, reward ekstra!",
       campaignType: "MACHINE_DEPOSIT", rewardMode: "MONEY_REWARD", visibility: "PUBLIC", status: "ACTIVE",
       startAt: daysAgo(7), endAt: new Date(Date.now() + 30 * 86_400_000), rewardMultiplier: 1.2,
     },
@@ -401,8 +401,8 @@ async function main() {
   });
   await prisma.trashBagAssignment.createMany({
     data: [
-      { tripId: tourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-001", wasteTypeId: botol.id },
-      { tripId: tourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-002", wasteTypeId: kaleng.id },
+      { tripId: tourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-001", wasteTypeId: organik.id },
+      { tripId: tourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-002", wasteTypeId: anorganik.id },
     ],
   });
   await prisma.manualValidation.create({
@@ -437,8 +437,8 @@ async function main() {
   });
   await prisma.trashBagAssignment.createMany({
     data: [
-      { tripId: completedTourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-101", wasteTypeId: botol.id },
-      { tripId: completedTourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-102", wasteTypeId: kaleng.id },
+      { tripId: completedTourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-101", wasteTypeId: organik.id },
+      { tripId: completedTourismTrip.id, assignedById: admin.id, bagQrCode: "BAG-DEMO-102", wasteTypeId: anorganik.id },
     ],
   });
   await prisma.manualValidation.createMany({
@@ -487,10 +487,10 @@ async function main() {
     },
   });
   const a1 = await prisma.depositItem.create({
-    data: { sessionId: sessionA.id, wasteTypeId: botol.id, quantity: 20, measuredWeightGrams: 22, rewardAmount: 4000, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(2), createdAt: daysAgo(2) },
+    data: { sessionId: sessionA.id, wasteTypeId: organik.id, quantity: 20, measuredWeightGrams: 220, rewardAmount: 4000, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(2), createdAt: daysAgo(2) },
   });
   const a2 = await prisma.depositItem.create({
-    data: { sessionId: sessionA.id, wasteTypeId: kaleng.id, quantity: 16, measuredWeightGrams: 15, rewardAmount: 4000, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(2), createdAt: daysAgo(2) },
+    data: { sessionId: sessionA.id, wasteTypeId: anorganik.id, quantity: 16, measuredWeightGrams: 180, rewardAmount: 4000, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(2), createdAt: daysAgo(2) },
   });
   await prisma.rewardLedger.createMany({
     data: [
@@ -506,14 +506,14 @@ async function main() {
     },
   });
   const b1 = await prisma.depositItem.create({
-    data: { sessionId: sessionB.id, wasteTypeId: botol.id, quantity: 15, measuredWeightGrams: 21, rewardAmount: 3000, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(1), createdAt: daysAgo(1) },
+    data: { sessionId: sessionB.id, wasteTypeId: organik.id, quantity: 15, measuredWeightGrams: 260, rewardAmount: 3000, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(1), createdAt: daysAgo(1) },
   });
   const b2 = await prisma.depositItem.create({
-    data: { sessionId: sessionB.id, wasteTypeId: kaleng.id, quantity: 6, measuredWeightGrams: 14, rewardAmount: 1500, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(1), createdAt: daysAgo(1) },
+    data: { sessionId: sessionB.id, wasteTypeId: anorganik.id, quantity: 6, measuredWeightGrams: 140, rewardAmount: 1500, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(1), createdAt: daysAgo(1) },
   });
   // Anomaly item: reward held PENDING for review.
   const b3 = await prisma.depositItem.create({
-    data: { sessionId: sessionB.id, wasteTypeId: botol.id, quantity: 1, measuredWeightGrams: 240, rewardAmount: 200, status: "REVIEW", source: "PYTHON_SIMULATOR", validationReasonCode: "WEIGHT_OVER_MAX_OR_STRING_PULL", externalFraudFlag: true, createdAt: daysAgo(1) },
+    data: { sessionId: sessionB.id, wasteTypeId: anorganik.id, quantity: 1, measuredWeightGrams: 90000, rewardAmount: 200, status: "REVIEW", source: "PYTHON_SIMULATOR", validationReasonCode: "WEIGHT_OVER_MAX_OR_STRING_PULL", externalFraudFlag: true, createdAt: daysAgo(1) },
   });
   await prisma.rewardLedger.createMany({
     data: [

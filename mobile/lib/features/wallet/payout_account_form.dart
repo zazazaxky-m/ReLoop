@@ -50,11 +50,14 @@ class _PayoutAccountFormState extends State<PayoutAccountForm> {
 
     try {
       final api = context.read<ApiClient>();
-      await api.post('/api/payout-accounts', data: {
-        'provider': _selectedProvider,
-        'accountIdentifier': _numberCtrl.text.trim(),
-        'accountName': _nameCtrl.text.trim(),
-      });
+      await api.post(
+        '/api/payout-accounts',
+        data: {
+          'provider': _selectedProvider,
+          'accountIdentifier': _numberCtrl.text.trim(),
+          'accountName': _nameCtrl.text.trim(),
+        },
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -80,7 +83,7 @@ class _PayoutAccountFormState extends State<PayoutAccountForm> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Tambah Akun Pencairan')),
+      appBar: AppBar(title: Text('Tambah Akun Pencairan')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Form(
@@ -88,12 +91,12 @@ class _PayoutAccountFormState extends State<PayoutAccountForm> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Pilih Provider',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: ReLoopColors.foreground,
+                  color: context.reloopForeground,
                 ),
               ),
               const SizedBox(height: 12),
@@ -123,7 +126,9 @@ class _PayoutAccountFormState extends State<PayoutAccountForm> {
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
                   labelText: _providerLabel,
-                  hintText: _selectedProvider == 'BANK' ? '1234567890' : '08123456789',
+                  hintText: _selectedProvider == 'BANK'
+                      ? '1234567890'
+                      : '08123456789',
                   prefixIcon: Icon(
                     _selectedProvider == 'BANK'
                         ? Icons.credit_card
@@ -144,7 +149,8 @@ class _PayoutAccountFormState extends State<PayoutAccountForm> {
                   prefixIcon: Icon(Icons.person_outline),
                 ),
                 validator: (v) {
-                  if (v == null || v.trim().length < 2) return 'Nama minimal 2 karakter';
+                  if (v == null || v.trim().length < 2)
+                    return 'Nama minimal 2 karakter';
                   return null;
                 },
               ),

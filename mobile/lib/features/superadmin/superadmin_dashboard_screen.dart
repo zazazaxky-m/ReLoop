@@ -272,7 +272,7 @@ class _SecuritySummaryCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Peringatan Fraud & Vandalisme',
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
@@ -282,9 +282,9 @@ class _SecuritySummaryCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       '$count alert terdeteksi dalam 24 jam terakhir.',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: ReLoopColors.muted,
+                        color: context.reloopMuted,
                       ),
                     ),
                   ],
@@ -298,10 +298,12 @@ class _SecuritySummaryCard extends StatelessWidget {
             child: OutlinedButton(
               style: OutlinedButton.styleFrom(
                 foregroundColor: ReLoopColors.warning,
-                side: BorderSide(color: ReLoopColors.warning.withValues(alpha: .5)),
+                side: BorderSide(
+                  color: ReLoopColors.warning.withValues(alpha: .5),
+                ),
               ),
               onPressed: () => context.push('/superadmin/security'),
-              child: const Text('Buka log keamanan'),
+              child: Text('Buka log keamanan'),
             ),
           ),
         ],

@@ -161,12 +161,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: Text('Konfirmasi Password', style: TextStyle(color: context.reloopForeground)),
+          title: Text(
+            'Konfirmasi Password',
+            style: TextStyle(color: context.reloopForeground),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Masukkan password Anda untuk mengaktifkan $_biometricType.', style: TextStyle(color: context.reloopMuted)),
+              Text(
+                'Masukkan password Anda untuk mengaktifkan $_biometricType.',
+                style: TextStyle(color: context.reloopMuted),
+              ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: passwordCtrl,
@@ -175,7 +181,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 decoration: InputDecoration(
                   hintText: 'Password Anda',
                   suffixIcon: IconButton(
-                    icon: Icon(obscure ? Icons.visibility_off : Icons.visibility),
+                    icon: Icon(
+                      obscure ? Icons.visibility_off : Icons.visibility,
+                    ),
                     onPressed: () => setDialogState(() => obscure = !obscure),
                   ),
                 ),
@@ -185,11 +193,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Batal'),
+              child: Text('Batal'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Lanjut'),
+              child: Text('Lanjut'),
             ),
           ],
         ),
@@ -224,9 +232,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } else {
       if (mounted && authResult.errorMessage != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(authResult.errorMessage!)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(authResult.errorMessage!)));
       }
     }
   }
@@ -234,7 +242,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool get _isChangingSensitiveData =>
       _newPasswordCtrl.text.isNotEmpty ||
       _confirmNewPasswordCtrl.text.isNotEmpty ||
-      _emailCtrl.text.trim() != (context.read<AuthProvider>().user?.email ?? '');
+      _emailCtrl.text.trim() !=
+          (context.read<AuthProvider>().user?.email ?? '');
 
   InputDecoration _passwordDecoration({
     required IconData prefixIcon,
@@ -247,7 +256,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       hintText: hintText,
       suffixIcon: IconButton(
         icon: Icon(
-          obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+          obscureText
+              ? Icons.visibility_off_outlined
+              : Icons.visibility_outlined,
         ),
         onPressed: onToggle,
       ),
@@ -260,7 +271,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = auth.user;
 
     if (user == null) {
-      return const Center(child: CircularProgressIndicator());
+      return Center(child: CircularProgressIndicator());
     }
 
     return Scaffold(
@@ -434,11 +445,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       hintText: 'Wajib untuk ganti email atau password',
                       obscureText: _obscureCurrentPassword,
                       onToggle: () => setState(
-                        () => _obscureCurrentPassword = !_obscureCurrentPassword,
+                        () =>
+                            _obscureCurrentPassword = !_obscureCurrentPassword,
                       ),
                     ),
                     validator: (value) {
-                      if (_isChangingSensitiveData && (value == null || value.isEmpty)) {
+                      if (_isChangingSensitiveData &&
+                          (value == null || value.isEmpty)) {
                         return 'Password saat ini wajib diisi';
                       }
                       return null;
@@ -461,8 +474,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       prefixIcon: Icons.password_rounded,
                       hintText: 'Kosongkan jika tidak ingin mengganti',
                       obscureText: _obscureNewPassword,
-                      onToggle: () =>
-                          setState(() => _obscureNewPassword = !_obscureNewPassword),
+                      onToggle: () => setState(
+                        () => _obscureNewPassword = !_obscureNewPassword,
+                      ),
                     ),
                     validator: (value) {
                       if (value != null &&
@@ -495,12 +509,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       hintText: 'Ulangi password baru',
                       obscureText: _obscureConfirmNewPassword,
                       onToggle: () => setState(
-                        () => _obscureConfirmNewPassword = !_obscureConfirmNewPassword,
+                        () => _obscureConfirmNewPassword =
+                            !_obscureConfirmNewPassword,
                       ),
                     ),
                     validator: (value) {
                       final hasNewPassword = _newPasswordCtrl.text.isNotEmpty;
-                      final hasConfirmPassword = value != null && value.isNotEmpty;
+                      final hasConfirmPassword =
+                          value != null && value.isNotEmpty;
                       if (hasNewPassword && !hasConfirmPassword) {
                         return 'Ulangi password baru';
                       }

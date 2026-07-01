@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
+import '../../core/auth_provider.dart';
 import '../../core/models.dart';
 import '../../shared/widgets/reloop_button.dart';
 import '../../shared/widgets/reloop_card.dart';
@@ -52,6 +53,15 @@ class _ScanScreenState extends State<ScanScreen> {
     });
 
     try {
+      final user = context.read<AuthProvider>().user;
+      final trashBagCode = _extractTrashBagCode(qrData);
+      final canUpdateTrashBag =
+          user?.role == AppRole.ADMIN || user?.role == AppRole.SUPERADMIN;
+      if (canUpdateTrashBag && trashBagCode != null) {
+        await _handleTrashBagCode(trashBagCode);
+        return;
+      }
+
       Uri uri;
       try {
         uri = Uri.parse(qrData);
@@ -70,7 +80,8 @@ class _ScanScreenState extends State<ScanScreen> {
 
       // Handle both: /scan?machine=XXX&token=YYY and /machine/XXX/display
       if (uri.path.contains('scan')) {
-        machineCode = uri.queryParameters['machine'] ?? uri.queryParameters['m'];
+        machineCode =
+            uri.queryParameters['machine'] ?? uri.queryParameters['m'];
         token = uri.queryParameters['token'] ?? uri.queryParameters['t'];
       } else if (segments.length >= 3 && segments[0] == 'machine') {
         machineCode = segments[1];
@@ -91,10 +102,10 @@ class _ScanScreenState extends State<ScanScreen> {
       }
 
       final api = context.read<ApiClient>();
-      final response = await api.post('/api/scan', data: {
-        'machineCode': machineCode,
-        'token': token,
-      });
+      final response = await api.post(
+        '/api/scan',
+        data: {'machineCode': machineCode, 'token': token},
+      );
 
       HapticFeedback.heavyImpact();
 
@@ -113,6 +124,210 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
+  String? _extractTrashBagCode(String qrData) {
+    final raw = qrData.trim();
+    if (raw.toUpperCase().startsWith('BAG-')) return raw;
+
+    final uri = Uri.tryParse(raw);
+    if (uri == null) return null;
+    final queryCode =
+        uri.queryParameters['qrCode'] ??
+        uri.queryParameters['bag'] ??
+        uri.queryParameters['code'];
+    if (queryCode != null && queryCode.toUpperCase().startsWith('BAG-')) {
+      return queryCode;
+    }
+    final bagSegment = uri.pathSegments
+        .where((segment) => segment.toUpperCase().startsWith('BAG-'))
+        .firstOrNull;
+    return bagSegment;
+  }
+
+  Future<void> _handleTrashBagCode(String qrCode) async {
+    try {
+      final api = context.read<ApiClient>();
+      final response = await api.get(
+        '/api/trash-bags',
+        queryParameters: {'qrCode': qrCode},
+      );
+      final data = response.data as Map<String, dynamic>;
+      final bags = (data['bags'] as List?)?.cast<dynamic>() ?? [];
+      if (bags.isEmpty) {
+        throw Exception('Trash bag tidak ditemukan');
+      }
+      final bag = bags.first as Map<String, dynamic>;
+
+      if (!mounted) return;
+      setState(() {
+        _isProcessing = false;
+      });
+      HapticFeedback.mediumImpact();
+
+      final update = await _showTrashBagUpdateDialog(bag);
+      if (update == null || !mounted) {
+        _reset();
+        return;
+      }
+
+      setState(() {
+        _isProcessing = true;
+      });
+      await api.patch('/api/trash-bags', data: {'qrCode': qrCode, ...update});
+      HapticFeedback.heavyImpact();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Trash bag berhasil diperbarui'),
+          backgroundColor: ReLoopColors.success,
+        ),
+      );
+      _reset();
+    } catch (e) {
+      HapticFeedback.vibrate();
+      if (!mounted) return;
+      setState(() {
+        _error = ApiClient.getErrorMessage(e, includeDetails: true);
+        _isProcessing = false;
+        _isScanning = true;
+      });
+    }
+  }
+
+  Future<Map<String, dynamic>?> _showTrashBagUpdateDialog(
+    Map<String, dynamic> bag,
+  ) {
+    var status = (bag['status'] as String?) ?? 'GOOD';
+    if (!['GOOD', 'PARTIAL', 'POOR', 'NOT_RETURNED'].contains(status)) {
+      status = 'GOOD';
+    }
+    var appCompleted = true;
+    final weightCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+    final trip = bag['trip'] as Map<String, dynamic>?;
+    final campaign = trip?['campaign'] as Map<String, dynamic>?;
+    final travelAgent = trip?['travelAgent'] as Map<String, dynamic>?;
+    final wasteType = bag['wasteType'] as Map<String, dynamic>?;
+
+    return showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          title: Text('Update Trash Bag'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _dialogInfo('QR', bag['bagQrCode'] as String? ?? '-'),
+                _dialogInfo('Trip', trip?['groupName'] as String? ?? '-'),
+                if (campaign?['name'] != null)
+                  _dialogInfo('Campaign', campaign!['name'] as String),
+                if (travelAgent?['name'] != null)
+                  _dialogInfo('Travel Agent', travelAgent!['name'] as String),
+                if (wasteType?['name'] != null)
+                  _dialogInfo('Pemilahan', wasteType!['name'] as String),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: status,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Kondisi trash bag',
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'GOOD',
+                      child: Text('Baik / sesuai'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'PARTIAL',
+                      child: Text('Sebagian sesuai'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'POOR',
+                      child: Text('Buruk / tercampur'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'NOT_RETURNED',
+                      child: Text('Tidak kembali'),
+                    ),
+                  ],
+                  onChanged: (value) => setSt(() => status = value ?? 'GOOD'),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: appCompleted,
+                  title: Text('Aplikasi selesai'),
+                  onChanged: (value) => setSt(() => appCompleted = value),
+                ),
+                TextField(
+                  controller: weightCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Berat aktual (kg)',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: noteCtrl,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(labelText: 'Catatan'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Batal'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, {
+                'status': status,
+                'appCompleted': appCompleted,
+                if (weightCtrl.text.trim().isNotEmpty)
+                  'actualWeightKg': double.tryParse(weightCtrl.text.trim()),
+                if (noteCtrl.text.trim().isNotEmpty)
+                  'notes': noteCtrl.text.trim(),
+              }),
+              child: Text('Simpan'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dialogInfo(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(
+              label,
+              style: TextStyle(color: context.reloopMuted, fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                color: context.reloopForeground,
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _reset() {
     setState(() {
       _scanResult = null;
@@ -125,15 +340,18 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: _buildBody(),
-    );
+    return Scaffold(body: _buildBody());
   }
 
   Widget _buildBody() {
     if (_scanResult != null) {
       return _buildResult();
     }
+    final user = context.watch<AuthProvider>().user;
+    final scanInstruction =
+        user?.role == AppRole.ADMIN || user?.role == AppRole.SUPERADMIN
+        ? 'Arahkan kamera ke QR trash bag'
+        : 'Arahkan kamera ke QR code mesin';
 
     return Column(
       children: [
@@ -162,7 +380,7 @@ class _ScanScreenState extends State<ScanScreen> {
               if (_isProcessing)
                 Container(
                   color: Colors.black54,
-                  child: const Center(
+                  child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -190,7 +408,9 @@ class _ScanScreenState extends State<ScanScreen> {
                   decoration: BoxDecoration(
                     color: context.reloopTone('danger').bg,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: context.reloopTone('danger').border),
+                    border: Border.all(
+                      color: context.reloopTone('danger').border,
+                    ),
                   ),
                   child: Text(
                     _error!,
@@ -204,7 +424,7 @@ class _ScanScreenState extends State<ScanScreen> {
                 const SizedBox(height: 16),
               ],
               Text(
-                'Arahkan kamera ke QR code mesin',
+                scanInstruction,
                 style: TextStyle(color: context.reloopMuted, fontSize: 13),
               ),
             ],
@@ -272,36 +492,48 @@ class _ScanScreenState extends State<ScanScreen> {
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    Text('Status: ', style: TextStyle(color: context.reloopMuted)),
+                    Text(
+                      'Status: ',
+                      style: TextStyle(color: context.reloopMuted),
+                    ),
                     StatusBadge(statusKey: machine.status),
                   ],
                 ),
                 if (machine.supportedWasteTypes != null &&
                     machine.supportedWasteTypes!.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text('Jenis sampah:', style: TextStyle(color: context.reloopMuted)),
+                  Text(
+                    'Jenis sampah:',
+                    style: TextStyle(color: context.reloopMuted),
+                  ),
                   const SizedBox(height: 4),
                   Wrap(
                     spacing: 6,
                     runSpacing: 4,
                     children: machine.supportedWasteTypes!
-                        .map((wt) => Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: context.reloopBrandSoft,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: context.reloopBrandSoftStrong),
+                        .map(
+                          (wt) => Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: context.reloopBrandSoft,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: context.reloopBrandSoftStrong,
                               ),
-                              child: Text(
-                                wt.name,
-                                style: TextStyle(
-                                  color: context.reloopBrandText,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                            ),
+                            child: Text(
+                              wt.name,
+                              style: TextStyle(
+                                color: context.reloopBrandText,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
                               ),
-                            ))
+                            ),
+                          ),
+                        )
                         .toList(),
                   ),
                 ],
@@ -309,10 +541,7 @@ class _ScanScreenState extends State<ScanScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          ReLoopButton(
-            label: 'Selesai / Kembali Scan',
-            onPressed: _reset,
-          ),
+          ReLoopButton(label: 'Selesai / Kembali Scan', onPressed: _reset),
         ],
       ),
     );

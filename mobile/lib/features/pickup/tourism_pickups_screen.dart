@@ -52,14 +52,17 @@ class _TourismPickupsScreenState extends State<TourismPickupsScreen> {
     try {
       final api = context.read<ApiClient>();
       final bagCount = (trip['bagCount'] as num?)?.toInt() ?? 0;
-      await api.post('/api/manual-validations', data: {
-        'tripId': id,
-        'validationStage': 'BANK_SAMPAH_PICKUP',
-        'gateType': 'BANK_SAMPAH',
-        'returnedBagCount': bagCount,
-        'appCompleted': true,
-        'notes': 'Pickup sampah terpilah oleh Bank Sampah',
-      });
+      await api.post(
+        '/api/manual-validations',
+        data: {
+          'tripId': id,
+          'validationStage': 'BANK_SAMPAH_PICKUP',
+          'gateType': 'BANK_SAMPAH',
+          'returnedBagCount': bagCount,
+          'appCompleted': true,
+          'notes': 'Pickup sampah terpilah oleh Bank Sampah',
+        },
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -84,7 +87,7 @@ class _TourismPickupsScreenState extends State<TourismPickupsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Pickup Wisata')),
+      appBar: AppBar(title: Text('Pickup Wisata')),
       body: RefreshIndicator(onRefresh: _load, child: _buildBody()),
     );
   }
@@ -105,11 +108,11 @@ class _TourismPickupsScreenState extends State<TourismPickupsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+            Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
             const SizedBox(height: 12),
             Text(_error!, style: TextStyle(color: context.reloopMuted)),
             const SizedBox(height: 12),
-            TextButton(onPressed: _load, child: const Text('Coba Lagi')),
+            TextButton(onPressed: _load, child: Text('Coba Lagi')),
           ],
         ),
       );
@@ -128,7 +131,9 @@ class _TourismPickupsScreenState extends State<TourismPickupsScreen> {
     }
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-      children: _trips.map((t) => _buildCard(t as Map<String, dynamic>)).toList(),
+      children: _trips
+          .map((t) => _buildCard(t as Map<String, dynamic>))
+          .toList(),
     );
   }
 
@@ -139,7 +144,8 @@ class _TourismPickupsScreenState extends State<TourismPickupsScreen> {
     final orgName = (trip['organizationName'] as String?) ?? '-';
     final travelAgent = (trip['travelAgentName'] as String?) ?? 'Tanpa agent';
     final bagCount = (trip['bagCount'] as num?)?.toInt() ?? 0;
-    final complianceStatus = (trip['complianceStatus'] as String?) ?? 'NOT_STARTED';
+    final complianceStatus =
+        (trip['complianceStatus'] as String?) ?? 'NOT_STARTED';
     final complianceScore = (trip['complianceScore'] as num?)?.toInt() ?? 0;
     final pickedUp = trip['pickedUp'] == true;
     final isBusy = _busyIds.contains(id);
@@ -162,7 +168,11 @@ class _TourismPickupsScreenState extends State<TourismPickupsScreen> {
             const SizedBox(height: 6),
             Text(
               campaignName,
-              style: TextStyle(color: context.reloopBrandText, fontSize: 12, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: context.reloopBrandText,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 10),
             Row(
@@ -179,7 +189,7 @@ class _TourismPickupsScreenState extends State<TourismPickupsScreen> {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 if (pickedUp)
-                  const Text(
+                  Text(
                     'Sudah dijemput',
                     style: TextStyle(
                       color: ReLoopColors.success,
@@ -205,14 +215,18 @@ class _TourismPickupsScreenState extends State<TourismPickupsScreen> {
   }
 
   Widget _chip(String text) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: ReLoopColors.background,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          text,
-          style: const TextStyle(fontSize: 10, color: ReLoopColors.muted, fontWeight: FontWeight.w500),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: ReLoopColors.background,
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 10,
+        color: context.reloopMuted,
+        fontWeight: FontWeight.w500,
+      ),
+    ),
+  );
 }

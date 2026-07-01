@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
-import '../../shared/widgets/metric_card.dart';
+import '../../core/auth_provider.dart';
 import '../../shared/widgets/promo_carousel.dart';
 import '../../shared/widgets/quick_action.dart';
 import '../../shared/widgets/reloop_card.dart';
@@ -97,121 +97,111 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
       children: [
         const PromoCarousel(),
-        const SizedBox(height: 18),
-        Row(
-          children: [
-            Expanded(
-              flex: 2,
-              child: MetricCard(
-                label: 'Total Mesin',
-                value: _machines.length.toString(),
-                icon: Icons.recycling,
-                tone: MetricTone.blue,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: MetricCard(
-                label: 'Mesin Penuh',
-                value: _fullCount.toString(),
-                icon: Icons.inventory_2,
-                tone: MetricTone.amber,
-              ),
-            ),
-          ],
+        const SizedBox(height: 16),
+        _AdminSummaryCard(
+          totalMachines: _machines.length,
+          fullMachines: _fullCount,
+          attentionCount: _attentionCount,
+          campaignCount: _campaignCount,
+          depositCount: _depositCount,
+          partnershipCount: _partnershipCount,
+        ),
+        const SizedBox(height: 22),
+        Text(
+          'Layanan ReLoop',
+          style: TextStyle(
+            color: context.reloopForeground,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -.2,
+          ),
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: MetricCard(
-                label: 'Perlu Perhatian',
-                value: _attentionCount.toString(),
-                icon: Icons.warning_amber_rounded,
-                tone: _attentionCount > 0 ? MetricTone.amber : MetricTone.green,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: MetricCard(
-                label: 'Campaign Aktif',
-                value: _campaignCount.toString(),
-                icon: Icons.campaign_outlined,
-                tone: MetricTone.teal,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: MetricCard(
-                label: 'Sesi Selesai',
-                value: _depositCount.toString(),
-                icon: Icons.check_circle_outline,
-                tone: MetricTone.green,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: MetricCard(
-                label: 'Mitra Aktif',
-                value: _partnershipCount.toString(),
-                icon: Icons.handshake_outlined,
-                tone: MetricTone.teal,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 20),
         GridView.count(
           crossAxisCount: 4,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 0,
-          crossAxisSpacing: 10,
+          crossAxisSpacing: 8,
           childAspectRatio: .78,
           children: [
             QuickAction(
-              icon: Icons.campaign_outlined,
-              title: 'Campaign',
-              description: 'Kelola program campaign.',
-              color: ReLoopColors.accent,
-              onTap: () => context.push('/admin/campaigns'),
-            ),
-            QuickAction(
-              icon: Icons.handshake,
-              title: 'Mitra',
-              description: 'Kelola mitra pengepul.',
-              color: ReLoopColors.brand500,
-              onTap: () => context.push('/admin/partners'),
-            ),
-            QuickAction(
-              icon: Icons.delete_outline,
-              title: 'Jenis & Tarif',
-              description: 'Atur jenis sampah & reward.',
-              color: ReLoopColors.warning,
-              onTap: () => context.push('/admin/waste-types'),
+              icon: Icons.qr_code_scanner_outlined,
+              title: 'Scan',
+              description: 'Trash bag',
+              tone: QuickActionTone.green,
+              onTap: () => context.push('/scan'),
             ),
             QuickAction(
               icon: Icons.luggage_outlined,
-              title: 'Trip',
-              description: 'Kelola trash bag.',
-              color: ReLoopColors.info,
+              title: 'Trash Bag',
+              description: 'Trip wisata',
+              tone: QuickActionTone.blue,
               onTap: () => context.push('/admin/trips'),
+            ),
+            QuickAction(
+              icon: Icons.campaign_outlined,
+              title: 'Program',
+              description: 'Campaign',
+              tone: QuickActionTone.teal,
+              onTap: () => context.push('/admin/campaigns'),
+            ),
+            QuickAction(
+              icon: Icons.delete_outline,
+              title: 'Sampah',
+              description: 'Jenis tarif',
+              tone: QuickActionTone.amber,
+              onTap: () => context.push('/admin/waste-types'),
+            ),
+            QuickAction(
+              icon: Icons.recycling_outlined,
+              title: 'Mesin',
+              description: 'Status unit',
+              tone: QuickActionTone.blue,
+              onTap: () => context.push('/admin/machines'),
+            ),
+            QuickAction(
+              icon: Icons.local_shipping_outlined,
+              title: 'Pickup',
+              description: 'Jemput sampah',
+              tone: QuickActionTone.green,
+              onTap: () => context.push('/admin/pickups'),
+            ),
+            QuickAction(
+              icon: Icons.description_outlined,
+              title: 'Laporan',
+              description: 'Unduhan',
+              tone: QuickActionTone.teal,
+              onTap: () => context.push('/admin/reports'),
+            ),
+            QuickAction(
+              icon: Icons.grid_view_rounded,
+              title: 'Lainnya',
+              description: 'Menu admin',
+              tone: QuickActionTone.amber,
+              onTap: () => showAdminMoreBottomSheet(context, false),
             ),
           ],
         ),
         const SizedBox(height: 24),
+        _SectionTitle(
+          title: 'Status mesin',
+          action: 'Lihat semua',
+          onAction: () => context.push('/admin/machines'),
+        ),
+        const SizedBox(height: 10),
         _buildSection(
-          'Status Mesin',
           _machines.isEmpty ? 'Belum ada mesin.' : null,
           children: _machines.take(5).map(_buildMachineTile).toList(),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 22),
+        _SectionTitle(
+          title: 'Pickup aktif',
+          action: 'Lihat semua',
+          onAction: () => context.push('/admin/pickups'),
+        ),
+        const SizedBox(height: 10),
         _buildSection(
-          'Pickup Aktif',
           _pickups.isEmpty ? 'Tidak ada pickup aktif.' : null,
           children: [
             ..._pickups.take(5).map(_buildPickupTile),
@@ -234,15 +224,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildSection(
-    String title,
-    String? emptyText, {
-    required List<Widget> children,
-  }) {
+  Widget _buildSection(String? emptyText, {required List<Widget> children}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ReLoopCardHeader(child: ReLoopCardTitle(title: title)),
         if (emptyText != null)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 24),
@@ -300,7 +285,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '%',
+                  '$fillLevel%',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -366,7 +351,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: Text(
-                  ' item',
+                  '$itemCount item',
                   style: TextStyle(
                     fontSize: 11,
                     color: context.reloopMutedSoft,
@@ -377,6 +362,172 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AdminSummaryCard extends StatelessWidget {
+  const _AdminSummaryCard({
+    required this.totalMachines,
+    required this.fullMachines,
+    required this.attentionCount,
+    required this.campaignCount,
+    required this.depositCount,
+    required this.partnershipCount,
+  });
+
+  final int totalMachines;
+  final int fullMachines;
+  final int attentionCount;
+  final int campaignCount;
+  final int depositCount;
+  final int partnershipCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = context.watch<AuthProvider>().user;
+    final firstName = (user?.name ?? 'Admin').split(' ').first;
+    return ReLoopCard(
+      padding: const EdgeInsets.fromLTRB(16, 15, 14, 15),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 23,
+            backgroundColor: context.reloopBrandSoftStrong,
+            child: Text(
+              firstName.isEmpty ? 'A' : firstName[0].toUpperCase(),
+              style: TextStyle(
+                color: context.reloopBrandText,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$totalMachines mesin',
+                  style: TextStyle(
+                    color: context.reloopForeground,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -.3,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Halo, $firstName - $_statusSummary',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: context.reloopMuted, fontSize: 10.5),
+                ),
+              ],
+            ),
+          ),
+          _SummaryMetric(
+            icon: Icons.inventory_2_outlined,
+            value: fullMachines,
+            label: 'Penuh',
+            tone: QuickActionTone.amber,
+          ),
+          const SizedBox(width: 5),
+          _SummaryMetric(
+            icon: Icons.warning_amber_rounded,
+            value: attentionCount,
+            label: 'Pantau',
+            tone: attentionCount > 0
+                ? QuickActionTone.amber
+                : QuickActionTone.green,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String get _statusSummary {
+    return '$campaignCount campaign, $depositCount sesi, $partnershipCount mitra';
+  }
+}
+
+class _SummaryMetric extends StatelessWidget {
+  const _SummaryMetric({
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.tone,
+  });
+
+  final IconData icon;
+  final int value;
+  final String label;
+  final QuickActionTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (tone) {
+      QuickActionTone.green => ReLoopColors.brand600,
+      QuickActionTone.blue => ReLoopColors.info,
+      QuickActionTone.amber => ReLoopColors.warning,
+      QuickActionTone.teal => ReLoopColors.accent,
+    };
+    return SizedBox(
+      width: 50,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: Colors.white, size: 19),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$label $value',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: context.reloopMuted,
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, this.action, this.onAction});
+
+  final String title;
+  final String? action;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              color: context.reloopForeground,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        if (action != null)
+          TextButton(onPressed: onAction, child: Text(action!)),
+      ],
     );
   }
 }

@@ -84,12 +84,15 @@ class _MapScreenState extends State<MapScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+              Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
               const SizedBox(height: 12),
-              Text(_error!, textAlign: TextAlign.center,
-                  style: TextStyle(color: context.reloopMuted)),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: context.reloopMuted),
+              ),
               const SizedBox(height: 12),
-              TextButton(onPressed: _loadAll, child: const Text('Coba Lagi')),
+              TextButton(onPressed: _loadAll, child: Text('Coba Lagi')),
             ],
           ),
         ),
@@ -102,7 +105,10 @@ class _MapScreenState extends State<MapScreen> {
           FlutterMap(
             options: MapOptions(
               initialCenter: _machines.isNotEmpty
-                  ? LatLng(_machines.first.latitude!, _machines.first.longitude!)
+                  ? LatLng(
+                      _machines.first.latitude!,
+                      _machines.first.longitude!,
+                    )
                   : const LatLng(-6.2088, 106.8456),
               initialZoom: 13.0,
               onTap: (_, _) {
@@ -161,7 +167,11 @@ class _MapScreenState extends State<MapScreen> {
                               ),
                             ],
                           ),
-                          child: const Icon(Icons.recycling, color: Colors.white, size: 18),
+                          child: const Icon(
+                            Icons.recycling,
+                            color: Colors.white,
+                            size: 18,
+                          ),
                         ),
                       ),
                     );
@@ -189,10 +199,18 @@ class _MapScreenState extends State<MapScreen> {
                               width: isSelected ? 3 : 2,
                             ),
                             boxShadow: const [
-                              BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
+                              BoxShadow(
+                                color: Colors.black26,
+                                blurRadius: 4,
+                                offset: Offset(0, 2),
+                              ),
                             ],
                           ),
-                          child: const Icon(Icons.campaign, color: Colors.white, size: 18),
+                          child: const Icon(
+                            Icons.campaign,
+                            color: Colors.white,
+                            size: 18,
+                          ),
                         ),
                       ),
                     );
@@ -231,7 +249,13 @@ class _MapScreenState extends State<MapScreen> {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: context.reloopBorder),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: context.isDarkMode ? .3 : .08), blurRadius: 8, offset: const Offset(0, 2)),
+                  BoxShadow(
+                    color: Colors.black.withValues(
+                      alpha: context.isDarkMode ? .3 : .08,
+                    ),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
                 ],
               ),
               child: Text(
@@ -265,7 +289,13 @@ class _MachineInfoCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: context.reloopBorder),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: context.isDarkMode ? .3 : .08), blurRadius: 12, offset: const Offset(0, 4)),
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: context.isDarkMode ? .3 : .08,
+            ),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
@@ -286,7 +316,11 @@ class _MachineInfoCard extends StatelessWidget {
               ),
               GestureDetector(
                 onTap: onClose,
-                child: Icon(Icons.close, size: 20, color: context.reloopMutedSoft),
+                child: Icon(
+                  Icons.close,
+                  size: 20,
+                  color: context.reloopMutedSoft,
+                ),
               ),
             ],
           ),
@@ -311,9 +345,10 @@ class _MachineInfoCard extends StatelessWidget {
                 ),
               const Spacer(),
               TextButton.icon(
-                onPressed: () => context.push('/machine/${machine.machineCode}/detail'),
+                onPressed: () =>
+                    context.push('/machine/${machine.machineCode}/detail'),
                 icon: const Icon(Icons.info_outline, size: 16),
-                label: const Text('Detail', style: TextStyle(fontSize: 12)),
+                label: Text('Detail', style: TextStyle(fontSize: 12)),
               ),
             ],
           ),
@@ -323,19 +358,26 @@ class _MachineInfoCard extends StatelessWidget {
             Wrap(
               spacing: 6,
               children: machine.supportedWasteTypes!
-                  .map((wt) => Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: context.reloopBrandSoft,
-                          borderRadius: BorderRadius.circular(4),
+                  .map(
+                    (wt) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: context.reloopBrandSoft,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        wt.name,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.reloopBrandText,
+                          fontWeight: FontWeight.w500,
                         ),
-                        child: Text(wt.name,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: context.reloopBrandText,
-                              fontWeight: FontWeight.w500,
-                            )),
-                      ))
+                      ),
+                    ),
+                  )
                   .toList(),
             ),
           ],
@@ -360,7 +402,13 @@ class _CampaignInfoCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: context.reloopBorder),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: context.isDarkMode ? .3 : .08), blurRadius: 12, offset: const Offset(0, 4)),
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: context.isDarkMode ? .3 : .08,
+            ),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
@@ -376,7 +424,13 @@ class _CampaignInfoCard extends StatelessWidget {
                   color: context.reloopBrandSoft,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(Icons.campaign, color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600, size: 16),
+                child: Icon(
+                  Icons.campaign,
+                  color: context.isDarkMode
+                      ? ReLoopColors.brand400
+                      : ReLoopColors.brand600,
+                  size: 16,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -394,14 +448,21 @@ class _CampaignInfoCard extends StatelessWidget {
                     if (campaign.organizationName != null)
                       Text(
                         campaign.organizationName!,
-                        style: TextStyle(color: context.reloopMutedSoft, fontSize: 11),
+                        style: TextStyle(
+                          color: context.reloopMutedSoft,
+                          fontSize: 11,
+                        ),
                       ),
                   ],
                 ),
               ),
               GestureDetector(
                 onTap: onClose,
-                child: Icon(Icons.close, size: 20, color: context.reloopMutedSoft),
+                child: Icon(
+                  Icons.close,
+                  size: 20,
+                  color: context.reloopMutedSoft,
+                ),
               ),
             ],
           ),
@@ -412,7 +473,10 @@ class _CampaignInfoCard extends StatelessWidget {
               if (campaign.rewardMultiplier != null) ...[
                 const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: context.reloopBrandSoft,
                     borderRadius: BorderRadius.circular(4),

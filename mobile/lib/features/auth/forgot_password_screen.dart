@@ -28,7 +28,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Lupa Password')),
+      appBar: AppBar(title: Text('Lupa Password')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -46,14 +46,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         children: [
           const Icon(Icons.lock_reset, size: 56, color: ReLoopColors.brand500),
           const SizedBox(height: 20),
-          const Text(
+          Text(
             'Reset Password',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: ReLoopColors.foreground),
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: context.reloopForeground,
+            ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Masukkan email Anda. Kami akan mengirimkan kode reset password.',
-            style: TextStyle(color: ReLoopColors.muted, fontSize: 14),
+            style: TextStyle(color: context.reloopMuted, fontSize: 14),
           ),
           const SizedBox(height: 32),
           TextFormField(
@@ -66,12 +70,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             ),
             validator: (v) {
               if (v == null || v.trim().isEmpty) return 'Email wajib diisi';
-              if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(v.trim())) return 'Format email tidak valid';
+              if (!RegExp(
+                r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+              ).hasMatch(v.trim()))
+                return 'Format email tidak valid';
               return null;
             },
           ),
           const SizedBox(height: 24),
-          ReLoopButton(label: 'Kirim Kode Reset', onPressed: _submit, size: ReLoopButtonSize.lg),
+          ReLoopButton(
+            label: 'Kirim Kode Reset',
+            onPressed: _submit,
+            size: ReLoopButtonSize.lg,
+          ),
         ],
       ),
     );
@@ -81,17 +92,25 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     return Column(
       children: [
         const SizedBox(height: 40),
-        const Icon(Icons.mark_email_read, size: 64, color: ReLoopColors.brand500),
+        const Icon(
+          Icons.mark_email_read,
+          size: 64,
+          color: ReLoopColors.brand500,
+        ),
         const SizedBox(height: 24),
-        const Text(
+        Text(
           'Email Terkirim!',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: ReLoopColors.foreground),
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: context.reloopForeground,
+          ),
         ),
         const SizedBox(height: 12),
         Text(
           'Kode reset password telah dikirim ke ${_emailCtrl.text}. Silakan cek inbox dan folder spam Anda.',
           textAlign: TextAlign.center,
-          style: const TextStyle(color: ReLoopColors.muted, fontSize: 14),
+          style: TextStyle(color: context.reloopMuted, fontSize: 14),
         ),
         const SizedBox(height: 32),
         ReLoopButton(
