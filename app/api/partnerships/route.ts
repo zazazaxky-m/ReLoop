@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
+import { displayUser } from "@/lib/display-user";
 
 const serviceAreaSchema = z
   .object({
@@ -46,7 +47,12 @@ export async function GET(req: Request) {
       },
     });
 
-    return jsonOk({ partnerships });
+    const decrypted = partnerships.map((p) => ({
+      ...p,
+      collectorUser: displayUser(p.collectorUser),
+    }));
+
+    return jsonOk({ partnerships: decrypted });
   } catch (error) {
     return handleApiError(error);
   }

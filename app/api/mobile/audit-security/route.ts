@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { requireApiUser } from "@/lib/rbac";
 import { getSecurityEvents, getSecuritySummary } from "@/lib/security-events";
+import { displayUsers } from "@/lib/display-user";
 
 export async function GET(req: Request) {
   try {
@@ -34,7 +35,8 @@ export async function GET(req: Request) {
           select: { id: true, name: true, role: true },
         })
       : [];
-    const actorById = new Map(actors.map((a) => [a.id, a]));
+    const decryptedActors = displayUsers(actors);
+    const actorById = new Map(decryptedActors.map((a) => [a.id, a]));
 
     const enrichedLogs = auditLogs.map((l) => ({
       ...l,

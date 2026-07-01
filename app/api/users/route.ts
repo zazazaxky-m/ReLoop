@@ -5,6 +5,7 @@ import { requireApiUser } from "@/lib/rbac";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { hashPassword } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { displayUsers } from "@/lib/display-user";
 
 const createSchema = z.object({
   name: z.string().min(2).max(120),
@@ -39,7 +40,7 @@ export async function GET(req: Request) {
         createdAt: true,
       },
     });
-    return jsonOk({ users });
+    return jsonOk({ users: displayUsers(users) });
   } catch (error) {
     return handleApiError(error);
   }

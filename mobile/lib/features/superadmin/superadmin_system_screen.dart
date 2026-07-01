@@ -226,56 +226,84 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
     final summary =
         _data!['securitySummary'] as Map<String, dynamic>? ?? const {};
     final events = _data!['securityEvents'] as List? ?? const [];
+    final alerts24h = (summary['alerts24h'] as num?)?.toInt() ?? 0;
+    final fraud7d = (summary['fraud7d'] as num?)?.toInt() ?? 0;
+    final vandalism7d = (summary['vandalism7d'] as num?)?.toInt() ?? 0;
+    final affectedMachines = (summary['affectedMachines7d'] as num?)?.toInt() ?? 0;
+    final hasIncident = alerts24h > 0 || fraud7d > 0 || vandalism7d > 0;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 100),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
       children: [
+        _SecurityHeroBanner(
+          hasIncident: hasIncident,
+          alerts24h: alerts24h,
+          fraud7d: fraud7d,
+          vandalism7d: vandalism7d,
+          affectedMachines: affectedMachines,
+        ),
+        const SizedBox(height: 18),
+        const _SectionLabel(
+          icon: Icons.insights_rounded,
+          text: 'Ringkasan ancaman',
+        ),
+        const SizedBox(height: 10),
         GridView.count(
           crossAxisCount: 2,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
-          childAspectRatio: 1.4,
+          childAspectRatio: 1.35,
           children: [
             MetricCard(
               icon: Icons.notifications_active_outlined,
               label: 'Alert 24 jam',
-              value: '${summary['alerts24h'] ?? 0}',
-              tone: MetricTone.amber,
+              value: '$alerts24h',
+              hint: alerts24h == 0
+                  ? 'Tidak ada alert baru'
+                  : 'Perlu ditinjau',
+              tone: alerts24h > 0 ? MetricTone.red : MetricTone.amber,
             ),
             MetricCard(
               icon: Icons.shield_outlined,
               label: 'Fraud 7 hari',
-              value: '${summary['fraud7d'] ?? 0}',
-              tone: MetricTone.amber,
+              value: '$fraud7d',
+              hint: 'Insiden fraud terdeteksi',
+              tone: fraud7d > 0 ? MetricTone.red : MetricTone.amber,
             ),
             MetricCard(
               icon: Icons.warning_amber_rounded,
               label: 'Vandalisme',
-              value: '${summary['vandalism7d'] ?? 0}',
-              tone: MetricTone.blue,
+              value: '$vandalism7d',
+              hint: 'Aksi vandalisme 7 hari',
+              tone: vandalism7d > 0 ? MetricTone.red : MetricTone.blue,
             ),
             MetricCard(
               icon: Icons.recycling_outlined,
               label: 'Mesin terdampak',
-              value: '${summary['affectedMachines7d'] ?? 0}',
-              tone: MetricTone.teal,
+              value: '$affectedMachines',
+              hint: 'Unit yang perlu dicek',
+              tone: affectedMachines > 0 ? MetricTone.amber : MetricTone.teal,
             ),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 22),
+        const _SectionLabel(
+          icon: Icons.history_toggle_off_rounded,
+          text: 'Timeline alert terbaru',
+        ),
+        const SizedBox(height: 10),
         if (events.isEmpty)
-          const EmptyState(
-            icon: Icons.shield_outlined,
-            title: 'Tidak ada alert keamanan',
-            description:
-                'Belum ada aktivitas fraud atau vandalisme yang terdeteksi.',
-          )
+          const _SecurityEmptyTimeline()
         else
-          for (final raw in events)
+          for (var i = 0; i < events.length; i++)
             Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _LogCard(data: raw as Map<String, dynamic>, security: true),
+              padding: EdgeInsets.only(bottom: i == events.length - 1 ? 0 : 12),
+              child: _SecurityEventTile(
+                data: events[i] as Map<String, dynamic>,
+                isFirst: i == 0,
+                isLast: i == events.length - 1,
+              ),
             ),
       ],
     );
@@ -539,9 +567,8 @@ class _ErrorState extends StatelessWidget {
 }
 
 class _LogCard extends StatelessWidget {
-  const _LogCard({required this.data, this.security = false});
+  const _LogCard({required this.data});
   final Map<String, dynamic> data;
-  final bool security;
 
   @override
   Widget build(BuildContext context) {
@@ -568,20 +595,12 @@ class _LogCard extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: security
-                      ? (context.isDarkMode
-                            ? const Color(0xFF3A2D17)
-                            : const Color(0xFFFFF7E8))
-                      : context.reloopBrandSoft,
+                  color: context.reloopBrandSoft,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
-                  security
-                      ? Icons.warning_amber_rounded
-                      : _iconForEntity(entityType),
-                  color: security
-                      ? ReLoopColors.warning
-                      : context.reloopBrandText,
+                  _iconForEntity(entityType),
+                  color: context.reloopBrandText,
                   size: 18,
                 ),
               ),
@@ -858,6 +877,735 @@ class _SlideEditor extends StatelessWidget {
             ),
             controller: controllers['image'],
             keyboardType: TextInputType.url,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: context.reloopBrandSoft,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 16, color: context.reloopBrandText),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w800,
+            color: context.reloopForeground,
+            letterSpacing: -0.2,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SecurityHeroBanner extends StatelessWidget {
+  const _SecurityHeroBanner({
+    required this.hasIncident,
+    required this.alerts24h,
+    required this.fraud7d,
+    required this.vandalism7d,
+    required this.affectedMachines,
+  });
+
+  final bool hasIncident;
+  final int alerts24h;
+  final int fraud7d;
+  final int vandalism7d;
+  final int affectedMachines;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = context.isDarkMode;
+    final accent = hasIncident
+        ? (dark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C))
+        : (dark ? ReLoopColors.brand300 : ReLoopColors.brand600);
+    final surfaceStart = hasIncident
+        ? (dark ? const Color(0xFF2A1313) : const Color(0xFFFFF5F5))
+        : (dark ? const Color(0xFF142B1E) : const Color(0xFFF1FBF4));
+    final surfaceEnd = hasIncident
+        ? (dark ? const Color(0xFF3A1A1A) : const Color(0xFFFEE2E2))
+        : (dark ? const Color(0xFF1B3527) : const Color(0xFFE6F6EC));
+    final iconBg = hasIncident
+        ? (dark ? const Color(0xFF3A1A1A) : const Color(0xFFFEE2E2))
+        : (dark ? const Color(0xFF1F4530) : ReLoopColors.brand50);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [surfaceStart, surfaceEnd],
+        ),
+        border: Border.all(color: accent.withValues(alpha: 0.22)),
+        boxShadow: dark
+            ? const [
+                BoxShadow(
+                  color: Color(0x52000000),
+                  blurRadius: 18,
+                  offset: Offset(0, 8),
+                ),
+              ]
+            : const [
+                BoxShadow(
+                  color: Color(0x080F172A),
+                  blurRadius: 2,
+                  offset: Offset(0, 1),
+                ),
+                BoxShadow(
+                  color: Color(0x0A0F172A),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
+                ),
+              ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [iconBg, accent.withValues(alpha: 0.22)],
+                  ),
+                  border: Border.all(
+                    color: accent.withValues(alpha: 0.32),
+                    width: 1,
+                  ),
+                ),
+                child: Icon(
+                  hasIncident
+                      ? Icons.report_problem_rounded
+                      : Icons.verified_user_rounded,
+                  color: accent,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: accent,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                hasIncident
+                                    ? 'PERLU TINJAUAN'
+                                    : 'STATUS AMAN',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  color: accent,
+                                  letterSpacing: 0.6,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      hasIncident
+                          ? 'Ada ancaman yang belum ditangani'
+                          : 'Sistem berjalan normal',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: context.reloopForeground,
+                        height: 1.25,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      hasIncident
+                          ? 'Tinjau alert di bawah, lalu ambil tindakan mitigasi.'
+                          : 'Belum ada fraud, vandalisme, atau alert 24 jam terakhir.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: context.reloopMuted,
+                        height: 1.35,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _BannerStat(
+                label: 'Alert',
+                value: '$alerts24h',
+                tone: alerts24h > 0 ? MetricTone.red : MetricTone.green,
+              ),
+              const SizedBox(width: 8),
+              _BannerStat(
+                label: 'Fraud',
+                value: '$fraud7d',
+                tone: fraud7d > 0 ? MetricTone.red : MetricTone.green,
+              ),
+              const SizedBox(width: 8),
+              _BannerStat(
+                label: 'Vandal',
+                value: '$vandalism7d',
+                tone: vandalism7d > 0 ? MetricTone.red : MetricTone.green,
+              ),
+              const SizedBox(width: 8),
+              _BannerStat(
+                label: 'Mesin',
+                value: '$affectedMachines',
+                tone: affectedMachines > 0 ? MetricTone.amber : MetricTone.green,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BannerStat extends StatelessWidget {
+  const _BannerStat({
+    required this.label,
+    required this.value,
+    required this.tone,
+  });
+
+  final String label;
+  final String value;
+  final MetricTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final isAlert = tone == MetricTone.red;
+    final color = isAlert
+        ? (context.isDarkMode ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C))
+        : (context.isDarkMode ? ReLoopColors.brand300 : ReLoopColors.brand600);
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        decoration: BoxDecoration(
+          color: context.isDarkMode
+              ? Colors.white.withValues(alpha: 0.04)
+              : Colors.white.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.18)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: color,
+                height: 1.1,
+                letterSpacing: -0.3,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                color: context.reloopMuted,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SecurityEmptyTimeline extends StatelessWidget {
+  const _SecurityEmptyTimeline();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: context.isDarkMode
+              ? [const Color(0xFF142B1E), const Color(0xFF1B3527)]
+              : [const Color(0xFFF1FBF4), const Color(0xFFE6F6EC)],
+        ),
+        border: Border.all(
+          color: ReLoopColors.brand500.withValues(alpha: 0.18),
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              color: ReLoopColors.brand50,
+            ),
+            child: Icon(
+              Icons.shield_outlined,
+              color: ReLoopColors.brand600,
+              size: 28,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Tidak ada alert keamanan',
+            style: TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w800,
+              color: context.reloopForeground,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Belum ada aktivitas fraud atau vandalisme yang terdeteksi.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12.5,
+              color: context.reloopMuted,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurityEventTile extends StatelessWidget {
+  const _SecurityEventTile({
+    required this.data,
+    required this.isFirst,
+    required this.isLast,
+  });
+
+  final Map<String, dynamic> data;
+  final bool isFirst;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final action = (data['eventType'] ?? data['action'] ?? 'Aktivitas')
+        .toString();
+    final entityType = data['entityType']?.toString();
+    final machine = data['machine'] as Map<String, dynamic>?;
+    final severity = (data['severity']?.toString() ?? 'medium').toLowerCase();
+    final timestamp =
+        data['occurredAt']?.toString() ?? data['createdAt']?.toString();
+    final note = data['note']?.toString() ?? data['description']?.toString();
+
+    final palette = _severityPalette(context, severity);
+    final icon = _iconForAction(action, severity);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Timeline rail
+        SizedBox(
+          width: 28,
+          child: Column(
+            children: [
+              Container(
+                width: 2,
+                height: 6,
+                color: isFirst
+                    ? Colors.transparent
+                    : context.reloopBorder,
+              ),
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: palette.dot,
+                  border: Border.all(
+                    color: context.reloopSurfaceRaised,
+                    width: 2.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: palette.dot.withValues(alpha: 0.35),
+                      blurRadius: 6,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Container(
+                  width: 2,
+                  color: isLast
+                      ? Colors.transparent
+                      : context.reloopBorder,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              color: context.reloopSurfaceRaised,
+              border: Border.all(color: context.reloopBorder),
+              boxShadow: context.isDarkMode
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x40000000),
+                        blurRadius: 12,
+                        offset: Offset(0, 6),
+                      ),
+                    ]
+                  : const [
+                      BoxShadow(
+                        color: Color(0x080F172A),
+                        blurRadius: 2,
+                        offset: Offset(0, 1),
+                      ),
+                      BoxShadow(
+                        color: Color(0x080F172A),
+                        blurRadius: 14,
+                        offset: Offset(0, 6),
+                      ),
+                    ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [palette.iconBg, palette.iconBgHi],
+                        ),
+                      ),
+                      child: Icon(icon, size: 18, color: palette.iconFg),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            action,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: context.reloopForeground,
+                              height: 1.2,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          if (timestamp != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              _formatTimestamp(timestamp),
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: context.reloopMutedSoft,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    _SeverityChip(label: palette.label, color: palette.chip),
+                  ],
+                ),
+                if (note != null && note.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: palette.surface,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      note,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.reloopForeground,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+                if (entityType != null || machine != null) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      if (entityType != null)
+                        _MetaPill(
+                          icon: Icons.category_outlined,
+                          label: entityType,
+                        ),
+                      if (machine != null && machine['name'] != null)
+                        _MetaPill(
+                          icon: Icons.recycling_outlined,
+                          label: machine['name'].toString(),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  _SecurityPalette _severityPalette(BuildContext context, String severity) {
+    final dark = context.isDarkMode;
+    switch (severity) {
+      case 'high':
+      case 'critical':
+        return _SecurityPalette(
+          label: 'TINGGI',
+          dot: dark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C),
+          chip: dark
+              ? const Color(0xFF3A1A1A)
+              : const Color(0xFFFEE2E2),
+          iconBg: dark
+              ? const Color(0xFF3A1A1A)
+              : const Color(0xFFFEE2E2),
+          iconBgHi: dark
+              ? const Color(0xFF4A2222)
+              : const Color(0xFFFECACA),
+          iconFg: dark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C),
+          surface: dark
+              ? const Color(0xFF2A1313)
+              : const Color(0xFFFFF5F5),
+        );
+      case 'low':
+        return _SecurityPalette(
+          label: 'RENDAH',
+          dot: dark ? const Color(0xFF7AE2D8) : const Color(0xFF0F766E),
+          chip: dark
+              ? const Color(0xFF19413D)
+              : const Color(0xFFCCFBF1),
+          iconBg: dark
+              ? const Color(0xFF19413D)
+              : const Color(0xFFCCFBF1),
+          iconBgHi: dark
+              ? const Color(0xFF1F504B)
+              : const Color(0xFF99F6E4),
+          iconFg: dark ? const Color(0xFF7AE2D8) : const Color(0xFF0F766E),
+          surface: dark
+              ? const Color(0xFF102B28)
+              : const Color(0xFFF0FDFA),
+        );
+      case 'medium':
+      default:
+        return _SecurityPalette(
+          label: 'SEDANG',
+          dot: dark ? const Color(0xFFF5B85C) : const Color(0xFFB45309),
+          chip: dark
+              ? const Color(0xFF3E2B18)
+              : const Color(0xFFFEF3C7),
+          iconBg: dark
+              ? const Color(0xFF3E2B18)
+              : const Color(0xFFFEF3C7),
+          iconBgHi: dark
+              ? const Color(0xFF52391F)
+              : const Color(0xFFFDE68A),
+          iconFg: dark ? const Color(0xFFF5B85C) : const Color(0xFFB45309),
+          surface: dark
+              ? const Color(0xFF2A1F10)
+              : const Color(0xFFFFFBEB),
+        );
+    }
+  }
+
+  IconData _iconForAction(String action, String severity) {
+    final a = action.toLowerCase();
+    if (a.contains('fraud') || severity == 'high' || severity == 'critical') {
+      return Icons.gpp_maybe_rounded;
+    }
+    if (a.contains('vandal')) return Icons.broken_image_outlined;
+    if (a.contains('login') || a.contains('auth')) {
+      return Icons.lock_open_rounded;
+    }
+    if (a.contains('machine') || a.contains('rvm')) {
+      return Icons.recycling_rounded;
+    }
+    return Icons.warning_amber_rounded;
+  }
+
+  String _formatTimestamp(String iso) {
+    try {
+      final dt = DateTime.parse(iso);
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+      if (diff.inMinutes < 1) return 'baru saja';
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m lalu';
+      if (diff.inHours < 24) return '${diff.inHours}j lalu';
+      if (diff.inDays < 7) return '${diff.inDays}h lalu';
+      return '${dt.day}/${dt.month}/${dt.year}';
+    } catch (_) {
+      return iso;
+    }
+  }
+}
+
+class _SecurityPalette {
+  const _SecurityPalette({
+    required this.label,
+    required this.dot,
+    required this.chip,
+    required this.iconBg,
+    required this.iconBgHi,
+    required this.iconFg,
+    required this.surface,
+  });
+  final String label;
+  final Color dot;
+  final Color chip;
+  final Color iconBg;
+  final Color iconBgHi;
+  final Color iconFg;
+  final Color surface;
+}
+
+class _SeverityChip extends StatelessWidget {
+  const _SeverityChip({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9.5,
+          fontWeight: FontWeight.w800,
+          color: color.computeLuminance() > 0.5
+              ? const Color(0xFF7C2D12)
+              : const Color(0xFFFECACA),
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+  }
+}
+
+class _MetaPill extends StatelessWidget {
+  const _MetaPill({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: context.reloopSurface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: context.reloopBorder),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: context.reloopMuted),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              color: context.reloopMuted,
+              letterSpacing: 0.2,
+            ),
           ),
         ],
       ),

@@ -7,6 +7,7 @@ import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { getWalletBalance, createRedeemReserve } from "@/lib/ledger";
 import { getMinRedemption } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
+import { displayUsers } from "@/lib/display-user";
 
 const createSchema = z.object({
   amount: z.number().int().positive(),
@@ -45,6 +46,7 @@ export async function GET(req: Request) {
 
     const enriched = redemptions.map((r) => ({
       ...r,
+      user: r.user ? displayUsers([r.user])[0] : r.user,
       payoutAccount: r.payoutAccountId ? (accById.get(r.payoutAccountId) ?? null) : null,
     }));
 

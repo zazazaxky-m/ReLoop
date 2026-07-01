@@ -94,18 +94,27 @@ class _AdminMachinesScreenState extends State<AdminMachinesScreen> {
       itemCount: _machines.length + 1,
       itemBuilder: (_, i) {
         if (i == 0) {
+          final auth = context.watch<AuthProvider>();
+          final isSuperadmin = auth.hasRole(AppRole.SUPERADMIN);
           return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: ReLoopColors.brand50, borderRadius: BorderRadius.circular(8)),
-            child: const Row(children: [
-              Icon(Icons.info_outline, size: 16, color: ReLoopColors.brand600),
-              SizedBox(width: 8),
-              Expanded(child: Text('Mesin ditambahkan oleh Superadmin. Hubungi Superadmin untuk menambah mesin baru.', style: TextStyle(fontSize: 11, color: ReLoopColors.brand700))),
-            ]),
-          ),
-        );
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: ReLoopColors.brand50, borderRadius: BorderRadius.circular(8)),
+              child: Row(children: [
+                const Icon(Icons.info_outline, size: 16, color: ReLoopColors.brand600),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    isSuperadmin
+                        ? 'Anda memiliki akses penuh untuk menambah dan mengelola semua mesin.'
+                        : 'Mesin ditambahkan oleh Superadmin. Hubungi Superadmin untuk menambah mesin baru.',
+                    style: const TextStyle(fontSize: 11, color: ReLoopColors.brand700),
+                  ),
+                ),
+              ]),
+            ),
+          );
         }
         return _buildCard(_machines[i - 1]);
       },

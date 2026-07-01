@@ -182,33 +182,10 @@ class _SuperadminDashboardScreenState extends State<SuperadminDashboardScreen> {
         const SizedBox(height: 24),
         const _SectionTitle(title: 'Operasional'),
         const SizedBox(height: 12),
-        GridView.count(
-          crossAxisCount: 3,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 1.15,
-          children: [
-            MetricCard(
-              label: 'Item diterima',
-              value: '${data['depositCount'] ?? 0}',
-              tone: MetricTone.teal,
-              icon: Icons.inventory_2_outlined,
-            ),
-            MetricCard(
-              label: 'Mitra pending',
-              value: '${data['pendingPartners'] ?? 0}',
-              tone: MetricTone.amber,
-              icon: Icons.handshake_outlined,
-            ),
-            MetricCard(
-              label: 'Min. pencairan',
-              value: _money.format(data['minRedemption'] ?? 0),
-              tone: MetricTone.slate,
-              icon: Icons.payments_outlined,
-            ),
-          ],
+        _OperasionalMetricsRow(
+          depositCount: '${data['depositCount'] ?? 0}',
+          pendingPartners: '${data['pendingPartners'] ?? 0}',
+          minRedemption: _money.format(data['minRedemption'] ?? 0),
         ),
         const SizedBox(height: 24),
         const _SectionTitle(title: 'Ekspor Laporan'),
@@ -622,5 +599,59 @@ class _ReportItem {
     required this.label,
     required this.icon,
   });
+}
+
+class _OperasionalMetricsRow extends StatelessWidget {
+  const _OperasionalMetricsRow({
+    required this.depositCount,
+    required this.pendingPartners,
+    required this.minRedemption,
+  });
+
+  final String depositCount;
+  final String pendingPartners;
+  final String minRedemption;
+
+  @override
+  Widget build(BuildContext context) {
+    final pendingValue = int.tryParse(pendingPartners) ?? 0;
+    return Column(
+      children: [
+        MetricCard(
+          label: 'Item diterima',
+          value: depositCount,
+          hint: 'Total deposit dari semua pengguna',
+          icon: Icons.inventory_2_outlined,
+          tone: MetricTone.teal,
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: MetricCard(
+                label: 'Mitra pending',
+                value: pendingPartners,
+                hint: pendingValue == 0
+                    ? 'Tidak ada antrian'
+                    : 'Menunggu approval',
+                icon: Icons.handshake_outlined,
+                tone: pendingValue > 0 ? MetricTone.amber : MetricTone.slate,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: MetricCard(
+                label: 'Min. pencairan',
+                value: minRedemption,
+                hint: 'Batas minimum redeem',
+                icon: Icons.payments_outlined,
+                tone: MetricTone.violet,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
