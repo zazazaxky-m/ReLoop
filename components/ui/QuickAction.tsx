@@ -10,24 +10,24 @@ const toneStyles: Record<
   { surface: string; icon: string; arrow: string }
 > = {
   green: {
-    surface: "border-brand-200 bg-brand-50/70 hover:border-brand-300",
+    surface: "border-brand-200 bg-brand-50/70 hover:border-brand-300 dark:border-brand-900/30 dark:hover:border-brand-800/40",
     icon: "bg-brand-600 text-white",
-    arrow: "text-brand-700",
+    arrow: "text-brand-700 dark:text-brand-400",
   },
   blue: {
-    surface: "border-blue-200 bg-blue-50/70 hover:border-blue-300",
+    surface: "border-blue-200 bg-blue-50/70 hover:border-blue-300 dark:border-blue-900/30 dark:bg-blue-950/20 dark:hover:border-blue-800/40",
     icon: "bg-blue-600 text-white",
-    arrow: "text-blue-700",
+    arrow: "text-blue-700 dark:text-blue-400",
   },
   amber: {
-    surface: "border-amber-200 bg-amber-50/70 hover:border-amber-300",
+    surface: "border-amber-200 bg-amber-50/70 hover:border-amber-300 dark:border-amber-900/30 dark:bg-amber-950/20 dark:hover:border-amber-800/40",
     icon: "bg-amber-500 text-white",
-    arrow: "text-amber-700",
+    arrow: "text-amber-700 dark:text-amber-400",
   },
   teal: {
-    surface: "border-teal-200 bg-teal-50/70 hover:border-teal-300",
+    surface: "border-teal-200 bg-teal-50/70 hover:border-teal-300 dark:border-teal-900/30 dark:bg-teal-950/20 dark:hover:border-teal-800/40",
     icon: "bg-teal-600 text-white",
-    arrow: "text-teal-700",
+    arrow: "text-teal-700 dark:text-teal-400",
   },
 };
 

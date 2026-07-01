@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { displayUserField } from "@/lib/display-user";
 import { PickupManager, type PickupRow } from "@/components/pickup/PickupManager";
 
 export const metadata: Metadata = { title: "Pickup" };
@@ -39,13 +40,13 @@ export default async function AdminPickupsPage() {
     status: p.status,
     reason: p.reason,
     priority: p.priority,
-    assignedCollectorName: p.assignedCollector?.name ?? null,
+    assignedCollectorName: displayUserField(p.assignedCollector?.name) ?? null,
     itemCount: p._count.items,
   }));
 
   const activePartners = partners.map((p) => ({
     id: p.collectorUser.id,
-    name: p.collectorUser.name,
+    name: displayUserField(p.collectorUser.name) ?? "-",
   }));
 
   return (

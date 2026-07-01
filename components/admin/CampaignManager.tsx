@@ -29,12 +29,17 @@ const TYPES = [
 ] as const;
 
 const STATUSES = ["DRAFT", "ACTIVE", "PAUSED", "ENDED"] as const;
+const REWARD_MODES = [
+  ["MONEY_REWARD", "Reward uang"],
+  ["COMPLIANCE_ONLY", "Compliance only"],
+] as const;
 
 export interface CampaignRow {
   id: string;
   name: string;
   description: string | null;
   campaignType: string;
+  rewardMode: string;
   visibility: string;
   allowedEmailDomains: string[];
   startAt: string | Date | null;
@@ -55,6 +60,7 @@ const EMPTY = {
   name: "",
   description: "",
   campaignType: "MACHINE_DEPOSIT",
+  rewardMode: "MONEY_REWARD",
   visibility: "PUBLIC",
   domains: "",
   startAt: "",
@@ -96,6 +102,7 @@ export function CampaignManager({
       name: row.name,
       description: row.description ?? "",
       campaignType: row.campaignType,
+      rewardMode: row.rewardMode,
       visibility: row.visibility,
       domains: row.allowedEmailDomains.join("\n"),
       startAt: toDateInput(row.startAt),
@@ -121,6 +128,7 @@ export function CampaignManager({
         name: form.name,
         description: form.description || null,
         campaignType: form.campaignType,
+        rewardMode: form.rewardMode,
         visibility: form.visibility,
         allowedEmailDomains: form.visibility === "PRIVATE" ? domains : [],
         startAt: form.startAt ? new Date(form.startAt).toISOString() : null,
@@ -168,6 +176,8 @@ export function CampaignManager({
           <p className="font-medium text-foreground">{r.name}</p>
           <p className="text-xs text-muted">
             {TYPES.find(([v]) => v === r.campaignType)?.[1] ?? r.campaignType}
+            {" · "}
+            {REWARD_MODES.find(([v]) => v === r.rewardMode)?.[1] ?? r.rewardMode}
             {showOrganization && r.organizationName ? ` · ${r.organizationName}` : ""}
           </p>
         </div>
@@ -234,7 +244,7 @@ export function CampaignManager({
           <CardContent>
             <form onSubmit={submit} className="space-y-4">
               {error ? (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-status-error">
+                <div className="rounded-xl border border-red-200 bg-red-50 dark:border-red-900/30 dark:bg-red-950/20 px-3.5 py-2.5 text-sm text-status-error">
                   {error}
                 </div>
               ) : null}
@@ -269,6 +279,19 @@ export function CampaignManager({
                   >
                     <option value="PUBLIC">Public</option>
                     <option value="PRIVATE">Private (domain email)</option>
+                  </Select>
+                </FormField>
+                <FormField label="Mode reward" htmlFor="c-reward-mode">
+                  <Select
+                    id="c-reward-mode"
+                    value={form.rewardMode}
+                    onChange={(e) => setForm((f) => ({ ...f, rewardMode: e.target.value }))}
+                  >
+                    {REWARD_MODES.map(([v, label]) => (
+                      <option key={v} value={v}>
+                        {label}
+                      </option>
+                    ))}
                   </Select>
                 </FormField>
                 {form.visibility === "PRIVATE" ? (

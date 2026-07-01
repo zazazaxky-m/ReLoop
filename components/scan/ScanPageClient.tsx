@@ -170,7 +170,7 @@ export function ScanPageClient() {
       />
 
       {error ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-xl border border-red-200 bg-red-50 dark:border-red-900/30 dark:bg-red-950/20 px-4 py-3 text-sm text-red-700 dark:text-red-400">
           {error}
           {code && token ? (
             <div className="mt-3">
@@ -194,7 +194,7 @@ export function ScanPageClient() {
               <QrScanner onResult={handleScanned} onCancel={() => setCameraOn(false)} />
             ) : (
               <div className="text-center">
-                <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-brand-50 text-2xl text-brand-600">
+                <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-brand-50 text-2xl text-brand-600 dark:bg-brand-950/20 dark:text-brand-400">
                   <QrCode />
                 </span>
                 {code && token ? (
@@ -263,7 +263,7 @@ export function ScanPageClient() {
                   {machine.supportedWasteTypes.map((w) => (
                     <span
                       key={w.id}
-                      className="rounded-lg bg-mint px-2.5 py-1 text-xs font-medium text-brand-700"
+                      className="rounded-lg bg-mint px-2.5 py-1 text-xs font-medium text-brand-700 dark:text-brand-400"
                     >
                       {w.name}
                     </span>

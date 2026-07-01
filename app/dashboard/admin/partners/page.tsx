@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { displayUserField } from "@/lib/display-user";
 import { PartnershipPanel, type PartnerRow } from "@/components/pickup/PartnershipPanel";
 
 export const metadata: Metadata = { title: "Mitra Pengepul" };
@@ -30,9 +31,9 @@ export default async function AdminPartnersPage() {
       id: p.id,
       status: p.status,
       organizationName: p.organization.name,
-      collectorName: p.collectorUser.name,
-      collectorEmail: p.collectorUser.email,
-      collectorPhone: p.collectorUser.phone,
+      collectorName: displayUserField(p.collectorUser.name) ?? "-",
+      collectorEmail: displayUserField(p.collectorUser.email) ?? "-",
+      collectorPhone: displayUserField(p.collectorUser.phone),
       serviceRegions: area.regions ?? [],
       serviceNote: area.note ?? null,
     };

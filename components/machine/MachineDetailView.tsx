@@ -122,7 +122,7 @@ export async function MachineDetailView({
                 {machine.wasteTypes.length ? (
                   <div className="flex flex-wrap gap-2">
                     {machine.wasteTypes.map((w) => (
-                      <span key={w.wasteTypeId} className="rounded-full bg-mint px-2.5 py-1 text-xs font-medium text-brand-700">
+                      <span key={w.wasteTypeId} className="rounded-full bg-mint px-2.5 py-1 text-xs font-medium text-brand-700 dark:text-brand-400">
                         {w.wasteType.name}
                       </span>
                     ))}
