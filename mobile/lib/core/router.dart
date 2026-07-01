@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../core/auth_provider.dart';
 import '../core/models.dart';
+import '../core/page_transitions.dart';
 import '../features/auth/login_screen.dart';
 import '../features/auth/register_screen.dart';
 import '../features/dashboard/user_dashboard_screen.dart';
@@ -15,6 +16,7 @@ import '../features/wallet/payout_account_form.dart';
 import '../features/map/map_screen.dart';
 import '../features/campaigns/campaigns_screen.dart';
 import '../features/pickup/pickup_screen.dart';
+import '../features/pickup/tourism_pickups_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/trash_bag/trash_bag_screen.dart';
 import '../features/machine/machine_detail_screen.dart';
@@ -32,14 +34,18 @@ import '../features/admin/admin_campaigns_screen.dart';
 import '../features/admin/admin_waste_types_screen.dart';
 import '../features/admin/admin_partners_screen.dart';
 import '../features/admin/admin_trips_screen.dart';
+import '../features/admin/admin_travel_agents_screen.dart';
+import '../features/admin/admin_compliance_screen.dart';
 import '../features/admin/admin_reports_screen.dart';
 import '../features/admin/admin_shell.dart';
+import '../features/superadmin/superadmin_partnerships_screen.dart';
+import '../features/superadmin/superadmin_redemptions_screen.dart';
 import '../features/superadmin/superadmin_dashboard_screen.dart';
-import '../features/superadmin/superadmin_resource_screen.dart';
 import '../features/superadmin/superadmin_organizations_screen.dart';
 import '../features/superadmin/superadmin_users_screen.dart';
 import '../features/superadmin/superadmin_regions_screen.dart';
 import '../features/superadmin/superadmin_system_screen.dart';
+import '../features/superadmin/superadmin_waste_types_screen.dart';
 import '../shared/widgets/reloop_logo.dart';
 import '../services/notification_service.dart';
 import '../services/analytics_service.dart';
@@ -93,158 +99,403 @@ class AppRouter {
     routes: [
       GoRoute(
         path: '/splash',
-        builder: (context, state) => const _SplashScreen(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const _SplashScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/forgot-password',
-        builder: (context, state) => const ForgotPasswordScreen(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const ForgotPasswordScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/about',
-        builder: (context, state) => const AboutScreen(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const AboutScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/terms',
-        builder: (context, state) => const TermsScreen(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const TermsScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/privacy',
-        builder: (context, state) => const PrivacyScreen(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const PrivacyScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/onboarding',
-        builder: (context, state) => const OnboardingScreen(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const OnboardingScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/login',
-        builder: (context, state) => const LoginScreen(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const LoginScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/register',
-        builder: (context, state) => const RegisterScreen(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const RegisterScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       ShellRoute(
         builder: (context, state, child) => _AppScaffold(child: child),
         routes: [
           GoRoute(
             path: '/dashboard',
-            builder: (context, state) => const UserDashboardScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const UserDashboardScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/pengepul/dashboard',
-            builder: (context, state) => const PengepulDashboardScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const PengepulDashboardScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/scan',
-            builder: (context, state) => const ScanScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const ScanScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/wallet',
-            builder: (context, state) => const WalletScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const WalletScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/map',
-            builder: (context, state) => const MapScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const MapScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/campaigns',
-            builder: (context, state) => const CampaignsScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const CampaignsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/pickup',
-            builder: (context, state) => const PickupScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const PickupScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/pengepul/tourism-pickups',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const TourismPickupsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/profile',
-            builder: (context, state) => const ProfileScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const ProfileScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/pengepul/area',
-            builder: (context, state) => const AreaMapScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AreaMapScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           // Admin routes
           GoRoute(
             path: '/admin',
-            builder: (context, state) => const AdminDashboardScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminDashboardScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/admin/machines',
-            builder: (context, state) => const AdminMachinesScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminMachinesScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/admin/machines/:id/detail',
-            builder: (context, state) {
+            pageBuilder: (context, state) {
               final id = state.pathParameters['id']!;
-              return AdminMachineDetailScreen(machineId: id);
+              return buildPage(
+                key: state.pageKey,
+                child: AdminMachineDetailScreen(machineId: id),
+                style: styleForPath(state.matchedLocation),
+              );
             },
           ),
           GoRoute(
             path: '/admin/pickups',
-            builder: (context, state) => const AdminPickupsScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminPickupsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/admin/campaigns',
-            builder: (context, state) => const AdminCampaignsScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminCampaignsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/admin/waste-types',
-            builder: (context, state) => const AdminWasteTypesScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminWasteTypesScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/admin/partners',
-            builder: (context, state) => const AdminPartnersScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminPartnersScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/admin/trips',
-            builder: (context, state) => const AdminTripsScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminTripsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/travel-agents',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminTravelAgentsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/compliance',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminComplianceScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
           GoRoute(
             path: '/admin/reports',
-            builder: (context, state) => const AdminReportsScreen(),
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminReportsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
           ),
-          GoRoute(path: '/superadmin', builder: (context, state) => const SuperadminDashboardScreen()),
-          GoRoute(path: '/superadmin/organizations', builder: (context, state) => const SuperadminOrganizationsScreen()),
-          GoRoute(path: '/superadmin/machines', builder: (context, state) => const AdminMachinesScreen()),
+          GoRoute(
+            path: '/superadmin',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminDashboardScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/superadmin/organizations',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminOrganizationsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/superadmin/machines',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminMachinesScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
           GoRoute(
             path: '/superadmin/machines/:id/detail',
-            builder: (context, state) {
+            pageBuilder: (context, state) {
               final id = state.pathParameters['id']!;
-              return AdminMachineDetailScreen(machineId: id);
+              return buildPage(
+                key: state.pageKey,
+                child: AdminMachineDetailScreen(machineId: id),
+                style: styleForPath(state.matchedLocation),
+              );
             },
           ),
-          GoRoute(path: '/superadmin/users', builder: (context, state) => const SuperadminUsersScreen()),
-          GoRoute(path: '/superadmin/partnerships', builder: (context, state) => const SuperadminResourceScreen(title: 'Kemitraan', endpoint: '/api/partnerships', rootKey: 'partnerships', primaryFields: ['status', 'contactName'], secondaryFields: ['organization', 'collector'], action: SuperadminResourceAction.partnership)),
-          GoRoute(path: '/superadmin/redemptions', builder: (context, state) => const SuperadminResourceScreen(title: 'Redemption', endpoint: '/api/redemptions?queue=1', rootKey: 'redemptions', primaryFields: ['amount', 'status'], secondaryFields: ['provider', 'user'], action: SuperadminResourceAction.redemption)),
-          GoRoute(path: '/superadmin/regions', builder: (context, state) => const SuperadminRegionsScreen()),
-          GoRoute(path: '/superadmin/waste-types', builder: (context, state) => const AdminWasteTypesScreen()),
-          GoRoute(path: '/superadmin/security', builder: (context, state) => const SuperadminSystemScreen(title: 'Log Keamanan', mode: SuperadminSystemMode.security)),
-          GoRoute(path: '/superadmin/config', builder: (context, state) => const SuperadminSystemScreen(title: 'Konfigurasi Global', mode: SuperadminSystemMode.config)),
-          GoRoute(path: '/superadmin/audit', builder: (context, state) => const SuperadminSystemScreen(title: 'Audit Log', mode: SuperadminSystemMode.audit)),
-          GoRoute(path: '/superadmin/reports', builder: (context, state) => const AdminReportsScreen()),
+          GoRoute(
+            path: '/superadmin/users',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminUsersScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/superadmin/partnerships',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminPartnershipsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/superadmin/redemptions',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminRedemptionsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/superadmin/regions',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminRegionsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/superadmin/waste-types',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminWasteTypesScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/superadmin/security',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminSystemScreen(
+                title: 'Log Keamanan',
+                mode: SuperadminSystemMode.security,
+              ),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/superadmin/config',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminSystemScreen(
+                title: 'Konfigurasi Global',
+                mode: SuperadminSystemMode.config,
+              ),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/superadmin/audit',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminSystemScreen(
+                title: 'Audit Log',
+                mode: SuperadminSystemMode.audit,
+              ),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/superadmin/reports',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminReportsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
         ],
       ),
 
       GoRoute(
         path: '/wallet/redemption',
-        builder: (context, state) => const RedemptionScreen(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const RedemptionScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/wallet/redemption/create',
-        builder: (context, state) => const PayoutAccountForm(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const PayoutAccountForm(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/wallet/add-account',
-        builder: (context, state) => const PayoutAccountForm(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const PayoutAccountForm(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/trash-bags',
-        builder: (context, state) => const TrashBagScreen(),
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const TrashBagScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
       ),
       GoRoute(
         path: '/machine/:code/detail',
-        builder: (context, state) {
+        pageBuilder: (context, state) {
           final code = state.pathParameters['code']!;
-          return MachineDetailScreen(machineCode: code);
+          return buildPage(
+            key: state.pageKey,
+            child: MachineDetailScreen(machineCode: code),
+            style: styleForPath(state.matchedLocation),
+          );
         },
       ),
     ],
@@ -335,6 +586,7 @@ class _AppScaffold extends StatelessWidget {
 
     if (isAdmin) {
       if (location == '/profile') return AdminShell(title: 'Profil', child: child);
+      if (location == '/scan') return AdminShell(title: 'Scan Trash Bag', child: child);
       return child;
     }
 
