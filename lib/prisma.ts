@@ -11,6 +11,42 @@ function decryptValue(value: unknown): unknown {
   }
 }
 
+// PII fields that may be encrypted in the User model. When we see a User-shaped
+// object in any query result (including nested includes), decrypt these fields
+// so callers never need to remember to call displayUser manually.
+const PII_FIELDS = ["name", "email", "phone"] as const;
+
+function looksLikeUser(obj: unknown): obj is Record<string, unknown> {
+  if (!obj || typeof obj !== "object") return false;
+  const o = obj as Record<string, unknown>;
+  if (typeof o.id !== "string") return false;
+  return PII_FIELDS.some((f) => f in o);
+}
+
+function decryptUserFieldsInPlace(obj: Record<string, unknown>): void {
+  for (const field of PII_FIELDS) {
+    if (field in obj && typeof obj[field] === "string") {
+      obj[field] = decryptValue(obj[field]);
+    }
+  }
+}
+
+function walkAndDecryptUsers(value: unknown): void {
+  if (value === null || value === undefined) return;
+  if (Array.isArray(value)) {
+    for (const item of value) walkAndDecryptUsers(item);
+    return;
+  }
+  if (typeof value !== "object") return;
+  const obj = value as Record<string, unknown>;
+  if (looksLikeUser(obj)) {
+    decryptUserFieldsInPlace(obj);
+  }
+  for (const key of Object.keys(obj)) {
+    walkAndDecryptUsers(obj[key]);
+  }
+}
+
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
@@ -25,6 +61,11 @@ const basePrisma =
 // Cast back to PrismaClient for type compatibility with TransactionClient.
 export const prisma = basePrisma.$extends({
   query: {
+    $allOperations: async ({ args, query }) => {
+      const result = await query(args);
+      walkAndDecryptUsers(result);
+      return result;
+    },
     user: {
       async $allOperations({ args, query }) {
         const a = args as Record<string, unknown>;
