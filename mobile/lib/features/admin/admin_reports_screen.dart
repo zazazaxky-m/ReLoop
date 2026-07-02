@@ -115,41 +115,60 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
           Expanded(child: MetricCard(label: 'Reward Diterbitkan', value: 'Rp ${_formatRupiah(_rewardTotal)}', icon: Icons.paid_outlined, tone: MetricTone.amber)),
         ]),
         const SizedBox(height: 20),
-        const Text('Unduh Laporan CSV', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ReLoopColors.foreground)),
+        Text('Unduh Laporan CSV', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.reloopForeground)),
         const SizedBox(height: 12),
-        _reportCard('Laporan Deposit', 'Data deposit per mesin, jenis sampah, dan user.', Icons.inventory_2, 'deposits', 'laporan-deposit.csv'),
+        _reportCard(context, 'Laporan Deposit', 'Data deposit per mesin, jenis sampah, dan user.', Icons.inventory_2, 'deposits', 'laporan-deposit.csv'),
         const SizedBox(height: 8),
-        _reportCard('Laporan Reward', 'Riwayat reward (earn, redeem, penalty, adjustment).', Icons.paid_outlined, 'rewards', 'laporan-reward.csv'),
+        _reportCard(context, 'Laporan Reward', 'Riwayat reward (earn, redeem, penalty, adjustment).', Icons.paid_outlined, 'rewards', 'laporan-reward.csv'),
         const SizedBox(height: 8),
-        _reportCard('Laporan Pickup', 'Riwayat pickup per mesin, status, dan pengepul.', Icons.local_shipping, 'pickups', 'laporan-pickup.csv'),
+        _reportCard(context, 'Laporan Pickup', 'Riwayat pickup per mesin, status, dan pengepul.', Icons.local_shipping, 'pickups', 'laporan-pickup.csv'),
         const SizedBox(height: 16),
-        _infoBox(),
+        _infoBox(context),
         const SizedBox(height: 80),
       ]),
     );
   }
 
-  Widget _reportCard(String title, String desc, IconData icon, String type, String filename) {
+  Widget _reportCard(BuildContext context, String title, String desc, IconData icon, String type, String filename) {
     return ReLoopCard(
       child: ListTile(
-        leading: Container(width: 44, height: 44, decoration: BoxDecoration(color: ReLoopColors.brand50, borderRadius: BorderRadius.circular(10)),
-          child: Icon(icon, color: ReLoopColors.brand600, size: 22)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: ReLoopColors.foreground)),
-        subtitle: Text(desc, style: const TextStyle(fontSize: 12, color: ReLoopColors.mutedSoft)),
-        trailing: const Icon(Icons.download, color: ReLoopColors.brand500),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(color: context.reloopBrandSoft, borderRadius: BorderRadius.circular(10)),
+          child: Icon(icon, color: context.reloopBrandText, size: 22),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: context.reloopForeground),
+        ),
+        subtitle: Text(
+          desc,
+          style: TextStyle(fontSize: 12, color: context.reloopMutedSoft),
+        ),
+        trailing: Icon(Icons.download, color: context.reloopBrandText),
         onTap: () => _download(type, filename),
       ),
     );
   }
 
-  Widget _infoBox() {
+  Widget _infoBox(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: ReLoopColors.brand50, borderRadius: BorderRadius.circular(12)),
-      child: const Row(children: [
-        Icon(Icons.info_outline, size: 18, color: ReLoopColors.brand600),
-        SizedBox(width: 10),
-        Expanded(child: Text('Laporan CSV disimpan ke folder sementara dan dapat dibagikan langsung. Data dibatasi 5000 baris per laporan.', style: TextStyle(fontSize: 12, color: ReLoopColors.brand700))),
+      decoration: BoxDecoration(
+        color: context.reloopBrandSoft,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.reloopBrandText.withValues(alpha: 0.18)),
+      ),
+      child: Row(children: [
+        Icon(Icons.info_outline, size: 18, color: context.reloopBrandText),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'Laporan CSV disimpan ke folder sementara dan dapat dibagikan langsung. Data dibatasi 5000 baris per laporan.',
+            style: TextStyle(fontSize: 12, color: context.reloopBrandText),
+          ),
+        ),
       ]),
     );
   }
