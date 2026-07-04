@@ -13,13 +13,20 @@ class PayoutAccountForm extends StatefulWidget {
 
 class _PayoutAccountFormState extends State<PayoutAccountForm> {
   final _formKey = GlobalKey<FormState>();
-  final _providerCtrl = TextEditingController();
   final _numberCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
   String? _selectedProvider;
   bool _isSaving = false;
 
-  static const _providers = ['BANK', 'GOPAY', 'OVO', 'DANA', 'SHOPEEPAY'];
+  static const _providers = [
+    'BANK',
+    'GOPAY',
+    'OVO',
+    'DANA',
+    'SHOPEEPAY',
+    'LINKAJA',
+    'OTHER',
+  ];
 
   String get _providerLabel {
     switch (_selectedProvider) {
@@ -29,15 +36,37 @@ class _PayoutAccountFormState extends State<PayoutAccountForm> {
       case 'OVO':
       case 'DANA':
       case 'SHOPEEPAY':
+      case 'LINKAJA':
         return 'Nomor HP Terdaftar';
+      case 'OTHER':
+        return 'ID Akun / Tujuan';
       default:
         return 'Nomor Akun';
     }
   }
 
+  TextInputType get _accountKeyboardType {
+    switch (_selectedProvider) {
+      case 'OTHER':
+        return TextInputType.text;
+      default:
+        return TextInputType.number;
+    }
+  }
+
+  String get _accountHintText {
+    switch (_selectedProvider) {
+      case 'BANK':
+        return '1234567890';
+      case 'OTHER':
+        return 'Masukkan ID akun atau tujuan payout';
+      default:
+        return '08123456789';
+    }
+  }
+
   @override
   void dispose() {
-    _providerCtrl.dispose();
     _numberCtrl.dispose();
     _nameCtrl.dispose();
     super.dispose();
@@ -50,10 +79,11 @@ class _PayoutAccountFormState extends State<PayoutAccountForm> {
 
     try {
       final api = context.read<ApiClient>();
+      final accountName = _nameCtrl.text.trim();
       await api.post('/api/payout-accounts', data: {
         'provider': _selectedProvider,
         'accountIdentifier': _numberCtrl.text.trim(),
-        'accountName': _nameCtrl.text.trim(),
+        if (accountName.isNotEmpty) 'accountName': accountName,
       });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -120,14 +150,16 @@ class _PayoutAccountFormState extends State<PayoutAccountForm> {
               const SizedBox(height: 20),
               TextFormField(
                 controller: _numberCtrl,
-                keyboardType: TextInputType.number,
+                keyboardType: _accountKeyboardType,
                 decoration: InputDecoration(
                   labelText: _providerLabel,
-                  hintText: _selectedProvider == 'BANK' ? '1234567890' : '08123456789',
+                  hintText: _accountHintText,
                   prefixIcon: Icon(
                     _selectedProvider == 'BANK'
                         ? Icons.credit_card
-                        : Icons.phone_outlined,
+                        : _selectedProvider == 'OTHER'
+                            ? Icons.account_circle_outlined
+                            : Icons.phone_outlined,
                   ),
                 ),
                 validator: (v) {
@@ -140,11 +172,13 @@ class _PayoutAccountFormState extends State<PayoutAccountForm> {
                 controller: _nameCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Nama Pemilik Akun',
-                  hintText: 'Nama sesuai rekening/wallet',
+                  hintText: 'Opsional, isi jika diperlukan provider',
                   prefixIcon: Icon(Icons.person_outline),
                 ),
                 validator: (v) {
-                  if (v == null || v.trim().length < 2) return 'Nama minimal 2 karakter';
+                  if (v != null && v.trim().isNotEmpty && v.trim().length < 2) {
+                    return 'Nama minimal 2 karakter';
+                  }
                   return null;
                 },
               ),

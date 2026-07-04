@@ -198,15 +198,15 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
       body: Column(
         children: [
           Container(
-            decoration: const BoxDecoration(
-              color: ReLoopColors.surface,
-              border: Border(bottom: BorderSide(color: ReLoopColors.border, width: 0.5)),
+            decoration: BoxDecoration(
+              color: context.reloopSurface,
+              border: Border(bottom: BorderSide(color: context.reloopBorder, width: 0.5)),
             ),
             child: TabBar(
               controller: _tabController,
-              labelColor: ReLoopColors.brand600,
-              unselectedLabelColor: ReLoopColors.mutedSoft,
-              indicatorColor: ReLoopColors.brand500,
+              labelColor: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand600,
+              unselectedLabelColor: context.reloopMutedSoft,
+              indicatorColor: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500,
               isScrollable: true,
               tabAlignment: TabAlignment.start,
               tabs: const [
@@ -219,7 +219,7 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
           Expanded(
             child: RefreshIndicator(
               onRefresh: _loadAll,
-              child: _buildBody(isCollector),
+              child: _buildBody(isCollector, context),
             ),
           ),
         ],
@@ -227,7 +227,7 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildBody(bool isCollector) {
+  Widget _buildBody(bool isCollector, BuildContext context) {
     if (_isLoading) {
       return ListView(
         padding: const EdgeInsets.all(16),
@@ -246,9 +246,9 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+            Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
+            Text(_error!, style: TextStyle(color: context.reloopMuted)),
             const SizedBox(height: 12),
             TextButton(onPressed: _loadAll, child: const Text('Coba Lagi')),
           ],
@@ -269,14 +269,14 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     return TabBarView(
       controller: _tabController,
       children: [
-        _buildList(activeTasks, isCollector, emptyMessage: 'Tidak ada tugas aktif'),
-        _buildList(_availablePickups, isCollector, emptyMessage: 'Tidak ada tugas baru dari mitra', isAvailableTasks: true),
-        _buildList(doneTasks, isCollector, emptyMessage: 'Tidak ada riwayat tugas'),
+        _buildList(activeTasks, isCollector, context, emptyMessage: 'Tidak ada tugas aktif'),
+        _buildList(_availablePickups, isCollector, context, emptyMessage: 'Tidak ada tugas baru dari mitra', isAvailableTasks: true),
+        _buildList(doneTasks, isCollector, context, emptyMessage: 'Tidak ada riwayat tugas'),
       ],
     );
   }
 
-  Widget _buildList(List<dynamic> list, bool isCollector, {required String emptyMessage, bool isAvailableTasks = false}) {
+  Widget _buildList(List<dynamic> list, bool isCollector, BuildContext context, {required String emptyMessage, bool isAvailableTasks = false}) {
     if (list.isEmpty) {
       return ListView(
         children: [
@@ -286,11 +286,11 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.local_shipping_outlined, size: 48, color: ReLoopColors.mutedSoft),
+                  Icon(Icons.local_shipping_outlined, size: 48, color: context.reloopMutedSoft),
                   const SizedBox(height: 12),
                   Text(
                     emptyMessage,
-                    style: const TextStyle(color: ReLoopColors.mutedSoft, fontSize: 14),
+                    style: TextStyle(color: context.reloopMutedSoft, fontSize: 14),
                   ),
                 ],
               ),
@@ -301,11 +301,11 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     }
     return ListView(
       padding: const EdgeInsets.all(16),
-      children: list.map((p) => _buildPickupCard(p, isCollector, isAvailableTasks: isAvailableTasks)).toList(),
+      children: list.map((p) => _buildPickupCard(p, isCollector, context, isAvailableTasks: isAvailableTasks)).toList(),
     );
   }
 
-  Widget _buildPickupCard(dynamic p, bool isCollector, {bool isAvailableTasks = false}) {
+  Widget _buildPickupCard(dynamic p, bool isCollector, BuildContext context, {bool isAvailableTasks = false}) {
     final pickup = p as Map<String, dynamic>;
     final machine = pickup['machine'] as Map<String, dynamic>?;
     final org = pickup['organization'] as Map<String, dynamic>?;
@@ -329,11 +329,11 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: ReLoopColors.mintSoft,
+                    color: context.isDarkMode ? const Color(0xFF173D26) : ReLoopColors.mintSoft,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.local_shipping,
-                      color: ReLoopColors.brand500, size: 22),
+                  child: Icon(Icons.local_shipping,
+                      color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand500, size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -342,25 +342,25 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                     children: [
                       Text(
                         machine?['name'] as String? ?? 'Mesin #${pickup['machineId']}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontWeight: FontWeight.w600,
-                          color: ReLoopColors.foreground,
+                          color: context.reloopForeground,
                           fontSize: 14,
                         ),
                       ),
                       if (machine?['machineCode'] != null)
                         Text(
                           'Kode: ${machine!['machineCode']}',
-                          style: const TextStyle(
-                            color: ReLoopColors.mutedSoft,
+                          style: TextStyle(
+                            color: context.reloopMutedSoft,
                             fontSize: 11,
                           ),
                         ),
                       if (org != null)
                         Text(
                           org['name'] as String? ?? '',
-                          style: const TextStyle(
-                            color: ReLoopColors.mutedSoft,
+                          style: TextStyle(
+                            color: context.reloopMutedSoft,
                             fontSize: 12,
                           ),
                         ),
@@ -381,9 +381,9 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                             color: ReLoopColors.statusError.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: Text(
-                            'P$priority',
-                            style: const TextStyle(
+                          child: const Text(
+                            'P1',
+                            style: TextStyle(
                               color: ReLoopColors.statusError,
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
@@ -400,7 +400,7 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: ReLoopColors.background,
+                  color: context.reloopBackground,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Column(
@@ -409,21 +409,21 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                     if (org?['contactName'] != null)
                       Text(
                         org!['contactName'] as String,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: ReLoopColors.foreground,
+                          color: context.reloopForeground,
                         ),
                       ),
                     if (org?['contactPhone'] != null)
                       Text(
                         org!['contactPhone'] as String,
-                        style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                        style: TextStyle(fontSize: 11, color: context.reloopMutedSoft),
                       ),
                     if (org?['address'] != null)
                       Text(
                         org!['address'] as String,
-                        style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft),
+                        style: TextStyle(fontSize: 11, color: context.reloopMutedSoft),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -434,14 +434,15 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
             const SizedBox(height: 10),
             Row(
               children: [
-                _pickupChip(Icons.info_outline, _reasonLabel(reason)),
+                _pickupChip(Icons.info_outline, _reasonLabel(reason), context),
                 const SizedBox(width: 6),
-                _pickupChip(Icons.inventory_2, '$itemCount material'),
+                _pickupChip(Icons.inventory_2, '$itemCount material', context),
                 if (machine?['fillLevelPercent'] != null) ...[
                   const SizedBox(width: 6),
                   _pickupChip(
                     Icons.water_drop,
                     '${machine!['fillLevelPercent']}% penuh',
+                    context
                   ),
                 ],
               ],
@@ -453,19 +454,19 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: ReLoopColors.brand50,
+                  color: context.isDarkMode ? const Color(0xFF172D49) : ReLoopColors.brand50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: ReLoopColors.brand100),
+                  border: Border.all(color: context.isDarkMode ? const Color(0xFF1E3A8A) : ReLoopColors.brand100),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Material tercatat:',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: ReLoopColors.brand700,
+                        color: context.isDarkMode ? ReLoopColors.brand400 : ReLoopColors.brand700,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -478,9 +479,9 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                         padding: const EdgeInsets.only(bottom: 2),
                         child: Text(
                           '${wtName ?? "Item"} — ${count ?? "-"} pcs, ${weight ?? "-"} kg',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11,
-                            color: ReLoopColors.brand600,
+                            color: context.isDarkMode ? const Color(0xFF93C5FD) : ReLoopColors.brand600,
                           ),
                         ),
                       );
@@ -503,7 +504,7 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
               ),
             ] else if (isCollector) ...[
               const SizedBox(height: 12),
-              _buildActionButtons(pickupId, status, isFormExpanded),
+              _buildActionButtons(pickupId, status, isFormExpanded, context),
             ],
           ],
         ),
@@ -511,7 +512,7 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildActionButtons(String pickupId, String status, bool isFormExpanded) {
+  Widget _buildActionButtons(String pickupId, String status, bool isFormExpanded, BuildContext context) {
     return Column(
       children: [
         Row(
@@ -612,13 +613,13 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
             size: ReLoopButtonSize.sm,
             onPressed: () => _toggleMaterialForm(pickupId),
           ),
-          if (isFormExpanded) _buildMaterialForm(pickupId),
+          if (isFormExpanded) _buildMaterialForm(pickupId, context),
         ],
       ],
     );
   }
 
-  Widget _buildMaterialForm(String pickupId) {
+  Widget _buildMaterialForm(String pickupId, BuildContext context) {
     final form = _materialForms[pickupId];
     if (form == null) return const SizedBox.shrink();
 
@@ -627,39 +628,52 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: ReLoopColors.background,
+          color: context.reloopBackground,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: ReLoopColors.border),
+          border: Border.all(color: context.reloopBorder),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Catat Material',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: ReLoopColors.foreground,
+                color: context.reloopForeground,
               ),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: form['wasteTypeId'] as String?,
+              initialValue: form['wasteTypeId'] as String?,
               isExpanded: true,
-              decoration: const InputDecoration(
+              dropdownColor: context.reloopSurface,
+              decoration: InputDecoration(
                 labelText: 'Jenis Material',
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                labelStyle: TextStyle(color: context.reloopMuted),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: context.reloopBorder),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: const BorderSide(color: ReLoopColors.brand500),
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
               items: [
-                const DropdownMenuItem<String>(
+                DropdownMenuItem<String>(
                   value: null,
-                  child: Text('Pilih jenis...', style: TextStyle(color: ReLoopColors.mutedSoft)),
+                  child: Text('Pilih jenis...', style: TextStyle(color: context.reloopMutedSoft)),
                 ),
                 ..._wasteTypes.map((wt) {
                   final w = wt as Map<String, dynamic>;
                   return DropdownMenuItem<String>(
                     value: (w['id'] as String?) ?? '',
-                    child: Text((w['name'] as String?) ?? ''),
+                    child: Text(
+                      (w['name'] as String?) ?? '',
+                      style: TextStyle(color: context.reloopForeground),
+                    ),
                   );
                 }),
               ],
@@ -671,9 +685,19 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
             TextFormField(
               initialValue: form['itemCount'] as String?,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
+              style: TextStyle(color: context.reloopForeground),
+              decoration: InputDecoration(
                 labelText: 'Jumlah (pcs)',
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                labelStyle: TextStyle(color: context.reloopMuted),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: context.reloopBorder),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: const BorderSide(color: ReLoopColors.brand500),
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
               onChanged: (v) {
                 setState(() => form['itemCount'] = v);
@@ -683,9 +707,19 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
             TextFormField(
               initialValue: form['weight'] as String?,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
+              style: TextStyle(color: context.reloopForeground),
+              decoration: InputDecoration(
                 labelText: 'Berat aktual (kg)',
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                labelStyle: TextStyle(color: context.reloopMuted),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: context.reloopBorder),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: const BorderSide(color: ReLoopColors.brand500),
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
               onChanged: (v) {
                 setState(() => form['weight'] = v);
@@ -695,9 +729,19 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
             TextFormField(
               initialValue: form['notes'] as String?,
               maxLines: 2,
-              decoration: const InputDecoration(
+              style: TextStyle(color: context.reloopForeground),
+              decoration: InputDecoration(
                 labelText: 'Catatan',
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                labelStyle: TextStyle(color: context.reloopMuted),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: context.reloopBorder),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: const BorderSide(color: ReLoopColors.brand500),
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
               onChanged: (v) {
                 setState(() => form['notes'] = v);
@@ -732,23 +776,23 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _pickupChip(IconData icon, String label) {
+  Widget _pickupChip(IconData icon, String label, BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: ReLoopColors.background,
+        color: context.reloopBackground,
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: ReLoopColors.mutedSoft),
+          Icon(icon, size: 12, color: context.reloopMutedSoft),
           const SizedBox(width: 4),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
-              color: ReLoopColors.muted,
+              color: context.reloopMuted,
               fontWeight: FontWeight.w500,
             ),
           ),

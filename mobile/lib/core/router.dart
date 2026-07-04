@@ -38,14 +38,15 @@ import '../features/admin/admin_partners_screen.dart';
 import '../features/admin/admin_trips_screen.dart';
 import '../features/admin/admin_reports_screen.dart';
 import '../features/admin/admin_shell.dart';
-import '../features/superadmin/superadmin_partnerships_screen.dart';
-import '../features/superadmin/superadmin_redemptions_screen.dart';
+import '../features/admin/admin_compliance_screen.dart';
+import '../features/admin/admin_travel_agents_screen.dart';
+import '../features/pickup/tourism_pickups_screen.dart';
+import '../features/superadmin/superadmin_resource_screen.dart';
 import '../features/superadmin/superadmin_dashboard_screen.dart';
 import '../features/superadmin/superadmin_organizations_screen.dart';
 import '../features/superadmin/superadmin_users_screen.dart';
 import '../features/superadmin/superadmin_regions_screen.dart';
 import '../features/superadmin/superadmin_system_screen.dart';
-import '../features/superadmin/superadmin_waste_types_screen.dart';
 import '../shared/widgets/reloop_logo.dart';
 import '../services/notification_service.dart';
 import '../services/analytics_service.dart';
@@ -236,6 +237,14 @@ class AppRouter {
               style: styleForPath(state.matchedLocation),
             ),
           ),
+          GoRoute(
+            path: '/pengepul/tourism-pickups',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const TourismPickupsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
           // Admin routes
           GoRoute(
             path: '/admin',
@@ -269,6 +278,22 @@ class AppRouter {
             pageBuilder: (context, state) => buildPage(
               key: state.pageKey,
               child: const AdminPickupsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/travel-agents',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminTravelAgentsScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
+            path: '/admin/compliance',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const AdminComplianceScreen(),
               style: styleForPath(state.matchedLocation),
             ),
           ),
@@ -359,7 +384,14 @@ class AppRouter {
             path: '/superadmin/partnerships',
             pageBuilder: (context, state) => buildPage(
               key: state.pageKey,
-              child: const SuperadminPartnershipsScreen(),
+              child: const SuperadminResourceScreen(
+                title: 'Kemitraan',
+                endpoint: '/api/partnerships',
+                rootKey: 'partnerships',
+                primaryFields: ['status', 'contactName'],
+                secondaryFields: ['organization', 'collector'],
+                action: SuperadminResourceAction.partnership,
+              ),
               style: styleForPath(state.matchedLocation),
             ),
           ),
@@ -367,7 +399,14 @@ class AppRouter {
             path: '/superadmin/redemptions',
             pageBuilder: (context, state) => buildPage(
               key: state.pageKey,
-              child: const SuperadminRedemptionsScreen(),
+              child: const SuperadminResourceScreen(
+                title: 'Redemption',
+                endpoint: '/api/redemptions?queue=1',
+                rootKey: 'redemptions',
+                primaryFields: ['amount', 'status'],
+                secondaryFields: ['provider', 'user'],
+                action: SuperadminResourceAction.redemption,
+              ),
               style: styleForPath(state.matchedLocation),
             ),
           ),
@@ -383,7 +422,7 @@ class AppRouter {
             path: '/superadmin/waste-types',
             pageBuilder: (context, state) => buildPage(
               key: state.pageKey,
-              child: const SuperadminWasteTypesScreen(),
+              child: const AdminWasteTypesScreen(),
               style: styleForPath(state.matchedLocation),
             ),
           ),

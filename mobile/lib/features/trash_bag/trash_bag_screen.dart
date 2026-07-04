@@ -52,7 +52,7 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Trash Bag / Trip')),
+      appBar: AppBar(title: Text('Trash Bag / Trip')),
       body: RefreshIndicator(
         onRefresh: _loadTrips,
         child: _buildBody(),
@@ -79,11 +79,11 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+            Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
             const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: ReLoopColors.muted)),
+            Text(_error!, style: TextStyle(color: context.reloopMuted)),
             const SizedBox(height: 12),
-            TextButton(onPressed: _loadTrips, child: const Text('Coba Lagi')),
+            TextButton(onPressed: _loadTrips, child: Text('Coba Lagi')),
           ],
         ),
       );
@@ -96,7 +96,7 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
           Center(
             child: Column(
               children: [
-                Icon(Icons.delete_outline, size: 48, color: ReLoopColors.mutedSoft),
+                Icon(Icons.delete_outline, size: 48, color: context.reloopMutedSoft),
                 SizedBox(height: 12),
                 Text(
                   'Belum ada trip',

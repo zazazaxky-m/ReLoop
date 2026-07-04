@@ -1,6 +1,7 @@
 import { requireApiUser } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { getWalletBalance, getLedgerHistory } from "@/lib/ledger";
+import { CONFIG_KEYS, getConfigInt } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
 import { isCampaignEligible } from "@/lib/campaign";
 
@@ -8,7 +9,14 @@ export async function GET() {
   try {
     const user = await requireApiUser(["USER"]);
 
-    const [balance, recentSessions, campaigns, ledger] = await Promise.all([
+    const [
+      balance,
+      recentSessions,
+      campaigns,
+      ledger,
+      travelAgentLinkCount,
+      pointsToRupiah,
+    ] = await Promise.all([
       getWalletBalance(user.id),
       prisma.depositSession.findMany({
         where: { userId: user.id },
@@ -26,6 +34,8 @@ export async function GET() {
         take: 10,
       }),
       getLedgerHistory(user.id, 5),
+      prisma.travelAgentUser.count({ where: { userId: user.id } }),
+      getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
     ]);
 
     const eligibleCampaigns = campaigns.filter((c) =>
@@ -37,6 +47,8 @@ export async function GET() {
       recentSessions,
       campaigns: eligibleCampaigns,
       recentLedger: ledger,
+      isTravelAgent: travelAgentLinkCount > 0,
+      pointsToRupiah,
     });
   } catch (error) {
     return handleApiError(error);

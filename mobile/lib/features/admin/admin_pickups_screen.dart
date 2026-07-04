@@ -70,7 +70,7 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
-          title: const Text('Buat Pickup Baru'),
+          title: Text('Buat Pickup Baru'),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButtonFormField<String>(
@@ -116,10 +116,10 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Batal')),
             TextButton(
               onPressed: () => Navigator.pop(ctx, {'machineId': machineId, 'reason': reason, 'priority': priority, 'notes': notes}),
-              child: const Text('Buat'),
+              child: Text('Buat'),
             ),
           ],
         ),
@@ -142,7 +142,7 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
-          title: const Text('Tugaskan Pengepul'),
+          title: Text('Tugaskan Pengepul'),
           content: DropdownButtonFormField<String>(
             value: collectorId,
             isExpanded: true,
@@ -160,13 +160,13 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
             onChanged: (v) => setSt(() => collectorId = v),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Batal')),
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
                 if (collectorId != null) _act(pickupId, 'assign', collectorUserId: collectorId);
               },
-              child: const Text('Tugaskan'),
+              child: Text('Tugaskan'),
             ),
           ],
         ),
@@ -192,10 +192,10 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
     if (_isLoading) return ListView(padding: const EdgeInsets.all(16), children: const [SkeletonListTile(), SizedBox(height: 8), SkeletonListTile()]);
     if (_error != null) {
       return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+        Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
         const SizedBox(height: 12),
-        Text(_error ?? '', style: const TextStyle(color: ReLoopColors.muted)),
-        TextButton(onPressed: _load, child: const Text('Coba Lagi')),
+        Text(_error ?? '', style: TextStyle(color: context.reloopMuted)),
+        TextButton(onPressed: _load, child: Text('Coba Lagi')),
       ]));
     }
     return ListView(
@@ -204,7 +204,7 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
         ReLoopButton(label: 'Buat Pickup', icon: Icons.add, variant: ReLoopButtonVariant.primary, onPressed: _createPickup),
         const SizedBox(height: 16),
         if (_pickups.isEmpty)
-          SizedBox(height: 120, child: Center(child: Text('Tidak ada pickup.', style: const TextStyle(color: ReLoopColors.mutedSoft))))
+          SizedBox(height: 120, child: Center(child: Text('Tidak ada pickup.', style: TextStyle(color: context.reloopMutedSoft))))
         else
           ..._pickups.map(_buildCard),
         const SizedBox(height: 80),
@@ -228,33 +228,33 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(machine?['name'] as String? ?? 'Pickup #$id', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: ReLoopColors.foreground)),
+              Text(machine?['name'] as String? ?? 'Pickup #$id', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: context.reloopForeground)),
               if (machine?['machineCode'] != null)
-                Text(machine!['machineCode'] as String, style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft)),
+                Text(machine!['machineCode'] as String, style: TextStyle(fontSize: 11, color: context.reloopMutedSoft)),
             ])),
             if (priority > 0)
               Container(
                 margin: const EdgeInsets.only(right: 8),
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(color: ReLoopColors.statusError.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
-                child: Text('P$priority', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ReLoopColors.statusError)),
+                child: Text('P$priority', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ReLoopColors.statusError)),
               ),
             StatusBadge(statusKey: status),
           ]),
           const SizedBox(height: 4),
           Row(children: [
-            _chip('Alasan: $reason'),
+            _chip('Alasan: $reason', context),
             const SizedBox(width: 8),
-            _chip('$itemCount material'),
+            _chip('$itemCount material', context),
             if (collector != null) ...[
               const SizedBox(width: 8),
-              _chip('${collector['name']}'),
+              _chip('${collector['name']}', context),
             ],
           ]),
           if (pickup['notes'] != null) ...[
             const SizedBox(height: 4),
             Text(pickup['notes'] as String, maxLines: 2, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft, fontStyle: FontStyle.italic)),
+                style: TextStyle(fontSize: 11, color: context.reloopMutedSoft, fontStyle: FontStyle.italic)),
           ],
           if (status == 'REQUESTED' || status == 'ASSIGNED') ...[
             const SizedBox(height: 8),
@@ -271,11 +271,11 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
     );
   }
 
-  Widget _chip(String label) {
+  Widget _chip(String label, BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: ReLoopColors.background, borderRadius: BorderRadius.circular(6)),
-      child: Text(label, style: const TextStyle(fontSize: 10, color: ReLoopColors.muted, fontWeight: FontWeight.w500)),
+      decoration: BoxDecoration(color: context.reloopBackground, borderRadius: BorderRadius.circular(6)),
+      child: Text(label, style: TextStyle(fontSize: 10, color: context.reloopMuted, fontWeight: FontWeight.w500)),
     );
   }
 }

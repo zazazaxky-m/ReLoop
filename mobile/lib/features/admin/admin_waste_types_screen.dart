@@ -92,7 +92,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
           TextField(controller: descCtrl, decoration: const InputDecoration(labelText: 'Deskripsi'), maxLines: 2),
         ])),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Batal')),
           TextButton(onPressed: () => Navigator.pop(ctx, {
             'name': nameCtrl.text.trim(),
             'unit': unit,
@@ -100,7 +100,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
             'maxWeightGrams': int.tryParse(maxCtrl.text),
             'defaultRewardPerItem': int.tryParse(rewardCtrl.text),
             'description': descCtrl.text.trim().isEmpty ? null : descCtrl.text.trim(),
-          }), child: const Text('Simpan')),
+          }), child: Text('Simpan')),
         ],
       )),
     );
@@ -127,11 +127,11 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
 
   Future<void> _deleteWasteType(String id, String name) async {
     final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-      title: const Text('Nonaktifkan Jenis Sampah?'),
+      title: Text('Nonaktifkan Jenis Sampah?'),
       content: Text('"$name" akan dinonaktifkan.'),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
-        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Nonaktifkan', style: TextStyle(color: ReLoopColors.danger))),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Batal')),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Nonaktifkan', style: TextStyle(color: ReLoopColors.danger))),
       ],
     ));
     if (ok != true || !mounted) return;
@@ -155,7 +155,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setSt) => AlertDialog(
-        title: const Text('Tarif Baru'),
+        title: Text('Tarif Baru'),
         content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
           DropdownButtonFormField<String>(value: wasteTypeId, isExpanded: true, decoration: const InputDecoration(labelText: 'Jenis Sampah'),
             items: _wasteTypes.where((w) => w['active'] == true).map((w) => DropdownMenuItem(value: (w['id'] as String?) ?? '', child: Text((w['name'] as String?) ?? ''))).toList(),
@@ -186,7 +186,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
           ),
         ])),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Batal')),
           TextButton(onPressed: () {
             final points = int.tryParse(pointsCtrl.text) ?? 0;
             final minW = int.tryParse(minWeightCtrl.text);
@@ -200,7 +200,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
               'maxWeightGrams': maxW,
               'campaignId': campaignId,
             });
-          }, child: const Text('Simpan')),
+          }, child: Text('Simpan')),
         ],
       )),
     );
@@ -224,15 +224,15 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
     return AdminShell(
       title: 'Jenis Sampah & Tarif',
       child: Column(children: [
-        TabBar(controller: _tabController, labelColor: ReLoopColors.brand600, unselectedLabelColor: ReLoopColors.mutedSoft, indicatorColor: ReLoopColors.brand500,
+        TabBar(controller: _tabController, labelColor: ReLoopColors.brand600, unselectedLabelColor: context.reloopMutedSoft, indicatorColor: ReLoopColors.brand500,
           tabs: const [Tab(text: 'Jenis Sampah'), Tab(text: 'Tarif Reward')]),
         Expanded(child: RefreshIndicator(onRefresh: _load, child: _isLoading
           ? ListView(padding: const EdgeInsets.all(16), children: const [SkeletonListTile(), SizedBox(height: 8), SkeletonListTile()])
           : _error != null
             ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft), const SizedBox(height: 12),
-                Text(_error ?? '', style: const TextStyle(color: ReLoopColors.muted)),
-                TextButton(onPressed: _load, child: const Text('Coba Lagi'))]))
+                Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft), const SizedBox(height: 12),
+                Text(_error ?? '', style: TextStyle(color: context.reloopMuted)),
+                TextButton(onPressed: _load, child: Text('Coba Lagi'))]))
             : TabBarView(controller: _tabController, children: [_buildWasteTypes(), _buildRates()]))),
       ]),
     );
@@ -243,7 +243,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
       ReLoopButton(label: 'Tambah Jenis', icon: Icons.add, variant: ReLoopButtonVariant.primary, onPressed: () => _saveWasteType()),
       const SizedBox(height: 16),
       if (_wasteTypes.isEmpty)
-        SizedBox(height: 120, child: Center(child: Text('Belum ada jenis sampah.', style: const TextStyle(color: ReLoopColors.mutedSoft))))
+        SizedBox(height: 120, child: Center(child: Text('Belum ada jenis sampah.', style: TextStyle(color: context.reloopMutedSoft))))
       else
         ..._wasteTypes.map((w) {
           final wt = w as Map<String, dynamic>;
@@ -256,14 +256,14 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
           return Padding(padding: const EdgeInsets.only(bottom: 8), child: ReLoopCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text((wt['name'] as String?) ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: ReLoopColors.foreground)),
+                Text((wt['name'] as String?) ?? '', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: context.reloopForeground)),
                 const SizedBox(height: 2),
                 Text([
                   if (wt['unit'] != null) wt['unit'],
                   if (reward != null) 'Rp$reward/item',
                   if (minW != null || maxW != null) '${minW ?? '-'}-${maxW ?? '-'}g',
                   orgId == null ? 'Global' : 'Organisasi',
-                ].join(' · '), style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft)),
+                ].join(' · '), style: TextStyle(fontSize: 11, color: context.reloopMutedSoft)),
               ])),
               StatusBadge(statusKey: active ? 'ACTIVE' : 'REJECTED'),
             ]),
@@ -288,7 +288,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
       ReLoopButton(label: 'Tambah Tarif', icon: Icons.add, variant: ReLoopButtonVariant.primary, onPressed: () => _saveRate()),
       const SizedBox(height: 16),
       if (_rates.isEmpty)
-        SizedBox(height: 120, child: Center(child: Text('Belum ada tarif.', style: const TextStyle(color: ReLoopColors.mutedSoft))))
+        SizedBox(height: 120, child: Center(child: Text('Belum ada tarif.', style: TextStyle(color: context.reloopMutedSoft))))
       else
         ..._rates.map((r) {
           final rate = r as Map<String, dynamic>;
@@ -311,7 +311,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
           return Padding(padding: const EdgeInsets.only(bottom: 8), child: ReLoopCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text((wt?['name'] as String?) ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: ReLoopColors.foreground)),
+                Text((wt?['name'] as String?) ?? '', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: context.reloopForeground)),
                 const SizedBox(height: 2),
                 Text([
                   '${rate['pointsPerItem']} poin',
@@ -319,7 +319,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
                   if (minW != null || maxW != null) '${minW ?? '-'}-${maxW ?? '-'}g',
                   if (effFrom != null) 'dari ${(effFrom).substring(0, 10)}',
                   if (effTo != null) 's/d ${(effTo).substring(0, 10)}',
-                ].join(' · '), style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft)),
+                ].join(' · '), style: TextStyle(fontSize: 11, color: context.reloopMutedSoft)),
               ])),
               StatusBadge(statusKey: active ? 'ACTIVE' : 'REJECTED'),
             ]),

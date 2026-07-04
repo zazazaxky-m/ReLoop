@@ -76,11 +76,11 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
+                        Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
                         const SizedBox(height: 12),
                         Text(_error!, style: TextStyle(color: context.reloopMuted)),
                         const SizedBox(height: 12),
-                        TextButton(onPressed: _loadMachine, child: const Text('Coba Lagi')),
+                        TextButton(onPressed: _loadMachine, child: Text('Coba Lagi')),
                       ],
                     ),
                   )
@@ -134,7 +134,7 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
               color: statusColor,
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.recycling, color: Colors.white, size: 32),
+            child: Icon(Icons.recycling, color: Colors.white, size: 32),
           ),
           const SizedBox(height: 12),
           Text(
@@ -174,7 +174,7 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
           const SizedBox(height: 6),
           Text(
             'Kapasitas Terisi: $fillLevel%',
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -219,7 +219,7 @@ class _AdminMachineDetailScreenState extends State<AdminMachineDetailScreen> {
         const SizedBox(height: 4),
         Text(
           name,
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
         ),
         const SizedBox(height: 2),
         Text(

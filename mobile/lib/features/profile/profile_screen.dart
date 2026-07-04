@@ -194,6 +194,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
 
     if (confirmed != true || passwordCtrl.text.isEmpty) return;
+    if (!mounted) return;
 
     final auth = context.read<AuthProvider>();
     final valid = await auth.verifyPassword(passwordCtrl.text);
@@ -232,12 +233,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final user = auth.user;
+    final isAdmin = user?.role == AppRole.ADMIN || user?.role == AppRole.SUPERADMIN;
 
     if (user == null) {
       return const Center(child: CircularProgressIndicator());
     }
 
     return Scaffold(
+      appBar: isAdmin
+          ? null
+          : AppBar(
+              title: Text('Profil', style: TextStyle(color: context.reloopForeground, fontWeight: FontWeight.w700, fontSize: 16)),
+              backgroundColor: context.reloopSurface,
+              elevation: 0,
+              centerTitle: true,
+            ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

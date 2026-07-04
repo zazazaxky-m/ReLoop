@@ -97,6 +97,8 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
         _WalletSummary(
           firstName: firstName,
           balance: dashboard.balance,
+          showPoints: dashboard.isTravelAgent,
+          pointsToRupiah: dashboard.pointsToRupiah,
           onWallet: () => context.push('/wallet'),
           onHistory: () => context.push('/wallet'),
           onProfile: () => context.push('/profile'),
@@ -329,6 +331,8 @@ class _WalletSummary extends StatelessWidget {
   const _WalletSummary({
     required this.firstName,
     required this.balance,
+    required this.showPoints,
+    required this.pointsToRupiah,
     required this.onWallet,
     required this.onHistory,
     required this.onProfile,
@@ -336,6 +340,8 @@ class _WalletSummary extends StatelessWidget {
 
   final String firstName;
   final WalletBalance balance;
+  final bool showPoints;
+  final int pointsToRupiah;
   final VoidCallback onWallet;
   final VoidCallback onHistory;
   final VoidCallback onProfile;
@@ -370,9 +376,13 @@ class _WalletSummary extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    balance.availableFormatted,
+                    showPoints
+                        ? '${balance.availableFormatted} - ${_points(balance.available, pointsToRupiah)} poin'
+                        : balance.availableFormatted,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 18,
+                      fontSize: showPoints ? 15.5 : 18,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -.3,
                     ),
@@ -542,6 +552,15 @@ String _currency(int amount) {
     (match) => '${match[1]}.',
   );
   return 'Rp $formatted';
+}
+
+String _points(int amount, int pointsToRupiah) {
+  if (pointsToRupiah <= 0) return '0';
+  final points = amount ~/ pointsToRupiah;
+  return points.toString().replaceAllMapped(
+    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+    (match) => '${match[1]}.',
+  );
 }
 
 String _formatDate(String iso) {

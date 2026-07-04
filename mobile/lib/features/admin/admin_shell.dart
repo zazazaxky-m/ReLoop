@@ -8,11 +8,12 @@ import '../../shared/widgets/reloop_logo.dart';
 import '../../theme/colors.dart';
 
 class AdminShell extends StatelessWidget {
-  const AdminShell({super.key, required this.child, required this.title, this.actions});
+  const AdminShell({super.key, required this.child, required this.title, this.actions, this.floatingActionButton});
 
   final Widget child;
   final String title;
   final List<Widget>? actions;
+  final Widget? floatingActionButton;
 
   @override
   Widget build(BuildContext context) {
@@ -73,7 +74,7 @@ class AdminShell extends StatelessWidget {
               ],
             ),
             actions: [
-              if (actions != null) ...actions!,
+              ...?actions,
               Padding(
                 padding: const EdgeInsets.only(right: 14),
                 child: InkWell(
@@ -113,6 +114,7 @@ class AdminShell extends StatelessWidget {
           bottomNavigationBar: desktop
               ? null
               : _ManagementBottomBar(items: mobileItems, location: location),
+          floatingActionButton: floatingActionButton,
         );
       },
     );
@@ -173,12 +175,14 @@ class _BottomItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isScan = item.route == '/scan';
+
     return InkWell(
       borderRadius: BorderRadius.circular(20),
       onTap: () {
         if (item.route == '__more__') {
           final isSuper = context.read<AuthProvider>().user?.role == AppRole.SUPERADMIN;
-          _showMoreBottomSheet(context, isSuper);
+          showAdminMoreBottomSheet(context, isSuper);
         } else if (!active) {
           context.go(item.route);
         }
@@ -188,29 +192,46 @@ class _BottomItem extends StatelessWidget {
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            width: active ? 42 : 36,
-            height: 34,
+            width: active || isScan ? 42 : 36,
+            height: active || isScan ? 42 : 34,
             decoration: BoxDecoration(
-              color: active ? context.reloopBrandSoft : Colors.transparent,
-              borderRadius: BorderRadius.circular(12),
+              color: isScan 
+                  ? context.reloopBrandSoftStrong
+                  : active 
+                      ? context.reloopBrandSoft 
+                      : Colors.transparent,
+              borderRadius: BorderRadius.circular(isScan ? 21 : 12),
+              boxShadow: isScan ? [
+                BoxShadow(
+                  color: context.reloopBrandSoftStrong.withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                )
+              ] : null,
             ),
             child: Icon(
               item.icon,
-              size: 22,
-              color: active ? context.reloopBrandText : context.reloopMuted,
+              size: isScan ? 24 : 22,
+              color: isScan 
+                  ? Colors.white
+                  : active 
+                      ? context.reloopBrandText 
+                      : context.reloopMuted,
             ),
           ),
-          const SizedBox(height: 3),
-          Text(
-            item.shortLabel ?? item.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 9.5,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-              color: active ? context.reloopBrandText : context.reloopMuted,
+          if (!isScan) ...[
+            const SizedBox(height: 3),
+            Text(
+              item.shortLabel ?? item.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 9.5,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                color: active ? context.reloopBrandText : context.reloopMuted,
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -370,7 +391,7 @@ const _adminMobile = [
   ),
   _AdminNavItem('Mesin', Icons.recycling_outlined, '/admin/machines'),
   _AdminNavItem('Pickup', Icons.local_shipping_outlined, '/admin/pickups'),
-  _AdminNavItem('Laporan', Icons.description_outlined, '/admin/reports'),
+  _AdminNavItem('Scan', Icons.qr_code_scanner_outlined, '/scan'),
   _AdminNavItem('Lainnya', Icons.grid_view_outlined, '__more__'),
 ];
 
@@ -388,35 +409,199 @@ const _superadminMobile = [
     shortLabel: 'Org',
   ),
   _AdminNavItem('Mesin', Icons.recycling_outlined, '/superadmin/machines'),
-  _AdminNavItem('Keamanan', Icons.shield_outlined, '/superadmin/security'),
+  _AdminNavItem('Scan', Icons.qr_code_scanner_outlined, '/scan'),
   _AdminNavItem('Lainnya', Icons.grid_view_outlined, '__more__'),
 ];
 
-void _showMoreBottomSheet(BuildContext context, bool isSuper) {
+void showAdminMoreBottomSheet(BuildContext context, bool isSuper) {
   final location = GoRouterState.of(context).matchedLocation;
-  
-  final items = isSuper
+
+  final topItems = isSuper
       ? const [
           _AdminNavItem('Pengguna', Icons.people_outline, '/superadmin/users'),
-          _AdminNavItem('Kemitraan', Icons.handshake_outlined, '/superadmin/partnerships'),
-          _AdminNavItem('Redemption', Icons.account_balance_wallet_outlined, '/superadmin/redemptions'),
-          _AdminNavItem('Wilayah', Icons.public_outlined, '/superadmin/regions'),
-          _AdminNavItem('Jenis & Tarif', Icons.delete_outline, '/superadmin/waste-types'),
-          _AdminNavItem('Konfigurasi', Icons.settings_outlined, '/superadmin/config'),
-          _AdminNavItem('Audit Log', Icons.history_rounded, '/superadmin/audit'),
-          _AdminNavItem('Laporan', Icons.description_outlined, '/superadmin/reports'),
+          _AdminNavItem(
+            'Kemitraan',
+            Icons.handshake_outlined,
+            '/superadmin/partnerships',
+          ),
+          _AdminNavItem(
+            'Redemption',
+            Icons.account_balance_wallet_outlined,
+            '/superadmin/redemptions',
+          ),
+          _AdminNavItem(
+            'Wilayah',
+            Icons.public_outlined,
+            '/superadmin/regions',
+          ),
+          _AdminNavItem(
+            'Jenis & Tarif',
+            Icons.delete_outline,
+            '/superadmin/waste-types',
+          ),
+          _AdminNavItem(
+            'Konfigurasi',
+            Icons.settings_outlined,
+            '/superadmin/config',
+          ),
+          _AdminNavItem(
+            'Audit Log',
+            Icons.history_rounded,
+            '/superadmin/audit',
+          ),
+          _AdminNavItem(
+            'Laporan',
+            Icons.description_outlined,
+            '/superadmin/reports',
+          ),
           _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
         ]
       : const [
-          _AdminNavItem('Campaign', Icons.campaign_outlined, '/admin/campaigns'),
-          _AdminNavItem('Jenis & Tarif', Icons.delete_outline, '/admin/waste-types'),
-          _AdminNavItem('Mitra Pengepul', Icons.handshake_outlined, '/admin/partners'),
-          _AdminNavItem('Trip / Trash Bag', Icons.luggage_outlined, '/admin/trips'),
+          _AdminNavItem(
+            'Campaign',
+            Icons.campaign_outlined,
+            '/admin/campaigns',
+          ),
+          _AdminNavItem(
+            'Jenis & Tarif',
+            Icons.delete_outline,
+            '/admin/waste-types',
+          ),
+          _AdminNavItem(
+            'Mitra Pengepul',
+            Icons.handshake_outlined,
+            '/admin/partners',
+          ),
+          _AdminNavItem(
+            'Trip / Trash Bag',
+            Icons.luggage_outlined,
+            '/admin/trips',
+          ),
+          _AdminNavItem(
+            'Travel Agent',
+            Icons.badge_outlined,
+            '/admin/travel-agents',
+          ),
+          _AdminNavItem(
+            'Compliance',
+            Icons.fact_check_outlined,
+            '/admin/compliance',
+          ),
           _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
+        ];
+  final sections = isSuper
+      ? const [
+          _AdminMenuSection('Pengelolaan', [
+            _AdminNavItem(
+              'Organisasi',
+              Icons.business_outlined,
+              '/superadmin/organizations',
+            ),
+            _AdminNavItem(
+              'Pengguna',
+              Icons.people_outline,
+              '/superadmin/users',
+            ),
+            _AdminNavItem(
+              'Wilayah',
+              Icons.public_outlined,
+              '/superadmin/regions',
+            ),
+          ]),
+          _AdminMenuSection('Operasional', [
+            _AdminNavItem(
+              'Mesin',
+              Icons.recycling_outlined,
+              '/superadmin/machines',
+            ),
+            _AdminNavItem(
+              'Jenis & Tarif',
+              Icons.delete_outline,
+              '/superadmin/waste-types',
+            ),
+            _AdminNavItem(
+              'Kemitraan',
+              Icons.handshake_outlined,
+              '/superadmin/partnerships',
+            ),
+          ]),
+          _AdminMenuSection('Monitoring', [
+            _AdminNavItem(
+              'Keamanan',
+              Icons.shield_outlined,
+              '/superadmin/security',
+            ),
+            _AdminNavItem(
+              'Audit Log',
+              Icons.history_rounded,
+              '/superadmin/audit',
+            ),
+            _AdminNavItem(
+              'Laporan',
+              Icons.description_outlined,
+              '/superadmin/reports',
+            ),
+            _AdminNavItem(
+              'Konfigurasi',
+              Icons.settings_outlined,
+              '/superadmin/config',
+            ),
+          ]),
+        ]
+      : const [
+          _AdminMenuSection('Operasional', [
+            _AdminNavItem('Mesin', Icons.recycling_outlined, '/admin/machines'),
+            _AdminNavItem(
+              'Pickup',
+              Icons.local_shipping_outlined,
+              '/admin/pickups',
+            ),
+            _AdminNavItem(
+              'Campaign',
+              Icons.campaign_outlined,
+              '/admin/campaigns',
+            ),
+            _AdminNavItem(
+              'Trip / Trash Bag',
+              Icons.luggage_outlined,
+              '/admin/trips',
+            ),
+          ]),
+          _AdminMenuSection('Relasi & Data', [
+            _AdminNavItem(
+              'Jenis & Tarif',
+              Icons.delete_outline,
+              '/admin/waste-types',
+            ),
+            _AdminNavItem(
+              'Mitra Pengepul',
+              Icons.handshake_outlined,
+              '/admin/partners',
+            ),
+            _AdminNavItem(
+              'Travel Agent',
+              Icons.badge_outlined,
+              '/admin/travel-agents',
+            ),
+          ]),
+          _AdminMenuSection('Monitoring', [
+            _AdminNavItem(
+              'Compliance',
+              Icons.fact_check_outlined,
+              '/admin/compliance',
+            ),
+            _AdminNavItem(
+              'Laporan',
+              Icons.description_outlined,
+              '/admin/reports',
+            ),
+            _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
+          ]),
         ];
 
   showModalBottomSheet(
     context: context,
+    isScrollControlled: true,
     backgroundColor: context.reloopSurfaceRaised,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -424,10 +609,9 @@ void _showMoreBottomSheet(BuildContext context, bool isSuper) {
     builder: (ctx) {
       return SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+          child: ListView(
+            shrinkWrap: true,
             children: [
               Align(
                 alignment: Alignment.center,
@@ -442,71 +626,113 @@ void _showMoreBottomSheet(BuildContext context, bool isSuper) {
               ),
               const SizedBox(height: 16),
               Text(
-                'Menu Administrasi',
+                'Layanan teratas',
                 style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
                   color: ctx.reloopForeground,
                 ),
               ),
               const SizedBox(height: 16),
-              Flexible(
-                child: GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
-                    childAspectRatio: 0.95,
-                  ),
-                  itemCount: items.length,
-                  itemBuilder: (context, index) {
-                    final item = items[index];
-                    final active = location == item.route ||
-                        (item.route != '/profile' && location.startsWith(item.route));
-                    final color = active ? ctx.reloopBrandText : ctx.reloopMuted;
-                    
-                    return InkWell(
-                      borderRadius: BorderRadius.circular(16),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        ctx.go(item.route);
-                      },
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: active ? ctx.reloopBrandSoft : Colors.transparent,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: active ? ctx.reloopBrandSoftStrong : Colors.transparent,
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 4,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: .82,
+                ),
+                itemCount: topItems.length,
+                itemBuilder: (context, index) {
+                  final item = topItems[index];
+                  final active =
+                      location == item.route ||
+                      (item.route != '/profile' &&
+                          item.route != '/admin' &&
+                          item.route != '/superadmin' &&
+                          location.startsWith(item.route));
+                  final color = active ? ctx.reloopBrandText : ctx.reloopMuted;
+
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      ctx.go(item.route);
+                    },
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 58,
+                          height: 58,
+                          decoration: BoxDecoration(
+                            color: active
+                                ? ctx.reloopBrandSoft
+                                : ctx.reloopSurface,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: ctx.reloopBorder),
+                          ),
+                          child: Icon(item.icon, size: 27, color: color),
+                        ),
+                        const SizedBox(height: 7),
+                        Text(
+                          item.shortLabel ?? item.label,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            height: 1.1,
+                            fontWeight: active
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                            color: active
+                                ? ctx.reloopBrandText
+                                : ctx.reloopForeground,
                           ),
                         ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(item.icon, size: 24, color: color),
-                            const SizedBox(height: 8),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                              child: Text(
-                                item.label,
-                                textAlign: TextAlign.center,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                                  color: color,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 22),
+              Text(
+                'Layanan lainnya',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: ctx.reloopForeground,
                 ),
               ),
+              const SizedBox(height: 14),
+              for (final section in sections) ...[
+                Text(
+                  section.title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: ctx.reloopForeground,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final item in section.items)
+                  _MoreServiceTile(
+                    item: item,
+                    active:
+                        location == item.route ||
+                        (item.route != '/profile' &&
+                            item.route != '/admin' &&
+                            item.route != '/superadmin' &&
+                            location.startsWith(item.route)),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      ctx.go(item.route);
+                    },
+                  ),
+                const SizedBox(height: 14),
+              ],
             ],
           ),
         ),
@@ -515,10 +741,107 @@ void _showMoreBottomSheet(BuildContext context, bool isSuper) {
   );
 }
 
+class _AdminMenuSection {
+  const _AdminMenuSection(this.title, this.items);
+  final String title;
+  final List<_AdminNavItem> items;
+}
+
+class _MoreServiceTile extends StatelessWidget {
+  const _MoreServiceTile({
+    required this.item,
+    required this.active,
+    required this.onTap,
+  });
+
+  final _AdminNavItem item;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active ? context.reloopBrandText : context.reloopMuted;
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: active ? context.reloopBrandSoft : context.reloopSurface,
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: Icon(item.icon, color: color, size: 23),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: context.reloopForeground,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _serviceDescription(item.route),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: context.reloopMuted,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: context.reloopMutedSoft),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _serviceDescription(String route) {
+  if (route.contains('machines')) return 'Pantau mesin dan kapasitas';
+  if (route.contains('pickups')) return 'Kelola permintaan pengambilan';
+  if (route.contains('campaigns')) return 'Atur program dan reward';
+  if (route.contains('waste-types')) {
+    return 'Kelola organik, anorganik, dan tarif';
+  }
+  if (route.contains('partners') || route.contains('partnerships')) {
+    return 'Kelola mitra pengepul';
+  }
+  if (route.contains('trips')) return 'Kelola trip dan QR trash bag';
+  if (route.contains('travel-agents')) return 'Invite dan pantau travel agent';
+  if (route.contains('compliance')) return 'Pantau kepatuhan rombongan';
+  if (route.contains('reports')) return 'Unduh dan cek laporan';
+  if (route.contains('users')) return 'Kelola akun pengguna';
+  if (route.contains('organizations')) return 'Kelola organisasi tenant';
+  if (route.contains('regions')) return 'Kelola wilayah layanan';
+  if (route.contains('security')) return 'Pantau keamanan sistem';
+  if (route.contains('config')) return 'Atur konfigurasi global';
+  if (route.contains('audit')) return 'Lihat jejak audit';
+  if (route == '/profile') return 'Pengaturan akun';
+  return 'Buka layanan administrasi';
+}
+
 const _adminDesktop = [
   _AdminNavItem('Dashboard', Icons.space_dashboard_outlined, '/admin'),
   _AdminNavItem('Mesin', Icons.recycling_outlined, '/admin/machines'),
   _AdminNavItem('Pickup', Icons.local_shipping_outlined, '/admin/pickups'),
+  _AdminNavItem('Scan QR', Icons.qr_code_scanner_outlined, '/scan'),
   _AdminNavItem('Campaign', Icons.campaign_outlined, '/admin/campaigns'),
   _AdminNavItem(
     'Jenis Sampah & Tarif',
@@ -527,6 +850,8 @@ const _adminDesktop = [
   ),
   _AdminNavItem('Mitra Pengepul', Icons.handshake_outlined, '/admin/partners'),
   _AdminNavItem('Trip / Trash Bag', Icons.luggage_outlined, '/admin/trips'),
+  _AdminNavItem('Travel Agent', Icons.badge_outlined, '/admin/travel-agents'),
+  _AdminNavItem('Compliance', Icons.fact_check_outlined, '/admin/compliance'),
   _AdminNavItem('Laporan', Icons.description_outlined, '/admin/reports'),
   _AdminNavItem('Profil', Icons.person_outline_rounded, '/profile'),
 ];
@@ -539,6 +864,7 @@ const _superadminDesktop = [
     '/superadmin/organizations',
   ),
   _AdminNavItem('Mesin', Icons.recycling_outlined, '/superadmin/machines'),
+  _AdminNavItem('Scan QR', Icons.qr_code_scanner_outlined, '/scan'),
   _AdminNavItem('Pengguna', Icons.people_outline, '/superadmin/users'),
   _AdminNavItem(
     'Kemitraan',

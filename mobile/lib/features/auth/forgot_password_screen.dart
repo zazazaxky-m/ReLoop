@@ -46,15 +46,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         children: [
           const Icon(Icons.lock_reset, size: 56, color: ReLoopColors.brand500),
           const SizedBox(height: 20),
-          const Text(
-            'Reset Password',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: ReLoopColors.foreground),
-          ),
+          Text(
+              'Reset Password',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: context.reloopForeground),
+            ),
           const SizedBox(height: 8),
-          const Text(
-            'Masukkan email Anda. Kami akan mengirimkan kode reset password.',
-            style: TextStyle(color: ReLoopColors.muted, fontSize: 14),
-          ),
+          Text(
+              'Masukkan email Anda. Kami akan mengirimkan kode reset password.',
+              style: TextStyle(color: context.reloopMuted, fontSize: 14),
+            ),
           const SizedBox(height: 32),
           TextFormField(
             controller: _emailCtrl,
@@ -83,15 +83,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         const SizedBox(height: 40),
         const Icon(Icons.mark_email_read, size: 64, color: ReLoopColors.brand500),
         const SizedBox(height: 24),
-        const Text(
-          'Email Terkirim!',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: ReLoopColors.foreground),
-        ),
+        Text(
+            'Email Terkirim!',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: context.reloopForeground),
+          ),
         const SizedBox(height: 12),
         Text(
           'Kode reset password telah dikirim ke ${_emailCtrl.text}. Silakan cek inbox dan folder spam Anda.',
           textAlign: TextAlign.center,
-          style: const TextStyle(color: ReLoopColors.muted, fontSize: 14),
+          style: TextStyle(color: context.reloopMuted, fontSize: 14),
         ),
         const SizedBox(height: 32),
         ReLoopButton(

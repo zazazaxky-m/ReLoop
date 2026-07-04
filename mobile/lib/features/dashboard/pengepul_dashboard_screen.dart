@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/api_client.dart';
+import '../../core/auth_provider.dart';
 import '../../shared/widgets/metric_card.dart';
 import '../../shared/widgets/promo_carousel.dart';
 import '../../shared/widgets/quick_action.dart';
@@ -61,26 +63,30 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
                   : [])
               .cast<dynamic>();
 
-      setState(() {
-        _activeTasks = pickups.where((p) {
-          final status = (p as Map<String, dynamic>)['status'] as String? ?? '';
-          return !['COMPLETED', 'CANCELLED', 'FAILED'].contains(status);
-        }).length;
-        _fullMachines = machines.where((m) {
-          return (m as Map<String, dynamic>)['status'] == 'FULL';
-        }).length;
-        _activePartners = partnerships.where((p) {
-          return (p as Map<String, dynamic>)['status'] == 'ACTIVE';
-        }).length;
-        _tasks = pickups;
-        _machines = machines;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _activeTasks = pickups.where((p) {
+            final status = (p as Map<String, dynamic>)['status'] as String? ?? '';
+            return !['COMPLETED', 'CANCELLED', 'FAILED'].contains(status);
+          }).length;
+          _fullMachines = machines.where((m) {
+            return (m as Map<String, dynamic>)['status'] == 'FULL';
+          }).length;
+          _activePartners = partnerships.where((p) {
+            return (p as Map<String, dynamic>)['status'] == 'ACTIVE';
+          }).length;
+          _tasks = pickups;
+          _machines = machines;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = ApiClient.getErrorMessage(e);
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = ApiClient.getErrorMessage(e);
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -93,87 +99,56 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
 
   Widget _buildBody() {
     if (_isLoading) {
+      return const SkeletonDashboard();
+    }
+
+    if (_error != null) {
       return ListView(
-        padding: const EdgeInsets.all(16),
-        children: const [
-          SkeletonListTile(),
-          SizedBox(height: 16),
-          SkeletonListTile(),
+        padding: const EdgeInsets.all(24),
+        children: [
+          const SizedBox(height: 140),
+          Icon(
+            Icons.cloud_off_rounded,
+            size: 48,
+            color: context.reloopMutedSoft,
+          ),
+          const SizedBox(height: 12),
+          Text(_error!, textAlign: TextAlign.center),
+          TextButton(onPressed: _loadDashboard, child: const Text('Coba lagi')),
         ],
       );
     }
 
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.cloud_off,
-              size: 48,
-              color: context.reloopMutedSoft,
-            ),
-            const SizedBox(height: 12),
-            Text(_error!, style: TextStyle(color: context.reloopMuted)),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: _loadDashboard,
-              child: Text('Coba Lagi'),
-            ),
-          ],
-        ),
-      );
-    }
+    final user = context.watch<AuthProvider>().user;
+    final firstName = (user?.name ?? 'Mitra').split(' ').first;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
       children: [
         const PromoCarousel(),
-        const SizedBox(height: 18),
-        Text(
-          'Pantau tugas pengambilan dan mesin yang membutuhkan penanganan.',
-          style: TextStyle(fontSize: 13, color: context.reloopMuted),
-        ),
         const SizedBox(height: 16),
-
-        Row(
-          children: [
-            Expanded(
-              flex: 2,
-              child: MetricCard(
-                label: 'Tugas aktif',
-                value: _activeTasks.toString(),
-                icon: Icons.local_shipping,
-                tone: MetricTone.amber,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: MetricCard(
-                label: 'Mitra aktif',
-                value: _activePartners.toString(),
-                icon: Icons.location_on_outlined,
-                tone: MetricTone.teal,
-              ),
-            ),
-          ],
+        _CollectorSummary(
+          firstName: firstName,
+          onProfile: () => context.push('/profile'),
+        ),
+        const SizedBox(height: 22),
+        Text(
+          'Akses Cepat',
+          style: TextStyle(
+            color: context.reloopForeground,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -.2,
+          ),
         ),
         const SizedBox(height: 12),
-        MetricCard(
-          label: 'Mesin penuh',
-          value: _fullMachines.toString(),
-          icon: Icons.recycling,
-          tone: MetricTone.blue,
-        ),
-
-        const SizedBox(height: 24),
         GridView.count(
-          crossAxisCount: 2,
+          crossAxisCount: 4,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 8,
+          mainAxisSpacing: 0,
           crossAxisSpacing: 8,
-          childAspectRatio: 1.6,
+          childAspectRatio: .78,
           children: [
             QuickAction(
               icon: Icons.local_shipping_outlined,
@@ -205,49 +180,71 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
             ),
           ],
         ),
-
         const SizedBox(height: 24),
-        _buildSectionHeader('Tugas pickup'),
-        const SizedBox(height: 8),
+        Text(
+          'Ringkasan Operasional',
+          style: TextStyle(
+            color: context.reloopForeground,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -.2,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: MetricCard(
+                label: 'Tugas aktif',
+                value: _activeTasks.toString(),
+                icon: Icons.local_shipping,
+                tone: MetricTone.amber,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: MetricCard(
+                label: 'Mitra aktif',
+                value: _activePartners.toString(),
+                icon: Icons.location_on_outlined,
+                tone: MetricTone.teal,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        MetricCard(
+          label: 'Mesin penuh',
+          value: _fullMachines.toString(),
+          icon: Icons.recycling,
+          tone: MetricTone.blue,
+        ),
+        const SizedBox(height: 24),
+        _SectionTitle(
+          title: 'Tugas pickup terbaru',
+          action: 'Lihat semua',
+          onAction: () => context.push('/pickup'),
+        ),
+        const SizedBox(height: 10),
         ..._buildTaskList(),
-
-        const SizedBox(height: 24),
-        _buildSectionHeader('Mesin penuh dari mitra'),
-        const SizedBox(height: 8),
+        const SizedBox(height: 22),
+        _SectionTitle(
+          title: 'Mesin penuh dari mitra',
+          action: 'Lihat peta',
+          onAction: () => context.push('/map'),
+        ),
+        const SizedBox(height: 10),
         ..._buildMachineList(),
-
-        const SizedBox(height: 80),
       ],
-    );
-  }
-
-  Widget _buildSectionHeader(String title) {
-    return Text(
-      title,
-      style: TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w700,
-        color: context.reloopForeground,
-      ),
     );
   }
 
   List<Widget> _buildTaskList() {
     if (_tasks.isEmpty) {
-      return [
-        Padding(
-          padding: EdgeInsets.symmetric(vertical: 24),
-          child: Center(
-            child: Text(
-              'Tidak ada tugas pickup saat ini.',
-              style: TextStyle(color: context.reloopMutedSoft, fontSize: 13),
-            ),
-          ),
-        ),
-      ];
+      return const [_EmptyRow('Belum ada tugas pickup saat ini.')];
     }
 
-    return _tasks.take(5).map((t) {
+    return _tasks.take(4).map((t) {
       final task = t as Map<String, dynamic>;
       final machine = task['machine'] as Map<String, dynamic>?;
       final org = task['organization'] as Map<String, dynamic>?;
@@ -256,57 +253,38 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: ReLoopCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
+              const _ActivityIcon(
+                icon: Icons.local_shipping_rounded,
+                tone: QuickActionTone.amber,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
                       machine?['name'] as String? ??
                           org?['name'] as String? ??
                           'Mesin',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
                         fontSize: 13,
-                        color: context.reloopForeground,
                       ),
                     ),
-                  ),
-                  StatusBadge(statusKey: status),
-                ],
-              ),
-              if (org != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Row(
-                    children: [
-                      Text(
-                        org['name'] as String? ?? '',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: context.reloopMutedSoft,
-                        ),
+                    const SizedBox(height: 3),
+                    Text(
+                      org?['name'] as String? ?? 'Lokasi',
+                      style: TextStyle(
+                        color: context.reloopMuted,
+                        fontSize: 11,
                       ),
-                      if (org['contactPhone'] != null) ...[
-                        Text(
-                          '  -  ',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: context.reloopMutedSoft,
-                          ),
-                        ),
-                        Text(
-                          org['contactPhone'] as String,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: context.reloopMutedSoft,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
+              ),
+              StatusBadge(statusKey: status),
             ],
           ),
         ),
@@ -320,20 +298,10 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
     }).toList();
 
     if (fullList.isEmpty) {
-      return [
-        Padding(
-          padding: EdgeInsets.symmetric(vertical: 24),
-          child: Center(
-            child: Text(
-              'Tidak ada mesin penuh.',
-              style: TextStyle(color: context.reloopMutedSoft, fontSize: 13),
-            ),
-          ),
-        ),
-      ];
+      return const [_EmptyRow('Tidak ada mesin penuh saat ini.')];
     }
 
-    return fullList.take(5).map((m) {
+    return fullList.take(4).map((m) {
       final machine = m as Map<String, dynamic>;
       final org = machine['organization'] as Map<String, dynamic>?;
       final fillLevel = machine['fillLevelPercent'] as num? ?? 0;
@@ -343,55 +311,200 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
         child: ReLoopCard(
           child: Row(
             children: [
+              const _ActivityIcon(
+                icon: Icons.recycling_rounded,
+                tone: QuickActionTone.blue,
+              ),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       machine['name'] as String? ?? 'Mesin',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
                         fontSize: 13,
-                        color: context.reloopForeground,
                       ),
                     ),
-                    if (org != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Row(
-                          children: [
-                            Text(
-                              org['name'] as String? ?? '',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: context.reloopMutedSoft,
-                              ),
-                            ),
-                            Text(
-                              '  -  ',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: context.reloopMutedSoft,
-                              ),
-                            ),
-                            Text(
-                              '$fillLevel% terisi',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: context.reloopMutedSoft,
-                              ),
-                            ),
-                          ],
-                        ),
+                    const SizedBox(height: 3),
+                    Text(
+                      org?['name'] as String? ?? 'Mitra',
+                      style: TextStyle(
+                        color: context.reloopMuted,
+                        fontSize: 11,
                       ),
+                    ),
                   ],
                 ),
               ),
-              StatusBadge(statusKey: machine['status'] as String? ?? 'FULL'),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: ReLoopColors.danger.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '$fillLevel%',
+                  style: const TextStyle(
+                    color: ReLoopColors.danger,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
             ],
           ),
         ),
       );
     }).toList();
+  }
+}
+
+class _CollectorSummary extends StatelessWidget {
+  const _CollectorSummary({
+    required this.firstName,
+    required this.onProfile,
+  });
+
+  final String firstName;
+  final VoidCallback onProfile;
+
+  @override
+  Widget build(BuildContext context) {
+    return ReLoopCard(
+      padding: const EdgeInsets.fromLTRB(16, 15, 12, 15),
+      child: Row(
+        children: [
+          InkWell(
+            onTap: onProfile,
+            borderRadius: BorderRadius.circular(20),
+            child: CircleAvatar(
+              radius: 23,
+              backgroundColor: context.reloopBrandSoftStrong,
+              child: Text(
+                firstName.isEmpty ? '?' : firstName[0].toUpperCase(),
+                style: TextStyle(
+                  color: context.reloopBrandText,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: InkWell(
+              onTap: onProfile,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Halo, $firstName!',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -.3,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Siap untuk mengambil sampah hari ini?',
+                    style: TextStyle(
+                      color: context.reloopMuted,
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, this.action, this.onAction});
+
+  final String title;
+  final String? action;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              color: context.reloopForeground,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        if (action != null)
+          TextButton(onPressed: onAction, child: Text(action!)),
+      ],
+    );
+  }
+}
+
+class _ActivityIcon extends StatelessWidget {
+  const _ActivityIcon({required this.icon, required this.tone});
+
+  final IconData icon;
+  final QuickActionTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final (color, softColor) = switch (tone) {
+      QuickActionTone.green => (
+          context.reloopBrandText,
+          context.reloopBrandSoft,
+        ),
+      QuickActionTone.blue => (
+          context.isDarkMode ? const Color(0xFF93C5FD) : ReLoopColors.info,
+          context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEDF5FF),
+        ),
+      QuickActionTone.amber => (
+          context.isDarkMode ? const Color(0xFFFCD34D) : ReLoopColors.warning,
+          context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFF5E7),
+        ),
+      QuickActionTone.teal => (
+          context.isDarkMode ? const Color(0xFF5EEAD4) : const Color(0xFF159A91),
+          context.isDarkMode ? const Color(0xFF173936) : const Color(0xFFEAF9F7),
+        ),
+    };
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: softColor,
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: Icon(icon, color: color, size: 20),
+    );
+  }
+}
+
+class _EmptyRow extends StatelessWidget {
+  const _EmptyRow(this.message);
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Center(
+        child: Text(
+          message,
+          style: TextStyle(color: context.reloopMuted, fontSize: 12),
+        ),
+      ),
+    );
   }
 }

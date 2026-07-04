@@ -108,7 +108,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         Row(
           children: [
             Expanded(
-              flex: 2,
               child: MetricCard(
                 label: 'Total Mesin',
                 value: _machines.length.toString(),

@@ -304,7 +304,7 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
                           const SizedBox(height: 12),
                           if (_accounts.isNotEmpty)
                             DropdownButtonFormField<String>(
-                              value: _selectedAccountId,
+                              initialValue: _selectedAccountId,
                               decoration: InputDecoration(
                                 labelText: 'Rekening Tujuan',
                                 labelStyle: const TextStyle(color: Colors.white70),

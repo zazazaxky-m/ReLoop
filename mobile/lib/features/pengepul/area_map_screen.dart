@@ -169,7 +169,8 @@ class _AreaMapScreenState extends State<AreaMapScreen>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Ajukan Kemitraan'),
+        backgroundColor: context.reloopSurface,
+        title: Text('Ajukan Kemitraan', style: TextStyle(color: context.reloopForeground)),
         content: SizedBox(
           width: double.maxFinite,
           child: ListView(
@@ -177,7 +178,7 @@ class _AreaMapScreenState extends State<AreaMapScreen>
             children: _organizations.map((o) {
               final org = o as Map<String, dynamic>;
               return ListTile(
-                title: Text((org['name'] as String?) ?? ''),
+                title: Text((org['name'] as String?) ?? '', style: TextStyle(color: context.reloopForeground)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _createPartnership((org['id'] as String?) ?? '');
@@ -211,7 +212,8 @@ class _AreaMapScreenState extends State<AreaMapScreen>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Atur Area Layanan'),
+        backgroundColor: context.reloopSurface,
+        title: Text('Atur Area Layanan', style: TextStyle(color: context.reloopForeground)),
         content: Form(
           key: formKey,
           child: Column(
@@ -219,15 +221,24 @@ class _AreaMapScreenState extends State<AreaMapScreen>
             children: [
               TextFormField(
                 controller: regionsCtrl,
-                decoration: const InputDecoration(
+                style: TextStyle(color: context.reloopForeground),
+                decoration: InputDecoration(
                   labelText: 'Wilayah (pisahkan dengan koma)',
+                  labelStyle: TextStyle(color: context.reloopMuted),
                   hintText: 'Kec. A, Kec. B',
+                  hintStyle: TextStyle(color: context.reloopMutedSoft),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: context.reloopBorder)),
                 ),
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: noteCtrl,
-                decoration: const InputDecoration(labelText: 'Catatan'),
+                style: TextStyle(color: context.reloopForeground),
+                decoration: InputDecoration(
+                  labelText: 'Catatan',
+                  labelStyle: TextStyle(color: context.reloopMuted),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: context.reloopBorder)),
+                ),
                 maxLines: 3,
               ),
             ],
@@ -289,11 +300,11 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.cloud_off,
-                                size: 48, color: ReLoopColors.mutedSoft),
+                            Icon(Icons.cloud_off,
+                                size: 48, color: context.reloopMutedSoft),
                             const SizedBox(height: 12),
                             Text(_error ?? '',
-                                style: const TextStyle(color: ReLoopColors.muted)),
+                                style: TextStyle(color: context.reloopMuted)),
                             const SizedBox(height: 12),
                             TextButton(
                                 onPressed: _loadAll,
@@ -336,8 +347,8 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                 child: Text(
                   'Belum ada kemitraan.\nAjukan kemitraan dengan organisasi\nuntuk menerima tugas pickup.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: ReLoopColors.mutedSoft, fontSize: 13),
+                  style: TextStyle(
+                      color: context.reloopMutedSoft, fontSize: 13),
                 ),
               ),
             )
@@ -368,10 +379,10 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                           Expanded(
                             child: Text(
                               (org?['name'] as String?) ?? 'Organisasi',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 fontSize: 14,
-                                color: ReLoopColors.foreground,
+                                color: context.reloopForeground,
                               ),
                             ),
                           ),
@@ -382,9 +393,9 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                         const SizedBox(height: 6),
                         Text(
                           'Wilayah: $regions',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: ReLoopColors.mutedSoft,
+                            color: context.reloopMutedSoft,
                           ),
                         ),
                       ],
@@ -392,9 +403,9 @@ class _AreaMapScreenState extends State<AreaMapScreen>
                         const SizedBox(height: 2),
                         Text(
                           note,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11,
-                            color: ReLoopColors.mutedSoft,
+                            color: context.reloopMutedSoft,
                             fontStyle: FontStyle.italic,
                           ),
                         ),

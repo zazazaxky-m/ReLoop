@@ -158,7 +158,7 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Batal')),
             TextButton(onPressed: () {
               final domains = visibility == 'PRIVATE'
                   ? domainsCtrl.text
@@ -178,7 +178,7 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
                 'rewardMultiplier': rewardMult.isEmpty ? null : double.tryParse(rewardMult),
                 'allowedEmailDomains': domains,
               });
-            }, child: const Text('Simpan')),
+            }, child: Text('Simpan')),
           ],
         ),
       ),
@@ -200,11 +200,11 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
 
   Future<void> _delete(String id) async {
     final confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-      title: const Text('Hapus Campaign?'),
-      content: const Text('Campaign dengan sesi akan diakhiri, bukan dihapus.'),
+      title: Text('Hapus Campaign?'),
+      content: Text('Campaign dengan sesi akan diakhiri, bukan dihapus.'),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
-        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Hapus', style: TextStyle(color: ReLoopColors.danger))),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Batal')),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Hapus', style: TextStyle(color: ReLoopColors.danger))),
       ],
     ));
     if (confirm != true || !mounted) return;
@@ -229,9 +229,9 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
     if (_isLoading) return ListView(padding: const EdgeInsets.all(16), children: const [SkeletonListTile(), SizedBox(height: 8), SkeletonListTile()]);
     if (_error != null) {
       return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft),
-        const SizedBox(height: 12), Text(_error ?? '', style: const TextStyle(color: ReLoopColors.muted)),
-        TextButton(onPressed: _load, child: const Text('Coba Lagi')),
+        Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft),
+        const SizedBox(height: 12), Text(_error ?? '', style: TextStyle(color: context.reloopMuted)),
+        TextButton(onPressed: _load, child: Text('Coba Lagi')),
       ]));
     }
     return ListView(
@@ -240,7 +240,7 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
         ReLoopButton(label: 'Buat Campaign', icon: Icons.add, variant: ReLoopButtonVariant.primary, onPressed: () => _save()),
         const SizedBox(height: 16),
         if (_campaigns.isEmpty)
-          SizedBox(height: 120, child: Center(child: Text('Belum ada campaign.', style: const TextStyle(color: ReLoopColors.mutedSoft))))
+          SizedBox(height: 120, child: Center(child: Text('Belum ada campaign.', style: TextStyle(color: context.reloopMutedSoft))))
         else
           ..._campaigns.map(_buildCard),
         const SizedBox(height: 80),
@@ -260,18 +260,18 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
       child: ReLoopCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Expanded(child: Text((campaign['name'] as String?) ?? '', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: ReLoopColors.foreground))),
+            Expanded(child: Text((campaign['name'] as String?) ?? '', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: context.reloopForeground))),
             StatusBadge(statusKey: status),
           ]),
           if (campaign['description'] != null) ...[
             const SizedBox(height: 4),
-            Text(campaign['description'] as String, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: ReLoopColors.mutedSoft)),
+            Text(campaign['description'] as String, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: context.reloopMutedSoft)),
           ],
           if (campaign['visibility'] == 'PRIVATE' && allowedDomains != null && allowedDomains.isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(
               'Domain: ${allowedDomains.join(", ")}',
-              style: const TextStyle(fontSize: 11, color: ReLoopColors.brand600, fontWeight: FontWeight.w500),
+              style: TextStyle(fontSize: 11, color: ReLoopColors.brand600, fontWeight: FontWeight.w500),
             ),
           ],
           const SizedBox(height: 6),
@@ -296,8 +296,8 @@ class _AdminCampaignsScreenState extends State<AdminCampaignsScreen> {
 
   Widget _chip(String label) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-    decoration: BoxDecoration(color: ReLoopColors.background, borderRadius: BorderRadius.circular(6)),
-    child: Text(label, style: const TextStyle(fontSize: 10, color: ReLoopColors.muted, fontWeight: FontWeight.w500)),
+    decoration: BoxDecoration(color: context.reloopBackground, borderRadius: BorderRadius.circular(6)),
+    child: Text(label, style: TextStyle(fontSize: 10, color: context.reloopMuted, fontWeight: FontWeight.w500)),
   );
 
   String _typeLabel(String t) {

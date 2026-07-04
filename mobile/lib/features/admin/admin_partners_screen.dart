@@ -50,11 +50,11 @@ class _AdminPartnersScreenState extends State<AdminPartnersScreen> {
 
   Future<void> _remove(String id, String name) async {
     final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-      title: const Text('Hapus Kemitraan?'),
+      title: Text('Hapus Kemitraan?'),
       content: Text('Hapus kemitraan dengan "$name"?'),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
-        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Hapus', style: TextStyle(color: ReLoopColors.danger))),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Batal')),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Hapus', style: TextStyle(color: ReLoopColors.danger))),
       ],
     ));
     if (ok != true || !mounted) return;
@@ -67,15 +67,15 @@ class _AdminPartnersScreenState extends State<AdminPartnersScreen> {
     final result = await showDialog<Map<String, String>>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Undang Pengepul'),
+        title: Text('Undang Pengepul'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: emailCtrl, decoration: const InputDecoration(labelText: 'Email pengepul', hintText: 'pengepul@reloop.id'), keyboardType: TextInputType.emailAddress),
           const SizedBox(height: 8),
           TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Catatan (opsional)'), maxLines: 2),
         ]),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
-          TextButton(onPressed: () => Navigator.pop(ctx, {'email': emailCtrl.text.trim(), 'notes': notesCtrl.text.trim()}), child: const Text('Undang')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Batal')),
+          TextButton(onPressed: () => Navigator.pop(ctx, {'email': emailCtrl.text.trim(), 'notes': notesCtrl.text.trim()}), child: Text('Undang')),
         ],
       ),
     );
@@ -119,7 +119,7 @@ class _AdminPartnersScreenState extends State<AdminPartnersScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
         FilterChip(
-          label: const Text('Semua'),
+          label: Text('Semua'),
           selected: _statusFilter == null,
           onSelected: (_) => setState(() => _statusFilter = null),
         ),
@@ -151,9 +151,9 @@ class _AdminPartnersScreenState extends State<AdminPartnersScreen> {
     if (_isLoading) return ListView(padding: const EdgeInsets.all(16), children: const [SkeletonListTile(), SizedBox(height: 8), SkeletonListTile()]);
     if (_error != null) {
       return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.cloud_off, size: 48, color: ReLoopColors.mutedSoft), const SizedBox(height: 12),
-        Text(_error ?? '', style: const TextStyle(color: ReLoopColors.muted)),
-        TextButton(onPressed: _load, child: const Text('Coba Lagi')),
+        Icon(Icons.cloud_off, size: 48, color: context.reloopMutedSoft), const SizedBox(height: 12),
+        Text(_error ?? '', style: TextStyle(color: context.reloopMuted)),
+        TextButton(onPressed: _load, child: Text('Coba Lagi')),
       ]));
     }
     
@@ -165,7 +165,7 @@ class _AdminPartnersScreenState extends State<AdminPartnersScreen> {
       ReLoopButton(label: 'Undang Pengepul', icon: Icons.person_add, variant: ReLoopButtonVariant.primary, onPressed: _invite),
       const SizedBox(height: 16),
       if (filtered.isEmpty)
-        SizedBox(height: 120, child: Center(child: Text('Belum ada mitra.', style: const TextStyle(color: ReLoopColors.mutedSoft))))
+        SizedBox(height: 120, child: Center(child: Text('Belum ada mitra.', style: TextStyle(color: context.reloopMutedSoft))))
       else
         ...filtered.map((p) {
           final partner = p as Map<String, dynamic>;
@@ -179,11 +179,11 @@ class _AdminPartnersScreenState extends State<AdminPartnersScreen> {
           return Padding(padding: const EdgeInsets.only(bottom: 8), child: ReLoopCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text((collector?['name'] as String?) ?? 'Pengepul', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: ReLoopColors.foreground)),
-                if (collector?['email'] != null) Text(collector!['email'] as String, style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft)),
-                if (collector?['phone'] != null) Text('Telp: ${collector!['phone']}', style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft)),
-                if (org != null) Text(org['name'] as String? ?? '', style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft)),
-                if (regions.isNotEmpty) Text('Wilayah: $regions', style: const TextStyle(fontSize: 11, color: ReLoopColors.mutedSoft)),
+                Text((collector?['name'] as String?) ?? 'Pengepul', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: context.reloopForeground)),
+                if (collector?['email'] != null) Text(collector!['email'] as String, style: TextStyle(fontSize: 11, color: context.reloopMutedSoft)),
+                if (collector?['phone'] != null) Text('Telp: ${collector!['phone']}', style: TextStyle(fontSize: 11, color: context.reloopMutedSoft)),
+                if (org != null) Text(org['name'] as String? ?? '', style: TextStyle(fontSize: 11, color: context.reloopMutedSoft)),
+                if (regions.isNotEmpty) Text('Wilayah: $regions', style: TextStyle(fontSize: 11, color: context.reloopMutedSoft)),
               ])),
               StatusBadge(statusKey: status),
             ]),

@@ -61,25 +61,23 @@ class _AdminMachinesScreenState extends State<AdminMachinesScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final isSuperadmin = auth.hasRole(AppRole.SUPERADMIN);
-    return Stack(children: [
-      AdminShell(title: 'Mesin', child: Column(children: [
+    return AdminShell(
+      title: 'Mesin',
+      floatingActionButton: isSuperadmin
+          ? FloatingActionButton.extended(
+              onPressed: _showAddMachineSheet,
+              backgroundColor: context.reloopBrandText,
+              foregroundColor: context.reloopSurface,
+              elevation: 4,
+              icon: const Icon(Icons.add, size: 20),
+              label: const Text('Tambah Mesin', style: TextStyle(fontWeight: FontWeight.w700)),
+            )
+          : null,
+      child: Column(children: [
         _buildFilterChips(),
         Expanded(child: RefreshIndicator(onRefresh: _load, child: _buildBody())),
-      ])),
-      if (isSuperadmin)
-        Positioned(
-          right: 16,
-          bottom: 18,
-          child: FloatingActionButton.extended(
-            onPressed: _showAddMachineSheet,
-            backgroundColor: context.reloopBrandText,
-            foregroundColor: context.reloopSurface,
-            elevation: 4,
-            icon: const Icon(Icons.add, size: 20),
-            label: const Text('Tambah Mesin', style: TextStyle(fontWeight: FontWeight.w700)),
-          ),
-        ),
-    ]);
+      ]),
+    );
   }
 
   Widget _buildFilterChips() {

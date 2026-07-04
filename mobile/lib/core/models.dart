@@ -387,12 +387,16 @@ class UserDashboard {
   final List<DepositSession> recentSessions;
   final List<CampaignInfo> campaigns;
   final List<RewardLedgerEntry> recentLedger;
+  final bool isTravelAgent;
+  final int pointsToRupiah;
 
   UserDashboard({
     required this.balance,
     required this.recentSessions,
     required this.campaigns,
     required this.recentLedger,
+    this.isTravelAgent = false,
+    this.pointsToRupiah = 0,
   });
 
   factory UserDashboard.fromJson(Map<String, dynamic> json) {
@@ -409,6 +413,8 @@ class UserDashboard {
       recentLedger: (json['recentLedger'] as List? ?? [])
           .map((e) => RewardLedgerEntry.fromJson(e as Map<String, dynamic>))
           .toList(),
+      isTravelAgent: json['isTravelAgent'] as bool? ?? false,
+      pointsToRupiah: (json['pointsToRupiah'] as num?)?.toInt() ?? 0,
     );
   }
 }
