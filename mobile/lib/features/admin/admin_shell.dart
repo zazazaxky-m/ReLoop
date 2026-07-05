@@ -390,8 +390,8 @@ const _adminMobile = [
     shortLabel: 'Beranda',
   ),
   _AdminNavItem('Mesin', Icons.recycling_outlined, '/admin/machines'),
-  _AdminNavItem('Pickup', Icons.local_shipping_outlined, '/admin/pickups'),
   _AdminNavItem('Scan', Icons.qr_code_scanner_outlined, '/scan'),
+  _AdminNavItem('Pickup', Icons.local_shipping_outlined, '/admin/pickups'),
   _AdminNavItem('Lainnya', Icons.grid_view_outlined, '__more__'),
 ];
 
@@ -408,8 +408,8 @@ const _superadminMobile = [
     '/superadmin/organizations',
     shortLabel: 'Org',
   ),
-  _AdminNavItem('Mesin', Icons.recycling_outlined, '/superadmin/machines'),
   _AdminNavItem('Scan', Icons.qr_code_scanner_outlined, '/scan'),
+  _AdminNavItem('Mesin', Icons.recycling_outlined, '/superadmin/machines'),
   _AdminNavItem('Lainnya', Icons.grid_view_outlined, '__more__'),
 ];
 

@@ -7,7 +7,7 @@ class ApiClient {
   static String _baseUrl = 'http://localhost:3000';
   static Dio? dioForNotification;
   late final Dio dio;
-  late final CookieJar _cookieJar;
+  CookieJar? _cookieJar;
 
   ApiClient({String? baseUrl}) {
     _baseUrl = baseUrl ?? _baseUrl;
@@ -25,11 +25,18 @@ class ApiClient {
   }
 
   Future<void> _initCookies() async {
-    final dir = await getApplicationDocumentsDirectory();
-    _cookieJar = PersistCookieJar(
-      storage: FileStorage('${dir.path}/.cookies'),
-    );
-    dio.interceptors.add(CookieManager(_cookieJar));
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      _cookieJar = PersistCookieJar(
+        storage: FileStorage('${dir.path}/.cookies'),
+      );
+    } catch (_) {
+      // Fallback to in-memory cookie jar for tests or environments without path_provider
+      _cookieJar = CookieJar();
+    }
+    if (_cookieJar != null) {
+      dio.interceptors.add(CookieManager(_cookieJar!));
+    }
     dio.interceptors.add(InterceptorsWrapper(
       onError: (error, handler) {
         handler.next(error);
@@ -60,7 +67,7 @@ class ApiClient {
   }
 
   Future<void> clearCookies() async {
-    await _cookieJar.deleteAll();
+    await _cookieJar?.deleteAll();
   }
 
   static String getErrorMessage(Object error, {bool includeDetails = false}) {

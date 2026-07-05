@@ -79,7 +79,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
         content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nama', hintText: 'wajib')),
           const SizedBox(height: 10),
-          DropdownButtonFormField<String>(value: unit, isExpanded: true, decoration: const InputDecoration(labelText: 'Unit'),
+          DropdownButtonFormField<String>(initialValue: unit, isExpanded: true, decoration: const InputDecoration(labelText: 'Unit'),
             items: const [DropdownMenuItem(value: 'ITEM', child: Text('ITEM (per pcs)')), DropdownMenuItem(value: 'KG', child: Text('KG (timbang)'))],
             onChanged: (v) => setSt(() => unit = v ?? 'ITEM')),
           const SizedBox(height: 10),
@@ -157,13 +157,13 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
       builder: (ctx) => StatefulBuilder(builder: (ctx, setSt) => AlertDialog(
         title: Text('Tarif Baru'),
         content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-          DropdownButtonFormField<String>(value: wasteTypeId, isExpanded: true, decoration: const InputDecoration(labelText: 'Jenis Sampah'),
+          DropdownButtonFormField<String>(initialValue: wasteTypeId, isExpanded: true, decoration: const InputDecoration(labelText: 'Jenis Sampah'),
             items: _wasteTypes.where((w) => w['active'] == true).map((w) => DropdownMenuItem(value: (w['id'] as String?) ?? '', child: Text((w['name'] as String?) ?? ''))).toList(),
             onChanged: (v) => setSt(() => wasteTypeId = v ?? '')),
           const SizedBox(height: 10),
           TextField(controller: pointsCtrl, decoration: const InputDecoration(labelText: 'Poin per unit', hintText: 'wajib'), keyboardType: TextInputType.number),
           const SizedBox(height: 10),
-          DropdownButtonFormField<String>(value: unit, isExpanded: true, decoration: const InputDecoration(labelText: 'Unit'),
+          DropdownButtonFormField<String>(initialValue: unit, isExpanded: true, decoration: const InputDecoration(labelText: 'Unit'),
             items: const [
               DropdownMenuItem(value: 'ITEM', child: Text('ITEM (per pcs)')),
               DropdownMenuItem(value: 'KG', child: Text('KG (per kilogram)')),
@@ -175,7 +175,7 @@ class _AdminWasteTypesScreenState extends State<AdminWasteTypesScreen> with Sing
           TextField(controller: maxWeightCtrl, decoration: const InputDecoration(labelText: 'Berat Max (Gram)', hintText: 'opsional'), keyboardType: TextInputType.number),
           const SizedBox(height: 10),
           DropdownButtonFormField<String?>(
-            value: campaignId,
+            initialValue: campaignId,
             isExpanded: true,
             decoration: const InputDecoration(labelText: 'Scope Campaign'),
             items: [

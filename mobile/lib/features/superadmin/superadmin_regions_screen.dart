@@ -450,7 +450,7 @@ class _RegionFormState extends State<_RegionForm> {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
-            value: _type,
+            initialValue: _type,
             items: _types
                 .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                 .toList(),
@@ -470,7 +470,7 @@ class _RegionFormState extends State<_RegionForm> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
-            value: _parentId,
+            initialValue: _parentId,
             items: [
               const DropdownMenuItem(value: null, child: Text('- Tidak ada -')),
               ...widget.regions.map(

@@ -290,8 +290,9 @@ class _UserCard extends StatelessWidget {
                   DropdownMenuItem(value: 'USER', child: Text('USER')),
                 ],
                 onChanged: (val) {
-                  if (val != null && val != row['role'])
+                  if (val != null && val != row['role']) {
                     onUpdate({'role': val});
+                  }
                 },
                 isDense: true,
                 underline: const SizedBox(),
@@ -308,8 +309,9 @@ class _UserCard extends StatelessWidget {
                   ),
                 ],
                 onChanged: (val) {
-                  if (val != null && val != row['status'])
+                  if (val != null && val != row['status']) {
                     onUpdate({'status': val});
+                  }
                 },
                 isDense: true,
                 underline: const SizedBox(),
@@ -344,8 +346,9 @@ class _UserFormState extends State<_UserForm> {
   final _roles = ["SUPERADMIN", "ADMIN", "PENGEPUL", "USER"];
 
   Future<void> _save() async {
-    if (_name.text.isEmpty || _email.text.isEmpty || _password.text.isEmpty)
+    if (_name.text.isEmpty || _email.text.isEmpty || _password.text.isEmpty) {
       return;
+    }
     setState(() => _saving = true);
     try {
       await context.read<ApiClient>().post(
@@ -417,7 +420,7 @@ class _UserFormState extends State<_UserForm> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _role,
+            initialValue: _role,
             items: _roles
                 .map((r) => DropdownMenuItem(value: r, child: Text(r)))
                 .toList(),
@@ -429,7 +432,7 @@ class _UserFormState extends State<_UserForm> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
-            value: _organizationId,
+            initialValue: _organizationId,
             items: [
               DropdownMenuItem(value: null, child: Text('- Tidak ada -')),
               ...widget.organizations.map(

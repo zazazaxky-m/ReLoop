@@ -23,10 +23,11 @@ void main() {
 
   group('BuildEnvironment', () {
     test('has all expected values', () {
-      expect(BuildEnvironment.values.length, 3);
+      expect(BuildEnvironment.values.length, 4);
       expect(BuildEnvironment.values, contains(BuildEnvironment.development));
       expect(BuildEnvironment.values, contains(BuildEnvironment.staging));
       expect(BuildEnvironment.values, contains(BuildEnvironment.production));
+      expect(BuildEnvironment.values, contains(BuildEnvironment.test));
     });
   });
 }

@@ -66,10 +66,7 @@ class _SuperadminDashboardScreenState extends State<SuperadminDashboardScreen> {
 
   Widget _body() {
     if (_data == null && _error == null) {
-      return ListView(
-        padding: const EdgeInsets.all(16),
-        children: const [SkeletonDashboard()],
-      );
+      return const SkeletonDashboard();
     }
     if (_error != null) {
       return _ErrorState(message: _error!, onRetry: _load);

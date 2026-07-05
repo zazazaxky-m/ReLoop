@@ -74,7 +74,7 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButtonFormField<String>(
-                value: machineId,
+                initialValue: machineId,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Mesin'),
                 items: [
@@ -88,7 +88,7 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: reason,
+                initialValue: reason,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Alasan'),
                 items: const [
@@ -101,7 +101,7 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<int>(
-                value: priority,
+                initialValue: priority,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Prioritas'),
                 items: List.generate(6, (i) => DropdownMenuItem(value: i, child: Text('P$i'))),
@@ -144,7 +144,7 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
         builder: (ctx, setSt) => AlertDialog(
           title: Text('Tugaskan Pengepul'),
           content: DropdownButtonFormField<String>(
-            value: collectorId,
+            initialValue: collectorId,
             isExpanded: true,
             decoration: const InputDecoration(labelText: 'Pengepul'),
             items: [

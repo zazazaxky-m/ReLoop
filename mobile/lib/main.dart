@@ -15,7 +15,7 @@ import 'services/offline_service.dart';
 import 'services/background_sync_service.dart';
 import 'theme/app_theme.dart';
 
-void main() async {
+Future<void> main({ApiClient? injectedApiClient}) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Hive.initFlutter();
@@ -42,7 +42,7 @@ void main() async {
 
   final connectivity = ConnectivityProvider();
 
-  final apiClient = ApiClient(baseUrl: Environment.apiBaseUrl);
+  final apiClient = injectedApiClient ?? ApiClient(baseUrl: Environment.apiBaseUrl);
   final authProvider = AuthProvider(apiClient);
   final themeProvider = ThemeProvider();
   final notifService = NotificationService();

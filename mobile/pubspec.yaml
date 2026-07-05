@@ -48,6 +48,8 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_launcher_icons: ^0.14.3
+  mocktail: ^1.0.4
+  network_image_mock: ^2.1.1
 
 flutter_launcher_icons:
   android: true
@@ -62,5 +64,6 @@ flutter:
     - .env.development
     - .env.staging
     - .env.production
+    - .env.test
     - assets/icon/
     - assets/images/

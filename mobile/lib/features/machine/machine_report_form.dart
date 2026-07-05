@@ -128,7 +128,7 @@ class _MachineReportFormState extends State<MachineReportForm> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _issueType,
+                initialValue: _issueType,
                 decoration: const InputDecoration(
                   hintText: 'Pilih jenis masalah',
                   prefixIcon: Icon(Icons.warning_amber_rounded),

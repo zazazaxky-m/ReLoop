@@ -1,6 +1,6 @@
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-enum BuildEnvironment { development, staging, production }
+enum BuildEnvironment { development, staging, production, test }
 
 class Environment {
   static BuildEnvironment current = BuildEnvironment.development;
@@ -11,6 +11,7 @@ class Environment {
 
   static bool get isProduction => current == BuildEnvironment.production;
   static bool get isDevelopment => current == BuildEnvironment.development;
+  static bool get isTest => current == BuildEnvironment.test;
 
   static Future<void> load(BuildEnvironment env) async {
     current = env;
@@ -23,6 +24,9 @@ class Environment {
         break;
       case BuildEnvironment.production:
         await dotenv.load(fileName: '.env.production');
+        break;
+      case BuildEnvironment.test:
+        await dotenv.load(fileName: '.env.test');
         break;
     }
   }

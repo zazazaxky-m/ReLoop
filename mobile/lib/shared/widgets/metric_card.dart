@@ -159,7 +159,7 @@ class MetricCard extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              if (trailing != null) trailing!,
+              ?trailing,
             ],
           ),
           SizedBox(height: compact ? 10 : 14),

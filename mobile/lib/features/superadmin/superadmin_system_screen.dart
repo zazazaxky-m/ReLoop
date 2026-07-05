@@ -124,8 +124,9 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
 
         for (final entry in config.entries) {
           if (entry.key == 'landing_hero_slides' ||
-              entry.key == 'mobile_hero_slides')
+              entry.key == 'mobile_hero_slides') {
             continue;
+          }
           _controllers.putIfAbsent(
             entry.key,
             () => TextEditingController(text: entry.value.toString()),

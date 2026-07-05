@@ -14,6 +14,24 @@ iPhone, iPad, serta tablet Android.
   redemption, keamanan, audit, konfigurasi, dan laporan sesuai RBAC backend.
 - Navigasi bawah untuk ponsel dan navigation rail untuk tablet.
 
+## Arsitektur
+
+- **State Management**: Menggunakan `Provider` untuk state global (seperti `AuthProvider`, `ConnectivityProvider`).
+- **Routing**: Menggunakan `go_router` untuk navigasi berbasis URL dan perlindungan rute dinamis (RBAC redirect).
+- **API Client**: Menggunakan `Dio` dengan *Cookie Manager* untuk memelihara sesi JWT antara Flutter dan Next.js.
+- **Penyimpanan Lokal**: Menggunakan `flutter_secure_storage` untuk data sensitif dan `hive` untuk *caching* *offline* (seperti profil Pengepul).
+
+## Environment Variables
+
+Aplikasi menggunakan paket `flutter_dotenv` untuk memuat URL backend sesuai *environment*. Tersedia file:
+- `.env.development`
+- `.env.staging`
+- `.env.production`
+- `.env.test`
+
+Secara *default*, menjalankan `flutter run` tanpa argumen akan membaca `.env.development`.
+Untuk build *production*, Anda dapat mengatur target variabel atau menyesuaikan `.env.production`.
+
 ## Menjalankan
 
 ```powershell
