@@ -11,6 +11,7 @@ const eslintConfig = [
       "next-env.d.ts",
       "prisma/generated/**",
       "generated/**",
+      "mobile/**",
     ],
   },
   ...nextCoreWebVitals,

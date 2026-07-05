@@ -10,6 +10,17 @@ Digital waste management platform for users, organizations, collectors, and syst
 - Auth: Custom credentials with `jose` JWT in an httpOnly cookie + `bcryptjs`
 - Validation: `zod`
 
+## Struktur Proyek & Dokumentasi
+
+Repositori ini adalah sebuah *monorepo* sederhana yang berisi Web Dashboard, Realtime Server, dan Mobile App. 
+Silakan merujuk ke dokumen berikut untuk detail pada masing-masing komponen:
+- 📱 [**Mobile App (Flutter)**](mobile/README.md) - Aplikasi pengguna, pengepul, dan admin.
+- 📖 [**Panduan Alur Bisnis & Role**](docs/business_logic_and_roles.md) - Cara kerja sistem di lapangan.
+- 📖 [**Manual Kepatuhan Wisata (Tourism MVP)**](docs/tourism-compliance-user-manual.md) - Panduan fitur agen perjalanan & Trash Bag QR.
+- 📖 [**Mobile API & Sinkronisasi**](docs/mobile-api.md) - Kontrak integrasi API antara backend dan mobile.
+- 📖 [**Panduan Setup Mesin Kiosk (RVM)**](docs/kiosk-setup-guide.md) - Alur operasional layar mesin cerdas.
+- 📖 [**Panduan Buku Besar (Ledger)**](docs/database-ledger-guide.md) - Penjelasan teknis mengenai arus keluar-masuk poin.
+
 ## Prerequisites
 
 - Node.js 20+

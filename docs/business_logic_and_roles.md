@@ -30,6 +30,24 @@ Secara sederhana, pergerakan sampah dan pergerakan uang bekerja berlawanan arah:
 *   **Fisik Sampah:** `User` ➡️ `Admin (Tempat Wisata)` ➡️ `Pengepul` ➡️ `Pabrik Daur Ulang`
 *   **Perputaran Uang:** `Pabrik Daur Ulang` ➡️ `Pengepul` ➡️ `Admin (Tempat Wisata)` ➡️ `User`
 
+```mermaid
+flowchart LR
+    subgraph Supply Chain
+        A[User/Wisatawan] -->|Setor Sampah| B(Admin/Tempat Wisata)
+        B -->|Pickup Bulk| C(Pengepul)
+        C -->|Jual Partai Besar| D{Pabrik Daur Ulang}
+        
+        D -.->|Uang Pembelian| C
+        C -.->|Uang Beli Bulk| B
+        B -.->|Reward/Poin/Uang| A
+    end
+    
+    style A fill:#4ade80,stroke:#166534
+    style B fill:#facc15,stroke:#854d0e
+    style C fill:#60a5fa,stroke:#1e3a8a
+    style D fill:#f87171,stroke:#991b1b
+```
+
 ---
 
 ## 3. Fitur Utama & Alur Penggunaan (Use Cases)
