@@ -565,21 +565,26 @@ async function handleAcceptance(
   let status: "ACCEPTED" | "REVIEW" | "REJECTED" = "ACCEPTED";
   let reason = "ACCEPTED";
   let ledgerStatus: "AVAILABLE" | "PENDING" = "AVAILABLE";
+  let complianceMultiplier = 1.0;
 
   if (!fusion.valid) {
     status = "REJECTED";
     reason = fusion.reasonCode ?? "WEIGHT_INVALID";
+    complianceMultiplier = 0.0;
   } else if (sensorAnomaly || item.externalFraudFlag || session.status === "REVIEW") {
     status = "REVIEW";
     reason = sensorAnomaly ?? "ANOMALY_REVIEW";
     ledgerStatus = "PENDING";
+    complianceMultiplier = 0.5;
   }
 
   const multiplier = session.campaign?.rewardMultiplier ?? 1;
   const points = rate?.pointsPerItem ?? item.wasteType.defaultRewardPerItem ?? 0;
+  const baseRewardAmount = computeRewardAmount(points, item.quantity, multiplier);
+  
   const rewardAmount =
     status === "ACCEPTED" || status === "REVIEW"
-      ? computeRewardAmount(points, item.quantity, multiplier)
+      ? Math.floor(baseRewardAmount * complianceMultiplier)
       : 0;
 
   await tx.depositItem.update({
@@ -588,6 +593,8 @@ async function handleAcceptance(
       status,
       validationReasonCode: reason,
       rewardRateId: rate?.id ?? null,
+      baseRewardAmount,
+      complianceMultiplier,
       rewardAmount,
       acceptedAt: status !== "REJECTED" ? new Date() : null,
       acceptanceEventId,

@@ -69,17 +69,6 @@ export async function POST(req: Request) {
       else finalConditionStatus = "PARTIAL";
     }
 
-    const rewardPerBag = data.rewardPerBag ?? TRASH_BAG_REWARD_PER_BAG;
-    let rewardAmount = 0;
-    if (trip.campaign.rewardMode === "MONEY_REWARD" && data.validationStage === "CHECK_OUT" && trip.userId) {
-      if (data.bags && data.bags.length > 0) {
-        const rewardableBags = data.bags.filter(b => isRewardableCondition(b.status)).length;
-        rewardAmount = rewardableBags * rewardPerBag;
-      } else if (isRewardableCondition(finalConditionStatus) && finalReturnedBagCount > 0) {
-        rewardAmount = finalReturnedBagCount * rewardPerBag;
-      }
-    }
-
     const compliance = calculateCompliance({
       stage: data.validationStage,
       appCompleted: data.appCompleted,
@@ -87,6 +76,21 @@ export async function POST(req: Request) {
       returnedBagCount: finalReturnedBagCount,
       conditionStatus: finalConditionStatus,
     });
+
+    const rewardPerBag = data.rewardPerBag ?? TRASH_BAG_REWARD_PER_BAG;
+    let baseRewardAmount = 0;
+    let rewardAmount = 0;
+    if (trip.campaign.rewardMode === "MONEY_REWARD" && data.validationStage === "CHECK_OUT" && trip.userId) {
+      if (data.bags && data.bags.length > 0) {
+        const rewardableBags = data.bags.filter(b => isRewardableCondition(b.status)).length;
+        baseRewardAmount = rewardableBags * rewardPerBag;
+      } else if (isRewardableCondition(finalConditionStatus) && finalReturnedBagCount > 0) {
+        baseRewardAmount = finalReturnedBagCount * rewardPerBag;
+      }
+      
+      const complianceMultiplier = compliance.score / 100.0;
+      rewardAmount = Math.floor(baseRewardAmount * complianceMultiplier);
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       if (data.bags && data.bags.length > 0) {

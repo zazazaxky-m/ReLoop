@@ -581,6 +581,8 @@ model DepositItem {
   barcodeValue         String?
   rewardRateId         String?
   rewardRate           RewardRate?       @relation(fields: [rewardRateId], references: [id])
+  baseRewardAmount     Int               @default(0)
+  complianceMultiplier Float             @default(1.0)
   rewardAmount         Int               @default(0)
   status               DepositItemStatus @default(PENDING)
   source               ItemSource        @default(PYTHON_SIMULATOR)

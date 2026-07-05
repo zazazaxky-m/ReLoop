@@ -480,6 +480,24 @@ class _WalletScreenState extends State<WalletScreen> {
                                           fontSize: 12,
                                         ),
                                       ),
+                                    if (entry.complianceMultiplier != null && entry.complianceMultiplier! < 1.0)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.warning_amber_rounded, size: 12, color: ReLoopColors.warning),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              'Denda Kepatuhan: -${(100 - (entry.complianceMultiplier! * 100)).toInt()}% (Sblm: Rp ${_fmt(entry.baseRewardAmount?.abs() ?? 0)})',
+                                              style: const TextStyle(
+                                                color: ReLoopColors.warning,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),

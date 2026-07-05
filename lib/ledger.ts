@@ -192,6 +192,8 @@ export async function getLedgerHistory(
         select: {
           wasteType: { select: { name: true } },
           status: true,
+          baseRewardAmount: true,
+          complianceMultiplier: true,
         },
       },
       session: {

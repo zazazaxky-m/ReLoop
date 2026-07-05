@@ -230,6 +230,8 @@ class DepositItem {
   final int? measuredWeightGrams;
   final String? aiDetectedType;
   final double? aiConfidence;
+  final int? baseRewardAmount;
+  final double? complianceMultiplier;
   final int? rewardAmount;
   final String status;
   final String source;
@@ -243,6 +245,8 @@ class DepositItem {
     this.measuredWeightGrams,
     this.aiDetectedType,
     this.aiConfidence,
+    this.baseRewardAmount,
+    this.complianceMultiplier,
     this.rewardAmount,
     this.status = 'PENDING',
     this.source = 'MACHINE',
@@ -258,6 +262,8 @@ class DepositItem {
       measuredWeightGrams: (json['measuredWeightGrams'] as num?)?.toInt(),
       aiDetectedType: json['aiDetectedType'] as String?,
       aiConfidence: (json['aiConfidence'] as num?)?.toDouble(),
+      baseRewardAmount: (json['baseRewardAmount'] as num?)?.toInt(),
+      complianceMultiplier: (json['complianceMultiplier'] as num?)?.toDouble(),
       rewardAmount: (json['rewardAmount'] as num?)?.toInt(),
       status: json['status'] as String? ?? 'PENDING',
       source: json['source'] as String? ?? 'MACHINE',
@@ -328,6 +334,8 @@ class RewardLedgerEntry {
   final String createdAt;
   final String? wasteTypeName;
   final String? machineName;
+  final int? baseRewardAmount;
+  final double? complianceMultiplier;
 
   RewardLedgerEntry({
     required this.id,
@@ -342,6 +350,8 @@ class RewardLedgerEntry {
     required this.createdAt,
     this.wasteTypeName,
     this.machineName,
+    this.baseRewardAmount,
+    this.complianceMultiplier,
   });
 
   factory RewardLedgerEntry.fromJson(Map<String, dynamic> json) {
@@ -358,6 +368,8 @@ class RewardLedgerEntry {
       createdAt: json['createdAt'] as String? ?? '',
       wasteTypeName: json['depositItem']?['wasteType']?['name'] as String?,
       machineName: json['session']?['machine']?['name'] as String?,
+      baseRewardAmount: (json['depositItem']?['baseRewardAmount'] as num?)?.toInt(),
+      complianceMultiplier: (json['depositItem']?['complianceMultiplier'] as num?)?.toDouble(),
     );
   }
 }
