@@ -6,6 +6,7 @@ import { getMinRedemption } from "@/lib/config";
 import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 import { Clock, Wallet } from "@/components/ui/icons";
 import { formatRupiah } from "@/lib/format";
+import { displayUserField } from "@/lib/display-user";
 import { RedemptionQueue, type RedemptionAdminRow } from "@/components/admin/RedemptionQueue";
 
 export const metadata: Metadata = { title: "Redemption & Payout" };
@@ -49,8 +50,8 @@ export default async function SuperadminRedemptionsPage({
     const acc = r.payoutAccountId ? accById.get(r.payoutAccountId) : null;
     return {
       id: r.id,
-      userName: r.user.name,
-      userEmail: r.user.email,
+      userName: displayUserField(r.user.name) ?? "",
+      userEmail: displayUserField(r.user.email) ?? "",
       amount: r.amount,
       provider: r.provider,
       accountIdentifier: acc?.accountIdentifier ?? null,

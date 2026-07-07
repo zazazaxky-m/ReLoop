@@ -53,9 +53,13 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
             }`}
           >
             {slide.imageUrl ? (
-              <div
-                className="absolute inset-0 bg-cover bg-center"
-                style={{ backgroundImage: `url("${slide.imageUrl.replaceAll('"', "%22")}")` }}
+              // eslint-disable-next-line @next/next/no-img-element -- Dynamic admin-managed hero URLs are already served/optimized by their source.
+              <img
+                src={slide.imageUrl}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover"
+                loading={index === 0 ? "eager" : "lazy"}
+                decoding="async"
               />
             ) : (
               <>

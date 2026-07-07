@@ -60,6 +60,7 @@ function withSecurityHeaders(response: NextResponse, nonce: string) {
     nonce,
     hsts: process.env.NODE_ENV === "production",
     allowUnsafeEval: process.env.NODE_ENV !== "production",
+    allowUnsafeInlineStyles: process.env.NODE_ENV !== "production",
   })) {
     response.headers.set(header.key, header.value);
   }

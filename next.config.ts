@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
 
   reactStrictMode: true,
 
-  allowedDevOrigins: ["192.168.0.107"],
+  allowedDevOrigins: ["192.168.0.107", "10.8.0.3"],
 
   output: "standalone",
 

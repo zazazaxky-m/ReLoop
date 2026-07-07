@@ -10,13 +10,20 @@ export const HSTS_HEADER = {
 
 
 
-function buildCsp(nonce: string, options?: { allowUnsafeEval?: boolean }): string {
+function buildCsp(
+  nonce: string,
+  options?: { allowUnsafeEval?: boolean; allowUnsafeInlineStyles?: boolean },
+): string {
 
   const scriptSrc = options?.allowUnsafeEval
 
     ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval'`
 
     : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`;
+
+  const styleSrc = options?.allowUnsafeInlineStyles
+    ? `style-src 'self' 'nonce-${nonce}' 'unsafe-inline'`
+    : `style-src 'self' 'nonce-${nonce}'`;
 
   return [
 
@@ -32,7 +39,7 @@ function buildCsp(nonce: string, options?: { allowUnsafeEval?: boolean }): strin
 
     scriptSrc,
 
-    `style-src 'self' 'nonce-${nonce}'`,
+    styleSrc,
 
     "img-src 'self' data: blob: https:",
 
@@ -53,6 +60,8 @@ export function buildSecurityHeaders(options?: {
   hsts?: boolean;
 
   allowUnsafeEval?: boolean;
+
+  allowUnsafeInlineStyles?: boolean;
 
   nonce?: string;
 
@@ -80,7 +89,10 @@ export function buildSecurityHeaders(options?: {
 
       key: "Content-Security-Policy",
 
-      value: buildCsp(nonce, { allowUnsafeEval: options?.allowUnsafeEval }),
+      value: buildCsp(nonce, {
+        allowUnsafeEval: options?.allowUnsafeEval,
+        allowUnsafeInlineStyles: options?.allowUnsafeInlineStyles,
+      }),
 
     });
 

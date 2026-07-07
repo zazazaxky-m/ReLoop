@@ -62,6 +62,7 @@ export default async function Home() {
               width={138}
               height={41}
               priority
+              loading="eager"
               className="h-10 w-auto"
             />
           </Link>

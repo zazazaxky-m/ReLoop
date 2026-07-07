@@ -16,13 +16,19 @@ export function ThemeToggle({ className }: Props) {
   useEffect(() => setMounted(true), []);
 
   const isDark = resolvedTheme === "dark";
+  const label = mounted
+    ? isDark
+      ? "Aktifkan mode terang"
+      : "Aktifkan mode gelap"
+    : "Ubah mode tema";
+  const title = mounted ? (isDark ? "Mode terang" : "Mode gelap") : "Tema";
 
   return (
     <button
       type="button"
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      aria-label={isDark ? "Aktifkan mode terang" : "Aktifkan mode gelap"}
-      title={isDark ? "Mode terang" : "Mode gelap"}
+      aria-label={label}
+      title={title}
       className={cn(
         "flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface-soft text-muted shadow-sm transition-colors hover:bg-surface hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:hover:bg-surface dark:hover:text-brand-400",
         className,
