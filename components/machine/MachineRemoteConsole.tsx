@@ -63,7 +63,9 @@ export function MachineRemoteConsole({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-    const timer = window.setInterval(() => void load(), 2000);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 2000);
     return () => window.clearInterval(timer);
   }, [load]);
 

@@ -6,7 +6,6 @@ import { prisma } from "@/lib/prisma";
 import { isCampaignEligible } from "@/lib/campaign";
 import { formatRewardPoints } from "@/lib/reward-points";
 import {
-  Button,
   Card,
   CardContent,
   CardHeader,
@@ -16,6 +15,7 @@ import {
   PageHeader,
   QuickAction,
   StatusBadge,
+  buttonVariants,
 } from "@/components/ui";
 import {
   ArrowUpRight,
@@ -69,11 +69,9 @@ export default async function UserDashboardPage() {
         title={`Halo, ${user.name.split(" ")[0]}!`}
         description="Pantau aktivitas setor, saldo reward, dan program yang sedang berlangsung."
         actions={
-          <Link href="/scan">
-            <Button>
+          <Link href="/scan" className={buttonVariants()}>
               <QrCode />
               Scan Mesin
-            </Button>
           </Link>
         }
       />
@@ -160,11 +158,9 @@ export default async function UserDashboardPage() {
                 title="Belum ada sesi setor"
                 description="Mulai setor sampah pertama Anda dengan memindai QR pada mesin ReLoop terdekat."
                 action={
-                  <Link href="/scan">
-                    <Button>
+                  <Link href="/scan" className={buttonVariants()}>
                       <QrCode />
                       Scan mesin sekarang
-                    </Button>
                   </Link>
                 }
                 className="min-h-0 border-0 bg-transparent shadow-none"

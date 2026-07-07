@@ -2,7 +2,6 @@ import Link from "next/link";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import {
-  Button,
   Card,
   CardContent,
   CardHeader,
@@ -11,6 +10,7 @@ import {
   PageHeader,
   QuickAction,
   StatusBadge,
+  buttonVariants,
 } from "@/components/ui";
 import { FileText, Megaphone, Recycle, Truck, Users } from "@/components/ui/icons";
 
@@ -50,8 +50,8 @@ export default async function AdminDashboardPage() {
         title="Dashboard Admin"
         description="Pantau mesin, pickup, dan aktivitas operasional organisasi."
         actions={
-          <Link href="/dashboard/admin/machines">
-            <Button variant="secondary">Kelola Mesin</Button>
+          <Link href="/dashboard/admin/machines" className={buttonVariants({ variant: "secondary" })}>
+            Kelola Mesin
           </Link>
         }
       />

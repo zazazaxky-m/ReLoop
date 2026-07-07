@@ -8,7 +8,7 @@ export default function AuthLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="h-dvh overflow-hidden bg-background lg:grid lg:grid-cols-[minmax(420px,44%)_1fr]">
+    <div className="min-h-dvh bg-background lg:grid lg:grid-cols-[minmax(420px,44%)_1fr]">
       <aside className="relative hidden h-dvh overflow-hidden bg-brand-950 p-10 text-white lg:flex lg:flex-col lg:justify-between xl:p-14">
         <div className="absolute -bottom-44 -left-32 h-96 w-96 rounded-full border-[64px] border-lime-300/10" />
         <div className="absolute -right-28 -top-28 h-96 w-96 rounded-full bg-emerald-700/20 blur-3xl" />
@@ -48,7 +48,7 @@ export default function AuthLayout({
         </p>
       </aside>
 
-      <main className="relative flex h-dvh min-h-0 flex-col overflow-hidden">
+      <main className="relative flex min-h-dvh flex-col overflow-y-auto">
         <div className="absolute inset-x-0 top-0 h-48 bg-gradient-to-b from-brand-100/65 to-transparent dark:from-brand-950/40 lg:hidden" />
 
         <header className="relative flex h-18 items-center px-5 sm:px-8 lg:hidden">
@@ -64,7 +64,7 @@ export default function AuthLayout({
           </Link>
         </header>
 
-        <div className="relative mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col items-center justify-center px-4 py-3 sm:px-10 sm:py-5 lg:px-12 lg:py-6">
+        <div className="relative mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-4 py-6 sm:px-10 sm:py-8 lg:px-12">
           <div className="w-full rounded-[1.5rem] border border-border bg-surface p-5 shadow-[0_24px_70px_rgba(6,78,59,0.1)] dark:shadow-none sm:rounded-[2rem] sm:p-7 lg:p-8">
             {children}
           </div>

@@ -3,6 +3,7 @@ const MACHINE_SIG_MAX_SKEW_SECONDS = 300;
 
 /** Nonces live at least as long as the HMAC replay window. */
 const NONCE_TTL_MS = (MACHINE_SIG_MAX_SKEW_SECONDS + 60) * 1000;
+const isProduction = () => process.env.NODE_ENV === "production";
 
 interface NonceStore {
   consume(key: string): Promise<boolean>;
@@ -51,7 +52,7 @@ class RedisNonceStore implements NonceStore {
       const RedisCtor = mod?.default ?? mod;
       const client = new RedisCtor(this.url, { maxRetriesPerRequest: 1, lazyConnect: false });
       client.on("error", (err: unknown) => {
-        console.error("[machine-nonce] Redis error, falling back to in-memory store:", err);
+        console.error("[machine-nonce] Redis error:", err);
         this.unavailable = true;
         this.client = null;
       });
@@ -59,7 +60,7 @@ class RedisNonceStore implements NonceStore {
       return client;
     } catch (err) {
       console.warn(
-        "[machine-nonce] REDIS_URL is set but ioredis is unavailable; using in-memory nonce store.",
+        "[machine-nonce] REDIS_URL is set but ioredis is unavailable.",
         err,
       );
       this.unavailable = true;
@@ -69,13 +70,13 @@ class RedisNonceStore implements NonceStore {
 
   async consume(key: string): Promise<boolean> {
     const client = await this.getClient();
-    if (!client) return this.fallback.consume(key);
+    if (!client) return isProduction() ? false : this.fallback.consume(key);
     try {
       const result = await client.set(key, "1", "PX", NONCE_TTL_MS, "NX");
       return result === "OK";
     } catch (err) {
-      console.error("[machine-nonce] Redis consume failed, falling back to in-memory store:", err);
-      return this.fallback.consume(key);
+      console.error("[machine-nonce] Redis consume failed:", err);
+      return isProduction() ? false : this.fallback.consume(key);
     }
   }
 }
@@ -90,10 +91,12 @@ const globalForNonce = globalThis as typeof globalThis & {
 
 function getNonceStore(): NonceStore {
   if (!globalForNonce.__reloopNonceStore) {
-    globalForNonce.__reloopNonceStore =
-      process.env.NODE_ENV === "test" || !process.env.REDIS_URL
-        ? new MemoryNonceStore()
-        : new RedisNonceStore(process.env.REDIS_URL);
+    if (isProduction() && !process.env.REDIS_URL) {
+      throw new Error("REDIS_URL is required for production machine replay protection");
+    }
+    globalForNonce.__reloopNonceStore = !process.env.REDIS_URL
+      ? new MemoryNonceStore()
+      : new RedisNonceStore(process.env.REDIS_URL);
   }
   return globalForNonce.__reloopNonceStore;
 }

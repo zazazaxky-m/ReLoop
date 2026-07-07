@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { getClientIp } from "@/lib/client-ip";
+import { verifyMachineRequest } from "@/lib/machine-auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { buildScanUrl, qrDataUrl, rotateToken } from "@/lib/qr";
 
@@ -33,6 +34,18 @@ export async function GET(
       where: { machineCode: code },
     });
     if (!machine) return jsonError(404, "Mesin tidak ditemukan");
+
+    const verdict = await verifyMachineRequest({
+      machineId: machine.id,
+      secret: machine.ingestSecret,
+      timestamp: req.headers.get("x-reloop-timestamp"),
+      nonce: req.headers.get("x-reloop-nonce"),
+      signature: req.headers.get("x-reloop-signature"),
+      rawBody: "",
+    });
+    if (!verdict.ok || req.headers.get("x-reloop-machine") !== machine.machineCode) {
+      return jsonError(401, "Tanda tangan tidak valid");
+    }
 
     let token = machine.qrToken;
     let expiresAt = machine.qrTokenExpiresAt;

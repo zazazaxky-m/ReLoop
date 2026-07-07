@@ -7,17 +7,26 @@ import type { HeroSlide } from "@/lib/hero-slides";
 
 export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
   const [active, setActive] = useState(0);
+  const [userPaused, setUserPaused] = useState(false);
+  const [hoverPaused, setHoverPaused] = useState(false);
   const startX = useRef<number | null>(null);
   const current = slides[active] ?? slides[0];
+  const paused = userPaused || hoverPaused;
 
   useEffect(() => {
-    if (slides.length < 2) return;
+    if (
+      paused ||
+      slides.length < 2 ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
     const timer = window.setInterval(
       () => setActive((index) => (index + 1) % slides.length),
       6500,
     );
     return () => window.clearInterval(timer);
-  }, [slides.length]);
+  }, [paused, slides.length]);
 
   function move(direction: number) {
     setActive((index) => (index + direction + slides.length) % slides.length);
@@ -40,6 +49,10 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
       onPointerCancel={() => {
         startX.current = null;
       }}
+      onMouseEnter={() => setHoverPaused(true)}
+      onMouseLeave={() => setHoverPaused(false)}
+      onFocus={() => setHoverPaused(true)}
+      onBlur={() => setHoverPaused(false)}
     >
       <article className="relative aspect-[4/5] w-full overflow-hidden rounded-[2rem] bg-brand-950 shadow-[0_28px_75px_rgba(6,78,59,0.18)] sm:aspect-[5/4.75] sm:rounded-[2.5rem]">
         {slides.map((slide, index) => (
@@ -88,7 +101,7 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
             <Link
               href={current.href}
               aria-label={`Buka: ${current.title}`}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-lime-300 text-xl text-brand-950 transition-transform hover:scale-105 dark:bg-lime-400"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-lime-300 text-xl text-brand-950 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-200 dark:bg-lime-400"
             >
               <ArrowRight />
             </Link>
@@ -105,7 +118,7 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
                 type="button"
                 aria-label={`Tampilkan slide ${index + 1}`}
                 onClick={() => setActive(index)}
-                className={`h-2 rounded-full transition-all ${
+                className={`h-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
                   active === index
                     ? "w-8 bg-brand-700 dark:bg-brand-500"
                     : "w-2 bg-brand-950/15 hover:bg-brand-950/30 dark:bg-brand-100/15 dark:hover:bg-brand-100/30"
@@ -118,7 +131,7 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
               type="button"
               aria-label="Slide sebelumnya"
               onClick={() => move(-1)}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface text-foreground shadow-sm hover:bg-surface-soft"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface text-foreground shadow-sm hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             >
               <ArrowRight className="rotate-180" />
             </button>
@@ -126,11 +139,18 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
               type="button"
               aria-label="Slide berikutnya"
               onClick={() => move(1)}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface text-foreground shadow-sm hover:bg-surface-soft"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface text-foreground shadow-sm hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             >
               <ArrowRight />
             </button>
           </div>
+          <button
+            type="button"
+            onClick={() => setUserPaused((value) => !value)}
+            className="ml-2 rounded-full px-3 py-2 text-xs font-bold text-muted hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+          >
+            {userPaused ? "Putar" : "Jeda"}
+          </button>
         </div>
       ) : null}
     </div>

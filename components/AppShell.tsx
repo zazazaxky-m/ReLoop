@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useRef,
   useState,
   type ComponentType,
   type SVGProps,
@@ -136,6 +137,8 @@ export function AppShell({
     items.find((item) => isActive(pathname, item)) ?? items[0];
   const CurrentIcon = currentItem?.icon;
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Mobile bottom bar shows a small set of primary destinations; the rest live
   // in the "Lainnya" sheet so the tab bar never needs horizontal scrolling.
@@ -145,9 +148,22 @@ export function AppShell({
 
   useEffect(() => {
     document.body.style.overflow = moreOpen ? "hidden" : "";
+    if (moreOpen) closeButtonRef.current?.focus();
     return () => {
       document.body.style.overflow = "";
     };
+  }, [moreOpen]);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMoreOpen(false);
+        moreButtonRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [moreOpen]);
 
   async function logout() {
@@ -325,12 +341,21 @@ export function AppShell({
             onClick={() => setMoreOpen(false)}
             className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
           />
-          <div className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-10px_40px_rgba(15,23,42,0.18)]">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-more-menu-title"
+            className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-10px_40px_rgba(15,23,42,0.18)]"
+          >
             <div className="sticky top-0 flex items-center justify-between border-b border-border bg-surface px-5 py-3.5">
-              <p className="text-sm font-bold text-foreground">Menu lainnya</p>
+              <p id="mobile-more-menu-title" className="text-sm font-bold text-foreground">Menu lainnya</p>
               <button
+                ref={closeButtonRef}
                 type="button"
-                onClick={() => setMoreOpen(false)}
+                onClick={() => {
+                  setMoreOpen(false);
+                  moreButtonRef.current?.focus();
+                }}
                 aria-label="Tutup menu"
                 className="flex h-10 w-10 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
               >
@@ -358,7 +383,7 @@ export function AppShell({
                   key={item.href}
                   href={item.href}
                   aria-label={item.label}
-                  className="relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1 rounded-lg px-0.5 pb-0.5 text-[10px] font-bold text-brand-700 focus-visible:outline-none dark:text-brand-400"
+                  className="relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1 rounded-lg px-0.5 pb-0.5 text-[10px] font-bold text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-brand-400"
                 >
                   <span className="-mt-6 flex h-13 w-13 items-center justify-center rounded-2xl bg-brand-600 text-2xl text-white shadow-[0_8px_20px_rgba(21,128,61,0.35)] ring-4 ring-surface transition-colors hover:bg-brand-700">
                     <Icon />
@@ -398,6 +423,7 @@ export function AppShell({
 
           {overflowItems.length > 0 ? (
             <button
+              ref={moreButtonRef}
               type="button"
               onClick={() => setMoreOpen(true)}
               aria-haspopup="dialog"

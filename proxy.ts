@@ -28,9 +28,19 @@ const PUBLIC_API_PREFIXES = [
   "/api/machine-media/download/",
 ];
 
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 function isPublicApiPath(pathname: string): boolean {
   if (PUBLIC_API_EXACT.has(pathname)) return true;
   return PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+function isSameOriginUnsafeRequest(req: NextRequest): boolean {
+  if (!UNSAFE_METHODS.has(req.method)) return true;
+  const origin = req.headers.get("origin");
+  if (origin && origin !== req.nextUrl.origin) return false;
+  const site = req.headers.get("sec-fetch-site");
+  return site !== "cross-site";
 }
 
 function getJwtSecret(): Uint8Array {
@@ -78,6 +88,11 @@ export async function proxy(req: NextRequest) {
   if (pathname.startsWith("/api/")) {
     if (isPublicApiPath(pathname)) {
       response = NextResponse.next({ request: { headers: requestHeaders } });
+    } else if (!isSameOriginUnsafeRequest(req)) {
+      response = NextResponse.json(
+        { error: "Permintaan tidak valid" },
+        { status: 403 },
+      );
     } else if (await hasValidSession(req)) {
       response = NextResponse.next({ request: { headers: requestHeaders } });
     } else {

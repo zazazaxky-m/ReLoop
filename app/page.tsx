@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/icons";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 const steps = [
   {
