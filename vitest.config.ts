@@ -6,6 +6,12 @@ export default defineConfig({
     environment: "node",
     include: ["**/*.test.ts"],
     exclude: ["node_modules", ".next"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      include: ["lib/**/*.ts", "app/api/**/*.ts", "proxy.ts"],
+      exclude: ["**/*.test.ts", "node_modules", ".next"],
+    },
   },
   resolve: {
     alias: {
