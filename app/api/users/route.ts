@@ -6,11 +6,13 @@ import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { hashPassword } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { displayUsers } from "@/lib/display-user";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
+import { passwordSchema } from "@/lib/password-policy";
 
 const createSchema = z.object({
   name: z.string().min(2).max(120),
   email: z.string().email(),
-  password: z.string().min(6).max(100),
+  password: passwordSchema.max(100),
   role: z.enum(["SUPERADMIN", "ADMIN", "PENGEPUL", "USER"]),
   organizationId: z.string().nullable().optional(),
   phone: z.string().max(40).optional(),
@@ -22,25 +24,35 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const roleFilter = url.searchParams.get("role") ?? undefined;
 
+    const pagination = parsePagination(url);
+
     const where: Prisma.UserWhereInput = {};
     if (roleFilter) where.role = roleFilter as Prisma.EnumRoleFilter["equals"];
 
-    const users = await prisma.user.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        role: true,
-        status: true,
-        organizationId: true,
-        organization: { select: { name: true } },
-        createdAt: true,
-      },
+    const [total, users] = await Promise.all([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: pagination.skip,
+        take: pagination.take,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          role: true,
+          status: true,
+          organizationId: true,
+          organization: { select: { name: true } },
+          createdAt: true,
+        },
+      }),
+    ]);
+    return jsonOk({
+      users: displayUsers(users),
+      pagination: buildPaginationMeta(total, pagination),
     });
-    return jsonOk({ users: displayUsers(users) });
   } catch (error) {
     return handleApiError(error);
   }

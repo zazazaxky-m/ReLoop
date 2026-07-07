@@ -3,6 +3,7 @@ import { POST } from '@/app/api/auth/register/route';
 import { prisma } from '@/lib/prisma';
 import * as auth from '@/lib/auth';
 import * as audit from '@/lib/audit';
+import * as rateLimit from '@/lib/rate-limit';
 import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/prisma', () => {
@@ -26,15 +27,28 @@ vi.mock('@/lib/prisma', () => {
 vi.mock('@/lib/auth', () => ({
   hashPassword: vi.fn(),
   setSessionCookie: vi.fn(),
+  buildSessionPayload: vi.fn((user) => ({
+    sub: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    organizationId: user.organizationId,
+    tokenVersion: user.tokenVersion,
+  })),
 }));
 
 vi.mock('@/lib/audit', () => ({
   logAudit: vi.fn(),
 }));
 
+vi.mock('@/lib/rate-limit', () => ({
+  checkRateLimit: vi.fn(),
+}));
+
 describe('POST /api/auth/register', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(rateLimit.checkRateLimit).mockReturnValue({ allowed: true } as any);
   });
 
   const makeReq = (body: any) => {
@@ -43,6 +57,15 @@ describe('POST /api/auth/register', () => {
       body: JSON.stringify(body),
     });
   };
+
+  it('fails if rate limit is exceeded (429)', async () => {
+    vi.mocked(rateLimit.checkRateLimit).mockReturnValue({ allowed: false } as any);
+
+    const req = makeReq({ name: 'John Doe', email: 'john@example.com', password: 'password1234', phone: '08123456789' });
+    const res = await POST(req);
+
+    expect(res.status).toBe(429);
+  });
 
   it('fails with validation error (422)', async () => {
     const req = makeReq({ name: 'A', email: 'invalid', password: '123', phone: 'abc' });
@@ -53,7 +76,7 @@ describe('POST /api/auth/register', () => {
   it('fails if email already registered (409)', async () => {
     vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'u1' } as any);
     
-    const req = makeReq({ name: 'John Doe', email: 'john@example.com', password: 'password123', phone: '08123456789' });
+    const req = makeReq({ name: 'John Doe', email: 'john@example.com', password: 'password1234', phone: '08123456789' });
     const res = await POST(req);
     
     expect(res.status).toBe(409);
@@ -67,10 +90,16 @@ describe('POST /api/auth/register', () => {
     
     // We need to access mockTx that we defined in vi.mock
     const { mockTx } = await import('@/lib/prisma') as any;
-    mockTx.user.create.mockResolvedValue({ id: 'u1', name: 'John Doe', email: 'john@example.com', role: 'USER' });
+    mockTx.user.create.mockResolvedValue({
+      id: 'u1',
+      name: 'John Doe',
+      email: 'john@example.com',
+      role: 'USER',
+      tokenVersion: 0,
+    });
     mockTx.travelAgentInvite.findMany.mockResolvedValue([]);
     
-    const req = makeReq({ name: 'John Doe', email: 'john@example.com', password: 'password123', phone: '08123456789' });
+    const req = makeReq({ name: 'John Doe', email: 'john@example.com', password: 'password1234', phone: '08123456789' });
     const res = await POST(req);
     
     expect(res.status).toBe(200);

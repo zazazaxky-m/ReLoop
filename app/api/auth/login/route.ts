@@ -1,11 +1,16 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { setSessionCookie, verifyPassword } from "@/lib/auth";
+import { setSessionCookie, verifyPassword, buildSessionPayload } from "@/lib/auth";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { dashboardPath, type AppRole } from "@/lib/roles";
+import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
+import {
+  requiresMfaAtLogin,
+  signMfaChallenge,
+} from "@/lib/mfa";
 
 const schema = z.object({
   email: z.string().email("Email tidak valid"),
@@ -17,8 +22,8 @@ const RATE_WINDOW_MS = 300_000;
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "unknown";
-    const rl = checkRateLimit(`login:${ip}`, RATE_LIMIT, RATE_WINDOW_MS);
+    const ip = getClientIp(req);
+    const rl = await checkRateLimit(`login:${ip}`, RATE_LIMIT, RATE_WINDOW_MS);
     if (!rl.allowed) {
       return jsonError(429, "Terlalu banyak percobaan login. Coba lagi nanti.");
     }
@@ -52,13 +57,30 @@ export async function POST(req: NextRequest) {
       return jsonError(403, "Akun tidak aktif. Hubungi admin.");
     }
 
-    await setSessionCookie({
-      sub: user.id,
+    if (requiresMfaAtLogin(user.role as AppRole, user.mfaEnabled)) {
+      const challengeToken = await signMfaChallenge(user.id);
+      await logAudit({
+        actorId: user.id,
+        action: "MFA_CHALLENGE_ISSUED",
+        entityType: "User",
+        entityId: user.id,
+        metadata: { ip },
+      });
+      return jsonOk({
+        requiresMfa: true,
+        challengeToken,
+        message: "Masukkan kode dari aplikasi authenticator Anda",
+      });
+    }
+
+    await setSessionCookie(buildSessionPayload({
+      id: user.id,
       email: user.email,
       name: user.name,
       role: user.role as AppRole,
       organizationId: user.organizationId,
-    });
+      tokenVersion: user.tokenVersion,
+    }));
 
     await logAudit({
       actorId: user.id,

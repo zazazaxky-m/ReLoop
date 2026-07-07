@@ -16,7 +16,6 @@ const createSchema = z.object({
   conditionStatus: z.enum(["GOOD", "PARTIAL", "POOR", "NOT_RETURNED"]).optional(),
   appCompleted: z.boolean().default(false),
   notes: z.string().max(500).optional(),
-  rewardPerBag: z.number().int().min(0).max(1_000_000).optional(),
   bags: z.array(z.object({
     id: z.string(),
     status: z.enum(["GOOD", "PARTIAL", "POOR", "NOT_RETURNED"])
@@ -77,7 +76,7 @@ export async function POST(req: Request) {
       conditionStatus: finalConditionStatus,
     });
 
-    const rewardPerBag = data.rewardPerBag ?? TRASH_BAG_REWARD_PER_BAG;
+    const rewardPerBag = TRASH_BAG_REWARD_PER_BAG;
     let baseRewardAmount = 0;
     let rewardAmount = 0;
     if (trip.campaign.rewardMode === "MONEY_REWARD" && data.validationStage === "CHECK_OUT" && trip.userId) {
@@ -94,12 +93,15 @@ export async function POST(req: Request) {
 
     const result = await prisma.$transaction(async (tx) => {
       if (data.bags && data.bags.length > 0) {
-        for (const b of data.bags) {
-          await tx.trashBagAssignment.update({
-            where: { id: b.id },
-            data: { status: b.status, returnedAt: new Date() }
-          });
-        }
+        const returnedAt = new Date();
+        await Promise.all(
+          data.bags.map((b) =>
+            tx.trashBagAssignment.update({
+              where: { id: b.id },
+              data: { status: b.status, returnedAt },
+            }),
+          ),
+        );
       }
 
       const validation = await tx.manualValidation.create({

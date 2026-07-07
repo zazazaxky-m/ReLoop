@@ -31,6 +31,20 @@ class _MapScreenState extends State<MapScreen> {
     _loadAll();
   }
 
+  /// Campaigns have no coordinates of their own in the data model (no
+  /// lat/lng on Campaign or Organization). Rather than pin every campaign
+  /// to the same fabricated point, approximate its location from a machine
+  /// belonging to the same organization when one is on the map, and simply
+  /// omit the marker otherwise instead of showing a misleading location.
+  LatLng? _campaignLocation(CampaignInfo campaign) {
+    if (campaign.organizationId == null) return null;
+    final match = _machines
+        .where((m) => m.organizationId == campaign.organizationId)
+        .firstOrNull;
+    if (match == null) return null;
+    return LatLng(match.latitude!, match.longitude!);
+  }
+
   Future<void> _loadAll() async {
     setState(() {
       _isLoading = true;
@@ -167,9 +181,11 @@ class _MapScreenState extends State<MapScreen> {
                     );
                   }),
                   ..._campaigns.map((c) {
+                    final location = _campaignLocation(c);
+                    if (location == null) return null;
                     final isSelected = _selectedCampaign?.id == c.id;
                     return Marker(
-                      point: const LatLng(-6.2088, 106.8456),
+                      point: location,
                       width: isSelected ? 44 : 36,
                       height: isSelected ? 44 : 36,
                       child: GestureDetector(
@@ -196,7 +212,7 @@ class _MapScreenState extends State<MapScreen> {
                         ),
                       ),
                     );
-                  }),
+                  }).whereType<Marker>(),
                 ],
               ),
             ],

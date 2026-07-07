@@ -2,10 +2,11 @@ import path from "node:path";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 
-export const captureStorageRoot = path.resolve(
-  process.env.CAPTURE_STORAGE_DIR ??
-    path.join(process.cwd(), "data", "private", "machine-captures"),
-);
+const configuredCaptureDir = process.env.CAPTURE_STORAGE_DIR;
+
+export const captureStorageRoot = configuredCaptureDir
+  ? path.resolve(/*turbopackIgnore: true*/ configuredCaptureDir)
+  : path.resolve("data", "private", "machine-captures");
 
 export function resolveCapturePath(relativePath: string) {
   const resolved = path.resolve(captureStorageRoot, relativePath);

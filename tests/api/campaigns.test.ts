@@ -3,11 +3,10 @@ import { GET, POST } from '@/app/api/campaigns/route';
 import { PATCH, DELETE } from '@/app/api/campaigns/[id]/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
-import * as audit from '@/lib/audit';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    campaign: { findMany: vi.fn(), create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    campaign: { findMany: vi.fn(), create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), delete: vi.fn(), count: vi.fn() },
     depositSession: { count: vi.fn() },
     rewardRate: { deleteMany: vi.fn() },
   },
@@ -36,6 +35,7 @@ describe('/api/campaigns endpoints', () => {
   describe('GET', () => {
     it('returns campaigns', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'ADMIN', organizationId: 'org1' } as any);
+      vi.mocked(prisma.campaign.count).mockResolvedValue(1);
       vi.mocked(prisma.campaign.findMany).mockResolvedValue([{ id: 'c1' }] as any);
 
       const res = await GET(makeReq('http://localhost/api/campaigns'));

@@ -181,12 +181,13 @@ export async function settleRedeemLedger(
 
 export async function getLedgerHistory(
   userId: string,
-  limit = 50,
+  options?: { skip?: number; take?: number },
 ) {
   return prisma.rewardLedger.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
-    take: limit,
+    skip: options?.skip,
+    take: options?.take ?? 50,
     include: {
       depositItem: {
         select: {
@@ -205,6 +206,10 @@ export async function getLedgerHistory(
   });
 }
 
+export async function countLedgerHistory(userId: string): Promise<number> {
+  return prisma.rewardLedger.count({ where: { userId } });
+}
+
 /** Ledger rows must never be deleted or have amounts edited. */
 export function assertAppendOnlyPolicy(
   action: "update" | "delete",
@@ -219,3 +224,156 @@ export type LedgerFilter = {
   status?: LedgerStatus;
   entryType?: LedgerEntryType;
 };
+
+// ---------- Financial reconciliation ----------
+
+export interface OrgLiability {
+  organizationId: string | null;
+  organizationName: string;
+  /** EARN entries spendable now (status AVAILABLE). */
+  earnAvailable: number;
+  /** EARN entries still under review (status PENDING). */
+  earnPending: number;
+  /** Signed ADJUST/REVERSE/PENALTY entries (AVAILABLE + PENDING). */
+  adjustments: number;
+  /** What the platform currently owes users tied to this org (spendable). */
+  outstanding: number;
+}
+
+export interface ReconciliationReport {
+  organizations: OrgLiability[];
+  totalEarnAvailable: number;
+  totalEarnPending: number;
+  totalOutstanding: number;
+  /** Ledger REDEEM entries actually paid out (status REDEEMED), positive rupiah. */
+  ledgerRedeemed: number;
+  /** Ledger REDEEM entries reserved but not yet paid (status PENDING), positive rupiah. */
+  ledgerReserved: number;
+  /** Sum of Redemption rows with status SUCCESS. */
+  redemptionSuccessTotal: number;
+  /** Sum of Redemption rows still in flight (REQUESTED/APPROVED/PROCESSING). */
+  redemptionInFlightTotal: number;
+  /** ledgerRedeemed − redemptionSuccessTotal; must be 0 in a healthy system. */
+  redeemedDiscrepancy: number;
+  /** ledgerReserved − redemptionInFlightTotal; must be 0 in a healthy system. */
+  reservedDiscrepancy: number;
+  /** True when either discrepancy is non-zero (needs manual investigation). */
+  hasDiscrepancy: boolean;
+  generatedAt: string;
+}
+
+/**
+ * Builds a platform-wide financial reconciliation:
+ *  - Per-organization outstanding liability from EARN ledger entries.
+ *  - Global payout reconciliation comparing the append-only REDEEM ledger
+ *    against the Redemption request records. REDEEM ledger rows carry no
+ *    organizationId (they are user-level debits), so payout figures are
+ *    reconciled globally rather than per-org.
+ */
+export async function getReconciliationReport(): Promise<ReconciliationReport> {
+  const [earnGroups, adjustGroups, redeemGroups, redemptionGroups, orgs] =
+    await Promise.all([
+      prisma.rewardLedger.groupBy({
+        by: ["organizationId", "status"],
+        where: { entryType: "EARN" },
+        _sum: { amount: true },
+      }),
+      prisma.rewardLedger.groupBy({
+        by: ["organizationId", "status"],
+        where: { entryType: { in: ["ADJUST", "REVERSE", "PENALTY"] } },
+        _sum: { amount: true },
+      }),
+      prisma.rewardLedger.groupBy({
+        by: ["status"],
+        where: { entryType: "REDEEM" },
+        _sum: { amount: true },
+      }),
+      prisma.redemption.groupBy({
+        by: ["status"],
+        _sum: { amount: true },
+      }),
+      prisma.organization.findMany({ select: { id: true, name: true } }),
+    ]);
+
+  const orgNames = new Map(orgs.map((o) => [o.id, o.name]));
+  const liabilityByOrg = new Map<string | null, OrgLiability>();
+
+  const ensureOrg = (organizationId: string | null): OrgLiability => {
+    let row = liabilityByOrg.get(organizationId);
+    if (!row) {
+      row = {
+        organizationId,
+        organizationName:
+          organizationId === null
+            ? "Tanpa organisasi"
+            : orgNames.get(organizationId) ?? "(organisasi dihapus)",
+        earnAvailable: 0,
+        earnPending: 0,
+        adjustments: 0,
+        outstanding: 0,
+      };
+      liabilityByOrg.set(organizationId, row);
+    }
+    return row;
+  };
+
+  for (const g of earnGroups) {
+    const row = ensureOrg(g.organizationId);
+    const sum = g._sum.amount ?? 0;
+    if (g.status === "AVAILABLE") row.earnAvailable += sum;
+    else if (g.status === "PENDING") row.earnPending += sum;
+  }
+
+  for (const g of adjustGroups) {
+    if (g.status !== "AVAILABLE" && g.status !== "PENDING") continue;
+    const row = ensureOrg(g.organizationId);
+    row.adjustments += g._sum.amount ?? 0;
+  }
+
+  const organizations = [...liabilityByOrg.values()].map((row) => ({
+    ...row,
+    // Spendable liability = available earn + available-side adjustments.
+    outstanding: row.earnAvailable + row.adjustments,
+  }));
+  organizations.sort((a, b) => b.outstanding - a.outstanding);
+
+  const totalEarnAvailable = organizations.reduce((s, o) => s + o.earnAvailable, 0);
+  const totalEarnPending = organizations.reduce((s, o) => s + o.earnPending, 0);
+  const totalOutstanding = organizations.reduce((s, o) => s + o.outstanding, 0);
+
+  let ledgerRedeemed = 0;
+  let ledgerReserved = 0;
+  for (const g of redeemGroups) {
+    const sum = g._sum.amount ?? 0; // negative
+    if (g.status === "REDEEMED") ledgerRedeemed += -sum;
+    else if (g.status === "PENDING") ledgerReserved += -sum;
+  }
+
+  let redemptionSuccessTotal = 0;
+  let redemptionInFlightTotal = 0;
+  for (const g of redemptionGroups) {
+    const sum = g._sum.amount ?? 0;
+    if (g.status === "SUCCESS") redemptionSuccessTotal += sum;
+    else if (["REQUESTED", "APPROVED", "PROCESSING"].includes(g.status)) {
+      redemptionInFlightTotal += sum;
+    }
+  }
+
+  const redeemedDiscrepancy = ledgerRedeemed - redemptionSuccessTotal;
+  const reservedDiscrepancy = ledgerReserved - redemptionInFlightTotal;
+
+  return {
+    organizations,
+    totalEarnAvailable,
+    totalEarnPending,
+    totalOutstanding,
+    ledgerRedeemed,
+    ledgerReserved,
+    redemptionSuccessTotal,
+    redemptionInFlightTotal,
+    redeemedDiscrepancy,
+    reservedDiscrepancy,
+    hasDiscrepancy: redeemedDiscrepancy !== 0 || reservedDiscrepancy !== 0,
+    generatedAt: new Date().toISOString(),
+  };
+}

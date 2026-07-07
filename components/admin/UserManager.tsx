@@ -186,8 +186,8 @@ export function UserManager({
                 <FormField label="Email" htmlFor="u-email" required>
                   <Input id="u-email" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} required />
                 </FormField>
-                <FormField label="Password" htmlFor="u-pass" required hint="Min 6 karakter">
-                  <Input id="u-pass" type="text" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} required />
+                <FormField label="Password" htmlFor="u-pass" required hint="Min 12 karakter">
+                  <Input id="u-pass" type="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} required />
                 </FormField>
                 <FormField label="Peran" htmlFor="u-role">
                   <Select id="u-role" value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>

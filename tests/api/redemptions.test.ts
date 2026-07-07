@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { GET, POST } from '@/app/api/redemptions/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
@@ -18,6 +18,7 @@ vi.mock('@/lib/prisma', () => ({
       findMany: vi.fn(),
       findUnique: vi.fn(),
       create: vi.fn(),
+      count: vi.fn(),
     },
     payoutAccount: {
       findMany: vi.fn(),
@@ -65,6 +66,7 @@ describe('Redemptions API - GET', () => {
 
   it('T2: Role USER hanya melihat riwayatnya sendiri', async () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'user_1', role: 'USER' } as any);
+    vi.mocked(prisma.redemption.count).mockResolvedValue(1);
     vi.mocked(prisma.redemption.findMany).mockResolvedValue([
       { id: 'r1', userId: 'user_1', amount: 50000 } as any
     ]);
@@ -85,6 +87,7 @@ describe('Redemptions API - GET', () => {
 
   it('T3: Role SUPERADMIN dapat melihat semua riwayat tanpa batasan userId', async () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin_1', role: 'SUPERADMIN' } as any);
+    vi.mocked(prisma.redemption.count).mockResolvedValue(2);
     vi.mocked(prisma.redemption.findMany).mockResolvedValue([
       { id: 'r1', userId: 'user_1', amount: 50000 } as any,
       { id: 'r2', userId: 'user_2', amount: 20000 } as any
@@ -173,7 +176,7 @@ describe('Redemptions API - POST', () => {
     });
 
     const res = await POST(req);
-    const body = await res.json();
+    await res.json();
 
     expect(res.status).toBe(201);
     // Prisma check transaction should be called

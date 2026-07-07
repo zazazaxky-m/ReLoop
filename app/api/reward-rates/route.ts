@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, assertOrgScope, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 
 const createSchema = z
   .object({
@@ -42,17 +43,23 @@ export async function GET(req: Request) {
           };
     if (activeOnly) where.active = true;
 
-    const rates = await prisma.rewardRate.findMany({
-      where,
-      orderBy: [{ active: "desc" }, { effectiveFrom: "desc" }],
-      include: {
-        wasteType: { select: { id: true, name: true } },
-        organization: { select: { id: true, name: true } },
-        campaign: { select: { id: true, name: true } },
-      },
-    });
+    const pagination = parsePagination(url);
+    const [total, rates] = await Promise.all([
+      prisma.rewardRate.count({ where }),
+      prisma.rewardRate.findMany({
+        where,
+        orderBy: [{ active: "desc" }, { effectiveFrom: "desc" }],
+        skip: pagination.skip,
+        take: pagination.take,
+        include: {
+          wasteType: { select: { id: true, name: true } },
+          organization: { select: { id: true, name: true } },
+          campaign: { select: { id: true, name: true } },
+        },
+      }),
+    ]);
 
-    return jsonOk({ rates });
+    return jsonOk({ rates, pagination: buildPaginationMeta(total, pagination) });
   } catch (error) {
     return handleApiError(error);
   }

@@ -57,6 +57,10 @@
             <div><span>Total item</span><strong id="totalItems">0</strong></div>
             <div><span>Reward</span><strong id="totalReward">Rp0</strong></div>
           </div>
+          <div id="wasteTypePicker" class="waste-picker" hidden>
+            <span>Pilih jenis sampah sebelum memasukkan item</span>
+            <div id="wasteTypeButtons" class="waste-picker-grid"></div>
+          </div>
           <div id="itemList" class="item-list">
             <div class="empty">Belum ada item. Masukkan sampah pertama Anda.</div>
           </div>
@@ -98,7 +102,13 @@
       </aside>
     </section>
 
-    <footer><span id="machineName">ReLoop RVM</span><span>Local edge · sinkronisasi aman</span></footer>
+    <footer>
+      <span id="machineName">ReLoop RVM</span>
+      <span class="privacy-notice" role="note">
+        <b aria-hidden="true">◉</b> Area ini dipantau kamera untuk keamanan &amp; anti-fraud. Rekaman disimpan sesuai kebijakan privasi ReLoop.
+      </span>
+      <span>Local edge · sinkronisasi aman</span>
+    </footer>
   </main>
 
   <dialog id="pinDialog">

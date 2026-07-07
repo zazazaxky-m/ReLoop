@@ -1,0 +1,131 @@
+import type { Prisma } from "@prisma/client";
+import { prisma } from "../prisma";
+import {
+  type IngestEventInput,
+  type IngestEventResult,
+} from "./shared";
+import { processEventSideEffects } from "./side-effects";
+import type { DepositItemCache } from "./item-cache";
+
+export type IngestMachine = Prisma.MachineGetPayload<{
+  include: { organization: true };
+}>;
+
+export interface IngestOptions {
+  /** Preloaded machine row — skips redundant lookup when ingesting a batch. */
+  machine?: IngestMachine;
+  /** Reused across events in the same ingest batch to avoid repeated lookups. */
+  depositItemCache?: DepositItemCache;
+}
+
+/** Idempotent machine event ingestion with acceptance-point reward gating. */
+export async function ingestMachineEvent(
+  input: IngestEventInput,
+  options?: IngestOptions,
+): Promise<IngestEventResult> {
+  const machine =
+    options?.machine ??
+    (await prisma.machine.findUnique({
+      where: { machineCode: input.machineCode },
+      include: { organization: true },
+    }));
+  if (!machine) throw new Error("Mesin tidak ditemukan");
+
+  const existing = await prisma.machineEvent.findUnique({
+    where: {
+      machineId_localEventId: {
+        machineId: machine.id,
+        localEventId: input.localEventId,
+      },
+    },
+  });
+  if (existing) {
+    return {
+      duplicate: true,
+      eventId: existing.id,
+      message: "Event sudah diproses",
+      depositItemId: existing.depositItemId,
+    };
+  }
+
+  // Edge machines can retain queued events across a server database reset.
+  // Detach stale foreign keys instead of failing the complete ingest batch.
+  let sessionId = input.sessionId ?? null;
+  let depositItemId = input.depositItemId ?? null;
+  const orphanedReferences: Record<string, string> = {};
+
+  if (sessionId) {
+    const session = await prisma.depositSession.findFirst({
+      where: { id: sessionId, machineId: machine.id },
+      select: { id: true },
+    });
+    if (!session) {
+      orphanedReferences.sessionId = sessionId;
+      sessionId = null;
+      depositItemId = null;
+    }
+  }
+
+  if (depositItemId) {
+    const item = await prisma.depositItem.findFirst({
+      where: { id: depositItemId, session: { machineId: machine.id } },
+      select: { id: true, sessionId: true },
+    });
+    if (!item || (sessionId && item.sessionId !== sessionId)) {
+      orphanedReferences.depositItemId = depositItemId;
+      depositItemId = null;
+    }
+  }
+
+  const sanitizedInput: IngestEventInput = {
+    ...input,
+    sessionId,
+    depositItemId,
+    payload:
+      Object.keys(orphanedReferences).length > 0
+        ? { ...(input.payload ?? {}), orphanedReferences }
+        : input.payload,
+  };
+
+  let createdItemId: string | null = null;
+
+  const occurredAt = input.occurredAt
+    ? new Date(input.occurredAt)
+    : new Date();
+
+  const event = await prisma.$transaction(async (tx) => {
+    const created = await tx.machineEvent.create({
+      data: {
+        machineId: machine.id,
+        sessionId,
+        depositItemId,
+        localEventId: input.localEventId,
+        eventType: input.eventType,
+        payloadJson: (sanitizedInput.payload ?? undefined) as Prisma.InputJsonValue | undefined,
+        occurredAt,
+      },
+    });
+
+    await processEventSideEffects(
+      tx,
+      machine,
+      sanitizedInput,
+      created.id,
+      (id) => {
+        createdItemId = id;
+      },
+      options?.depositItemCache,
+    );
+    return created;
+  });
+
+  return {
+    duplicate: false,
+    eventId: event.id,
+    depositItemId: createdItemId ?? depositItemId,
+    message:
+      Object.keys(orphanedReferences).length > 0
+        ? "Referensi sesi/item lokal tidak ditemukan dan dilepas"
+        : undefined,
+  };
+}

@@ -218,7 +218,7 @@ class _ResourceCard extends StatelessWidget {
                   children: [
                     for (final item in _actions())
                       OutlinedButton(
-                        onPressed: () => _runAction(context, item.$2),
+                        onPressed: () => _handleActionTap(context, item.$2),
                         child: Text(item.$1),
                       ),
                   ],
@@ -266,7 +266,63 @@ class _ResourceCard extends StatelessWidget {
     return [];
   }
 
-  Future<void> _runAction(BuildContext context, String value) async {
+  /// The server requires either a providerReference or an already-uploaded
+  /// bank transfer proof before a redemption can be marked `success` (proof
+  /// upload itself is web-only for now). Prompt for a reference here instead
+  /// of letting the PATCH fail with a 422 the user won't understand.
+  Future<void> _handleActionTap(BuildContext context, String value) async {
+    if (action == SuperadminResourceAction.redemption && value == 'success') {
+      final controller = TextEditingController();
+      final reference = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Konfirmasi Pembayaran'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Nomor referensi transfer',
+              hintText: 'Contoh: TRX-20260706-001',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+              child: const Text('Konfirmasi'),
+            ),
+          ],
+        ),
+      );
+      controller.dispose();
+      if (!context.mounted) return;
+      if (reference == null) return;
+      if (reference.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Nomor referensi wajib diisi, atau unggah bukti transfer lewat dashboard web.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      await _runAction(context, value, extra: {'providerReference': reference});
+      return;
+    }
+    await _runAction(context, value);
+  }
+
+  Future<void> _runAction(
+    BuildContext context,
+    String value, {
+    Map<String, dynamic>? extra,
+  }) async {
     final api = context.read<ApiClient>();
     try {
       if (action == SuperadminResourceAction.partnership) {
@@ -277,7 +333,7 @@ class _ResourceCard extends StatelessWidget {
       } else if (action == SuperadminResourceAction.redemption) {
         await api.patch(
           '/api/redemptions/${row['id']}',
-          data: {'action': value},
+          data: {'action': value, ...?extra},
         );
       } else if (action == SuperadminResourceAction.user) {
         await api.patch('/api/users/${row['id']}', data: {'status': value});

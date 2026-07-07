@@ -30,6 +30,15 @@ function renderMedia(media,show){
   if(!mediaVisible||changed){mediaVisible=true;$("adPlayer").hidden=false;playMedia()}
 }
 
+function renderWastePicker(d){
+  const picker=$("wasteTypePicker"),wasteTypes=d.wasteTypes||[];
+  const show=d.runtimeState==="SESSION_ACTIVE"&&wasteTypes.length>0;
+  picker.hidden=!show;
+  if(!show)return;
+  const selected=d.selectedWasteTypeId;
+  $("wasteTypeButtons").innerHTML=wasteTypes.map(wt=>`<button type="button" class="${wt.id===selected?"selected":""}" data-waste-type="${escapeHtml(wt.id)}">${escapeHtml(wt.name)}</button>`).join("");
+}
+
 function renderItems(session){
   const list=$("itemList"),items=session?.items||[];
   $("totalItems").textContent=session?.totalQuantity||0;
@@ -91,7 +100,8 @@ function render(d){
   $("temperature").textContent=Number(sensors.temperature_c).toFixed(1)+"°C";$("queue").textContent=server.queueDepth;
   $("network").classList.toggle("online",server.online);$("network").querySelector("span").textContent=server.online?"Server terhubung":"Mode offline lokal";
   $("simulatorLauncher").hidden=d.simulation?.available!==true;
-  $("sessionSummary").hidden=!session;$("userName").textContent=session?.userName||"Pengguna ReLoop";renderItems(session);
+  $("sessionSummary").hidden=!session;$("userName").textContent=session?.userName||"Pengguna ReLoop";renderItems(session);renderWastePicker(d);
+  const needsWasteTypeChoice=d.runtimeState==="SESSION_ACTIVE"&&(d.wasteTypes||[]).length>0&&!d.selectedWasteTypeId;
 
   const timeout=session?.timeoutAt?new Date(session.timeoutAt).getTime()-Date.now():0;
   const seconds=Math.max(0,Math.ceil(timeout/1000));
@@ -114,8 +124,8 @@ function render(d){
   const displayView=activeAlert?[alertKickers[d.alert.category]||(d.alert.severity==="CRITICAL"?"Mesin diamankan":"Peringatan mesin"),activeAlert[0],activeAlert[1]]:view;
   $("visualIcon").textContent=activeAlert?"!":"♻";
   $("visualKicker").textContent=displayView[0];$("visualTitle").textContent=showQr?"Scan untuk mulai":displayView[1];$("visualText").textContent=showQr?"Buka aplikasi ReLoop dan arahkan kamera ke QR":displayView[2];
-  $("headline").textContent=activeAlert?activeAlert[0]:(session?`${session.totalQuantity||0} item sudah masuk.`:"Scan QR untuk mulai menyetor.");
-  $("message").textContent=activeAlert?activeAlert[1]:(session?`Reward sementara ${rupiah(session.totalReward)}. Masukkan item berikutnya atau tekan Selesai di HP.`:"Setorkan botol atau kaleng satu per satu dan lihat reward bertambah langsung.");
+  $("headline").textContent=activeAlert?activeAlert[0]:needsWasteTypeChoice?"Pilih jenis sampah di panel kanan.":(session?`${session.totalQuantity||0} item sudah masuk.`:"Scan QR untuk mulai menyetor.");
+  $("message").textContent=activeAlert?activeAlert[1]:needsWasteTypeChoice?"Ketuk salah satu jenis sampah, lalu masukkan item ke chamber.":(session?`Reward sementara ${rupiah(session.totalReward)}. Masukkan item berikutnya atau tekan Selesai di HP.`:"Setorkan botol atau kaleng satu per satu dan lihat reward bertambah langsung.");
   $("eyebrow").textContent=activeAlert?(d.alert.category==="VANDALISM"?"Peringatan vandalisme":d.alert.category==="FRAUD"?"Peringatan fraud":"Peringatan operasional"):(session?"Setoran berlangsung":"Reverse vending machine");
   $("stepScan").classList.toggle("active",!session);$("stepDeposit").classList.toggle("active",Boolean(session));$("stepReward").classList.toggle("active",Boolean(session?.totalQuantity));
 
@@ -134,7 +144,9 @@ function render(d){
 }
 
 async function refresh(){try{const response=await fetch("/api/state",{cache:"no-store"});render(await response.json())}catch{$("network").querySelector("span").textContent="Controller terputus"}}
-async function loginMaintenance(pin){const response=await fetch("/api/maintenance/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pin})});const data=await response.json();if(!response.ok)throw new Error("PIN salah");maintenanceToken=data.token;sessionStorage.setItem("rvmMaintenanceToken",data.token)}
+async function selectWasteType(id){try{await fetch("/api/session/waste-type",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wasteTypeId:id})})}catch{} refresh()}
+$("wasteTypeButtons").addEventListener("click",event=>{const button=event.target.closest("button[data-waste-type]");if(button)selectWasteType(button.dataset.wasteType)});
+async function loginMaintenance(pin){const response=await fetch("/api/maintenance/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pin})});const data=await response.json();if(!response.ok)throw new Error(data.error||"PIN salah");maintenanceToken=data.token;sessionStorage.setItem("rvmMaintenanceToken",data.token)}
 async function command(command,data={}){const response=await fetch("/api/maintenance/command",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+maintenanceToken},body:JSON.stringify({command,...data})});if(response.status===401){maintenanceToken="";sessionStorage.removeItem("rvmMaintenanceToken");$("maintenanceDialog").close();return}const result=await response.json();if(!response.ok){$("simulationStatus").textContent=result.error||"Perintah gagal";return}render(result)}
 function openMaintenance(){if(maintenanceToken){$("maintenanceDialog").showModal();return}$("pinDialog").showModal();$("pin").focus()}
 $("pinForm").addEventListener("submit",async event=>{event.preventDefault();try{await loginMaintenance($("pin").value);$("pinDialog").close();$("pin").value="";$("pinError").textContent="";$("maintenanceDialog").showModal()}catch(error){$("pinError").textContent=error.message}});

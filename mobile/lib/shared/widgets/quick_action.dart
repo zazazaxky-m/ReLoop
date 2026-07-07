@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/colors.dart';
+import '../../theme/dimens.dart';
 
 enum QuickActionTone { green, blue, amber, teal }
 
@@ -130,7 +131,7 @@ class QuickAction extends StatelessWidget {
                       ),
                   ],
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: ReLoopSpacing.sm),
                 Text(
                   title,
                   textAlign: TextAlign.center,
@@ -138,12 +139,12 @@ class QuickAction extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: context.reloopForeground,
-                    fontSize: 12.5,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                     height: 1.15,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: ReLoopSpacing.xs),
                 Text(
                   description,
                   textAlign: TextAlign.center,
@@ -151,7 +152,7 @@ class QuickAction extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: context.reloopMuted,
-                    fontSize: 10,
+                    fontSize: 12,
                     height: 1.2,
                   ),
                 ),

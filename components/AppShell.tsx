@@ -2,7 +2,7 @@
 
 import {
   useEffect,
-  useRef,
+  useState,
   type ComponentType,
   type SVGProps,
 } from "react";
@@ -20,6 +20,7 @@ import {
   Map,
   MapPin,
   Megaphone,
+  MoreHorizontal,
   QrCode,
   Recycle,
   Settings,
@@ -29,8 +30,10 @@ import {
   User,
   Users,
   Wallet,
+  X,
 } from "@/components/ui/icons";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 type IconType = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -73,6 +76,7 @@ const NAV: Record<AppRole, NavItem[]> = {
     { label: "Travel Agent", mobileLabel: "Agent", href: "/dashboard/admin/travel-agents", icon: Users, group: "Manajemen" },
     { label: "Trip / Trash Bag", mobileLabel: "Trip", href: "/dashboard/admin/trips", icon: Trash, group: "Manajemen" },
     { label: "Compliance", mobileLabel: "Patuh", href: "/dashboard/admin/compliance", icon: ShieldCheck, group: "Manajemen" },
+    { label: "Keamanan Akun", mobileLabel: "MFA", href: "/dashboard/admin/security", icon: ShieldCheck, group: "Manajemen" },
     { label: "Laporan", href: "/dashboard/admin/reports", icon: FileText, group: "Manajemen", primary: true },
   ],
   SUPERADMIN: [
@@ -82,10 +86,12 @@ const NAV: Record<AppRole, NavItem[]> = {
     { label: "Pengguna", href: "/dashboard/superadmin/users", icon: Users, group: "Manajemen", primary: true },
     { label: "Kemitraan", mobileLabel: "Mitra", href: "/dashboard/superadmin/partnerships", icon: ShieldCheck, group: "Operasional" },
     { label: "Redemption", mobileLabel: "Pencairan", href: "/dashboard/superadmin/redemptions", icon: Wallet, group: "Operasional" },
+    { label: "Rekonsiliasi", mobileLabel: "Rekonsiliasi", href: "/dashboard/superadmin/reconciliation", icon: Wallet, group: "Operasional" },
     { label: "Log Keamanan", mobileLabel: "Keamanan", href: "/dashboard/superadmin/security", icon: AlertTriangle, group: "Operasional", primary: true },
     { label: "Wilayah", href: "/dashboard/superadmin/regions", icon: Map, group: "Manajemen" },
     { label: "Jenis Sampah & Tarif", mobileLabel: "Jenis", href: "/dashboard/superadmin/waste-types", icon: Trash, group: "Manajemen" },
     { label: "Konfigurasi", mobileLabel: "Config", href: "/dashboard/superadmin/config", icon: Settings, group: "Manajemen" },
+    { label: "Keamanan Akun", mobileLabel: "MFA", href: "/dashboard/superadmin/account-security", icon: ShieldCheck, group: "Manajemen" },
     { label: "Audit Log", mobileLabel: "Audit", href: "/dashboard/superadmin/audit", icon: FileText, group: "Manajemen" },
   ],
 };
@@ -129,15 +135,20 @@ export function AppShell({
   const currentItem =
     items.find((item) => isActive(pathname, item)) ?? items[0];
   const CurrentIcon = currentItem?.icon;
-  const activeMobileItemRef = useRef<HTMLAnchorElement>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  // Mobile bottom bar shows a small set of primary destinations; the rest live
+  // in the "Lainnya" sheet so the tab bar never needs horizontal scrolling.
+  const primaryItems = items.filter((item) => item.primary);
+  const overflowItems = items.filter((item) => !item.primary);
+  const overflowActive = overflowItems.some((item) => isActive(pathname, item));
 
   useEffect(() => {
-    activeMobileItemRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-      inline: "center",
-    });
-  }, [pathname]);
+    document.body.style.overflow = moreOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [moreOpen]);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -171,8 +182,7 @@ export function AppShell({
                 href={item.href}
                 onClick={onNavigate}
                 className={cn(
-                  "group relative flex items-center gap-3 rounded-lg px-3 text-sm font-semibold transition-colors",
-                  variant === "mobile" ? "min-h-10 py-2" : "min-h-11 py-2.5",
+                  "group relative flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
                   active && variant === "mobile"
                     ? "bg-brand-600 text-white shadow-sm"
                     : active
@@ -205,7 +215,7 @@ export function AppShell({
 
   const userFooter = (
     <div className="flex items-center gap-3 border-t border-border px-2 py-4">
-      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-sm font-semibold text-white dark:bg-brand-950 dark:text-brand-300 border border-transparent dark:border-brand-900/30">
+      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-600 text-sm font-semibold text-white dark:bg-brand-950 dark:text-brand-300 border border-transparent dark:border-brand-900/30">
         {user.name.charAt(0).toUpperCase()}
       </span>
       <div className="min-w-0 flex-1">
@@ -217,7 +227,8 @@ export function AppShell({
       <button
         onClick={logout}
         title="Keluar"
-        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-red-50 hover:text-status-error dark:hover:bg-red-950/20"
+        aria-label="Keluar"
+        className="flex h-10 w-10 items-center justify-center rounded-lg text-muted transition-colors hover:bg-red-50 hover:text-status-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:hover:bg-red-950/20"
       >
         <LogOut className="text-lg" />
       </button>
@@ -264,11 +275,12 @@ export function AppShell({
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <NotificationBell />
             <ThemeToggle />
             <span className="rounded-md border border-border bg-surface-soft px-2.5 py-1.5 text-xs font-semibold text-muted">
               {ROLE_LABELS[user.role]}
             </span>
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white dark:bg-brand-950 dark:text-brand-300 border border-transparent dark:border-brand-900/30">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white dark:bg-brand-950 dark:text-brand-300 border border-transparent dark:border-brand-900/30">
               {user.name.charAt(0).toUpperCase()}
             </span>
           </div>
@@ -287,10 +299,11 @@ export function AppShell({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <NotificationBell />
             <ThemeToggle />
             <button
               onClick={logout}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-sm hover:bg-red-50 hover:text-status-error dark:hover:bg-red-950/20"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-sm hover:bg-red-50 hover:text-status-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:hover:bg-red-950/20"
               aria-label="Keluar"
               title="Keluar"
             >
@@ -304,31 +317,77 @@ export function AppShell({
         </main>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-[900] border-t border-border bg-surface/95 px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-6px_20px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
-        <div className="mx-auto flex max-w-full items-end gap-0.5 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {items.map((item) => {
+      {moreOpen ? (
+        <div className="fixed inset-0 z-[950] lg:hidden">
+          <button
+            type="button"
+            aria-label="Tutup menu"
+            onClick={() => setMoreOpen(false)}
+            className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
+          />
+          <div className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-10px_40px_rgba(15,23,42,0.18)]">
+            <div className="sticky top-0 flex items-center justify-between border-b border-border bg-surface px-5 py-3.5">
+              <p className="text-sm font-bold text-foreground">Menu lainnya</p>
+              <button
+                type="button"
+                onClick={() => setMoreOpen(false)}
+                aria-label="Tutup menu"
+                className="flex h-10 w-10 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+              >
+                <X className="text-lg" />
+              </button>
+            </div>
+            <div className="space-y-3 px-3 py-4">
+              {navLinks(() => setMoreOpen(false), "mobile")}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <nav
+        aria-label="Navigasi utama"
+        className="fixed inset-x-0 bottom-0 z-[900] border-t border-border bg-surface/95 px-1 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-6px_20px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden"
+      >
+        <div className="mx-auto flex max-w-lg items-stretch justify-around gap-0.5">
+          {primaryItems.map((item) => {
             const active = isActive(pathname, item);
             const Icon = item.icon;
+            if (item.emphasis) {
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-label={item.label}
+                  className="relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1 rounded-lg px-0.5 pb-0.5 text-[10px] font-bold text-brand-700 focus-visible:outline-none dark:text-brand-400"
+                >
+                  <span className="-mt-6 flex h-13 w-13 items-center justify-center rounded-2xl bg-brand-600 text-2xl text-white shadow-[0_8px_20px_rgba(21,128,61,0.35)] ring-4 ring-surface transition-colors hover:bg-brand-700">
+                    <Icon />
+                  </span>
+                  <span className="max-w-full truncate">
+                    {item.mobileLabel ?? item.label}
+                  </span>
+                </Link>
+              );
+            }
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                ref={active ? activeMobileItemRef : undefined}
                 className={cn(
-                  "relative flex min-w-[70px] flex-1 flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-[10px] font-semibold transition-colors",
-                  active ? "text-brand-700" : "text-muted",
+                  "relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg px-0.5 py-1.5 text-[10px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400",
+                  active ? "text-brand-700 dark:text-brand-400" : "text-muted",
                 )}
               >
                 <span
                   className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-lg",
-                    active ? "bg-brand-50 text-lg dark:bg-brand-950/30" : "text-lg",
+                    "flex h-8 w-8 items-center justify-center rounded-lg text-lg",
+                    active ? "bg-brand-50 dark:bg-brand-950/30" : "",
                   )}
                 >
                   <Icon />
                 </span>
                 {active ? (
-                  <span className="absolute -top-1 h-0.5 w-8 rounded-full bg-brand-500" />
+                  <span className="absolute -top-0.5 h-0.5 w-8 rounded-full bg-brand-500" />
                 ) : null}
                 <span className="max-w-full truncate">
                   {item.mobileLabel ?? item.label}
@@ -336,6 +395,29 @@ export function AppShell({
               </Link>
             );
           })}
+
+          {overflowItems.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setMoreOpen(true)}
+              aria-haspopup="dialog"
+              aria-expanded={moreOpen}
+              className={cn(
+                "relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg px-0.5 py-1.5 text-[10px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400",
+                overflowActive ? "text-brand-700 dark:text-brand-400" : "text-muted",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-lg text-lg",
+                  overflowActive ? "bg-brand-50 dark:bg-brand-950/30" : "",
+                )}
+              >
+                <MoreHorizontal />
+              </span>
+              <span>Lainnya</span>
+            </button>
+          ) : null}
         </div>
       </nav>
     </div>

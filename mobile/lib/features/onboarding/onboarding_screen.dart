@@ -4,6 +4,7 @@ import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:go_router/go_router.dart';
 import '../../shared/widgets/reloop_logo.dart';
 import '../../theme/colors.dart';
+import '../../theme/dimens.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -56,14 +57,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   _OnboardingPage(
                     icon: Icons.wallet,
                     title: 'Kumpulkan & Cairkan',
-                    description: 'Kumpulkan reward dari setiap setoran dan cairkan kapan saja ke rekening atau e-wallet Anda.',
+                    description: 'Kumpulkan reward dari setiap setoran dan cairkan kapan saja ke rekening atau e-wallet kamu.',
                     color: ReLoopColors.statusFull,
                   ),
                 ],
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(ReLoopSpacing.xxl),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -76,6 +77,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           curve: Curves.easeInOut,
                         );
                       },
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(80, ReLoopA11y.minTouchTarget),
+                      ),
                       child: Text(
                         'Lewati',
                         style: TextStyle(color: context.reloopMuted),
@@ -99,6 +103,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: _isLastPage
                         ? TextButton(
                             onPressed: _complete,
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(
+                                  80, ReLoopA11y.minTouchTarget),
+                            ),
                             child: Text(
                               'Mulai',
                               style: TextStyle(
@@ -115,6 +123,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 curve: Curves.easeInOut,
                               );
                             },
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(
+                                  80, ReLoopA11y.minTouchTarget),
+                            ),
                             child: Text(
                               'Lanjut',
                               style: TextStyle(
@@ -151,9 +163,13 @@ class _OnboardingPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+        padding: const EdgeInsets.symmetric(
+          horizontal: ReLoopSpacing.xxxl,
+          vertical: ReLoopSpacing.lg,
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
@@ -170,22 +186,20 @@ class _OnboardingPage extends StatelessWidget {
                 ),
                 child: Icon(icon, color: color, size: 56),
               ),
-            const SizedBox(height: 40),
+            const SizedBox(height: ReLoopSpacing.xxxl),
             Text(
               title,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 24,
+              style: textTheme.headlineLarge?.copyWith(
                 fontWeight: FontWeight.w800,
                 color: context.reloopForeground,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: ReLoopSpacing.lg),
             Text(
               description,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
+              style: textTheme.bodyLarge?.copyWith(
                 color: context.reloopMuted,
                 height: 1.5,
               ),

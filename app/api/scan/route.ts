@@ -6,6 +6,7 @@ import { isTokenValid } from "@/lib/qr";
 import { machineAcceptsSessions } from "@/lib/machine-state";
 import { isCampaignEligible } from "@/lib/campaign";
 import { logAudit } from "@/lib/audit";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const scanSchema = z.object({
   machineCode: z.string().min(1),
@@ -13,9 +14,19 @@ const scanSchema = z.object({
   campaignId: z.string().optional(),
 });
 
+// A dynamic QR token is short-lived but still guessable if unlimited
+// attempts are allowed; cap per-user attempts instead of trusting entropy
+// alone.
+const RATE_LIMIT = 20;
+const RATE_WINDOW_MS = 60_000;
+
 export async function POST(req: Request) {
   try {
     const user = await requireApiUser(["USER"]);
+    const rl = await checkRateLimit(`scan:${user.id}`, RATE_LIMIT, RATE_WINDOW_MS);
+    if (!rl.allowed) {
+      throw new HttpError(429, "Terlalu banyak percobaan scan. Coba lagi sebentar lagi.");
+    }
     const body = scanSchema.parse(await req.json());
 
     const machine = await prisma.machine.findUnique({
@@ -30,16 +41,18 @@ export async function POST(req: Request) {
     });
 
     if (!machine) throw new HttpError(404, "Mesin tidak ditemukan");
-    if (!isTokenValid(machine, body.token ?? '')) {
-      const reason = !machine.qrToken ? 'NO_QR_TOKEN' :
-                     !machine.qrTokenExpiresAt ? 'NO_EXPIRY' :
-                     machine.qrToken !== body.token ? 'TOKEN_MISMATCH' :
-                     'EXPIRED';
-      console.log(`[scan] token check failed: ${reason} | expected=${machine.qrToken?.substring(0, 10)}... | got=${body.token?.substring(0, 10)}... | expiresAt=${machine.qrTokenExpiresAt?.toISOString()}`);
-      throw new HttpError(401, `QR token tidak valid atau sudah kedaluwarsa (${reason}). Silakan scan QR terbaru dari layar mesin.`);
+    if (!isTokenValid(machine, body.token ?? "")) {
+      console.warn("[scan] invalid QR token", {
+        machineCode: body.machineCode,
+        userId: user.id,
+      });
+      throw new HttpError(
+        401,
+        "QR token tidak valid atau sudah kedaluwarsa. Silakan scan QR terbaru dari layar mesin.",
+      );
     }
     if (!machineAcceptsSessions(machine.status)) {
-      throw new HttpError(409, `Mesin tidak menerima setor (status: ${machine.status})`);
+      throw new HttpError(409, "Mesin tidak menerima setoran saat ini");
     }
     if (machine.organization.status !== "ACTIVE") {
       throw new HttpError(409, "Organisasi mesin tidak aktif");
@@ -80,7 +93,7 @@ export async function POST(req: Request) {
       }
       const eligibility = isCampaignEligible(campaign, user.email);
       if (!eligibility.eligible) {
-        throw new HttpError(403, `Tidak memenuhi syarat campaign: ${eligibility.reason}`);
+        throw new HttpError(403, "Anda tidak memenuhi syarat campaign ini");
       }
     }
 

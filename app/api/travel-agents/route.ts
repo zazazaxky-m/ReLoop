@@ -4,6 +4,7 @@ import { requireApiUser, assertOrgScope, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { normalizeTravelAgentEmail } from "@/lib/tourism";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 
 const inviteSchema = z.object({
   name: z.string().min(2).max(160),
@@ -79,22 +80,30 @@ export async function GET(req: Request) {
       );
     }
 
-    const agents = await prisma.travelAgent.findMany({
-      where: {
-        organizations: { some: { organizationId } },
-      },
-      orderBy: { name: "asc" },
-      include: {
-        organizations: {
-          where: { organizationId },
-          include: { organization: { select: { id: true, name: true } } },
+    const pagination = parsePagination(url);
+    const agentWhere = {
+      organizations: { some: { organizationId } },
+    };
+
+    const [agents, total] = await Promise.all([
+      prisma.travelAgent.findMany({
+        where: agentWhere,
+        orderBy: { name: "asc" },
+        skip: pagination.skip,
+        take: pagination.take,
+        include: {
+          organizations: {
+            where: { organizationId },
+            include: { organization: { select: { id: true, name: true } } },
+          },
+          trips: {
+            where: { campaign: { organizationId } },
+            select: { id: true, complianceStatus: true },
+          },
         },
-        trips: {
-          where: { campaign: { organizationId } },
-          select: { id: true, complianceStatus: true },
-        },
-      },
-    });
+      }),
+      prisma.travelAgent.count({ where: agentWhere }),
+    ]);
 
     return jsonOk({
       agents: agents.map((agent) => {
@@ -114,6 +123,7 @@ export async function GET(req: Request) {
           nonCompliantCount: nonCompliant,
         };
       }),
+      pagination: buildPaginationMeta(total, pagination),
     });
   } catch (error) {
     return handleApiError(error);

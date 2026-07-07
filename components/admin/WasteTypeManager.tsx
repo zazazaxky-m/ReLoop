@@ -187,7 +187,10 @@ export function WasteTypeManager({
     {
       key: "reward",
       header: "Default reward",
-      render: (r) => (r.defaultRewardPerItem != null ? `Rp${r.defaultRewardPerItem}` : "-"),
+      render: (r) =>
+        r.defaultRewardPerItem != null
+          ? `Rp${r.defaultRewardPerItem} / ${r.unit === "KG" ? "kg" : "item"}`
+          : "-",
     },
     {
       key: "scope",
@@ -287,7 +290,19 @@ export function WasteTypeManager({
                     placeholder="80"
                   />
                 </FormField>
-                <FormField label="Default reward / item (Rp)" htmlFor="wt-reward">
+                <FormField
+                  label={
+                    form.unit === "KG"
+                      ? "Default reward / kilogram (Rp)"
+                      : "Default reward / item (Rp)"
+                  }
+                  htmlFor="wt-reward"
+                  hint={
+                    form.unit === "KG"
+                      ? "Dipakai jika belum ada tarif khusus; dihitung proporsional terhadap berat terukur."
+                      : undefined
+                  }
+                >
                   <Input
                     id="wt-reward"
                     type="number"
@@ -295,7 +310,7 @@ export function WasteTypeManager({
                     onChange={(e) =>
                       setForm((f) => ({ ...f, defaultRewardPerItem: e.target.value }))
                     }
-                    placeholder="200"
+                    placeholder={form.unit === "KG" ? "2000" : "200"}
                   />
                 </FormField>
                 {!editId && canManageGlobal && organizations ? (

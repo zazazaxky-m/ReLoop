@@ -6,6 +6,8 @@ import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { generateToken } from "@/lib/qr";
 import { generateIngestSecret } from "@/lib/machine-auth";
 import { logAudit } from "@/lib/audit";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
+import { machineSafeSelect } from "@/lib/machine-select";
 
 const createSchema = z.object({
   machineCode: z
@@ -46,16 +48,23 @@ export async function GET(req: NextRequest) {
     }
     if (statusFilter) where.status = statusFilter;
 
-    const machines = await prisma.machine.findMany({
-      where,
-      include: {
-        organization: { select: { id: true, name: true } },
-        region: { select: { id: true, name: true } },
-        _count: { select: { wasteTypes: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
-    return jsonOk({ machines });
+    const pagination = parsePagination(url);
+    const [total, machines] = await Promise.all([
+      prisma.machine.count({ where }),
+      prisma.machine.findMany({
+        where,
+        select: {
+          ...machineSafeSelect,
+          organization: { select: { id: true, name: true } },
+          region: { select: { id: true, name: true } },
+          _count: { select: { wasteTypes: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        skip: pagination.skip,
+        take: pagination.take,
+      }),
+    ]);
+    return jsonOk({ machines, pagination: buildPaginationMeta(total, pagination) });
   } catch (error) {
     return handleApiError(error);
   }
@@ -117,7 +126,17 @@ export async function POST(req: NextRequest) {
       metadata: { machineCode: machine.machineCode, organizationId },
     });
 
-    return jsonOk({ machine }, 201);
+    return jsonOk(
+      {
+        machine: {
+          id: machine.id,
+          machineCode: machine.machineCode,
+          name: machine.name,
+          organizationId: machine.organizationId,
+        },
+      },
+      201,
+    );
   } catch (error) {
     return handleApiError(error);
   }

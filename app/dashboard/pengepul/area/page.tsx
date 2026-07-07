@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, PagePagination } from "@/components/ui";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { organizationOptions } from "@/lib/queries";
 import { displayUserField } from "@/lib/display-user";
+import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 import { PartnershipPanel, type PartnerRow } from "@/components/pickup/PartnershipPanel";
 
 export const metadata: Metadata = { title: "Area & Kemitraan" };
@@ -13,18 +14,29 @@ interface ServiceArea {
   note?: string;
 }
 
-export default async function PengepulAreaPage() {
+export default async function PengepulAreaPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const user = await requirePageUser(["PENGEPUL"]);
+  const params = await searchParams;
+  const pagination = parsePageSearchParams(params);
 
-  const [partnerships, organizations] = await Promise.all([
+  const where = { collectorUserId: user.id };
+
+  const [partnerships, total, organizations] = await Promise.all([
     prisma.organizationCollectorPartner.findMany({
-      where: { collectorUserId: user.id },
+      where,
       orderBy: { updatedAt: "desc" },
+      skip: pagination.skip,
+      take: pagination.take,
       include: {
         organization: { select: { name: true } },
         collectorUser: { select: { name: true, email: true, phone: true } },
       },
     }),
+    prisma.organizationCollectorPartner.count({ where }),
     organizationOptions(),
   ]);
 
@@ -42,6 +54,8 @@ export default async function PengepulAreaPage() {
     };
   });
 
+  const pageMeta = buildPaginationMeta(total, pagination);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -49,6 +63,11 @@ export default async function PengepulAreaPage() {
         description="Kelola wilayah layanan serta hubungan kemitraan dengan organisasi."
       />
       <PartnershipPanel viewer="pengepul" partnerships={rows} organizations={organizations} />
+      <PagePagination
+        basePath="/dashboard/pengepul/area"
+        page={pageMeta.page}
+        totalPages={pageMeta.totalPages}
+      />
     </div>
   );
 }

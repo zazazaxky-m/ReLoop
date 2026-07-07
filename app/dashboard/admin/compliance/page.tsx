@@ -62,37 +62,69 @@ export default async function AdminCompliancePage() {
   const user = await requirePageUser(["ADMIN"]);
   const orgId = user.organizationId ?? "__none__";
 
-  const [trips, agents] = await Promise.all([
-    prisma.trip.findMany({
+  const [tripGroups, statusGroups, agents] = await Promise.all([
+    prisma.trip.groupBy({
+      by: ["travelAgentId", "complianceStatus"],
       where: { campaign: { organizationId: orgId } },
-      select: { id: true, complianceStatus: true, travelAgentId: true },
+      _count: { id: true },
+    }),
+    prisma.trip.groupBy({
+      by: ["complianceStatus"],
+      where: { campaign: { organizationId: orgId } },
+      _count: { id: true },
     }),
     prisma.travelAgent.findMany({
       where: { organizations: { some: { organizationId: orgId } } },
       orderBy: { name: "asc" },
       select: { id: true, name: true, email: true },
+      take: 200,
     }),
   ]);
 
+  const tripsByAgent = new Map<
+    string,
+    { total: number; compliant: number; review: number; nonCompliant: number }
+  >();
+
+  for (const group of tripGroups) {
+    if (!group.travelAgentId) continue;
+    const stats = tripsByAgent.get(group.travelAgentId) ?? {
+      total: 0,
+      compliant: 0,
+      review: 0,
+      nonCompliant: 0,
+    };
+    const count = group._count.id;
+    stats.total += count;
+    if (group.complianceStatus === "COMPLIANT") stats.compliant += count;
+    else if (group.complianceStatus === "NEEDS_REVIEW") stats.review += count;
+    else if (group.complianceStatus === "NON_COMPLIANT") stats.nonCompliant += count;
+    tripsByAgent.set(group.travelAgentId, stats);
+  }
+
   const rows = agents.map((agent) => {
-    const agentTrips = trips.filter((t) => t.travelAgentId === agent.id);
-    const compliantCount = agentTrips.filter((t) => t.complianceStatus === "COMPLIANT").length;
-    const reviewCount = agentTrips.filter((t) => t.complianceStatus === "NEEDS_REVIEW").length;
-    const nonCompliantCount = agentTrips.filter((t) => t.complianceStatus === "NON_COMPLIANT").length;
+    const stats = tripsByAgent.get(agent.id) ?? {
+      total: 0,
+      compliant: 0,
+      review: 0,
+      nonCompliant: 0,
+    };
     return {
       id: agent.id,
       name: agent.name,
       email: agent.email,
-      tripCount: agentTrips.length,
-      compliantCount,
-      reviewCount,
-      nonCompliantCount,
-      rate: agentTrips.length ? Math.round((compliantCount / agentTrips.length) * 100) : 0,
+      tripCount: stats.total,
+      compliantCount: stats.compliant,
+      reviewCount: stats.review,
+      nonCompliantCount: stats.nonCompliant,
+      rate: stats.total ? Math.round((stats.compliant / stats.total) * 100) : 0,
     };
   });
 
-  const compliantTrips = trips.filter((t) => t.complianceStatus === "COMPLIANT").length;
-  const nonCompliantTrips = trips.filter((t) => t.complianceStatus === "NON_COMPLIANT").length;
+  const countByStatus = new Map(statusGroups.map((g) => [g.complianceStatus, g._count.id]));
+  const totalTrips = statusGroups.reduce((sum, g) => sum + g._count.id, 0);
+  const compliantTrips = countByStatus.get("COMPLIANT") ?? 0;
+  const nonCompliantTrips = countByStatus.get("NON_COMPLIANT") ?? 0;
 
   return (
     <div className="space-y-6">
@@ -101,7 +133,7 @@ export default async function AdminCompliancePage() {
         description="Pantau kepatuhan travel agent dari validasi gerbang masuk, gerbang pulang, dan pengembalian trash bag."
       />
       <div className="grid gap-4 md:grid-cols-3">
-        <MetricCard label="Total trip" value={trips.length} icon={Users} tone="blue" />
+        <MetricCard label="Total trip" value={totalTrips} icon={Users} tone="blue" />
         <MetricCard label="Trip patuh" value={compliantTrips} icon={CheckCircle} tone="green" />
         <MetricCard label="Tidak patuh" value={nonCompliantTrips} icon={AlertTriangle} tone="amber" />
       </div>

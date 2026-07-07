@@ -1,26 +1,38 @@
 import type { Metadata } from "next";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, PagePagination } from "@/components/ui";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { TripManager, type TripRow } from "@/components/trip/TripManager";
 import { wasteTypeOptions } from "@/lib/queries";
+import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 
 export const metadata: Metadata = { title: "Trip / Trash Bag" };
 
-export default async function AdminTripsPage() {
+export default async function AdminTripsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const user = await requirePageUser(["ADMIN"]);
   const orgId = user.organizationId ?? "__none__";
+  const params = await searchParams;
+  const pagination = parsePageSearchParams(params);
 
-  const [trips, campaigns, travelAgents, wasteTypes] = await Promise.all([
+  const tripWhere = { campaign: { organizationId: orgId } };
+
+  const [trips, total, campaigns, travelAgents, wasteTypes] = await Promise.all([
     prisma.trip.findMany({
-      where: { campaign: { organizationId: orgId } },
+      where: tripWhere,
       orderBy: { createdAt: "desc" },
+      skip: pagination.skip,
+      take: pagination.take,
       include: {
         campaign: { select: { name: true, rewardMode: true } },
         travelAgent: { select: { id: true, name: true } },
         _count: { select: { bagAssignments: true, validations: true } },
       },
     }),
+    prisma.trip.count({ where: tripWhere }),
     prisma.campaign.findMany({
       where: {
         organizationId: orgId,
@@ -54,6 +66,8 @@ export default async function AdminTripsPage() {
     hasUser: t.userId != null,
   }));
 
+  const pageMeta = buildPaginationMeta(total, pagination);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -69,6 +83,11 @@ export default async function AdminTripsPage() {
           email: t.travelAgent.email,
         }))}
         wasteTypes={wasteTypes}
+      />
+      <PagePagination
+        basePath="/dashboard/admin/trips"
+        page={pageMeta.page}
+        totalPages={pageMeta.totalPages}
       />
     </div>
   );

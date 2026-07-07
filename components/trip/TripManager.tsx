@@ -218,7 +218,7 @@ export function TripManager({
       } else {
         setError("QR Tas tidak ditemukan atau belum terdaftar.");
       }
-    } catch (err) {
+    } catch {
       setError("Gagal scan QR.");
     } finally {
       setBusy(false);

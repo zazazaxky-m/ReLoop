@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { requireApiUser, activePartnerOrgIds } from "@/lib/rbac";
-import { machineCentroid } from "@/lib/map";
+import { loadPublicMapCampaigns, MAX_MAP_MACHINES } from "@/lib/map-data";
 
 export async function GET() {
   try {
@@ -13,6 +13,11 @@ export async function GET() {
     } else if (user.role === "PENGEPUL") {
       organizationIds = await activePartnerOrgIds(user.id);
     }
+
+    const scopedOrgIds =
+      user.role === "ADMIN" || user.role === "PENGEPUL"
+        ? organizationIds
+        : undefined;
 
     const [machines, campaigns] = await Promise.all([
       prisma.machine.findMany({
@@ -35,31 +40,13 @@ export async function GET() {
           },
         },
         orderBy: { name: "asc" },
+        take: MAX_MAP_MACHINES,
       }),
       user.role === "PENGEPUL"
         ? Promise.resolve([])
-        : prisma.campaign.findMany({
-            where: {
-              visibility: "PUBLIC",
-              status: "ACTIVE",
-              ...(organizationIds
-                ? {
-                    organizationId: {
-                      in: organizationIds.length ? organizationIds : ["__none__"],
-                    },
-                  }
-                : {}),
-            },
-            include: {
-              organization: {
-                select: {
-                  id: true,
-                  name: true,
-                  machines: { select: { latitude: true, longitude: true } },
-                },
-              },
-            },
-          }),
+        : loadPublicMapCampaigns(
+            scopedOrgIds?.length ? { organizationIds: scopedOrgIds } : undefined,
+          ),
     ]);
 
     return jsonOk({
@@ -75,24 +62,17 @@ export async function GET() {
         longitude: machine.longitude,
         supportedWasteTypes: machine.wasteTypes.map((link) => link.wasteType),
       })),
-      campaigns: campaigns.flatMap((campaign) => {
-        const centroid = machineCentroid(campaign.organization.machines);
-        return centroid
-          ? [
-              {
-                id: campaign.id,
-                name: campaign.name,
-                organization: {
-                  id: campaign.organization.id,
-                  name: campaign.organization.name,
-                },
-                rewardMultiplier: campaign.rewardMultiplier,
-                latitude: centroid.latitude,
-                longitude: centroid.longitude,
-              },
-            ]
-          : [];
-      }),
+      campaigns: campaigns.map((campaign) => ({
+        id: campaign.id,
+        name: campaign.name,
+        organization: {
+          id: campaign.organizationId,
+          name: campaign.organizationName,
+        },
+        rewardMultiplier: campaign.rewardMultiplier,
+        latitude: campaign.latitude,
+        longitude: campaign.longitude,
+      })),
     });
   } catch (error) {
     return handleApiError(error);

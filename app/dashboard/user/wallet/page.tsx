@@ -32,10 +32,11 @@ export default async function UserWalletPage() {
     pointsToRupiah,
   ] = await Promise.all([
     getWalletBalance(user.id),
-    getLedgerHistory(user.id, 30),
+    getLedgerHistory(user.id, { take: 30 }),
     prisma.payoutAccount.findMany({
       where: { userId: user.id, status: { not: "DISABLED" } },
       orderBy: { createdAt: "desc" },
+      take: 50,
     }),
     prisma.redemption.findMany({
       where: { userId: user.id },

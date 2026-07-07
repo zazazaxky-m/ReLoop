@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
-import { PageHeader, Card, CardContent, Badge, buttonVariants } from "@/components/ui";
+import { PageHeader, Card, CardContent, Badge, buttonVariants, PagePagination } from "@/components/ui";
+import { AuditChainVerifier } from "@/components/security/AuditChainVerifier";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { cn } from "@/lib/cn";
 import { formatDateTime } from "@/lib/format";
+import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 
 export const metadata: Metadata = { title: "Audit Log" };
 
@@ -23,17 +25,24 @@ const ENTITY_FILTERS = [
 export default async function SuperadminAuditPage({
   searchParams,
 }: {
-  searchParams: Promise<{ entity?: string }>;
+  searchParams: Promise<{ entity?: string; page?: string }>;
 }) {
   await requirePageUser(["SUPERADMIN"]);
-  const { entity } = await searchParams;
+  const params = await searchParams;
+  const { entity } = params;
+  const pagination = parsePageSearchParams(params, { defaultLimit: 50 });
 
   const where: Prisma.AuditLogWhereInput = entity ? { entityType: entity } : {};
-  const logs = await prisma.auditLog.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: 150,
-  });
+
+  const [logs, total] = await Promise.all([
+    prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: pagination.skip,
+      take: pagination.take,
+    }),
+    prisma.auditLog.count({ where }),
+  ]);
 
   const actorIds = Array.from(
     new Set(logs.map((l) => l.actorId).filter((x): x is string => Boolean(x))),
@@ -45,6 +54,9 @@ export default async function SuperadminAuditPage({
       })
     : [];
   const actorById = new Map(actors.map((a) => [a.id, a]));
+
+  const pageMeta = buildPaginationMeta(total, pagination);
+  const extraParams = entity ? { entity } : undefined;
 
   return (
     <div className="space-y-6">
@@ -70,6 +82,8 @@ export default async function SuperadminAuditPage({
           </Link>
         ))}
       </div>
+
+      <AuditChainVerifier />
 
       <Card>
         <CardContent className="p-0">
@@ -101,6 +115,13 @@ export default async function SuperadminAuditPage({
           )}
         </CardContent>
       </Card>
+
+      <PagePagination
+        basePath="/dashboard/superadmin/audit"
+        page={pageMeta.page}
+        totalPages={pageMeta.totalPages}
+        extraParams={extraParams}
+      />
     </div>
   );
 }

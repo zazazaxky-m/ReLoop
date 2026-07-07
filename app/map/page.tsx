@@ -4,32 +4,25 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader, Card, CardContent } from "@/components/ui";
 import { MapView } from "@/components/map/MapView";
 import { MapLegend } from "@/components/map/MapLegend";
-import { machineCentroid, type MapMachine, type MapCampaign } from "@/lib/map";
+import { type MapMachine } from "@/lib/map";
+import { loadPublicMapCampaigns, MAX_MAP_MACHINES } from "@/lib/map-data";
 
 export const metadata: Metadata = { title: "Peta" };
 
 export default async function MapPage() {
   await requirePageUser();
 
-  const [machines, campaigns] = await Promise.all([
+  const [machines, mapCampaigns] = await Promise.all([
     prisma.machine.findMany({
       where: { latitude: { not: null }, longitude: { not: null } },
       include: {
         organization: { select: { name: true } },
         wasteTypes: { where: { active: true }, include: { wasteType: { select: { name: true } } } },
       },
+      orderBy: { name: "asc" },
+      take: MAX_MAP_MACHINES,
     }),
-    prisma.campaign.findMany({
-      where: { visibility: "PUBLIC", status: "ACTIVE" },
-      include: {
-        organization: {
-          select: {
-            name: true,
-            machines: { select: { latitude: true, longitude: true } },
-          },
-        },
-      },
-    }),
+    loadPublicMapCampaigns(),
   ]);
 
   const mapMachines: MapMachine[] = machines.map((m) => ({
@@ -45,21 +38,6 @@ export default async function MapPage() {
     supportedWasteTypes: m.wasteTypes.map((w) => w.wasteType.name),
   }));
 
-  const mapCampaigns: MapCampaign[] = campaigns
-    .map((c) => {
-      const centroid = machineCentroid(c.organization.machines);
-      if (!centroid) return null;
-      return {
-        id: c.id,
-        name: c.name,
-        organizationName: c.organization.name,
-        latitude: centroid.latitude,
-        longitude: centroid.longitude,
-        rewardMultiplier: c.rewardMultiplier,
-      };
-    })
-    .filter((c): c is MapCampaign => c !== null);
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -71,7 +49,8 @@ export default async function MapPage() {
           <MapLegend />
           <MapView machines={mapMachines} campaigns={mapCampaigns} height={520} />
           <p className="text-xs text-muted">
-            {mapMachines.length} mesin · {mapCampaigns.length} program publik aktif.
+            {mapMachines.length} mesin · {mapCampaigns.length} program publik aktif
+            {machines.length >= MAX_MAP_MACHINES ? " (tampilan dibatasi)" : ""}.
           </p>
         </CardContent>
       </Card>

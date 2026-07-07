@@ -5,10 +5,12 @@ import {
   hashPassword,
   setSessionCookie,
   verifyPassword,
+  buildSessionPayload,
 } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { requireApiUser } from "@/lib/rbac";
+import { passwordSchema } from "@/lib/password-policy";
 import type { AppRole } from "@/lib/roles";
 
 const patchSchema = z.object({
@@ -16,12 +18,35 @@ const patchSchema = z.object({
   phone: z.string().max(40).nullable().optional(),
   email: z.string().email("Email tidak valid").optional(),
   currentPassword: z.string().min(1).optional(),
-  newPassword: z.string().min(6, "Password minimal 6 karakter").optional(),
+  newPassword: passwordSchema.optional(),
 });
 
 export async function GET() {
   try {
     const user = await requireApiUser();
+    const dbUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        organizationId: true,
+        tokenVersion: true,
+      },
+    });
+    if (dbUser) {
+      await setSessionCookie(
+        buildSessionPayload({
+          id: dbUser.id,
+          email: dbUser.email,
+          name: dbUser.name,
+          role: dbUser.role as AppRole,
+          organizationId: dbUser.organizationId,
+          tokenVersion: dbUser.tokenVersion,
+        }),
+      );
+    }
     return jsonOk({ user });
   } catch (error) {
     return handleApiError(error);
@@ -67,20 +92,26 @@ export async function PATCH(req: Request) {
         ...(data.phone !== undefined
           ? { phone: data.phone?.trim() || null }
           : {}),
-        ...(changingEmail ? { email: normalizedEmail } : {}),
+        ...(changingEmail
+          ? { email: normalizedEmail, tokenVersion: { increment: 1 } }
+          : {}),
         ...(changingPassword
-          ? { passwordHash: await hashPassword(data.newPassword!) }
+          ? {
+              passwordHash: await hashPassword(data.newPassword!),
+              tokenVersion: { increment: 1 },
+            }
           : {}),
       },
     });
 
-    await setSessionCookie({
-      sub: updated.id,
-    email: updated.email,
-    name: updated.name,
+    await setSessionCookie(buildSessionPayload({
+      id: updated.id,
+      email: updated.email,
+      name: updated.name,
       role: updated.role as AppRole,
       organizationId: updated.organizationId,
-    });
+      tokenVersion: updated.tokenVersion,
+    }));
 
     await logAudit({
       actorId: updated.id,

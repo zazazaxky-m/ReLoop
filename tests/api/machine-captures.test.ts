@@ -13,7 +13,7 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 vi.mock('@/lib/machine-auth', () => ({
-  verifyMachineSignature: vi.fn(),
+  verifyMachineRequest: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', () => ({
@@ -42,7 +42,7 @@ describe('POST /api/machine-captures', () => {
 
   it('fails if signature is invalid (401)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret' } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: false, reason: 'Invalid' } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: false, reason: 'Invalid' } as any);
     
     const res = await POST(makeReq({ 
       machineCode: 'm1', 
@@ -57,7 +57,7 @@ describe('POST /api/machine-captures', () => {
 
   it('fails if jpeg is invalid (422)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret' } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: true } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
     
     const res = await POST(makeReq({ 
       machineCode: 'm1', 
@@ -74,7 +74,7 @@ describe('POST /api/machine-captures', () => {
 
   it('saves capture successfully (201)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret' } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: true } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
     vi.mocked(prisma.machineCapture.findUnique).mockResolvedValue(null);
     vi.mocked(prisma.machineCapture.create).mockResolvedValue({ id: 'cap_1' } as any);
     

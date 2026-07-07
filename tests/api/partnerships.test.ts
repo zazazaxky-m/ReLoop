@@ -3,11 +3,10 @@ import { GET, POST } from '@/app/api/partnerships/route';
 import { PATCH } from '@/app/api/partnerships/[id]/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
-import * as audit from '@/lib/audit';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    organizationCollectorPartner: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+    organizationCollectorPartner: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), count: vi.fn() },
     organization: { findUnique: vi.fn() },
     user: { findUnique: vi.fn() },
   },
@@ -36,6 +35,7 @@ describe('/api/partnerships endpoints', () => {
     it('returns partnerships for PENGEPUL (200)', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'coll1', role: 'PENGEPUL' } as any);
       vi.mocked(prisma.organizationCollectorPartner.findMany).mockResolvedValue([{ id: 'p1', collectorUser: {} }] as any);
+      vi.mocked(prisma.organizationCollectorPartner.count).mockResolvedValue(1);
 
       const res = await GET(makeReq('http://localhost/api/partnerships'));
       expect(res.status).toBe(200);

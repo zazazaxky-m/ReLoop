@@ -56,13 +56,8 @@ export async function GET(req: Request) {
     });
 
     if (bags.length > 0) {
-      const trip = await prisma.trip.findUnique({
-        where: { id: bags[0].tripId },
-        include: { campaign: { select: { organizationId: true } } },
-      });
-      if (trip) {
-        assertOrgScope(user, trip.campaign.organizationId);
-      }
+      const orgId = bags[0].trip.campaign.organizationId;
+      assertOrgScope(user, orgId);
     }
 
     return jsonOk({ bags });
@@ -100,20 +95,21 @@ export async function POST(req: Request) {
       }
     }
 
-    // One unique QR per physical bag.
-    const created = [];
-    for (let i = 0; i < data.bagCount; i++) {
-      const bag = await prisma.trashBagAssignment.create({
-        data: {
-          tripId: trip.id,
-          assignedById: user.id,
-          wasteTypeId: data.wasteTypeId ?? null,
-          bagQrCode: generateBagQrCode(),
-          bagCount: 1,
-        },
-      });
-      created.push(bag);
-    }
+    // One unique QR per physical bag — bulk insert instead of N sequential creates.
+    const qrCodes = Array.from({ length: data.bagCount }, () => generateBagQrCode());
+    await prisma.trashBagAssignment.createMany({
+      data: qrCodes.map((bagQrCode) => ({
+        tripId: trip.id,
+        assignedById: user.id,
+        wasteTypeId: data.wasteTypeId ?? null,
+        bagQrCode,
+        bagCount: 1,
+      })),
+    });
+    const created = await prisma.trashBagAssignment.findMany({
+      where: { tripId: trip.id, bagQrCode: { in: qrCodes } },
+      orderBy: { assignedAt: "asc" },
+    });
 
     await logAudit({
       actorId: user.id,

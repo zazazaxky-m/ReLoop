@@ -25,6 +25,7 @@ export interface RedemptionAdminRow {
   accountName: string | null;
   status: string;
   note: string | null;
+  manualTransferProofUrl?: string | null;
   createdAt: string | Date;
 }
 
@@ -36,6 +37,7 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
   const [actionKind, setActionKind] = useState<"success" | "fail" | null>(null);
   const [note, setNote] = useState("Sudah ditransfer");
   const [ref, setRef] = useState("");
+  const [proofFile, setProofFile] = useState<File | null>(null);
 
   async function run(id: string, action: string, extra?: Record<string, unknown>) {
     setBusy(true);
@@ -55,7 +57,34 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
       setActionKind(null);
       setNote("Sudah ditransfer");
       setRef("");
+      setProofFile(null);
       router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runSuccess(id: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      if (proofFile) {
+        const form = new FormData();
+        form.append("file", proofFile);
+        const uploadRes = await fetch(`/api/redemptions/${id}/proof`, {
+          method: "POST",
+          body: form,
+        });
+        if (!uploadRes.ok) {
+          const d = await uploadRes.json().catch(() => ({}));
+          setError(d?.error ?? "Gagal mengunggah bukti transfer");
+          return;
+        }
+      }
+      await run(id, "success", {
+        note: note || undefined,
+        providerReference: ref || undefined,
+      });
     } finally {
       setBusy(false);
     }
@@ -66,6 +95,7 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
     setActionKind(kind);
     setNote(kind === "success" ? "Sudah ditransfer" : "");
     setRef("");
+    setProofFile(null);
   }
 
   const columns: Column<RedemptionAdminRow>[] = [
@@ -106,20 +136,55 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
       align: "right",
       render: (r) => {
         const isQueue = ["REQUESTED", "APPROVED", "PROCESSING"].includes(r.status);
-        if (!isQueue) return r.note ? <span className="text-xs text-muted">{r.note}</span> : null;
+        if (!isQueue) {
+          return (
+            <div className="flex flex-col items-end gap-1">
+              {r.note ? <span className="text-xs text-muted">{r.note}</span> : null}
+              {r.manualTransferProofUrl ? (
+                <a
+                  href={`/api/redemptions/${r.id}/proof`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-semibold text-brand-700 dark:text-brand-400 hover:underline"
+                >
+                  Lihat bukti
+                </a>
+              ) : null}
+            </div>
+          );
+        }
         return (
-          <div className="flex justify-end gap-1.5">
-            {r.status === "REQUESTED" ? (
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => run(r.id, "approve")}>
-                Setujui
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex justify-end gap-1.5">
+              {r.status === "REQUESTED" ? (
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => run(r.id, "approve")}>
+                  Setujui
+                </Button>
+              ) : null}
+              {r.status === "APPROVED" ? (
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => run(r.id, "process")}>
+                  Proses
+                </Button>
+              ) : null}
+              {r.status === "PROCESSING" ? (
+                <Button size="sm" variant="primary" disabled={busy} onClick={() => openAction(r.id, "success")}>
+                  Tandai Transfer
+                </Button>
+              ) : null}
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => openAction(r.id, "fail")}>
+                Gagal
               </Button>
+            </div>
+            {r.manualTransferProofUrl ? (
+              <a
+                href={`/api/redemptions/${r.id}/proof`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-semibold text-brand-700 dark:text-brand-400 hover:underline"
+              >
+                Lihat bukti
+              </a>
             ) : null}
-            <Button size="sm" variant="primary" disabled={busy} onClick={() => openAction(r.id, "success")}>
-              Tandai Transfer
-            </Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => openAction(r.id, "fail")}>
-              Gagal
-            </Button>
           </div>
         );
       },
@@ -154,7 +219,9 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
               </div>
               {actionKind === "success" ? (
                 <div>
-                  <label className="text-sm font-medium text-foreground">Referensi (opsional)</label>
+                  <label className="text-sm font-medium text-foreground">
+                    Referensi transfer{proofFile ? " (opsional)" : " (wajib jika tanpa bukti)"}
+                  </label>
                   <Input
                     value={ref}
                     onChange={(e) => setRef(e.target.value)}
@@ -164,14 +231,30 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
                 </div>
               ) : null}
             </div>
+            {actionKind === "success" ? (
+              <div>
+                <label className="text-sm font-medium text-foreground">
+                  Bukti transfer (JPG/PNG/WebP, maks 6MB)
+                  {ref ? " (opsional jika sudah isi referensi)" : ""}
+                </label>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => setProofFile(e.target.files?.[0] ?? null)}
+                  className="mt-1.5 block w-full text-sm text-muted"
+                />
+              </div>
+            ) : null}
             <div className="flex gap-2">
               <Button
                 disabled={busy}
                 onClick={() =>
-                  run(actionId, actionKind, {
-                    note: note || undefined,
-                    providerReference: ref || undefined,
-                  })
+                  actionKind === "success"
+                    ? runSuccess(actionId)
+                    : run(actionId, actionKind, {
+                        note: note || undefined,
+                        providerReference: ref || undefined,
+                      })
                 }
               >
                 {actionKind === "success" ? "Konfirmasi Sudah Transfer" : "Tandai Gagal"}
@@ -181,6 +264,7 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
                 onClick={() => {
                   setActionId(null);
                   setActionKind(null);
+                  setProofFile(null);
                 }}
               >
                 Batal

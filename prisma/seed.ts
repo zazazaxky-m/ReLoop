@@ -92,7 +92,7 @@ async function main() {
   console.log("Seeding ReLoop database...");
   await wipe();
 
-  const passwordHash = await bcrypt.hash("password123", 10);
+  const passwordHash = await bcrypt.hash("password1234", 10);
 
   // ==========================================================
   // Regions (Jawa Barat -> Pangandaran)
@@ -232,7 +232,7 @@ async function main() {
     },
   });
   // Second active partnership for orgC
-  const partnershipBatuHiu = await prisma.organizationCollectorPartner.create({
+  const _partnershipBatuHiu = await prisma.organizationCollectorPartner.create({
     data: {
       organizationId: orgC.id,
       collectorUserId: pengepul2.id,
@@ -1273,7 +1273,7 @@ async function main() {
   });
 
   // 2. ASSIGNED pickup (pengepul has been assigned)
-  const pickupAssigned = await prisma.pickupRequest.create({
+  const _pickupAssigned = await prisma.pickupRequest.create({
     data: {
       machineId: m1.id, organizationId: orgA.id, requestedById: admin.id,
       assignedCollectorId: pengepul.id, collectorPartnerId: partnershipActive.id,
@@ -1317,7 +1317,7 @@ async function main() {
   });
 
   // 4. ON_THE_WAY pickup
-  const pickupOnTheWay = await prisma.pickupRequest.create({
+  const _pickupOnTheWay = await prisma.pickupRequest.create({
     data: {
       machineId: m3.id, organizationId: orgB.id, requestedById: adminSchool.id,
       assignedCollectorId: pengepul.id,
@@ -1502,7 +1502,7 @@ async function main() {
   // Summary
   // ==========================================================
   console.log("\nSeed complete!");
-  console.log("Demo accounts (password: password123):");
+  console.log("Demo accounts (password: password1234):");
   console.log("  superadmin@reloop.id      (SUPERADMIN)");
   console.log("  admin@reloop.id           (ADMIN - Bank Sampah Pangandaran)");
   console.log("  admin.batuhiu@reloop.id   (ADMIN - Pantai Batu Hiu)");

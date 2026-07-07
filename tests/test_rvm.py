@@ -294,6 +294,52 @@ class ControllerTest(unittest.TestCase):
             self.assertEqual(event["payload"]["wasteTypeKey"], "anorganik")
             controller.db.close()
 
+    def test_kiosk_waste_type_selection_is_sent_as_waste_type_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = self.make_controller(tmp)
+            hardware = controller.hardware
+            now = int(time.time())
+            lease = {
+                "id": "lease-kiosk",
+                "sessionId": "session-kiosk",
+                "issuedAt": now,
+                "expiresAt": now + 60,
+            }
+            canonical = ".".join(
+                str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
+            )
+            lease["signature"] = hmac.new(
+                b"test-secret", canonical.encode(), hashlib.sha256
+            ).hexdigest()
+            self.assertTrue(controller.activate_lease(lease))
+
+            # Selecting a waste type while no session is active must fail.
+            controller._selected_waste_type_id = None
+            controller.set_state(MachineState.IDLE, "test-setup")
+            self.assertFalse(controller.select_waste_type("wt-bottle"))
+
+            controller.set_state(MachineState.SESSION_ACTIVE, "test-setup")
+            self.assertTrue(controller.select_waste_type("wt-bottle"))
+            self.assertEqual(controller.public_state()["selectedWasteTypeId"], "wt-bottle")
+
+            hardware.patch(item_present=True)
+            controller._process_sensors(hardware.read())
+            event = next(
+                row for row in controller.db.pending(20)
+                if row["eventType"] == "ITEM_DETECTED"
+            )
+            self.assertEqual(event["payload"]["wasteTypeId"], "wt-bottle")
+            self.assertNotIn("wasteTypeKey", event["payload"])
+
+            # Selection is cleared once the item finishes processing so the
+            # next item requires a fresh choice.
+            hardware.patch(item_present=False, weight_grams=20.0, weight_stable=True)
+            controller._process_sensors(hardware.read())
+            hardware.patch(acceptance_triggered=True)
+            controller._process_sensors(hardware.read())
+            self.assertIsNone(controller._selected_waste_type_id)
+            controller.db.close()
+
     def test_interactive_fraud_scenarios_expose_alert(self):
         scenarios = {
             "string-pull": "REVERSE_MOTION",
@@ -464,6 +510,68 @@ class ControllerTest(unittest.TestCase):
             token = controller.maintenance_login("2468")
             self.assertTrue(controller.maintenance_authorized(token))
             controller.db.close()
+
+    def test_maintenance_login_locks_out_after_repeated_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = self.make_controller(tmp)
+            for _ in range(5):
+                self.assertIsNone(controller.maintenance_login("wrong"))
+            self.assertTrue(controller.maintenance_locked())
+            # Even the correct PIN is rejected while locked out.
+            self.assertIsNone(controller.maintenance_login("2468"))
+            controller._maintenance_lockout_until = 0.0
+            self.assertFalse(controller.maintenance_locked())
+            self.assertIsNotNone(controller.maintenance_login("2468"))
+            controller.db.close()
+
+    def test_start_resumes_safe_state_instead_of_forcing_idle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = self.make_controller(tmp)
+            first.enter_safe_state("HIGH_IMPACT_DETECTED", {"vibrationG": 4.8})
+            self.assertEqual(first.state, MachineState.SAFE_STATE)
+            first.db.close()
+
+            # Simulate a process restart (power loss or redeploy): a brand
+            # new controller instance opens the same persisted database.
+            second = self.make_controller(tmp)
+            self.assertEqual(second.state, MachineState.SAFE_STATE)
+            second.start()
+            try:
+                self.assertEqual(second.state, MachineState.SAFE_STATE)
+                self.assertEqual(second.db.get_json("safe_reason"), "HIGH_IMPACT_DETECTED")
+            finally:
+                second.stop()
+
+    def test_start_flags_power_loss_mid_item_instead_of_resuming_processing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = self.make_controller(tmp)
+            first.set_state(MachineState.PROCESSING, "test-setup")
+            first.db.close()
+
+            second = self.make_controller(tmp)
+            self.assertEqual(second.state, MachineState.PROCESSING)
+            second.start()
+            try:
+                self.assertEqual(second.state, MachineState.SAFE_STATE)
+                self.assertEqual(second.db.get_json("safe_reason"), "POWER_LOSS_MID_ITEM")
+                errors = [
+                    row for row in second.db.pending(20)
+                    if row["eventType"] == "ERROR"
+                    and row["payload"].get("reason") == "POWER_LOSS_MID_ITEM"
+                ]
+                self.assertEqual(len(errors), 1)
+            finally:
+                second.stop()
+
+    def test_start_defaults_to_idle_on_first_boot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = self.make_controller(tmp)
+            self.assertEqual(controller.state, MachineState.BOOTING)
+            controller.start()
+            try:
+                self.assertEqual(controller.state, MachineState.IDLE)
+            finally:
+                controller.stop()
 
 
 if __name__ == "__main__":

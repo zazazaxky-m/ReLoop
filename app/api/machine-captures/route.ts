@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { jsonError, jsonOk, handleApiError } from "@/lib/api";
-import { verifyMachineSignature } from "@/lib/machine-auth";
+import { verifyMachineRequest } from "@/lib/machine-auth";
 import {
   captureStorageRoot,
   jsonValue,
@@ -54,7 +54,8 @@ export async function POST(req: Request) {
     });
     if (!machine) return jsonError(404, "Mesin tidak ditemukan");
 
-    const verdict = verifyMachineSignature({
+    const verdict = await verifyMachineRequest({
+      machineId: machine.id,
       secret: machine.ingestSecret,
       timestamp: req.headers.get("x-reloop-timestamp"),
       nonce: req.headers.get("x-reloop-nonce"),

@@ -46,7 +46,7 @@ describe('lib/rbac', () => {
 
     it('returns null if user not found or inactive', async () => {
       vi.mocked(auth.readSessionToken).mockResolvedValue('valid_token');
-      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1' } as any);
+      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1', tokenVersion: 0 } as any);
       
       // Not found
       vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
@@ -59,7 +59,7 @@ describe('lib/rbac', () => {
 
     it('returns current user with correct mapped fields', async () => {
       vi.mocked(auth.readSessionToken).mockResolvedValue('valid_token');
-      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1' } as any);
+      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1', tokenVersion: 0 } as any);
       vi.mocked(prisma.user.findUnique).mockResolvedValue({
         id: 'user_1',
         name: 'John Doe',
@@ -69,6 +69,7 @@ describe('lib/rbac', () => {
         organizationId: 'org_1',
         payoutEligible: true,
         status: 'ACTIVE',
+        tokenVersion: 0,
         organization: { name: 'Acme Corp' },
       } as any);
 
@@ -96,7 +97,7 @@ describe('lib/rbac', () => {
 
     it('redirects to dashboard if user lacks required role', async () => {
       vi.mocked(auth.readSessionToken).mockResolvedValue('valid_token');
-      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1' } as any);
+      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1', tokenVersion: 0 } as any);
       vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'user_1', role: 'USER', status: 'ACTIVE' } as any);
       
       await rbac.requirePageUser(['ADMIN']);
@@ -105,7 +106,7 @@ describe('lib/rbac', () => {
 
     it('returns user if authenticated and has required role', async () => {
       vi.mocked(auth.readSessionToken).mockResolvedValue('valid_token');
-      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1' } as any);
+      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1', tokenVersion: 0 } as any);
       vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'user_1', role: 'ADMIN', status: 'ACTIVE' } as any);
       
       const user = await rbac.requirePageUser(['ADMIN']);
@@ -123,7 +124,7 @@ describe('lib/rbac', () => {
 
     it('throws 403 if user lacks required role', async () => {
       vi.mocked(auth.readSessionToken).mockResolvedValue('valid_token');
-      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1' } as any);
+      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1', tokenVersion: 0 } as any);
       vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'user_1', role: 'USER', status: 'ACTIVE' } as any);
       
       await expect(rbac.requireApiUser(['ADMIN'])).rejects.toThrow(rbac.HttpError);
@@ -132,7 +133,7 @@ describe('lib/rbac', () => {
 
     it('returns user if authenticated and has required role', async () => {
       vi.mocked(auth.readSessionToken).mockResolvedValue('valid_token');
-      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1' } as any);
+      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1', tokenVersion: 0 } as any);
       vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'user_1', role: 'ADMIN', status: 'ACTIVE' } as any);
       
       const user = await rbac.requireApiUser(['ADMIN', 'SUPERADMIN']);

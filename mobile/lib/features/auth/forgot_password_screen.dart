@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/api_client.dart';
 import '../../shared/widgets/reloop_button.dart';
 import '../../theme/colors.dart';
 
@@ -13,6 +15,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _emailCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _sent = false;
+  bool _submitting = false;
+  String? _error;
 
   @override
   void dispose() {
@@ -20,9 +24,28 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _sent = true);
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      // Always shows the same success state regardless of whether the email is
+      // registered — the backend deliberately returns a generic response to
+      // prevent account enumeration.
+      await context.read<ApiClient>().post(
+        '/api/auth/forgot-password',
+        data: {'email': _emailCtrl.text.trim()},
+      );
+      if (mounted) setState(() => _sent = true);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = ApiClient.getErrorMessage(error));
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   @override
@@ -52,10 +75,28 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             ),
           const SizedBox(height: 8),
           Text(
-              'Masukkan email Anda. Kami akan mengirimkan kode reset password.',
+              'Masukkan email Anda. Kami akan mengirimkan tautan untuk mengatur ulang kata sandi.',
               style: TextStyle(color: context.reloopMuted, fontSize: 14),
             ),
           const SizedBox(height: 32),
+          if (_error != null) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: ReLoopColors.danger.withValues(alpha: .1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: ReLoopColors.danger.withValues(alpha: .35),
+                ),
+              ),
+              child: Text(
+                _error!,
+                style: const TextStyle(color: ReLoopColors.danger, fontSize: 13),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
           TextFormField(
             controller: _emailCtrl,
             keyboardType: TextInputType.emailAddress,
@@ -71,7 +112,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             },
           ),
           const SizedBox(height: 24),
-          ReLoopButton(label: 'Kirim Kode Reset', onPressed: _submit, size: ReLoopButtonSize.lg),
+          ReLoopButton(
+            label: 'Kirim Tautan Reset',
+            onPressed: _submit,
+            isLoading: _submitting,
+            size: ReLoopButtonSize.lg,
+          ),
         ],
       ),
     );
@@ -89,7 +135,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           ),
         const SizedBox(height: 12),
         Text(
-          'Kode reset password telah dikirim ke ${_emailCtrl.text}. Silakan cek inbox dan folder spam Anda.',
+          'Jika ${_emailCtrl.text} terdaftar, kami telah mengirimkan tautan reset kata sandi. Silakan cek inbox dan folder spam Anda.',
           textAlign: TextAlign.center,
           style: TextStyle(color: context.reloopMuted, fontSize: 14),
         ),

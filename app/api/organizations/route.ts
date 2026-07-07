@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 
 const ORG_TYPES = [
   "SCHOOL",
@@ -24,17 +25,28 @@ const createSchema = z.object({
   contactPhone: z.string().max(40).optional(),
 });
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     await requireApiUser(["USER", "PENGEPUL", "ADMIN", "SUPERADMIN"]);
-    const organizations = await prisma.organization.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        region: { select: { name: true } },
-        _count: { select: { machines: true, users: true } },
-      },
+    const pagination = parsePagination(new URL(req.url));
+
+    const [total, organizations] = await Promise.all([
+      prisma.organization.count(),
+      prisma.organization.findMany({
+        orderBy: { createdAt: "desc" },
+        skip: pagination.skip,
+        take: pagination.take,
+        include: {
+          region: { select: { name: true } },
+          _count: { select: { machines: true, users: true } },
+        },
+      }),
+    ]);
+
+    return jsonOk({
+      organizations,
+      pagination: buildPaginationMeta(total, pagination),
     });
-    return jsonOk({ organizations });
   } catch (error) {
     return handleApiError(error);
   }

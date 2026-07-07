@@ -1,5 +1,5 @@
 import { jsonError, jsonOk } from "@/lib/api";
-import { verifyMachineSignature } from "@/lib/machine-auth";
+import { verifyMachineRequest } from "@/lib/machine-auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(
@@ -12,7 +12,8 @@ export async function GET(
     select: { id: true, ingestSecret: true },
   });
   if (!machine) return jsonError(404, "Mesin tidak ditemukan");
-  const verdict = verifyMachineSignature({
+  const verdict = await verifyMachineRequest({
+    machineId: machine.id,
     secret: machine.ingestSecret,
     timestamp: req.headers.get("x-reloop-timestamp"),
     nonce: req.headers.get("x-reloop-nonce"),

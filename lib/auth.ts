@@ -4,7 +4,15 @@ import bcrypt from "bcryptjs";
 import type { AppRole } from "./roles";
 
 export const SESSION_COOKIE = "reloop_session";
-const MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // 7 days
+const USER_MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // 7 days
+const PRIVILEGED_MAX_AGE_SECONDS = 60 * 60 * 24; // 24 hours for ADMIN/SUPERADMIN
+
+/** Session lifetime in seconds based on role. */
+export function sessionMaxAgeSeconds(role: AppRole): number {
+  return role === "ADMIN" || role === "SUPERADMIN"
+    ? PRIVILEGED_MAX_AGE_SECONDS
+    : USER_MAX_AGE_SECONDS;
+}
 
 function getJwtSecret(): Uint8Array {
   const s = process.env.AUTH_JWT_SECRET;
@@ -23,6 +31,25 @@ export interface SessionPayload {
   name: string;
   role: AppRole;
   organizationId: string | null;
+  tokenVersion: number;
+}
+
+export function buildSessionPayload(user: {
+  id: string;
+  email: string;
+  name: string;
+  role: AppRole;
+  organizationId: string | null;
+  tokenVersion: number;
+}): SessionPayload {
+  return {
+    sub: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    organizationId: user.organizationId,
+    tokenVersion: user.tokenVersion,
+  };
 }
 
 export async function hashPassword(plain: string): Promise<string> {
@@ -37,10 +64,11 @@ export async function verifyPassword(
 }
 
 export async function signSession(payload: SessionPayload): Promise<string> {
+  const maxAge = sessionMaxAgeSeconds(payload.role);
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("7d")
+    .setExpirationTime(`${maxAge}s`)
     .sign(getJwtSecret());
 }
 
@@ -55,6 +83,7 @@ export async function verifySessionToken(
       name: String(payload.name),
       role: payload.role as AppRole,
       organizationId: (payload.organizationId as string | null) ?? null,
+      tokenVersion: Number(payload.tokenVersion ?? 0),
     };
   } catch {
     return null;
@@ -64,13 +93,14 @@ export async function verifySessionToken(
 /** Writes the session cookie. Only valid in Route Handlers / Server Actions. */
 export async function setSessionCookie(payload: SessionPayload): Promise<void> {
   const token = await signSession(payload);
+  const maxAge = sessionMaxAgeSeconds(payload.role);
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: MAX_AGE_SECONDS,
+    maxAge,
   });
 }
 

@@ -7,13 +7,21 @@ import {
   CardTitle,
   EmptyState,
   PageHeader,
+  PagePagination,
   StatusBadge,
 } from "@/components/ui";
 import { Trash } from "@/components/ui/icons";
 import { formatDate } from "@/lib/format";
+import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 
-export default async function UserTrashBagPage() {
+export default async function UserTrashBagPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const user = await requirePageUser(["USER"]);
+  const params = await searchParams;
+  const pagination = parsePageSearchParams(params, { defaultLimit: 20, maxLimit: 50 });
 
   const agentLinks = await prisma.travelAgentUser.findMany({
     where: { userId: user.id },
@@ -21,24 +29,34 @@ export default async function UserTrashBagPage() {
   });
   const travelAgentIds = agentLinks.map((link) => link.travelAgentId);
 
-  const trips = await prisma.trip.findMany({
-    where: {
-      OR: [
-        { userId: user.id },
-        travelAgentIds.length ? { travelAgentId: { in: travelAgentIds } } : { id: "__none__" },
-      ],
-    },
-    orderBy: { createdAt: "desc" },
-    include: {
-      campaign: { select: { name: true, rewardMode: true } },
-      travelAgent: { select: { name: true } },
-      bagAssignments: {
-        orderBy: { assignedAt: "desc" },
-        include: { wasteType: { select: { name: true } } },
+  const tripWhere = {
+    OR: [
+      { userId: user.id },
+      travelAgentIds.length ? { travelAgentId: { in: travelAgentIds } } : { id: "__none__" },
+    ],
+  };
+
+  const [trips, total] = await Promise.all([
+    prisma.trip.findMany({
+      where: tripWhere,
+      orderBy: { createdAt: "desc" },
+      skip: pagination.skip,
+      take: pagination.take,
+      include: {
+        campaign: { select: { name: true, rewardMode: true } },
+        travelAgent: { select: { name: true } },
+        bagAssignments: {
+          orderBy: { assignedAt: "desc" },
+          take: 30,
+          include: { wasteType: { select: { name: true } } },
+        },
+        validations: { orderBy: { createdAt: "desc" }, take: 20 },
       },
-      validations: { orderBy: { createdAt: "desc" } },
-    },
-  });
+    }),
+    prisma.trip.count({ where: tripWhere }),
+  ]);
+
+  const pageMeta = buildPaginationMeta(total, pagination);
 
   return (
     <div className="space-y-6">
@@ -106,6 +124,12 @@ export default async function UserTrashBagPage() {
           </Card>
         ))
       )}
+
+      <PagePagination
+        basePath="/dashboard/user/trash-bag"
+        page={pageMeta.page}
+        totalPages={pageMeta.totalPages}
+      />
     </div>
   );
 }

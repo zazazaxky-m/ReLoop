@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+/* eslint-disable @next/next/no-img-element -- Admin previews are uploaded media blobs; next/image adds no useful optimization here. */
+
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input } from "@/components/ui";
 
 type Item = { id:string; title:string|null; mediaType:"IMAGE"|"VIDEO"; originalName:string; fileSize:number; durationSeconds:number; sortOrder:number; active:boolean; previewUrl:string };
@@ -9,11 +11,11 @@ const size = (bytes:number) => bytes >= 1048576 ? (bytes/1048576).toFixed(1)+" M
 export function MachineMediaManager({ machineId }: { machineId:string }) {
   const [items,setItems]=useState<Item[]>([]), [open,setOpen]=useState(false), [loading,setLoading]=useState(true), [busy,setBusy]=useState(false), [error,setError]=useState("");
   const [title,setTitle]=useState(""), [duration,setDuration]=useState(8); const fileRef=useRef<HTMLInputElement>(null);
-  const load=async()=>{setLoading(true);try{const response=await fetch("/api/machines/"+machineId+"/media",{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Gagal memuat playlist");setItems(data.media||[]);setError("")}catch(cause){setError(cause instanceof Error?cause.message:"Gagal memuat playlist")}finally{setLoading(false)}};
+  const load=useCallback(async()=>{setLoading(true);try{const response=await fetch("/api/machines/"+machineId+"/media",{cache:"no-store"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Gagal memuat playlist");setItems(data.media||[]);setError("")}catch(cause){setError(cause instanceof Error?cause.message:"Gagal memuat playlist")}finally{setLoading(false)}},[machineId]);
   useEffect(()=>{
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-  },[machineId]);
+  },[load]);
   const upload=async(event:React.FormEvent<HTMLFormElement>)=>{event.preventDefault();const file=fileRef.current?.files?.[0];if(!file){setError("Pilih foto atau video terlebih dahulu");return}setBusy(true);setError("");const form=new FormData();form.set("file",file);form.set("title",title);form.set("durationSeconds",String(duration));try{const response=await fetch("/api/machines/"+machineId+"/media",{method:"POST",body:form});const data=await response.json();if(!response.ok)throw new Error(data.error||"Upload gagal");setItems(current=>[...current,data.media]);setTitle("");if(fileRef.current)fileRef.current.value=""}catch(cause){setError(cause instanceof Error?cause.message:"Upload gagal")}finally{setBusy(false)}};
   const update=async(id:string,patch:Partial<Pick<Item,"active"|"durationSeconds"|"sortOrder"|"title">>)=>{setError("");const response=await fetch("/api/machines/"+machineId+"/media/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});const data=await response.json();if(!response.ok){setError(data.error||"Perubahan gagal disimpan");return false}setItems(current=>current.map(item=>item.id===id?data.media:item).sort((a,b)=>a.sortOrder-b.sortOrder));return true};
   const move=async(index:number,direction:-1|1)=>{const other=index+direction;if(other<0||other>=items.length)return;setBusy(true);await Promise.all([update(items[index].id,{sortOrder:items[other].sortOrder}),update(items[other].id,{sortOrder:items[index].sortOrder})]);await load();setBusy(false)};

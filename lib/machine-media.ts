@@ -1,9 +1,10 @@
 import path from "node:path";
 
-export const machineMediaStorageRoot = path.resolve(
-  process.env.MACHINE_MEDIA_STORAGE_DIR ??
-    path.join(process.cwd(), "data", "private", "machine-media"),
-);
+const configuredMachineMediaDir = process.env.MACHINE_MEDIA_STORAGE_DIR;
+
+export const machineMediaStorageRoot = configuredMachineMediaDir
+  ? path.resolve(/*turbopackIgnore: true*/ configuredMachineMediaDir)
+  : path.resolve("data", "private", "machine-media");
 
 export function resolveMachineMediaPath(relativePath: string) {
   const resolved = path.resolve(machineMediaStorageRoot, relativePath);

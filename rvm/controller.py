@@ -6,65 +6,37 @@ import json
 import secrets
 import threading
 import time
-import uuid
-from datetime import datetime, timezone
-from enum import StrEnum
 from typing import Any
 
 from .camera import CameraWorker
 from .config import RvmConfig
 from .database import EdgeDatabase
+from .fraud import RvmFraudMixin
 from .hardware import GpioHardware, HardwareAdapter, MockHardware, SensorSnapshot
+from .remote import RvmRemoteMixin
+from .simulation import RvmSimulationMixin
+from .states import (
+    MAINTENANCE_LOCKOUT_SECONDS,
+    MAINTENANCE_LOCKOUT_THRESHOLD,
+    MachineState,
+    SIMULATION_SCENARIOS,
+    iso_now,
+)
 from .sync import SyncWorker
 
 
-class MachineState(StrEnum):
-    BOOTING = "BOOTING"
-    IDLE = "IDLE"
-    SESSION_ACTIVE = "SESSION_ACTIVE"
-    PROCESSING = "PROCESSING"
-    SYNC_PENDING = "SYNC_PENDING"
-    FULL = "FULL"
-    MAINTENANCE = "MAINTENANCE"
-    SAFE_STATE = "SAFE_STATE"
-    ERROR = "ERROR"
+class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
+    # States worth resuming as-is after an unclean shutdown (power loss) or
+    # a planned service restart, instead of silently forcing IDLE and
+    # discarding an in-progress session or unresolved safety condition.
+    _RESUMABLE_STATES = frozenset({
+        MachineState.SAFE_STATE,
+        MachineState.MAINTENANCE,
+        MachineState.SESSION_ACTIVE,
+        MachineState.FULL,
+        MachineState.ERROR,
+    })
 
-
-SIMULATION_SCENARIOS = frozenset({
-    "normal-bottle",
-    "normal-can",
-    "string-pull",
-    "acceptance-without-item",
-    "abnormal-weight",
-    "abnormal-underweight",
-    "item-without-session",
-    "chamber-timeout",
-    "vandalism-impact",
-    "panel-forced",
-    "door-forced",
-    "camera-covered",
-    "camera-offline",
-    "camera-blurry",
-    "overheat",
-    "machine-full",
-})
-
-SESSION_SIMULATION_SCENARIOS = frozenset({
-    "normal-bottle",
-    "normal-can",
-    "string-pull",
-    "abnormal-weight",
-    "abnormal-underweight",
-    "chamber-timeout",
-    "acceptance-without-item",
-})
-
-
-def iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-class RvmController:
     def __init__(self, config: RvmConfig):
         self.config = config
         self.db = EdgeDatabase(config.database_path)
@@ -87,11 +59,14 @@ class RvmController:
         self._processing_started_at: float | None = None
         self._weight_reported = False
         self._maintenance_tokens: dict[str, float] = {}
+        self._maintenance_failed_attempts = 0
+        self._maintenance_lockout_until = 0.0
         self._simulation_thread: threading.Thread | None = None
         self._simulation_name: str | None = None
         self._simulation_error: str | None = None
         self._simulation_result: dict[str, Any] | None = None
         self._simulation_waste_type_key: str | None = None
+        self._selected_waste_type_id: str | None = None
         self._sensor_sequence: list[str] = []
         self._server_session: dict[str, Any] | None = None
         self._idle_timeout_minutes: int | None = None
@@ -117,10 +92,10 @@ class RvmController:
 
     def start(self) -> None:
         self.running = True
-        self.set_state(MachineState.IDLE, "startup")
         self.hardware.all_stop()
         self.sync.start()
         self.camera.start()
+        self._recover_state_after_restart()
         self._loop = threading.Thread(target=self._run, daemon=True, name="rvm-control")
         self._loop.start()
         self._lease_thread = threading.Thread(
@@ -146,6 +121,23 @@ class RvmController:
             self._remote_thread.join(timeout=4)
         self.db.close()
 
+    def _recover_state_after_restart(self) -> None:
+        """`self.state` was already loaded from the persisted `machine_state`
+        kv row in __init__, so it reflects whatever was active the instant
+        the process stopped (clean or not). PROCESSING is the one state that
+        can never be safely resumed blind: the gate/conveyor/item position
+        is unknown, so it is routed to a safe state for manual review rather
+        than guessed at."""
+        recovered = self.state
+        if recovered == MachineState.PROCESSING:
+            self.enter_safe_state(
+                "POWER_LOSS_MID_ITEM", {}, category="SYSTEM", event_type="ERROR"
+            )
+        elif recovered in self._RESUMABLE_STATES:
+            self.set_state(recovered, "startup-recovery")
+        else:
+            self.set_state(MachineState.IDLE, "startup")
+
     def _run(self) -> None:
         while self.running:
             try:
@@ -163,6 +155,7 @@ class RvmController:
                     self.emit("CHAMBER_TIMEOUT", {"timeoutSeconds": self.config.chamber_timeout_seconds}, self.session_id())
                     self.emit("ITEM_REJECTED", {"reason": "CHAMBER_PROCESS_TIMEOUT"}, self.session_id())
                     self._sensor_sequence = []
+                    self._reset_waste_type_selection()
                     self.set_state(MachineState.SESSION_ACTIVE, "item-timeout")
                     self.hardware.set_conveyor("STOPPED")
                 if time.time() - self._last_heartbeat >= self.config.heartbeat_seconds:
@@ -185,6 +178,9 @@ class RvmController:
                 lease = payload.get("lease")
                 self._server_session = payload.get("session")
                 self._idle_timeout_minutes = payload.get("idleTimeoutMinutes")
+                waste_types = payload.get("wasteTypes")
+                if waste_types is not None:
+                    self.db.set_json("waste_types", waste_types)
                 local_lease = self.db.active_lease()
 
                 if lease and not local_lease:
@@ -196,6 +192,7 @@ class RvmController:
                     self.db.deactivate_leases()
                     self.hardware.all_stop()
                     self._processing_started_at = None
+                    self._reset_waste_type_selection()
                     if self._active_alert and self._active_alert.get("category") == "FRAUD":
                         self._clear_alert()
                     self.set_state(MachineState.IDLE, "server-session-ended")
@@ -214,99 +211,6 @@ class RvmController:
                         },
                     )
             time.sleep(2)
-
-    def _remote_loop(self) -> None:
-        while self.running:
-            command = self.sync.fetch_remote_command()
-            if command:
-                command_id = str(command.get("id", ""))
-                cached = self.db.get_json(f"remote_result:{command_id}")
-                if cached:
-                    self.sync.report_remote_command(command_id, **cached)
-                else:
-                    try:
-                        result = self.execute_remote_command(
-                            str(command.get("command", "")),
-                            dict(command.get("payload") or {}),
-                        )
-                        report = {"success": True, "result": result, "error": None}
-                    except Exception as exc:
-                        report = {"success": False, "result": {}, "error": str(exc)}
-                    self.db.set_json(f"remote_result:{command_id}", report)
-                    self.sync.report_remote_command(command_id, **report)
-            time.sleep(2)
-
-    def _remote_snapshot(self) -> dict[str, Any]:
-        state = self.public_state()
-        state.pop("display", None)
-        return state
-
-    def execute_remote_command(
-        self, command: str, payload: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        payload = payload or {}
-        with self._lock:
-            if command == "REFRESH_STATE":
-                pass
-            elif command == "CAPTURE_SNAPSHOT":
-                if not self.config.camera_enabled:
-                    raise ValueError("Kamera mesin tidak aktif")
-                evidence = self.camera.capture_evidence(
-                    "REMOTE", "SUPERADMIN_SNAPSHOT", self.session_id()
-                )
-                if not evidence:
-                    raise ValueError("Frame kamera belum tersedia")
-                self.db.enqueue_capture(evidence)
-                self.sync.flush_captures()
-            elif command == "SYNC_NOW":
-                self.sync.flush_once()
-                self.sync.flush_captures()
-            elif command == "STOP_ALL":
-                self.hardware.all_stop()
-            elif command == "OPEN_GATE":
-                if self.state != MachineState.SESSION_ACTIVE or not self.db.active_lease():
-                    raise ValueError("Gate hanya dapat dibuka saat sesi aktif")
-                if self._active_alert:
-                    raise ValueError("Gate tidak dapat dibuka selama alert aktif")
-                self.hardware.set_input_gate(True)
-            elif command == "CLOSE_GATE":
-                self.hardware.set_input_gate(False)
-            elif command == "RESET_ALERT":
-                sensor = self.hardware.read()
-                unsafe = []
-                if sensor.service_panel_open:
-                    unsafe.append("service panel masih terbuka")
-                if sensor.collection_door_open:
-                    unsafe.append("pintu kolektor masih terbuka")
-                if sensor.vibration_g >= self.config.vibration_threshold_g:
-                    unsafe.append("getaran masih tinggi")
-                if sensor.temperature_c >= self.config.max_temperature_c:
-                    unsafe.append("suhu masih tinggi")
-                if self.config.camera_enabled and not self.camera.status.online:
-                    unsafe.append("kamera masih offline")
-                if self.config.camera_enabled and self.camera.status.occluded:
-                    unsafe.append("kamera masih tertutup")
-                if unsafe:
-                    raise ValueError("Reset ditolak: " + ", ".join(unsafe))
-                self._reset_mock_state(deactivate_lease=False)
-            elif command == "ENTER_MAINTENANCE":
-                self.hardware.all_stop()
-                self.set_state(MachineState.MAINTENANCE, "remote-superadmin")
-            elif command == "RESUME_OPERATION":
-                if self.db.get_json("safe_reason") or self._active_alert:
-                    raise ValueError("Reset alert sebelum melanjutkan operasi")
-                if self.db.active_lease():
-                    self.set_state(MachineState.SESSION_ACTIVE, "remote-resume")
-                    self.hardware.set_input_gate(True)
-                else:
-                    self.set_state(MachineState.IDLE, "remote-resume")
-            else:
-                raise ValueError("Perintah remote tidak diizinkan")
-            self.db.audit(
-                "REMOTE_COMMAND_EXECUTED",
-                {"command": command, "payload": payload},
-            )
-            return self._remote_snapshot()
 
     def _process_sensors(self, current: SensorSnapshot) -> None:
         if current.chamber_open and not self._last.chamber_open:
@@ -363,8 +267,10 @@ class RvmController:
                 self._processing_started_at = time.time()
                 self._weight_reported = False
                 self.hardware.set_input_gate(False)
-                item_payload = {"inputBeam": True}
-                if self._simulation_waste_type_key:
+                item_payload: dict[str, Any] = {"inputBeam": True}
+                if self._selected_waste_type_id:
+                    item_payload["wasteTypeId"] = self._selected_waste_type_id
+                elif self._simulation_waste_type_key:
                     item_payload["wasteTypeKey"] = self._simulation_waste_type_key
                 self.emit("ITEM_DETECTED", item_payload, self.session_id())
                 self.emit("IMAGE_CLASSIFIED", self.camera.classify(), self.session_id())
@@ -410,6 +316,7 @@ class RvmController:
                 )
                 self._processing_started_at = None
                 self._sensor_sequence = []
+                self._reset_waste_type_selection()
                 self.set_state(MachineState.SESSION_ACTIVE, "abnormal-weight-rejected")
                 self.hardware.set_input_gate(True)
             self._weight_reported = True
@@ -431,6 +338,7 @@ class RvmController:
                     self.emit("COMPACTION_COMPLETED", {}, self.session_id())
                 self._processing_started_at = None
                 self._sensor_sequence = []
+                self._reset_waste_type_selection()
                 self.set_state(MachineState.SESSION_ACTIVE, "item-accepted")
 
     def heartbeat_payload(self, snapshot: SensorSnapshot | None = None) -> dict:
@@ -493,76 +401,6 @@ class RvmController:
                 self.session_id(),
             )
 
-    def report_fraud(self, reason: str, payload: dict[str, Any]) -> None:
-        self.hardware.all_stop()
-        self._set_alert("FRAUD", reason, "WARNING", payload)
-        if self.config.camera_capture_security_events:
-            self._capture_camera_evidence("FRAUD", reason, self.session_id())
-        self.emit("FRAUD_DETECTED", {"reason": reason, **payload}, self.session_id())
-
-    def _set_alert(
-        self,
-        category: str,
-        reason: str,
-        severity: str,
-        payload: dict[str, Any],
-    ) -> None:
-        alert = {
-            "category": category,
-            "reason": reason,
-            "severity": severity,
-            "payload": payload,
-            "occurredAt": iso_now(),
-        }
-        self._active_alert = alert
-        self.db.set_json("active_alert", alert)
-
-    def _clear_alert(self) -> None:
-        self._active_alert = None
-        self.db.set_json("active_alert", None)
-
-    def _capture_camera_evidence(
-        self,
-        kind: str,
-        reason: str,
-        session_id: str | None,
-    ) -> None:
-        if not self.config.camera_enabled:
-            return
-
-        def capture() -> None:
-            evidence = self.camera.capture_evidence(kind, reason, session_id)
-            if not evidence:
-                self.db.audit(
-                    "CAMERA_CAPTURE_SKIPPED",
-                    {"kind": kind, "reason": reason, "sessionId": session_id},
-                )
-                return
-            self.db.enqueue_capture(evidence)
-            self.db.audit(
-                "CAMERA_CAPTURE_QUEUED",
-                {
-                    "id": evidence["id"],
-                    "kind": kind,
-                    "reason": reason,
-                    "sessionId": session_id,
-                    "faceCount": evidence["faceCount"],
-                    "personDetected": evidence["personDetected"],
-                },
-            )
-
-        threading.Thread(
-            target=capture,
-            daemon=True,
-            name=f"rvm-capture-{kind.lower()}",
-        ).start()
-
-    def _camera_alert(self, reason: str, payload: dict[str, Any]) -> None:
-        if reason in {"CAMERA_OCCLUDED", "CAMERA_OFFLINE"}:
-            self.enter_safe_state(reason, payload)
-        else:
-            self.emit("ERROR", {"reason": reason, **payload})
-
     def verify_lease(self, lease: dict[str, Any]) -> bool:
         required = {"id", "sessionId", "issuedAt", "expiresAt", "signature"}
         if not required.issubset(lease):
@@ -609,12 +447,48 @@ class RvmController:
         lease = self.db.active_lease()
         return str(lease["session_id"]) if lease else None
 
+    def select_waste_type(self, waste_type_id: str) -> bool:
+        """Records the waste type the user picked on the kiosk before
+        inserting an item. Only valid while a session is active and no item
+        is currently being processed, so the selection always maps to the
+        next physical item."""
+        if not waste_type_id or self.state != MachineState.SESSION_ACTIVE:
+            return False
+        with self._lock:
+            self._selected_waste_type_id = waste_type_id
+            self.db.audit("WASTE_TYPE_SELECTED", {"wasteTypeId": waste_type_id})
+        return True
+
+    def _reset_waste_type_selection(self) -> None:
+        self._selected_waste_type_id = None
+
+    def maintenance_locked(self) -> bool:
+        return time.time() < self._maintenance_lockout_until
+
     def maintenance_login(self, pin: str) -> str | None:
-        if not self.config.verify_pin(pin):
-            self.db.audit("MAINTENANCE_LOGIN_FAILED", {})
+        now = time.time()
+        if now < self._maintenance_lockout_until:
+            self.db.audit(
+                "MAINTENANCE_LOGIN_LOCKED",
+                {"retryAfterSeconds": round(self._maintenance_lockout_until - now)},
+            )
             return None
+        if not self.config.verify_pin(pin):
+            self._maintenance_failed_attempts += 1
+            self.db.audit(
+                "MAINTENANCE_LOGIN_FAILED",
+                {"attempts": self._maintenance_failed_attempts},
+            )
+            if self._maintenance_failed_attempts >= MAINTENANCE_LOCKOUT_THRESHOLD:
+                self._maintenance_lockout_until = now + MAINTENANCE_LOCKOUT_SECONDS
+                self.db.audit(
+                    "MAINTENANCE_LOGIN_LOCKED_OUT",
+                    {"lockoutSeconds": MAINTENANCE_LOCKOUT_SECONDS},
+                )
+            return None
+        self._maintenance_failed_attempts = 0
         token = secrets.token_urlsafe(32)
-        self._maintenance_tokens[token] = time.time() + self.config.maintenance_token_ttl_seconds
+        self._maintenance_tokens[token] = now + self.config.maintenance_token_ttl_seconds
         self.db.audit("MAINTENANCE_LOGIN", {})
         return token
 
@@ -648,175 +522,6 @@ class RvmController:
         self.db.audit("MAINTENANCE_COMMAND", {"command": command, "data": data})
         return self.public_state()
 
-    def _reset_mock_state(self, deactivate_lease: bool = True) -> None:
-        self.db.set_json("safe_reason", None)
-        self._clear_alert()
-        if deactivate_lease:
-            self.db.deactivate_leases()
-        self.hardware.all_stop()
-        if isinstance(self.hardware, MockHardware):
-            self.hardware.patch(
-                chamber_open=False,
-                item_present=False,
-                acceptance_triggered=False,
-                reverse_motion=False,
-                weight_grams=0,
-                weight_stable=False,
-                fill_percent=20,
-                service_panel_open=False,
-                collection_door_open=False,
-                vibration_g=0.02,
-                camera_online=True,
-                camera_occluded=False,
-                camera_blurry=False,
-                temperature_c=28.0,
-            )
-            self._last = self.hardware.read()
-        self._processing_started_at = None
-        self._sensor_sequence = []
-        if self.db.active_lease():
-            self.set_state(MachineState.SESSION_ACTIVE, "simulation-reset")
-            self.hardware.set_input_gate(True)
-        else:
-            self.set_state(MachineState.IDLE, "maintenance-reset")
-        self.emit("STATUS_CHANGED", {"status": "ONLINE", "source": "maintenance"})
-
-    def _simulation_lease(self, seconds: int = 180) -> None:
-        now = time.time()
-        lease = {
-            "id": str(uuid.uuid4()),
-            "sessionId": f"interactive-{uuid.uuid4()}",
-            "userRef": "interactive-simulator",
-            "issuedAt": now,
-            "expiresAt": now + seconds,
-        }
-        canonical = ".".join(
-            str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
-        )
-        lease["signature"] = hmac.new(
-            self.config.machine_secret.encode(),
-            canonical.encode(),
-            hashlib.sha256,
-        ).hexdigest()
-        if not self.activate_lease(lease):
-            raise RuntimeError("Gagal membuat sesi simulasi")
-
-    def _simulation_patch(self, pause: float = 0.18, **values: Any) -> None:
-        hardware = self.hardware
-        if not isinstance(hardware, MockHardware):
-            raise ValueError("Simulator hanya tersedia untuk hardware mock")
-        hardware.patch(**values)
-        time.sleep(pause)
-
-    def _simulation_pulse(self, sensor: str, duration: float = 0.22) -> None:
-        self._simulation_patch(**{sensor: True})
-        self._simulation_patch(duration, **{sensor: False})
-
-    def start_simulation(self, scenario: str) -> None:
-        if not isinstance(self.hardware, MockHardware):
-            raise ValueError("Simulator interaktif hanya tersedia pada hardware_driver mock")
-        allowed = SIMULATION_SCENARIOS
-        if scenario not in allowed:
-            raise ValueError("Skenario simulator tidak dikenal")
-        if self._simulation_thread and self._simulation_thread.is_alive():
-            raise ValueError("Skenario lain masih berjalan")
-        self._simulation_name = scenario
-        self._simulation_error = None
-        self._simulation_result = {
-            "scenario": scenario,
-            "status": "RUNNING",
-            "startedAt": iso_now(),
-        }
-        self._simulation_thread = threading.Thread(
-            target=self._run_simulation,
-            args=(scenario,),
-            daemon=True,
-            name="rvm-interactive-simulator",
-        )
-        self._simulation_thread.start()
-
-    def _run_simulation(self, scenario: str) -> None:
-        try:
-            session_scenarios = SESSION_SIMULATION_SCENARIOS
-            requires_session = scenario in session_scenarios
-            self._reset_mock_state(deactivate_lease=not requires_session)
-
-            if requires_session and not self.db.active_lease():
-                lease = self.sync.fetch_active_lease()
-                if not lease or not self.activate_lease(lease):
-                    raise RuntimeError(
-                        "Belum ada sesi server aktif. Scan QR mesin dari aplikasi pengguna terlebih dahulu."
-                    )
-
-            if scenario in {
-                "normal-bottle",
-                "normal-can",
-                "string-pull",
-                "abnormal-weight",
-                "abnormal-underweight",
-            }:
-                self._simulation_patch(chamber_open=True)
-                self._simulation_pulse("item_present")
-                weight = {
-                    "normal-bottle": 22.4,
-                    "normal-can": 15.1,
-                    "string-pull": 23.0,
-                    "abnormal-weight": 900.0,
-                    "abnormal-underweight": 1.0,
-                }[scenario]
-                self._simulation_waste_type_key = (
-                    "anorganik" if scenario == "normal-can" else "organik"
-                )
-                self._simulation_patch(weight_grams=weight, weight_stable=True)
-                if scenario not in {"abnormal-weight", "abnormal-underweight"}:
-                    self._simulation_pulse("acceptance_triggered")
-                if scenario == "string-pull":
-                    self._simulation_pulse("reverse_motion")
-                self._simulation_patch(
-                    chamber_open=False,
-                    weight_grams=0,
-                    weight_stable=False,
-                    fill_percent=21,
-                )
-            elif scenario == "acceptance-without-item":
-                self._simulation_pulse("acceptance_triggered")
-            elif scenario == "item-without-session":
-                self._simulation_pulse("item_present")
-            elif scenario == "chamber-timeout":
-                self._simulation_patch(chamber_open=True)
-                self._simulation_pulse("item_present")
-                self._processing_started_at = time.time() - self.config.chamber_timeout_seconds - 1
-                time.sleep(0.2)
-            elif scenario == "vandalism-impact":
-                self._simulation_patch(vibration_g=4.8)
-            elif scenario == "panel-forced":
-                self._simulation_patch(service_panel_open=True)
-            elif scenario == "door-forced":
-                self._simulation_patch(collection_door_open=True)
-            elif scenario == "camera-covered":
-                self._simulation_patch(camera_online=True, camera_occluded=True)
-            elif scenario == "camera-offline":
-                self._simulation_patch(camera_online=False)
-            elif scenario == "camera-blurry":
-                self._simulation_patch(camera_blurry=True)
-            elif scenario == "overheat":
-                self._simulation_patch(temperature_c=self.config.max_temperature_c + 15)
-            elif scenario == "machine-full":
-                self._simulation_patch(fill_percent=98)
-        except Exception as exc:
-            self._simulation_error = str(exc)
-        finally:
-            self._simulation_result = {
-                "scenario": scenario,
-                "status": "FAILED" if self._simulation_error else "COMPLETED",
-                "message": self._simulation_error or "Skenario selesai dan respons sensor berhasil diproses",
-                "completedAt": iso_now(),
-                "runtimeState": self.state,
-                "alertReason": self._active_alert.get("reason") if self._active_alert else None,
-            }
-            self._simulation_waste_type_key = None
-            self._simulation_name = None
-
     def public_state(self) -> dict[str, Any]:
         sensor = self.hardware.read()
         display = self.db.get_json("display", {})
@@ -841,6 +546,8 @@ class RvmController:
             "activeSession": bool(self.db.active_lease()),
             "session": self._server_session,
             "idleTimeoutMinutes": self._idle_timeout_minutes,
+            "wasteTypes": self.db.get_json("waste_types", []),
+            "selectedWasteTypeId": self._selected_waste_type_id,
             "safeReason": self.db.get_json("safe_reason"),
             "alert": self._active_alert,
             "simulation": {

@@ -3,7 +3,6 @@ import { GET as getList, POST } from '@/app/api/pickups/route';
 import { GET as getOne, PATCH } from '@/app/api/pickups/[id]/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
-import * as audit from '@/lib/audit';
 
 vi.mock('@/lib/prisma', () => {
   const mockTx = {
@@ -12,7 +11,7 @@ vi.mock('@/lib/prisma', () => {
   };
   return {
     prisma: {
-      pickupRequest: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), findFirst: vi.fn() },
+      pickupRequest: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
       machine: { findUnique: vi.fn() },
       $transaction: vi.fn().mockImplementation((cb) => cb(mockTx)),
     },
@@ -32,6 +31,10 @@ vi.mock('@/lib/rbac', () => ({
 
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn() }));
 
+vi.mock('@/lib/notifications', () => ({
+  createNotification: vi.fn().mockResolvedValue({ id: 'n1' }),
+}));
+
 describe('/api/pickups endpoints', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -46,6 +49,7 @@ describe('/api/pickups endpoints', () => {
     it('returns available open pickups for PENGEPUL (200)', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'coll1', role: 'PENGEPUL' } as any);
       vi.mocked(rbac.activePartnerOrgIds).mockResolvedValue(['org1']);
+      vi.mocked(prisma.pickupRequest.count).mockResolvedValue(1);
       vi.mocked(prisma.pickupRequest.findMany).mockResolvedValue([{ id: 'p1' }] as any);
 
       const res = await getList(makeReq('http://localhost/api/pickups?scope=available'));

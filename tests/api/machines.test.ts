@@ -3,9 +3,6 @@ import { GET as getList, POST } from '@/app/api/machines/route';
 import { GET as getOne, PATCH, DELETE } from '@/app/api/machines/[id]/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
-import * as audit from '@/lib/audit';
-import * as qr from '@/lib/qr';
-import * as mAuth from '@/lib/machine-auth';
 import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/prisma', () => {
@@ -15,7 +12,7 @@ vi.mock('@/lib/prisma', () => {
   };
   return {
     prisma: {
-      machine: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), delete: vi.fn() },
+      machine: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), delete: vi.fn(), count: vi.fn() },
       organization: { findUnique: vi.fn() },
       machineWasteType: { deleteMany: vi.fn() },
       depositSession: { count: vi.fn() },
@@ -54,6 +51,7 @@ describe('/api/machines endpoints', () => {
   describe('GET list', () => {
     it('returns filtered list based on role', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ role: 'ADMIN', organizationId: 'org1' } as any);
+      vi.mocked(prisma.machine.count).mockResolvedValue(1);
       vi.mocked(prisma.machine.findMany).mockResolvedValue([{ id: 'm1' }] as any);
 
       const req = makeReq('http://localhost/api/machines?status=ONLINE');

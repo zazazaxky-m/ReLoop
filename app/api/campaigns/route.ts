@@ -5,6 +5,7 @@ import { requireApiUser, assertOrgScope, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { normalizeEmailDomains } from "@/lib/campaign";
 import { logAudit } from "@/lib/audit";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 
 const createSchema = z
   .object({
@@ -41,16 +42,22 @@ export async function GET(req: Request) {
       where.organizationId = orgFilter;
     }
 
-    const campaigns = await prisma.campaign.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      include: {
-        organization: { select: { id: true, name: true } },
-        _count: { select: { sessions: true } },
-      },
-    });
+    const pagination = parsePagination(url);
+    const [total, campaigns] = await Promise.all([
+      prisma.campaign.count({ where }),
+      prisma.campaign.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: pagination.skip,
+        take: pagination.take,
+        include: {
+          organization: { select: { id: true, name: true } },
+          _count: { select: { sessions: true } },
+        },
+      }),
+    ]);
 
-    return jsonOk({ campaigns });
+    return jsonOk({ campaigns, pagination: buildPaginationMeta(total, pagination) });
   } catch (error) {
     return handleApiError(error);
   }

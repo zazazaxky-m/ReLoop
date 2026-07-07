@@ -24,6 +24,7 @@ import '../features/trash_bag/trash_bag_screen.dart';
 import '../features/machine/machine_detail_screen.dart';
 import '../features/pengepul/area_map_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
+import '../features/notifications/notifications_screen.dart';
 import '../features/legal/terms_screen.dart';
 import '../features/legal/privacy_screen.dart';
 import '../features/about/about_screen.dart';
@@ -43,6 +44,7 @@ import '../features/admin/admin_travel_agents_screen.dart';
 import '../features/pickup/tourism_pickups_screen.dart';
 import '../features/superadmin/superadmin_resource_screen.dart';
 import '../features/superadmin/superadmin_dashboard_screen.dart';
+import '../features/superadmin/superadmin_reconciliation_screen.dart';
 import '../features/superadmin/superadmin_organizations_screen.dart';
 import '../features/superadmin/superadmin_users_screen.dart';
 import '../features/superadmin/superadmin_regions_screen.dart';
@@ -79,6 +81,19 @@ class AppRouter {
     _analytics.logScreenView(screenName: name);
   }
 
+  // Mirrors AuthProvider.dashboardRoute: each prefix's allowed roles map
+  // 1:1 to the role that owns that home route, so redirecting a
+  // wrong-role user to their own dashboardRoute can never re-trigger this
+  // same guard (no redirect loop). The backend independently enforces the
+  // same RBAC on every API call — this only stops the UI from rendering a
+  // screen the user has no access to in the first place.
+  static const Map<String, List<AppRole>> _roleGuardedPrefixes = {
+    '/superadmin': [AppRole.SUPERADMIN],
+    '/admin': [AppRole.ADMIN, AppRole.SUPERADMIN],
+    '/pengepul': [AppRole.PENGEPUL],
+    '/dashboard': [AppRole.USER],
+  };
+
   static const _screenNameMap = {
     '/login': 'Login',
     '/register': 'Register',
@@ -92,6 +107,7 @@ class AppRouter {
     '/pickup': 'Pickup',
     '/profile': 'Profile',
     '/trash-bags': 'Trash Bag',
+    '/notifications': 'Notifications',
   };
 
   late final router = GoRouter(
@@ -411,6 +427,14 @@ class AppRouter {
             ),
           ),
           GoRoute(
+            path: '/superadmin/reconciliation',
+            pageBuilder: (context, state) => buildPage(
+              key: state.pageKey,
+              child: const SuperadminReconciliationScreen(),
+              style: styleForPath(state.matchedLocation),
+            ),
+          ),
+          GoRoute(
             path: '/superadmin/regions',
             pageBuilder: (context, state) => buildPage(
               key: state.pageKey,
@@ -503,6 +527,14 @@ class AppRouter {
         ),
       ),
       GoRoute(
+        path: '/notifications',
+        pageBuilder: (context, state) => buildPage(
+          key: state.pageKey,
+          child: const NotificationsScreen(),
+          style: styleForPath(state.matchedLocation),
+        ),
+      ),
+      GoRoute(
         path: '/machine/:code/detail',
         pageBuilder: (context, state) {
           final code = state.pathParameters['code']!;
@@ -532,6 +564,15 @@ class AppRouter {
         final redirect = state.uri.queryParameters['redirect'];
         if (redirect != null) return redirect;
         return authProvider.dashboardRoute;
+      }
+      if (isAuthenticated) {
+        final role = authProvider.user?.role;
+        for (final entry in _roleGuardedPrefixes.entries) {
+          final allowed = role != null && entry.value.contains(role);
+          if (location.startsWith(entry.key) && !allowed) {
+            return authProvider.dashboardRoute;
+          }
+        }
       }
       return null;
     },
@@ -677,7 +718,7 @@ class _CustomBottomNavBar extends StatelessWidget {
                       item['label'] as String,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 9.5, fontWeight: selected ? FontWeight.w700 : FontWeight.w500, color: color),
+                      style: TextStyle(fontSize: 11, fontWeight: selected ? FontWeight.w700 : FontWeight.w500, color: color),
                     ),
                   ],
                 ),

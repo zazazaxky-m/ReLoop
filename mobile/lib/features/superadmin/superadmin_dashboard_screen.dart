@@ -127,6 +127,13 @@ class _SuperadminDashboardScreenState extends State<SuperadminDashboardScreen> {
               onTap: () => context.push('/superadmin/redemptions'),
             ),
             QuickAction(
+              icon: Icons.rule_folder_outlined,
+              title: 'Rekonsiliasi',
+              description: 'Cek keuangan',
+              tone: QuickActionTone.teal,
+              onTap: () => context.push('/superadmin/reconciliation'),
+            ),
+            QuickAction(
               icon: Icons.public_outlined,
               title: 'Wilayah',
               description: 'Struktur area',

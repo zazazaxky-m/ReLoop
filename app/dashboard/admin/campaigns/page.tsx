@@ -1,20 +1,34 @@
 import type { Metadata } from "next";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, PagePagination } from "@/components/ui";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 import { CampaignManager, type CampaignRow } from "@/components/admin/CampaignManager";
 
 export const metadata: Metadata = { title: "Campaign" };
 
-export default async function AdminCampaignsPage() {
+export default async function AdminCampaignsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const user = await requirePageUser(["ADMIN"]);
   const orgId = user.organizationId ?? "__none__";
+  const params = await searchParams;
+  const pagination = parsePageSearchParams(params);
 
-  const campaigns = await prisma.campaign.findMany({
-    where: { organizationId: orgId },
-    orderBy: { createdAt: "desc" },
-    include: { _count: { select: { sessions: true } } },
-  });
+  const where = { organizationId: orgId };
+
+  const [campaigns, total] = await Promise.all([
+    prisma.campaign.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: pagination.skip,
+      take: pagination.take,
+      include: { _count: { select: { sessions: true } } },
+    }),
+    prisma.campaign.count({ where }),
+  ]);
 
   const rows: CampaignRow[] = campaigns.map((c) => ({
     id: c.id,
@@ -32,6 +46,8 @@ export default async function AdminCampaignsPage() {
     organizationName: null,
   }));
 
+  const pageMeta = buildPaginationMeta(total, pagination);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -39,6 +55,11 @@ export default async function AdminCampaignsPage() {
         description="Buat dan kelola program lingkungan untuk pengguna organisasi."
       />
       <CampaignManager campaigns={rows} />
+      <PagePagination
+        basePath="/dashboard/admin/campaigns"
+        page={pageMeta.page}
+        totalPages={pageMeta.totalPages}
+      />
     </div>
   );
 }

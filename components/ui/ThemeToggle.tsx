@@ -24,7 +24,7 @@ export function ThemeToggle({ className }: Props) {
       aria-label={isDark ? "Aktifkan mode terang" : "Aktifkan mode gelap"}
       title={isDark ? "Mode terang" : "Mode gelap"}
       className={cn(
-        "flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface-soft text-muted shadow-sm transition-colors hover:bg-surface hover:text-brand-700 dark:hover:bg-surface dark:hover:text-brand-400",
+        "flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface-soft text-muted shadow-sm transition-colors hover:bg-surface hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:hover:bg-surface dark:hover:text-brand-400",
         className,
       )}
     >

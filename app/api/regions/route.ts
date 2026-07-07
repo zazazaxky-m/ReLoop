@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 
 const createSchema = z.object({
   type: z.enum(["PROVINCE", "REGENCY", "DISTRICT", "VILLAGE"]),
@@ -10,17 +11,25 @@ const createSchema = z.object({
   parentId: z.string().nullable().optional(),
 });
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     await requireApiUser(["SUPERADMIN"]);
-    const regions = await prisma.region.findMany({
-      orderBy: [{ type: "asc" }, { name: "asc" }],
-      include: {
-        parent: { select: { id: true, name: true } },
-        _count: { select: { children: true, organizations: true, machines: true } },
-      },
-    });
-    return jsonOk({ regions });
+    const pagination = parsePagination(new URL(req.url), { defaultLimit: 100, maxLimit: 200 });
+
+    const [total, regions] = await Promise.all([
+      prisma.region.count(),
+      prisma.region.findMany({
+        orderBy: [{ type: "asc" }, { name: "asc" }],
+        skip: pagination.skip,
+        take: pagination.take,
+        include: {
+          parent: { select: { id: true, name: true } },
+          _count: { select: { children: true, organizations: true, machines: true } },
+        },
+      }),
+    ]);
+
+    return jsonOk({ regions, pagination: buildPaginationMeta(total, pagination) });
   } catch (error) {
     return handleApiError(error);
   }

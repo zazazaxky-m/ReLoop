@@ -64,6 +64,98 @@ export async function getSecurityEvents(options?: {
   })) satisfies SecurityEventRow[];
 }
 
+export type DepositReviewRow = {
+  id: string;
+  quantity: number;
+  measuredWeightGrams: number | null;
+  aiDetectedType: string | null;
+  aiConfidence: number | null;
+  validationReasonCode: string | null;
+  createdAt: Date;
+  wasteType: { id: string; name: string; unit: string };
+  pendingLedgerAmount: number;
+  session: {
+    id: string;
+    startedAt: Date;
+    user: { id: string; name: string; email: string };
+    machine: {
+      id: string;
+      machineCode: string;
+      name: string;
+      organizationId: string;
+      organization: { id: string; name: string };
+    };
+  };
+};
+
+/**
+ * Deposit items awaiting manual resolution: sensor/fraud anomalies (50%
+ * reward already reserved as EARN/PENDING) and the unknown-waste-type
+ * fallback (0 reward, no ledger entry yet). Shared by the review API route
+ * and the superadmin/admin security page so both read the same query.
+ */
+export async function getDepositReviewQueue(options?: {
+  organizationId?: string;
+  skip?: number;
+  take?: number;
+}): Promise<{ items: DepositReviewRow[]; total: number }> {
+  const where: Prisma.DepositItemWhereInput = {
+    status: "REVIEW",
+    session: options?.organizationId
+      ? { machine: { organizationId: options.organizationId } }
+      : undefined,
+  };
+
+  const [total, rows] = await Promise.all([
+    prisma.depositItem.count({ where }),
+    prisma.depositItem.findMany({
+      where,
+      orderBy: { createdAt: "asc" },
+      skip: options?.skip,
+      take: options?.take,
+      include: {
+        wasteType: { select: { id: true, name: true, unit: true } },
+        ledgerEntries: {
+          where: { entryType: "EARN" },
+          select: { amount: true, status: true },
+        },
+        session: {
+          select: {
+            id: true,
+            startedAt: true,
+            user: { select: { id: true, name: true, email: true } },
+            machine: {
+              select: {
+                id: true,
+                machineCode: true,
+                name: true,
+                organizationId: true,
+                organization: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+    }),
+  ]);
+
+  return {
+    total,
+    items: rows.map((row) => ({
+      id: row.id,
+      quantity: row.quantity,
+      measuredWeightGrams: row.measuredWeightGrams,
+      aiDetectedType: row.aiDetectedType,
+      aiConfidence: row.aiConfidence,
+      validationReasonCode: row.validationReasonCode,
+      createdAt: row.createdAt,
+      wasteType: row.wasteType,
+      pendingLedgerAmount: row.ledgerEntries[0]?.amount ?? 0,
+      session: row.session,
+    })),
+  };
+}
+
 export async function getSecuritySummary() {
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);

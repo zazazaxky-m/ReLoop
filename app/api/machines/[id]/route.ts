@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, assertOrgScope, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
+import { machineSafeSelect } from "@/lib/machine-select";
 
 const updateSchema = z.object({
   name: z.string().min(2).max(120).optional(),
@@ -44,7 +45,8 @@ export async function GET(
 
     const machine = await prisma.machine.findUnique({
       where: { id },
-      include: {
+      select: {
+        ...machineSafeSelect,
         organization: { select: { id: true, name: true } },
         region: { select: { id: true, name: true } },
         wasteTypes: { include: { wasteType: true } },
@@ -75,6 +77,7 @@ export async function PATCH(
       const updated = await tx.machine.update({
         where: { id },
         data: rest,
+        select: machineSafeSelect,
       });
       if (wasteTypeIds) {
         await tx.machineWasteType.deleteMany({ where: { machineId: id } });

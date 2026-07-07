@@ -5,6 +5,7 @@ import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { settleRedeemLedger } from "@/lib/ledger";
 import { logAudit } from "@/lib/audit";
+import { createNotification } from "@/lib/notifications";
 
 const patchSchema = z.object({
   action: z.enum(["approve", "process", "success", "fail", "cancel"]),
@@ -12,10 +13,13 @@ const patchSchema = z.object({
   providerReference: z.string().max(120).optional(),
 });
 
+// success now requires the full REQUESTED -> APPROVED -> PROCESSING chain
+// (no skipping straight from REQUESTED) so a superadmin can't accidentally
+// mark a payout complete before it was ever approved/processed.
 const FROM: Record<string, RedemptionStatus[]> = {
   approve: ["REQUESTED"],
   process: ["APPROVED"],
-  success: ["REQUESTED", "APPROVED", "PROCESSING"],
+  success: ["PROCESSING"],
   fail: ["REQUESTED", "APPROVED", "PROCESSING"],
   cancel: ["REQUESTED"],
 };
@@ -26,6 +30,13 @@ const TO: Record<string, RedemptionStatus> = {
   success: "SUCCESS",
   fail: "FAILED",
   cancel: "REVERSED",
+};
+
+const STATUS_MESSAGES: Record<string, string> = {
+  approve: "Pengajuan pencairan Anda telah disetujui dan akan segera diproses.",
+  process: "Pencairan Anda sedang diproses oleh tim kami.",
+  success: "Pencairan Anda berhasil, dana telah dikirim.",
+  fail: "Pencairan Anda gagal. Silakan hubungi dukungan atau ajukan ulang.",
 };
 
 export async function PATCH(
@@ -53,7 +64,18 @@ export async function PATCH(
       return jsonOk({ redemption, idempotent: true });
     }
     if (!FROM[body.action].includes(redemption.status)) {
-      throw new HttpError(409, `Tidak bisa ${body.action} dari status ${redemption.status}`);
+      throw new HttpError(409, "Transisi status pencairan tidak valid");
+    }
+
+    if (
+      body.action === "success" &&
+      !body.providerReference &&
+      !redemption.manualTransferProofUrl
+    ) {
+      throw new HttpError(
+        422,
+        "Isi nomor referensi transfer atau unggah bukti transfer sebelum menandai sukses",
+      );
     }
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -73,6 +95,19 @@ export async function PATCH(
       }
       return row;
     });
+
+    // Only notify when a superadmin changed the status on behalf of the
+    // user; the user's own "cancel" doesn't need a self-notification.
+    const statusMessage = STATUS_MESSAGES[body.action];
+    if (user.role === "SUPERADMIN" && statusMessage) {
+      await createNotification({
+        userId: redemption.userId,
+        type: "REDEMPTION_STATUS",
+        title: "Status pencairan diperbarui",
+        body: statusMessage,
+        data: { redemptionId: id, status: target },
+      });
+    }
 
     await logAudit({
       actorId: user.id,

@@ -11,6 +11,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  EmptyState,
   MetricCard,
   PageHeader,
   QuickAction,
@@ -52,7 +53,7 @@ export default async function UserDashboardPage() {
       include: { organization: { select: { name: true } } },
       take: 6,
     }),
-    getLedgerHistory(user.id, 5),
+    getLedgerHistory(user.id, { take: 5 }),
     prisma.travelAgentUser.count({ where: { userId: user.id } }),
     getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
   ]);
@@ -154,9 +155,20 @@ export default async function UserDashboardPage() {
           </CardHeader>
           <CardContent>
             {sessions.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted">
-                Belum ada sesi setor.
-              </p>
+              <EmptyState
+                icon={QrCode}
+                title="Belum ada sesi setor"
+                description="Mulai setor sampah pertama Anda dengan memindai QR pada mesin ReLoop terdekat."
+                action={
+                  <Link href="/scan">
+                    <Button>
+                      <QrCode />
+                      Scan mesin sekarang
+                    </Button>
+                  </Link>
+                }
+                className="min-h-0 border-0 bg-transparent shadow-none"
+              />
             ) : (
               <ul className="space-y-2">
                 {sessions.map((session) => (
@@ -187,9 +199,12 @@ export default async function UserDashboardPage() {
           </CardHeader>
           <CardContent>
             {eligibleCampaigns.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted">
-                Tidak ada campaign aktif saat ini.
-              </p>
+              <EmptyState
+                icon={Megaphone}
+                title="Belum ada campaign"
+                description="Program yang tersedia untuk Anda akan tampil di sini."
+                className="min-h-0 border-0 bg-transparent shadow-none"
+              />
             ) : (
               <ul className="space-y-2">
                 {eligibleCampaigns.slice(0, 4).map((campaign) => (

@@ -37,6 +37,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     include: { organization: { select: { name: true } } },
   });
   if (!user || user.status !== "ACTIVE") return null;
+  if ((payload.tokenVersion ?? 0) !== (user.tokenVersion ?? 0)) return null;
 
   return {
     id: user.id,

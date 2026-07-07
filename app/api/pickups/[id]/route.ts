@@ -8,6 +8,7 @@ import {
 import { handleApiError, jsonOk } from "@/lib/api";
 import { resolvePickupTransition, type PickupAction } from "@/lib/pickup";
 import { logAudit } from "@/lib/audit";
+import { createNotification } from "@/lib/notifications";
 
 const patchSchema = z.object({
   action: z.enum(["assign", "start", "arrive", "collect", "complete", "fail", "cancel"]),
@@ -115,8 +116,19 @@ export async function PATCH(
           });
         }
       }
+
       return row;
     });
+
+    if (body.action === "assign" && assignedCollectorId) {
+      await createNotification({
+        userId: assignedCollectorId,
+        type: "PICKUP_ASSIGNED",
+        title: "Tugas pickup baru",
+        body: "Anda ditugaskan untuk mengambil setoran dari sebuah mesin. Cek daftar tugas Anda.",
+        data: { pickupId: id },
+      });
+    }
 
     await logAudit({
       actorId: user.id,

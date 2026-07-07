@@ -7,7 +7,7 @@ import * as audit from '@/lib/audit';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    organization: { findMany: vi.fn(), create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    organization: { findMany: vi.fn(), create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), count: vi.fn() },
   },
 }));
 
@@ -35,9 +35,10 @@ describe('/api/organizations', () => {
   describe('GET list', () => {
     it('returns list of organizations for authorized user (200)', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1' } as any);
+      vi.mocked(prisma.organization.count).mockResolvedValue(1);
       vi.mocked(prisma.organization.findMany).mockResolvedValue([{ id: 'org1', name: 'Org 1' }] as any);
 
-      const res = await GET();
+      const res = await GET(new Request("http://localhost/api/organizations"));
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.organizations).toHaveLength(1);
@@ -45,7 +46,7 @@ describe('/api/organizations', () => {
 
     it('denies access if unauthorized (401)', async () => {
       vi.mocked(rbac.requireApiUser).mockRejectedValue(new (rbac as any).HttpError(401, 'Unauthorized'));
-      const res = await GET();
+      const res = await GET(new Request("http://localhost/api/organizations"));
       expect(res.status).toBe(401);
     });
   });

@@ -1,19 +1,30 @@
 import type { Metadata } from "next";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, PagePagination } from "@/components/ui";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { wasteTypeOptions } from "@/lib/queries";
+import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 import { PickupTaskList, type TaskRow } from "@/components/pickup/PickupTaskList";
 
 export const metadata: Metadata = { title: "Tugas Pickup" };
 
-export default async function PengepulTasksPage() {
+export default async function PengepulTasksPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const user = await requirePageUser(["PENGEPUL"]);
+  const params = await searchParams;
+  const pagination = parsePageSearchParams(params, { defaultLimit: 25 });
 
-  const [pickups, wasteTypes] = await Promise.all([
+  const where = { assignedCollectorId: user.id };
+
+  const [pickups, total, wasteTypes] = await Promise.all([
     prisma.pickupRequest.findMany({
-      where: { assignedCollectorId: user.id },
+      where,
       orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
+      skip: pagination.skip,
+      take: pagination.take,
       include: {
         machine: { select: { name: true, machineCode: true } },
         organization: {
@@ -22,6 +33,7 @@ export default async function PengepulTasksPage() {
         items: { include: { wasteType: { select: { name: true } } } },
       },
     }),
+    prisma.pickupRequest.count({ where }),
     wasteTypeOptions(),
   ]);
 
@@ -44,6 +56,8 @@ export default async function PengepulTasksPage() {
     })),
   }));
 
+  const pageMeta = buildPaginationMeta(total, pagination);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -51,6 +65,11 @@ export default async function PengepulTasksPage() {
         description="Lihat tugas pengambilan, perbarui progres, dan catat material."
       />
       <PickupTaskList tasks={rows} wasteTypes={wasteTypes} />
+      <PagePagination
+        basePath="/dashboard/pengepul/tasks"
+        page={pageMeta.page}
+        totalPages={pageMeta.totalPages}
+      />
     </div>
   );
 }

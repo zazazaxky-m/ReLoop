@@ -18,11 +18,19 @@ def main() -> None:
     args = parser.parse_args()
     
     config = RvmConfig.load(args.config)
-    
+
     if args.env == "prod":
-        config.server_url = "https://reloop.farhanlhsn.cloud"
-        config.machine_secret = "g17051vhqVVYcp89gUafi2AsQRNDjClGCejzvWUI8mY"
-        
+        server_url = os.getenv("RVM_SERVER_URL")
+        machine_secret = os.getenv("RVM_MACHINE_SECRET")
+        if not server_url or not machine_secret:
+            raise SystemExit(
+                "RVM_SERVER_URL dan RVM_MACHINE_SECRET wajib diset sebagai environment "
+                "variable saat --env prod. Jangan menaruh secret produksi di source code; "
+                "isi nilai ini melalui environment atau secret manager pada mesin deploy."
+            )
+        config.server_url = server_url
+        config.machine_secret = machine_secret
+
     controller = RvmController(config)
     assets = Path(__file__).resolve().parent / "web"
     api = LocalApiServer(controller, assets)

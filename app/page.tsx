@@ -73,7 +73,7 @@ export default async function Home() {
               className={buttonVariants({
                 variant: "ghost",
                 size: "sm",
-                className: "rounded-full px-4 text-emerald-950",
+                className: "rounded-full px-4 text-emerald-950 dark:text-emerald-100",
               })}
             >
               Masuk
@@ -170,7 +170,7 @@ export default async function Home() {
               <h2 className="mt-4 max-w-md text-3xl font-black leading-tight tracking-[-0.045em] sm:text-4xl">
                 Dari barang bekas menjadi nilai baru.
               </h2>
-              <p className="mt-4 max-w-sm leading-7 text-white/58">
+              <p className="mt-4 max-w-sm leading-7 text-white/80">
                 Tanpa alur rumit. Setiap langkah terasa jelas dari awal sampai
                 reward masuk.
               </p>
@@ -190,12 +190,12 @@ export default async function Home() {
                     <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-lime-300 text-xl text-emerald-950">
                       <step.icon />
                     </span>
-                    <span className="text-xs font-bold tracking-[0.15em] text-white/25">
+                    <span className="text-xs font-bold tracking-[0.15em] text-white/40">
                       {step.number}
                     </span>
                   </div>
                   <h3 className="mt-8 text-lg font-bold">{step.title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-white/52">
+                  <p className="mt-2 text-sm leading-6 text-white/75">
                     {step.desc}
                   </p>
                 </article>

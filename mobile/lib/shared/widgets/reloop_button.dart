@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/colors.dart';
+import '../../theme/dimens.dart';
 
 class ReLoopButton extends StatelessWidget {
   final String label;
@@ -81,7 +82,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           disabledForegroundColor: Colors.white70,
           padding: size.padding,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: ReLoopRadius.brMd,
           ),
         );
       case ReLoopButtonVariant.secondary:
@@ -93,7 +94,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           disabledForegroundColor: context.reloopMutedSoft,
           padding: size.padding,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: ReLoopRadius.brMd,
           ),
         );
       case ReLoopButtonVariant.outline:
@@ -102,7 +103,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           side: BorderSide(color: context.reloopBorder),
           padding: size.padding,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: ReLoopRadius.brMd,
           ),
         );
       case ReLoopButtonVariant.ghost:
@@ -110,7 +111,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           foregroundColor: context.reloopForeground,
           padding: size.padding,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: ReLoopRadius.brMd,
           ),
         );
       case ReLoopButtonVariant.danger:
@@ -120,7 +121,7 @@ extension _ButtonVariantStyle on ReLoopButtonVariant {
           disabledBackgroundColor: ReLoopColors.danger.withValues(alpha: 0.5),
           padding: size.padding,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: ReLoopRadius.brMd,
           ),
         );
     }

@@ -1,0 +1,390 @@
+import type { MachineStatus, Prisma } from "@prisma/client";
+import {
+  transitionSession,
+  validateSensorSequence,
+  type SensorSequencePayload,
+} from "../machine-state";
+import { AUTO_PICKUP_FILL_THRESHOLD } from "../pickup";
+import {
+  UNKNOWN_WASTE_TYPE_REASON,
+  payloadStr,
+  type IngestEventInput,
+  type MachineContext,
+} from "./shared";
+import {
+  resolveDepositItemId,
+  resolveFraudDepositItemId,
+  resolveOrCreateUnknownWasteType,
+} from "./item";
+import { flagAnomaly, notifyOrgAdmins } from "./fraud";
+import { maybeCreateAutoPickup } from "./pickup";
+import { handleAcceptance } from "./acceptance";
+import type { DepositItemCache } from "./item-cache";
+
+export async function processEventSideEffects(
+  tx: Prisma.TransactionClient,
+  machine: MachineContext,
+  input: IngestEventInput,
+  eventId: string,
+  onItemCreated?: (id: string) => void,
+  depositItemCache?: DepositItemCache,
+) {
+  const payload = payloadStr(input.payload);
+
+  switch (input.eventType) {
+    case "HEARTBEAT": {
+      const fill =
+        typeof payload.fillLevelPercent === "number"
+          ? (payload.fillLevelPercent as number)
+          : undefined;
+      await tx.machine.update({
+        where: { id: machine.id },
+        data: {
+          lastHeartbeatAt: new Date(),
+          status: (payload.status as MachineStatus) ?? undefined,
+          fillLevelPercent: fill,
+        },
+      });
+      if (
+        (typeof fill === "number" && fill >= AUTO_PICKUP_FILL_THRESHOLD) ||
+        payload.status === "FULL"
+      ) {
+        await maybeCreateAutoPickup(tx, machine, input.machineCode);
+      }
+      break;
+    }
+
+    case "STATUS_CHANGED": {
+      if (payload.status) {
+        await tx.machine.update({
+          where: { id: machine.id },
+          data: { status: payload.status as MachineStatus },
+        });
+        if (payload.status === "FULL") {
+          await maybeCreateAutoPickup(tx, machine, input.machineCode);
+        }
+      }
+      break;
+    }
+
+    case "FILL_LEVEL_UPDATED": {
+      if (typeof payload.fillLevelPercent === "number") {
+        const fill = payload.fillLevelPercent as number;
+        await tx.machine.update({
+          where: { id: machine.id },
+          data: {
+            fillLevelPercent: fill,
+            status: fill >= 95 ? "FULL" : undefined,
+          },
+        });
+        if (fill >= AUTO_PICKUP_FILL_THRESHOLD) {
+          await maybeCreateAutoPickup(tx, machine, input.machineCode);
+        }
+      }
+      break;
+    }
+
+    case "CHAMBER_OPENED": {
+      if (input.sessionId) {
+        const session = await tx.depositSession.findUnique({
+          where: { id: input.sessionId },
+        });
+        if (session && ["ACTIVE", "RESERVED"].includes(session.status)) {
+          await tx.depositSession.update({
+            where: { id: session.id },
+            data: {
+              status: transitionSession(session.status, "START_ITEM"),
+            },
+          });
+        }
+      }
+      break;
+    }
+
+    case "CHAMBER_TIMEOUT": {
+      if (input.sessionId) {
+        const session = await tx.depositSession.findUnique({
+          where: { id: input.sessionId },
+        });
+        if (session?.status === "PROCESSING_ITEM") {
+          await tx.depositSession.update({
+            where: { id: session.id },
+            data: { status: transitionSession(session.status, "ITEM_DONE") },
+          });
+        }
+      }
+      break;
+    }
+
+    case "ITEM_DETECTED": {
+      if (!input.sessionId) break;
+      const session = await tx.depositSession.findUnique({
+        where: { id: input.sessionId },
+      });
+      if (!session) break;
+
+      await tx.depositSession.update({
+        where: { id: session.id },
+        data: {
+          timeoutAt: new Date(
+            Date.now() + machine.sessionIdleTimeoutMinutes * 60 * 1000,
+          ),
+        },
+      });
+
+      // Preferred path: kiosk sends the real WasteType id the user picked
+      // on-machine before inserting the item. Only trust it if it's still
+      // an accepted type for this machine (config may have changed since).
+      let wasteTypeId: string | null =
+        (payload.wasteTypeId as string | undefined) ?? null;
+      let kioskConfirmed = false;
+      if (wasteTypeId) {
+        const linked = await tx.machineWasteType.findFirst({
+          where: { machineId: machine.id, wasteTypeId, active: true },
+          select: { id: true },
+        });
+        if (linked) {
+          kioskConfirmed = true;
+        } else {
+          wasteTypeId = null;
+        }
+      }
+      if (!wasteTypeId && payload.wasteTypeName) {
+        const wt = await tx.wasteType.findFirst({
+          where: {
+            name: { contains: String(payload.wasteTypeName).split("(")[0].trim(), mode: "insensitive" },
+            active: true,
+          },
+        });
+        wasteTypeId = wt?.id ?? null;
+      }
+      if (!wasteTypeId && payload.wasteTypeKey) {
+        const key = String(payload.wasteTypeKey).toLowerCase();
+        const mappedName =
+          key.includes("anorganik") || key.includes("kaleng")
+            ? "Anorganik"
+            : key.includes("organik") || key.includes("botol")
+            ? "Organik"
+            : "Anorganik";
+        const wt = await tx.wasteType.findFirst({
+          where: {
+            active: true,
+            name: { contains: mappedName, mode: "insensitive" },
+          },
+        });
+        wasteTypeId = wt?.id ?? null;
+      }
+
+      // Last resort: never drop a physical deposit silently. Route it to
+      // the review queue under a shared "unknown" type instead of skipping
+      // item creation entirely (previous behaviour lost the event).
+      const isUnknownFallback = !wasteTypeId;
+      if (!wasteTypeId) {
+        wasteTypeId = await resolveOrCreateUnknownWasteType(tx);
+      }
+
+      const item = await tx.depositItem.create({
+        data: {
+          sessionId: session.id,
+          wasteTypeId,
+          quantity: (payload.quantity as number) ?? 1,
+          source: kioskConfirmed ? "MACHINE" : "PYTHON_SIMULATOR",
+          status: isUnknownFallback ? "REVIEW" : "PENDING",
+          validationReasonCode: isUnknownFallback
+            ? UNKNOWN_WASTE_TYPE_REASON
+            : undefined,
+        },
+      });
+
+      onItemCreated?.(item.id);
+      depositItemCache?.set(session.id, item.id);
+
+      await tx.machineEvent.update({
+        where: { id: eventId },
+        data: { depositItemId: item.id },
+      });
+
+      if (session.status === "ACTIVE") {
+        await tx.depositSession.update({
+          where: { id: session.id },
+          data: { status: "PROCESSING_ITEM" },
+        });
+      }
+      break;
+    }
+
+    case "WEIGHT_MEASURED": {
+      const itemId = await resolveDepositItemId(tx, input, depositItemCache);
+      if (!itemId) break;
+      await tx.depositItem.update({
+        where: { id: itemId },
+        data: {
+          measuredWeightGrams: payload.weightGrams as number,
+        },
+      });
+      break;
+    }
+
+    case "IMAGE_CLASSIFIED": {
+      const itemId = await resolveDepositItemId(tx, input, depositItemCache);
+      if (!itemId) break;
+      await tx.depositItem.update({
+        where: { id: itemId },
+        data: {
+          aiDetectedType: payload.detectedType as string,
+          aiConfidence: payload.confidence as number,
+        },
+      });
+      break;
+    }
+
+    case "BARCODE_READ": {
+      const itemId = await resolveDepositItemId(tx, input, depositItemCache);
+      if (!itemId) break;
+      await tx.depositItem.update({
+        where: { id: itemId },
+        data: { barcodeValue: payload.barcode as string },
+      });
+      break;
+    }
+
+    case "SENSOR_SEQUENCE": {
+      const itemId = await resolveDepositItemId(tx, input, depositItemCache);
+      if (!itemId) break;
+      const seq = payload as SensorSequencePayload;
+      await tx.depositItem.update({
+        where: { id: itemId },
+        data: { sensorSequenceJson: seq as Prisma.InputJsonValue },
+      });
+
+      const anomaly = validateSensorSequence(seq);
+      if (anomaly && input.sessionId) {
+        await flagAnomaly(tx, input.sessionId, itemId, anomaly);
+      }
+      break;
+    }
+
+    case "ITEM_ACCEPTED_POINT": {
+      if (!input.sessionId) break;
+      const itemId = await resolveDepositItemId(tx, input, depositItemCache);
+      if (!itemId) break;
+      await handleAcceptance(tx, machine, input.sessionId, itemId, eventId);
+      break;
+    }
+
+    case "ITEM_REJECTED": {
+      const itemId = await resolveDepositItemId(tx, input, depositItemCache);
+      if (!itemId) break;
+      await tx.depositItem.update({
+        where: { id: itemId },
+        data: {
+          status: "REJECTED",
+          validationReasonCode: (payload.reason as string) ?? "REJECTED",
+        },
+      });
+      if (input.sessionId) {
+        const session = await tx.depositSession.findUnique({
+          where: { id: input.sessionId },
+        });
+        if (session?.status === "PROCESSING_ITEM") {
+          await tx.depositSession.update({
+            where: { id: session.id },
+            data: { status: transitionSession(session.status, "ITEM_DONE") },
+          });
+        }
+      }
+      break;
+    }
+
+    case "FRAUD_DETECTED":
+    case "VANDALISM_DETECTED": {
+      const reason = String(payload.reason ?? input.eventType);
+      const affectedItemId =
+        input.eventType === "FRAUD_DETECTED"
+          ? await resolveFraudDepositItemId(tx, input)
+          : input.depositItemId ?? null;
+
+      if (affectedItemId) {
+        await tx.depositItem.update({
+          where: { id: affectedItemId },
+          data: {
+            status: "REVIEW",
+            externalFraudFlag: true,
+            validationReasonCode: reason,
+          },
+        });
+        await tx.rewardLedger.updateMany({
+          where: { depositItemId: affectedItemId, status: "AVAILABLE" },
+          data: { status: "PENDING", reasonCode: reason },
+        });
+        await tx.machineEvent.update({
+          where: { id: eventId },
+          data: { depositItemId: affectedItemId },
+        });
+      }
+      if (input.sessionId) {
+        await flagAnomaly(
+          tx,
+          input.sessionId,
+          affectedItemId,
+          reason,
+        );
+      }
+      await notifyOrgAdmins(machine.organizationId, {
+        type: "MACHINE_FRAUD",
+        title:
+          input.eventType === "VANDALISM_DETECTED"
+            ? "Indikasi vandalisme terdeteksi"
+            : "Indikasi fraud terdeteksi",
+        body: `Mesin ${input.machineCode ?? ""} melaporkan ${reason.replaceAll("_", " ").toLowerCase()}. Tinjau di log keamanan.`.trim(),
+        data: { machineCode: input.machineCode, reason },
+      });
+      break;
+    }
+
+    case "COMPACTION_STARTED": {
+      const itemId = await resolveDepositItemId(tx, input, depositItemCache);
+      if (!itemId) break;
+      await tx.depositItem.update({
+        where: { id: itemId },
+        data: { compactionStatus: "PENDING" },
+      });
+      break;
+    }
+
+    case "COMPACTION_COMPLETED": {
+      const itemId = await resolveDepositItemId(tx, input, depositItemCache);
+      if (!itemId) break;
+      await tx.depositItem.update({
+        where: { id: itemId },
+        data: { compactionStatus: "COMPACTED" },
+      });
+      break;
+    }
+
+    case "SAFE_STATE_ENTERED": {
+      await tx.machine.update({
+        where: { id: machine.id },
+        data: { status: "ERROR" },
+      });
+      if (input.sessionId) {
+        const session = await tx.depositSession.findUnique({
+          where: { id: input.sessionId },
+        });
+        if (session && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(session.status)) {
+          await tx.depositSession.update({
+            where: { id: session.id },
+            data: {
+              status: transitionSession(session.status, "SAFE_STATE"),
+              anomalyCount: { increment: 1 },
+            },
+          });
+        }
+      }
+      break;
+    }
+
+    default:
+      break;
+  }
+}

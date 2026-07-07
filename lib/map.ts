@@ -14,6 +14,7 @@ export interface MapMachine {
 export interface MapCampaign {
   id: string;
   name: string;
+  organizationId: string;
   organizationName: string;
   latitude: number;
   longitude: number;

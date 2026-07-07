@@ -17,6 +17,14 @@ vi.mock('@/lib/prisma', () => ({
 vi.mock('@/lib/auth', () => ({
   verifyPassword: vi.fn(),
   setSessionCookie: vi.fn(),
+  buildSessionPayload: vi.fn((user) => ({
+    sub: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    organizationId: user.organizationId,
+    tokenVersion: user.tokenVersion,
+  })),
 }));
 
 vi.mock('@/lib/audit', () => ({
@@ -107,7 +115,9 @@ describe('POST /api/auth/login', () => {
       passwordHash: 'hash',
       status: 'ACTIVE',
       role: 'USER',
-      organizationId: null
+      organizationId: null,
+      tokenVersion: 0,
+      mfaEnabled: false,
     } as any);
     vi.mocked(auth.verifyPassword).mockResolvedValue(true);
     
@@ -125,5 +135,30 @@ describe('POST /api/auth/login', () => {
     }));
 
     expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'USER_LOGIN' }));
+  });
+
+  it('returns MFA challenge for privileged users with MFA enabled (200)', async () => {
+    vi.mocked(rateLimit.checkRateLimit).mockReturnValue({ allowed: true } as any);
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: 'admin-1',
+      name: 'Admin',
+      email: 'admin@example.com',
+      passwordHash: 'hash',
+      status: 'ACTIVE',
+      role: 'ADMIN',
+      organizationId: 'org-1',
+      tokenVersion: 0,
+      mfaEnabled: true,
+    } as any);
+    vi.mocked(auth.verifyPassword).mockResolvedValue(true);
+
+    const req = makeReq({ email: 'admin@example.com', password: 'pass' });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.requiresMfa).toBe(true);
+    expect(body.challengeToken).toBeTruthy();
+    expect(auth.setSessionCookie).not.toHaveBeenCalled();
   });
 });

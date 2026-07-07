@@ -18,7 +18,7 @@ vi.mock('@/lib/prisma', () => {
 });
 
 vi.mock('@/lib/machine-auth', () => ({
-  verifyMachineSignature: vi.fn(),
+  verifyMachineRequest: vi.fn(),
 }));
 
 describe('GET /api/machine-commands/[code]', () => {
@@ -43,7 +43,7 @@ describe('GET /api/machine-commands/[code]', () => {
 
   it('fails if signature invalid (401)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'mach_1', ingestSecret: 'secret' } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: false } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: false } as any);
     
     const res = await GET(makeReq(), { params: Promise.resolve({ code: 'm1' }) });
     expect(res.status).toBe(401);
@@ -51,7 +51,7 @@ describe('GET /api/machine-commands/[code]', () => {
 
   it('returns null if no pending commands (200)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'mach_1', ingestSecret: 'secret' } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: true } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
     
     const { mockTx } = await import('@/lib/prisma') as any;
     mockTx.machineRemoteCommand.findFirst.mockResolvedValue(null);
@@ -66,7 +66,7 @@ describe('GET /api/machine-commands/[code]', () => {
 
   it('returns command and marks it as DISPATCHED (200)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'mach_1', ingestSecret: 'secret' } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: true } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
     
     const { mockTx } = await import('@/lib/prisma') as any;
     mockTx.machineRemoteCommand.findFirst.mockResolvedValue({

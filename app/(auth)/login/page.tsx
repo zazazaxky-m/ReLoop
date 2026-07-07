@@ -1,9 +1,16 @@
 import type { Metadata } from "next";
 import { AuthForm } from "@/components/auth/AuthForm";
+import { CheckCircle } from "@/components/ui/icons";
 
 export const metadata: Metadata = { title: "Masuk" };
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ reset?: string }>;
+}) {
+  const { reset } = await searchParams;
+
   return (
     <div className="space-y-7">
       <div>
@@ -17,6 +24,12 @@ export default function LoginPage() {
           Lanjutkan aksi baikmu dari sini.
         </p>
       </div>
+      {reset === "1" ? (
+        <div className="flex items-center gap-2.5 rounded-xl border border-brand-200 bg-brand-50 px-3.5 py-2.5 text-sm font-medium text-brand-800 dark:border-brand-900/30 dark:bg-brand-950/20 dark:text-brand-400">
+          <CheckCircle className="shrink-0 text-lg" />
+          Kata sandi berhasil diperbarui. Silakan masuk.
+        </div>
+      ) : null}
       <AuthForm mode="login" />
     </div>
   );

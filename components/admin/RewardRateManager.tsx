@@ -21,6 +21,7 @@ import { formatDate, formatRupiah } from "@/lib/format";
 interface Option {
   id: string;
   name: string;
+  unit?: string;
 }
 
 export interface RateRow {
@@ -68,6 +69,9 @@ export function RewardRateManager({
     return Number.isFinite(n) ? n : null;
   }
 
+  const selectedWasteType = wasteTypes.find((w) => w.id === form.wasteTypeId);
+  const isKgRate = selectedWasteType?.unit === "KG";
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -76,6 +80,9 @@ export function RewardRateManager({
       const payload: Record<string, unknown> = {
         wasteTypeId: form.wasteTypeId,
         pointsPerItem: num(form.pointsPerItem) ?? 0,
+        // The rate's unit always follows its waste type: KG rates are
+        // Rp/kilogram, ITEM rates are Rp/item. See lib/reward.ts.
+        unit: isKgRate ? "KG" : "ITEM",
         minWeightGrams: num(form.minWeightGrams),
         maxWeightGrams: num(form.maxWeightGrams),
       };
@@ -120,8 +127,13 @@ export function RewardRateManager({
     { key: "wasteTypeName", header: "Jenis sampah", render: (r) => r.wasteTypeName },
     {
       key: "points",
-      header: "Reward / item",
-      render: (r) => <span className="font-medium">{formatRupiah(r.pointsPerItem)}</span>,
+      header: "Reward",
+      render: (r) => (
+        <span className="font-medium">
+          {formatRupiah(r.pointsPerItem)}
+          <span className="text-muted font-normal"> / {r.unit === "KG" ? "kg" : "item"}</span>
+        </span>
+      ),
     },
     {
       key: "weight",
@@ -201,13 +213,22 @@ export function RewardRateManager({
                     ))}
                   </Select>
                 </FormField>
-                <FormField label="Reward per item (Rp)" htmlFor="rate-points" required>
+                <FormField
+                  label={isKgRate ? "Reward per kilogram (Rp)" : "Reward per item (Rp)"}
+                  htmlFor="rate-points"
+                  hint={
+                    isKgRate
+                      ? "Dihitung proporsional terhadap berat terukur, bukan nilai tetap per setoran."
+                      : undefined
+                  }
+                  required
+                >
                   <Input
                     id="rate-points"
                     type="number"
                     value={form.pointsPerItem}
                     onChange={(e) => setForm((f) => ({ ...f, pointsPerItem: e.target.value }))}
-                    placeholder="200"
+                    placeholder={isKgRate ? "2000" : "200"}
                     required
                   />
                 </FormField>

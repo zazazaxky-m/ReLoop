@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { consumeMachineNonce } from "./machine-nonce";
 
 /** Max allowed clock skew (seconds) between machine and server for a signed request. */
 export const MACHINE_SIG_MAX_SKEW_SECONDS = 300;
@@ -53,4 +54,25 @@ export function verifyMachineSignature(params: {
   const b = Buffer.from(signature, "utf8");
   if (a.length !== b.length) return { ok: false, reason: "BAD_SIGNATURE" };
   return timingSafeEqual(a, b) ? { ok: true } : { ok: false, reason: "BAD_SIGNATURE" };
+}
+
+/** Verifies HMAC signature and rejects replayed nonces within the skew window. */
+export async function verifyMachineRequest(params: {
+  machineId: string;
+  secret: string | null | undefined;
+  timestamp: string | null | undefined;
+  nonce: string | null | undefined;
+  rawBody: string;
+  signature: string | null | undefined;
+  nowSeconds?: number;
+}): Promise<VerifyResult> {
+  const signatureResult = verifyMachineSignature(params);
+  if (!signatureResult.ok) return signatureResult;
+
+  const nonce = params.nonce;
+  if (!nonce) return { ok: false, reason: "MISSING_HEADERS" };
+
+  const fresh = await consumeMachineNonce(params.machineId, nonce);
+  if (!fresh) return { ok: false, reason: "REPLAY_NONCE" };
+  return { ok: true };
 }

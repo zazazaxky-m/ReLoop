@@ -303,6 +303,13 @@ enum ComplianceStatus {
   NON_COMPLIANT
 }
 
+enum NotificationType {
+  PICKUP_ASSIGNED
+  REDEMPTION_STATUS
+  MACHINE_FULL
+  MACHINE_FRAUD
+}
+
 // ============================================================
 // Core identity & tenancy
 // ============================================================
@@ -319,6 +326,10 @@ model User {
   organization   Organization? @relation(fields: [organizationId], references: [id])
   status         UserStatus    @default(ACTIVE)
   payoutEligible Boolean       @default(true)
+  // Bumped on password reset/change, role demotion, or suspension — stale JWTs are rejected.
+  tokenVersion   Int           @default(0)
+  mfaEnabled     Boolean       @default(false)
+  totpSecret     String?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -329,6 +340,9 @@ model User {
   collectorPartnerships OrganizationCollectorPartner[] @relation("CollectorPartnerships")
   assignedPickups       PickupRequest[]                @relation("AssignedCollector")
   travelAgentLinks      TravelAgentUser[]
+  notifications         Notification[]
+  deviceTokens          DeviceToken[]
+  passwordResetTokens   PasswordResetToken[]
 
   @@index([organizationId])
   @@index([role])
@@ -984,4 +998,58 @@ model SystemConfig {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+// ============================================================
+// Notifications
+// ============================================================
+
+// In-app notification feed (pickup assignment, redemption status changes,
+// machine FULL/fraud alerts). Delivered in-app always; also pushed via FCM
+// when the recipient has a registered device token and firebase-admin is
+// configured (see lib/notifications.ts) — push delivery is best-effort and
+// never blocks writing the in-app row.
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  type      NotificationType
+  title     String
+  body      String
+  dataJson  Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, readAt])
+  @@index([createdAt])
+}
+
+// Registered by the mobile app (see mobile/lib/services/notification_service.dart)
+// so push notifications have somewhere to be sent; a user can have multiple
+// tokens (multiple devices). Deleting a token is a plain unregister, not a
+// user action, so this table has no direct UI of its own.
+model DeviceToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  platform  String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // SHA-256 of the raw token that is delivered to the user; the raw value is
+  // never stored so a DB leak cannot be used to reset accounts.
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }

@@ -1,15 +1,23 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { hashPassword, setSessionCookie } from "@/lib/auth";
+import { hashPassword, setSessionCookie, buildSessionPayload } from "@/lib/auth";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { dashboardPath } from "@/lib/roles";
+import { getClientIp } from "@/lib/client-ip";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { passwordSchema } from "@/lib/password-policy";
+
+// Looser than login (legitimate signups are rare per visitor) but still
+// closes the previously wide-open account-creation endpoint.
+const RATE_LIMIT = 8;
+const RATE_WINDOW_MS = 3_600_000;
 
 const schema = z.object({
   name: z.string().min(2, "Nama minimal 2 karakter"),
   email: z.string().email("Email tidak valid"),
-  password: z.string().min(6, "Password minimal 6 karakter"),
+  password: passwordSchema,
   phone: z
     .string()
     .trim()
@@ -20,6 +28,12 @@ const schema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req);
+    const rl = await checkRateLimit(`register:${ip}`, RATE_LIMIT, RATE_WINDOW_MS);
+    if (!rl.allowed) {
+      return jsonError(429, "Terlalu banyak percobaan registrasi. Coba lagi nanti.");
+    }
+
     const data = schema.parse(await req.json());
     const email = data.email.toLowerCase().trim();
 
@@ -78,13 +92,14 @@ export async function POST(req: NextRequest) {
       return created;
     });
 
-    await setSessionCookie({
-      sub: user.id,
+    await setSessionCookie(buildSessionPayload({
+      id: user.id,
       email: user.email,
       name: user.name,
       role: "USER",
       organizationId: null,
-    });
+      tokenVersion: user.tokenVersion,
+    }));
 
     await logAudit({
       actorId: user.id,

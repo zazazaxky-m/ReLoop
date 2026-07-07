@@ -12,6 +12,7 @@ describe('lib/auth', () => {
     name: 'Test User',
     role: 'USER',
     organizationId: null,
+    tokenVersion: 0,
   };
 
   beforeEach(() => {

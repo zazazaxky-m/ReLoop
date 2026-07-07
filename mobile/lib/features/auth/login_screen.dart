@@ -7,6 +7,7 @@ import '../../services/biometric_service.dart';
 import '../../shared/widgets/reloop_button.dart';
 import '../../shared/widgets/reloop_logo.dart';
 import '../../theme/colors.dart';
+import '../../theme/dimens.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -98,7 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Widget _buildLabel(String text) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: ReLoopSpacing.sm),
       child: RichText(
         text: TextSpan(
           text: text,
@@ -126,19 +127,22 @@ class _LoginScreenState extends State<LoginScreen> {
       backgroundColor: context.reloopBackground,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          padding: const EdgeInsets.symmetric(
+            horizontal: ReLoopSpacing.xl,
+            vertical: ReLoopSpacing.xxl,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const ReLoopLogo(height: 36),
-              const SizedBox(height: 32),
+              ReLoopSpacing.gap24,
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(ReLoopSpacing.xxl),
                 decoration: BoxDecoration(
                   color: context.reloopSurfaceRaised,
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: ReLoopRadius.brLg,
                   border: Border.all(color: context.reloopBorder),
                   boxShadow: [
                     BoxShadow(
@@ -160,7 +164,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         color: context.reloopBrandText,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    ReLoopSpacing.gap8,
                     Text(
                       'Masuk ke ReLoop',
                       style: TextStyle(
@@ -170,7 +174,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         letterSpacing: -0.5,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    ReLoopSpacing.gap8,
                     Text(
                       'Lanjutkan aksi baikmu dari sini.',
                       style: TextStyle(
@@ -179,7 +183,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         height: 1.5,
                       ),
                     ),
-                    const SizedBox(height: 28),
+                    const SizedBox(height: ReLoopSpacing.xxl),
                     Form(
                       key: _formKey,
                       child: AutofillGroup(
@@ -187,39 +191,19 @@ class _LoginScreenState extends State<LoginScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                           _buildLabel('Email'),
-                           TextFormField(
+                          TextFormField(
                             controller: _emailCtrl,
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
                             autofillHints: const [AutofillHints.email],
-                            style: TextStyle(fontSize: 15, color: context.reloopForeground),
+                            style: TextStyle(
+                                fontSize: 15, color: context.reloopForeground),
                             decoration: InputDecoration(
                               hintText: 'nama@email.com',
-                              hintStyle: TextStyle(
+                              prefixIcon: Icon(
+                                Icons.mail_outline,
+                                size: 20,
                                 color: context.reloopMutedSoft,
-                                fontSize: 15,
-                              ),
-                              fillColor: context.reloopSurface,
-                              filled: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBorder),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBorder),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBrandText,
-                                    width: 1.5),
                               ),
                             ),
                             validator: (v) {
@@ -234,43 +218,22 @@ class _LoginScreenState extends State<LoginScreen> {
                               return null;
                             },
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: ReLoopSpacing.lg),
                           _buildLabel('Password'),
-                           TextFormField(
+                          TextFormField(
                             controller: _passwordCtrl,
                             obscureText: _obscurePassword,
                             textInputAction: TextInputAction.done,
                             autofillHints: const [AutofillHints.password],
                             onFieldSubmitted: (_) => _login(),
-                            style: TextStyle(fontSize: 15, color: context.reloopForeground),
+                            style: TextStyle(
+                                fontSize: 15, color: context.reloopForeground),
                             decoration: InputDecoration(
                               hintText: '••••••••',
-                              hintStyle: TextStyle(
+                              prefixIcon: Icon(
+                                Icons.lock_outline,
+                                size: 20,
                                 color: context.reloopMutedSoft,
-                                fontSize: 15,
-                                letterSpacing: 2.0,
-                              ),
-                              fillColor: context.reloopSurface,
-                              filled: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBorder),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBorder),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                    color: context.reloopBrandText,
-                                    width: 1.5),
                               ),
                               suffixIcon: IconButton(
                                 icon: Icon(
@@ -297,25 +260,47 @@ class _LoginScreenState extends State<LoginScreen> {
                               return null;
                             },
                           ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () => context.push('/forgot-password'),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 0,
+                                  vertical: ReLoopSpacing.sm,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: Text(
+                                'Lupa kata sandi?',
+                                style: TextStyle(
+                                  color: context.reloopBrandText,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                       ),
                     ),
-                             if (auth.error != null) ...[
-                      const SizedBox(height: 16),
+                    if (auth.error != null) ...[
+                      const SizedBox(height: ReLoopSpacing.lg),
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(ReLoopSpacing.md),
                         decoration: BoxDecoration(
                           color: context.reloopTone('danger').bg,
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: ReLoopRadius.brSm,
                           border: Border.all(color: context.reloopTone('danger').border),
                         ),
                         child: Row(
                           children: [
                             Icon(Icons.error_outline,
                                 size: 16, color: context.reloopTone('danger').text),
-                            const SizedBox(width: 8),
+                            ReLoopSpacing.gap8,
                             Expanded(
                               child: Text(
                                 auth.error!,
@@ -329,7 +314,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 24),
+                    const SizedBox(height: ReLoopSpacing.xxl),
                     SizedBox(
                       width: double.infinity,
                       child: ReLoopButton(
@@ -340,7 +325,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     if (_biometricAvailable && _biometricEnabled) ...[
-                      const SizedBox(height: 16),
+                      const SizedBox(height: ReLoopSpacing.lg),
                       Center(
                         child: Text(
                           'atau',
@@ -348,7 +333,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               color: context.reloopMutedSoft, fontSize: 13),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: ReLoopSpacing.md),
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
@@ -370,15 +355,18 @@ class _LoginScreenState extends State<LoginScreen> {
                             foregroundColor: context.reloopBrandText,
                             side: BorderSide(
                                 color: context.reloopBrandSoftStrong),
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                            minimumSize:
+                                const Size.fromHeight(ReLoopA11y.minTouchTarget),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: ReLoopSpacing.lg),
+                            shape: const RoundedRectangleBorder(
+                              borderRadius: ReLoopRadius.brMd,
                             ),
                           ),
                         ),
                       ),
                     ],
-                    const SizedBox(height: 24),
+                    const SizedBox(height: ReLoopSpacing.xxl),
                     Align(
                       alignment: Alignment.center,
                       child: GestureDetector(
@@ -406,7 +394,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: ReLoopSpacing.xxl),
               Align(
                 alignment: Alignment.center,
                 child: GestureDetector(

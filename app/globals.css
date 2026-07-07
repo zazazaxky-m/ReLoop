@@ -9,7 +9,7 @@
   --color-surface-soft: #f8faf9;
   --color-foreground: #14211a;
   --color-muted: #5f6f66;
-  --color-muted-soft: #8b9a91;
+  --color-muted-soft: #667468;
   --color-border: #dce6df;
 
   /* Brand green scale */
@@ -37,8 +37,8 @@
   --color-status-error: #dc2626;
   --color-status-offline: #64748b;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
 }
 
 html {
@@ -90,8 +90,8 @@ button:not(:disabled),
   --color-surface: #101613;
   --color-surface-soft: #161e1a;
   --color-foreground: #e4e9e6;
-  --color-muted: #8b9a91;
-  --color-muted-soft: #5f6f66;
+  --color-muted: #9aa9a0;
+  --color-muted-soft: #7e8e85;
   --color-border: #1d2722;
   --color-brand-950: #061d10;
   --color-mint: #0f3d21;

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, assertOrgScope, activePartnerOrgIds, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 
 const createSchema = z
   .object({
@@ -23,9 +24,10 @@ const createSchema = z
     { message: "Berat minimum tidak boleh melebihi maksimum", path: ["minWeightGrams"] },
   );
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const user = await requireApiUser(["USER", "PENGEPUL", "ADMIN", "SUPERADMIN"]);
+    const url = new URL(req.url);
 
     let where: Record<string, unknown> = {};
     if (user.role === "SUPERADMIN") {
@@ -49,13 +51,19 @@ export async function GET() {
       where = {};
     }
 
-    const wasteTypes = await prisma.wasteType.findMany({
-      where,
-      orderBy: [{ organizationId: "asc" }, { name: "asc" }],
-      include: {
-        _count: { select: { depositItems: true, rewardRates: true } },
-      },
-    });
+    const pagination = parsePagination(url, { defaultLimit: 100, maxLimit: 200 });
+    const [wasteTypes, total] = await Promise.all([
+      prisma.wasteType.findMany({
+        where,
+        orderBy: [{ organizationId: "asc" }, { name: "asc" }],
+        skip: pagination.skip,
+        take: pagination.take,
+        include: {
+          _count: { select: { depositItems: true, rewardRates: true } },
+        },
+      }),
+      prisma.wasteType.count({ where }),
+    ]);
 
     // Soft-join ke Organization (WasteType.organizationId tidak punya @relation).
     const orgIds = Array.from(
@@ -76,7 +84,10 @@ export async function GET() {
       organization: w.organizationId ? orgById.get(w.organizationId) ?? null : null,
     }));
 
-    return jsonOk({ wasteTypes: enriched });
+    return jsonOk({
+      wasteTypes: enriched,
+      pagination: buildPaginationMeta(total, pagination),
+    });
   } catch (error) {
     return handleApiError(error);
   }

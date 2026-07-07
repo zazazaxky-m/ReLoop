@@ -123,6 +123,51 @@ export const prisma = basePrisma.$extends({
         return result;
       },
     },
+    payoutAccount: {
+      async $allOperations({ args, query }) {
+        const a = args as Record<string, unknown>;
+        const encryptField = (value: unknown) =>
+          typeof value === "string" && value.length > 0 ? encrypt(value) : value;
+
+        const data = a.data as Record<string, unknown> | undefined;
+        if (data?.accountIdentifier) data.accountIdentifier = encryptField(data.accountIdentifier);
+        if (data?.accountName) data.accountName = encryptField(data.accountName);
+
+        const createData = a.create as Record<string, unknown> | undefined;
+        if (createData?.accountIdentifier) {
+          createData.accountIdentifier = encryptField(createData.accountIdentifier);
+        }
+        if (createData?.accountName) {
+          createData.accountName = encryptField(createData.accountName);
+        }
+
+        const updateData = a.update as Record<string, unknown> | undefined;
+        if (updateData?.accountIdentifier) {
+          updateData.accountIdentifier = encryptField(updateData.accountIdentifier);
+        }
+        if (updateData?.accountName) {
+          updateData.accountName = encryptField(updateData.accountName);
+        }
+
+        const result = await query(args);
+
+        const decryptFields = (item: Record<string, unknown>) => {
+          if (item.accountIdentifier) {
+            item.accountIdentifier = decryptValue(item.accountIdentifier);
+          }
+          if (item.accountName) {
+            item.accountName = decryptValue(item.accountName);
+          }
+        };
+
+        if (result) {
+          if (Array.isArray(result)) result.forEach(decryptFields);
+          else decryptFields(result as Record<string, unknown>);
+        }
+
+        return result;
+      },
+    },
     machineCapture: {
       async $allOperations({ args, query }) {
         const a = args as Record<string, unknown>;

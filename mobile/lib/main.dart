@@ -24,7 +24,11 @@ Future<void> main({ApiClient? injectedApiClient}) async {
     await Firebase.initializeApp();
   } catch (_) {}
 
-  const envStr = String.fromEnvironment('BUILD_ENV', defaultValue: 'production');
+  // Defaults to development so a plain `flutter run` (or forgetting the
+  // --dart-define below) never silently talks to the production API.
+  // Release builds MUST pass --dart-define=BUILD_ENV=production explicitly
+  // (see mobile/README.md).
+  const envStr = String.fromEnvironment('BUILD_ENV', defaultValue: 'development');
   final env = BuildEnvironment.values.firstWhere(
     (e) => e.name == envStr,
     orElse: () => BuildEnvironment.production,
@@ -47,8 +51,16 @@ Future<void> main({ApiClient? injectedApiClient}) async {
   final themeProvider = ThemeProvider();
   final notifService = NotificationService();
   notifService.setApiClient(apiClient);
+  // Safe no-op without Firebase config (see mobile/README.md "Setup
+  // Firebase"); only sets up local channels/permissions/token, actual
+  // server registration happens post-login in AuthProvider.
+  await notifService.initialize();
 
   final syncService = BackgroundSyncService();
+  // Ticks every 15 min regardless of auth state; unauthenticated ticks just
+  // 401 cheaply against the shared ApiClient/cookie jar and are swallowed
+  // internally, so this is safe to start before login completes.
+  syncService.start(apiClient);
 
   runApp(
     MultiProvider(

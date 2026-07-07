@@ -10,6 +10,16 @@ const CONTENT_TYPES: Record<string, string> = {
   ".webp": "image/webp",
 };
 
+/** Only hero/marketing assets — not arbitrary public/ files. */
+function isAllowedHeroPath(normalized: string): boolean {
+  if (!normalized || normalized.includes("..")) return false;
+  const ext = path.extname(normalized).toLowerCase();
+  if (!CONTENT_TYPES[ext]) return false;
+  if (normalized.startsWith("images/hero/")) return true;
+  const base = path.basename(normalized);
+  return base.startsWith("hero-") || base.startsWith("hero_");
+}
+
 export async function GET(req: Request) {
   const requested = new URL(req.url).searchParams.get("path") ?? "";
   const normalized = requested.replaceAll("\\", "/").replace(/^\/+/, "");
@@ -18,7 +28,7 @@ export async function GET(req: Request) {
   const contentType = CONTENT_TYPES[path.extname(filePath).toLowerCase()];
 
   if (
-    !normalized ||
+    !isAllowedHeroPath(normalized) ||
     !filePath.startsWith(`${publicRoot}${path.sep}`) ||
     !contentType
   ) {

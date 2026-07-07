@@ -348,3 +348,26 @@ export const Moon = (p: IconProps) => (
     <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
   </Base>
 );
+
+export const Bell = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+  </Base>
+);
+
+export const Eye = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0" />
+    <circle cx="12" cy="12" r="3" />
+  </Base>
+);
+
+export const EyeOff = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.07 0 9.5 6 9.5 7a12.6 12.6 0 0 1-2.16 2.88" />
+    <path d="M6.61 6.61A12.94 12.94 0 0 0 2.5 12c0 1 3.43 7 9.5 7a9.74 9.74 0 0 0 5.39-1.61" />
+    <path d="M9.88 9.88a3 3 0 0 0 4.24 4.24" />
+    <path d="m2 2 20 20" />
+  </Base>
+);

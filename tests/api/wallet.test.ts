@@ -31,6 +31,7 @@ vi.mock('@/lib/rbac', async (importOriginal) => {
 vi.mock('@/lib/ledger', () => ({
   getWalletBalance: vi.fn(),
   getLedgerHistory: vi.fn(),
+  countLedgerHistory: vi.fn(),
 }));
 
 vi.mock('@/lib/config', () => ({
@@ -47,8 +48,7 @@ describe('Wallet API - GET', () => {
   it('T1: Menolak request jika tidak terotentikasi (401)', async () => {
     vi.mocked(rbac.requireApiUser).mockRejectedValue(new rbac.HttpError(401, 'Unauthorized'));
 
-    const req = new Request('http://localhost/api/wallet');
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/wallet"));
 
     expect(res.status).toBe(401);
   });
@@ -57,6 +57,7 @@ describe('Wallet API - GET', () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'user_1', role: 'USER' } as any);
     
     vi.mocked(ledger.getWalletBalance).mockResolvedValue({ available: 150000, pending: 0, redeemed: 50000, totalEarned: 200000 } as any);
+    vi.mocked(ledger.countLedgerHistory).mockResolvedValue(1);
     vi.mocked(ledger.getLedgerHistory).mockResolvedValue([
       { id: 'tx_1', amount: 150000, type: 'EARN' } as any
     ]);
@@ -68,8 +69,7 @@ describe('Wallet API - GET', () => {
     vi.mocked(config.getMinRedemption).mockResolvedValue(10000);
     vi.mocked(config.getConfigInt).mockResolvedValue(1);
 
-    const req = new Request('http://localhost/api/wallet');
-    const res = await GET(); // GET in wallet route has () no parameter based on its signature export async function GET()
+    const res = await GET(new Request("http://localhost/api/wallet"));
     const body = await res.json();
 
     expect(res.status).toBe(200);

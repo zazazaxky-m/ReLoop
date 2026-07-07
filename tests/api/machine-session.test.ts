@@ -11,7 +11,7 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 vi.mock('@/lib/machine-auth', () => ({
-  verifyMachineSignature: vi.fn(),
+  verifyMachineRequest: vi.fn(),
 }));
 
 describe('GET /api/machine-session/[code]', () => {
@@ -35,7 +35,7 @@ describe('GET /api/machine-session/[code]', () => {
 
   it('fails if signature is invalid (401)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret' } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: false, reason: 'Invalid' } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: false, reason: 'Invalid' } as any);
     
     const res = await GET(makeReq(), { params: Promise.resolve({ code: 'm1' }) });
     expect(res.status).toBe(401);
@@ -43,7 +43,7 @@ describe('GET /api/machine-session/[code]', () => {
 
   it('returns null session if no active session exists (200)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret', sessionIdleTimeoutMinutes: 3 } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: true } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
     vi.mocked(prisma.depositSession.findFirst).mockResolvedValue(null);
 
     const res = await GET(makeReq(), { params: Promise.resolve({ code: 'm1' }) });
@@ -55,7 +55,7 @@ describe('GET /api/machine-session/[code]', () => {
 
   it('returns active session and lease (200)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret', sessionIdleTimeoutMinutes: 3 } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: true } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
     vi.mocked(prisma.depositSession.findFirst).mockResolvedValue({
       id: 'sess1',
       status: 'ACTIVE',
@@ -77,7 +77,7 @@ describe('GET /api/machine-session/[code]', () => {
 
   it('expires session if timeout passed (200)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret', sessionIdleTimeoutMinutes: 3 } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: true } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
     vi.mocked(prisma.depositSession.findFirst).mockResolvedValue({
       id: 'sess1',
       status: 'ACTIVE',

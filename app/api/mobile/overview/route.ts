@@ -37,7 +37,7 @@ export async function GET() {
             orderBy: { startAt: "desc" },
             take: 20,
           }),
-          getLedgerHistory(user.id, 8),
+          getLedgerHistory(user.id, { take: 8 }),
           getMinRedemption(),
           prisma.travelAgentUser.count({ where: { userId: user.id } }),
           getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
@@ -94,6 +94,7 @@ export async function GET() {
             where: { collectorUserId: user.id },
             include: { organization: { select: { id: true, name: true } } },
             orderBy: { updatedAt: "desc" },
+            take: 50,
           }),
         ]);
 
@@ -113,6 +114,7 @@ export async function GET() {
           prisma.machine.findMany({
             where: { organizationId },
             orderBy: { name: "asc" },
+            take: 100,
           }),
           prisma.pickupRequest.findMany({
             where: {

@@ -4,7 +4,6 @@ import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
 import * as audit from '@/lib/audit';
 import * as auth from '@/lib/auth';
-import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -12,6 +11,7 @@ vi.mock('@/lib/prisma', () => ({
       findMany: vi.fn(),
       findUnique: vi.fn(),
       create: vi.fn(),
+      count: vi.fn(),
     },
   },
 }));
@@ -49,6 +49,7 @@ describe('/api/users API', () => {
 
     it('returns list of users', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'SUPERADMIN' } as any);
+      vi.mocked(prisma.user.count).mockResolvedValue(1);
       vi.mocked(prisma.user.findMany).mockResolvedValue([
         { id: '1', name: 'John', email: 'john@a.com', role: 'USER', status: 'ACTIVE' }
       ] as any);
@@ -65,6 +66,7 @@ describe('/api/users API', () => {
 
     it('filters by role if provided in query string', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'SUPERADMIN' } as any);
+      vi.mocked(prisma.user.count).mockResolvedValue(0);
       vi.mocked(prisma.user.findMany).mockResolvedValue([]);
 
       await GET(makeGetReq('http://localhost/api/users?role=ADMIN'));
@@ -99,7 +101,7 @@ describe('/api/users API', () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin' } as any);
       vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'existing' } as any);
 
-      const req = makePostReq({ name: 'Test', email: 'test@example.com', password: 'password', role: 'USER' });
+      const req = makePostReq({ name: 'Test', email: 'test@example.com', password: 'password1234', role: 'USER' });
       const res = await POST(req);
       
       expect(res.status).toBe(409);
@@ -111,7 +113,7 @@ describe('/api/users API', () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin' } as any);
       vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
 
-      const req = makePostReq({ name: 'Admin', email: 'admin@a.com', password: 'password', role: 'ADMIN' }); // No orgId
+      const req = makePostReq({ name: 'Admin', email: 'admin@a.com', password: 'password1234', role: 'ADMIN' }); // No orgId
       const res = await POST(req);
       
       expect(res.status).toBe(422);
@@ -125,7 +127,7 @@ describe('/api/users API', () => {
       vi.mocked(auth.hashPassword).mockResolvedValue('hashed');
       vi.mocked(prisma.user.create).mockResolvedValue({ id: 'new', email: 'new@a.com', role: 'USER' } as any);
 
-      const req = makePostReq({ name: 'New User', email: 'NEW@a.com', password: 'password', role: 'USER' });
+      const req = makePostReq({ name: 'New User', email: 'NEW@a.com', password: 'password1234', role: 'USER' });
       const res = await POST(req);
 
       expect(res.status).toBe(201);

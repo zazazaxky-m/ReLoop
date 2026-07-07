@@ -1,6 +1,24 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../shared/widgets/reloop_button.dart';
 import '../../theme/colors.dart';
+
+// TODO(release): swap in the real numeric App Store id once the iOS build
+// is published, e.g. https://apps.apple.com/app/id<numeric-id>.
+const _androidStoreUrl =
+    'https://play.google.com/store/apps/details?id=id.reloop.reloop_mobile';
+const _iosStoreUrl = 'https://apps.apple.com/app/id.reloop.reloopMobile';
+
+Future<void> _openAppStore() async {
+  final uri = Uri.parse(Platform.isIOS ? _iosStoreUrl : _androidStoreUrl);
+  try {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {
+    // No browser/store app available to handle the link; nothing sensible
+    // to recover to from inside a non-dismissible dialog.
+  }
+}
 
 class ForceUpdateDialog extends StatelessWidget {
   final String latestVersion;
@@ -64,7 +82,7 @@ class ForceUpdateDialog extends StatelessWidget {
           ReLoopButton(
             label: 'Update Sekarang',
             icon: Icons.download,
-            onPressed: () {},
+            onPressed: () => _openAppStore(),
           ),
         ],
       ),

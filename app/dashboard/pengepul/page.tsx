@@ -1,3 +1,4 @@
+import type { PickupStatus } from "@prisma/client";
 import { requirePageUser, activePartnerOrgIds } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import {
@@ -15,29 +16,44 @@ import { Map, MapPin, Recycle, Truck, User } from "@/components/ui/icons";
 export default async function PengepulDashboardPage() {
   const user = await requirePageUser(["PENGEPUL"]);
   const orgIds = await activePartnerOrgIds(user.id);
+  const orgFilter = { organizationId: { in: orgIds.length ? orgIds : ["__none__"] } };
+  const closedPickupStatuses: PickupStatus[] = ["COMPLETED", "CANCELLED", "FAILED"];
+  const taskWhere = {
+    assignedCollectorId: user.id,
+    status: { notIn: closedPickupStatuses },
+  };
 
-  const [tasks, fullMachines, partnerships] = await Promise.all([
+  const [tasks, taskCount, fullMachines, fullMachineCount, _partnerships, partnerCount] =
+    await Promise.all([
     prisma.pickupRequest.findMany({
-      where: {
-        assignedCollectorId: user.id,
-        status: { notIn: ["COMPLETED", "CANCELLED", "FAILED"] },
-      },
+      where: taskWhere,
       include: {
         machine: { select: { name: true, machineCode: true } },
         organization: { select: { name: true, contactPhone: true } },
       },
+      orderBy: { updatedAt: "desc" },
       take: 10,
     }),
+    prisma.pickupRequest.count({ where: taskWhere }),
     prisma.machine.findMany({
       where: {
-        organizationId: { in: orgIds },
+        ...orgFilter,
         status: "FULL",
       },
       include: { organization: { select: { name: true } } },
+      orderBy: { fillLevelPercent: "desc" },
+      take: 30,
+    }),
+    prisma.machine.count({
+      where: { ...orgFilter, status: "FULL" },
     }),
     prisma.organizationCollectorPartner.findMany({
       where: { collectorUserId: user.id, status: "ACTIVE" },
       include: { organization: { select: { name: true } } },
+      take: 50,
+    }),
+    prisma.organizationCollectorPartner.count({
+      where: { collectorUserId: user.id, status: "ACTIVE" },
     }),
   ]);
 
@@ -51,20 +67,20 @@ export default async function PengepulDashboardPage() {
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
         <MetricCard
           label="Tugas aktif"
-          value={tasks.length}
+          value={taskCount}
           icon={Truck}
           tone="amber"
           className="col-span-2 lg:col-span-1"
         />
         <MetricCard
           label="Mitra aktif"
-          value={partnerships.length}
+          value={partnerCount}
           icon={MapPin}
           tone="teal"
         />
         <MetricCard
           label="Mesin penuh"
-          value={fullMachines.length}
+          value={fullMachineCount}
           icon={Recycle}
           tone="blue"
         />

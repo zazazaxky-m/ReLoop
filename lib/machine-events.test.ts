@@ -7,8 +7,9 @@ vi.mock('./prisma', () => {
     machineEvent: { create: vi.fn(), update: vi.fn() },
     machine: { update: vi.fn() },
     depositSession: { findUnique: vi.fn(), update: vi.fn() },
-    depositItem: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
-    wasteType: { findFirst: vi.fn() },
+    depositItem: { create: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    wasteType: { findFirst: vi.fn(), create: vi.fn() },
+    machineWasteType: { findFirst: vi.fn() },
     pickupRequest: { findFirst: vi.fn(), create: vi.fn() },
     rewardLedger: { updateMany: vi.fn() },
   };
@@ -18,11 +19,18 @@ vi.mock('./prisma', () => {
       machineEvent: { findUnique: vi.fn() },
       depositSession: { findFirst: vi.fn() },
       depositItem: { findFirst: vi.fn() },
+      user: { findMany: vi.fn().mockResolvedValue([]) },
+      notification: { createMany: vi.fn() },
+      deviceToken: { findMany: vi.fn().mockResolvedValue([]) },
       $transaction: vi.fn().mockImplementation((cb) => cb(mockTx)),
     },
     mockTx,
   };
 });
+
+vi.mock('./notifications', () => ({
+  sendPushToUsersBestEffort: vi.fn(),
+}));
 
 describe('lib/machine-events', () => {
   beforeEach(() => {
@@ -67,9 +75,10 @@ describe('lib/machine-events', () => {
       });
     });
 
-    it('creates auto pickup if machine is FULL during heartbeat', async () => {
+    it('creates auto pickup and notifies org admins if machine is FULL during heartbeat', async () => {
       vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', organizationId: 'o1' } as any);
       vi.mocked(prisma.machineEvent.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.user.findMany).mockResolvedValue([{ id: 'admin_1' }] as any);
       
       const { mockTx } = await import('./prisma') as any;
       mockTx.machineEvent.create.mockResolvedValue({ id: 'evt_new' });
@@ -85,6 +94,80 @@ describe('lib/machine-events', () => {
       expect(mockTx.pickupRequest.create).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ machineId: 'm1', reason: 'FULL' })
       }));
+      expect(prisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ organizationId: 'o1', role: 'ADMIN' }),
+      }));
+      expect(prisma.notification.createMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: [expect.objectContaining({
+          userId: 'admin_1',
+          type: 'MACHINE_FULL',
+        })],
+      }));
+    });
+  });
+
+  describe('ITEM_DETECTED waste type resolution', () => {
+    it('creates a MACHINE-sourced PENDING item when the kiosk-selected wasteTypeId is linked to the machine', async () => {
+      vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', organizationId: 'o1', sessionIdleTimeoutMinutes: 3 } as any);
+      vi.mocked(prisma.depositSession.findFirst).mockResolvedValue({ id: 'sess1' } as any);
+
+      const { mockTx } = await import('./prisma') as any;
+      mockTx.machineEvent.create.mockResolvedValue({ id: 'evt_new' });
+      mockTx.depositSession.findUnique.mockResolvedValue({ id: 'sess1', status: 'ACTIVE' });
+      mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
+      mockTx.depositItem.create.mockResolvedValue({ id: 'item1' });
+
+      await me.ingestMachineEvent({
+        machineCode: 'm1',
+        localEventId: '3',
+        eventType: 'ITEM_DETECTED',
+        sessionId: 'sess1',
+        payload: { wasteTypeId: 'wt-bottle' },
+      });
+
+      expect(mockTx.machineWasteType.findFirst).toHaveBeenCalledWith({
+        where: { machineId: 'm1', wasteTypeId: 'wt-bottle', active: true },
+        select: { id: true },
+      });
+      expect(mockTx.depositItem.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          wasteTypeId: 'wt-bottle',
+          source: 'MACHINE',
+          status: 'PENDING',
+        }),
+      });
+    });
+
+    it('falls back to the shared unknown WasteType and marks the item REVIEW when no waste type hint resolves', async () => {
+      vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', organizationId: 'o1', sessionIdleTimeoutMinutes: 3 } as any);
+      vi.mocked(prisma.depositSession.findFirst).mockResolvedValue({ id: 'sess1' } as any);
+
+      const { mockTx } = await import('./prisma') as any;
+      mockTx.machineEvent.create.mockResolvedValue({ id: 'evt_new' });
+      mockTx.depositSession.findUnique.mockResolvedValue({ id: 'sess1', status: 'ACTIVE' });
+      mockTx.wasteType.findFirst.mockResolvedValue(null);
+      mockTx.wasteType.create.mockResolvedValue({ id: 'wt-unknown' });
+      mockTx.depositItem.create.mockResolvedValue({ id: 'item1' });
+
+      await me.ingestMachineEvent({
+        machineCode: 'm1',
+        localEventId: '4',
+        eventType: 'ITEM_DETECTED',
+        sessionId: 'sess1',
+        payload: { inputBeam: true },
+      });
+
+      expect(mockTx.wasteType.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ name: me.UNKNOWN_WASTE_TYPE_NAME, active: false }),
+      }));
+      expect(mockTx.depositItem.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          wasteTypeId: 'wt-unknown',
+          source: 'PYTHON_SIMULATOR',
+          status: 'REVIEW',
+          validationReasonCode: me.UNKNOWN_WASTE_TYPE_REASON,
+        }),
+      });
     });
   });
 });

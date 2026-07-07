@@ -64,7 +64,7 @@ npm run realtime
 
 ## Seed accounts
 
-All demo accounts use the password **`password123`**.
+All demo accounts use the password **`password1234`** (minimum 12 characters).
 
 | Role       | Email                 | Notes                                            |
 | ---------- | --------------------- | ------------------------------------------------ |

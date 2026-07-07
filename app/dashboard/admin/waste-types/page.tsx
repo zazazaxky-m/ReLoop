@@ -74,7 +74,7 @@ export default async function AdminWasteTypesPage() {
 
   const rateWasteTypeOptions = wasteTypeRows
     .filter((w) => w.active)
-    .map((w) => ({ id: w.id, name: w.name }));
+    .map((w) => ({ id: w.id, name: w.name, unit: w.unit }));
 
   return (
     <div className="space-y-8">

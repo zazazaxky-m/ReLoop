@@ -8,6 +8,7 @@ import { getWalletBalance, createRedeemReserve } from "@/lib/ledger";
 import { getMinRedemption } from "@/lib/config";
 import { logAudit } from "@/lib/audit";
 import { displayUsers } from "@/lib/display-user";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 
 const createSchema = z.object({
   amount: z.number().int().positive(),
@@ -24,18 +25,25 @@ export async function GET(req: Request) {
     const statusFilter = url.searchParams.get("status") ?? undefined;
     const queueOnly = url.searchParams.get("queue") === "1";
 
+    const pagination = parsePagination(url);
+
     const where: Prisma.RedemptionWhereInput = {};
     if (user.role === "USER") where.userId = user.id;
     if (statusFilter) where.status = statusFilter as Prisma.EnumRedemptionStatusFilter["equals"];
     else if (queueOnly) where.status = { in: [...ACTIVE_QUEUE] };
 
-    const redemptions = await prisma.redemption.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      include: {
-        user: { select: { id: true, name: true, email: true } },
-      },
-    });
+    const [total, redemptions] = await Promise.all([
+      prisma.redemption.count({ where }),
+      prisma.redemption.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: pagination.skip,
+        take: pagination.take,
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+        },
+      }),
+    ]);
 
     // Attach the payout account snapshot (no FK relation in schema).
     const accountIds = redemptions.map((r) => r.payoutAccountId).filter(Boolean) as string[];
@@ -50,7 +58,10 @@ export async function GET(req: Request) {
       payoutAccount: r.payoutAccountId ? (accById.get(r.payoutAccountId) ?? null) : null,
     }));
 
-    return jsonOk({ redemptions: enriched });
+    return jsonOk({
+      redemptions: enriched,
+      pagination: buildPaginationMeta(total, pagination),
+    });
   } catch (error) {
     return handleApiError(error);
   }

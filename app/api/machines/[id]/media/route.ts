@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
-import { machineMediaStorageRoot, serializeMachineMedia } from "@/lib/machine-media";
+import { machineMediaStorageRoot, resolveMachineMediaPath, serializeMachineMedia } from "@/lib/machine-media";
 import { prisma } from "@/lib/prisma";
 import { HttpError, requireApiUser } from "@/lib/rbac";
 
@@ -56,9 +56,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const current = await prisma.machineMedia.aggregate({ where: { machineId: id }, _max: { sortOrder: true } });
     const mediaId = randomUUID();
     const filename = `${mediaId}.${definition.extension}`;
-    const relativePath = path.join(id, filename);
+    const relativePath = `${id}/${filename}`;
     await mkdir(path.join(machineMediaStorageRoot, id), { recursive: true });
-    await writeFile(path.join(machineMediaStorageRoot, relativePath), bytes);
+    await writeFile(resolveMachineMediaPath(relativePath), bytes);
     const durationRaw = Number(form.get("durationSeconds") ?? 8);
     const media = await prisma.machineMedia.create({ data: {
       id: mediaId, machineId: id, title: String(form.get("title") ?? "").trim().slice(0, 100) || null,

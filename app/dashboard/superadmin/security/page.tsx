@@ -2,17 +2,29 @@ import type { Metadata } from "next";
 import { MetricCard, PageHeader } from "@/components/ui";
 import { AlertTriangle, Recycle, ShieldCheck } from "@/components/ui/icons";
 import { SecurityEventList } from "@/components/security/SecurityEventList";
+import { ReviewQueue } from "@/components/security/ReviewQueue";
 import { requirePageUser } from "@/lib/rbac";
-import { getSecurityEvents, getSecuritySummary } from "@/lib/security-events";
+import { prisma } from "@/lib/prisma";
+import {
+  getDepositReviewQueue,
+  getSecurityEvents,
+  getSecuritySummary,
+} from "@/lib/security-events";
 
 export const metadata: Metadata = { title: "Log Keamanan" };
 export const dynamic = "force-dynamic";
 
 export default async function SecurityLogPage() {
   await requirePageUser(["SUPERADMIN"]);
-  const [summary, events] = await Promise.all([
+  const [summary, events, reviewQueue, wasteTypes] = await Promise.all([
     getSecuritySummary(),
     getSecurityEvents({ take: 150 }),
+    getDepositReviewQueue({ take: 100 }),
+    prisma.wasteType.findMany({
+      where: { active: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, unit: true },
+    }),
   ]);
 
   return (
@@ -32,6 +44,16 @@ export default async function SecurityLogPage() {
         <MetricCard label="Fraud 7 hari" value={summary.fraud7d} icon={ShieldCheck} tone="amber" />
         <MetricCard label="Vandalisme 7 hari" value={summary.vandalism7d} icon={AlertTriangle} tone="slate" />
         <MetricCard label="Mesin terdampak" value={summary.affectedMachines7d} icon={Recycle} tone="teal" />
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Antrean peninjauan setoran</h2>
+          <p className="text-sm text-muted">
+            Setoran dengan anomali sensor atau jenis sampah tak dikenali menunggu keputusan approve/reject di sini.
+          </p>
+        </div>
+        <ReviewQueue items={reviewQueue.items} wasteTypes={wasteTypes} />
       </div>
 
       <SecurityEventList events={events} />

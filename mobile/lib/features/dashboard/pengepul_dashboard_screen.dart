@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/auth_provider.dart';
 import '../../shared/widgets/metric_card.dart';
+import '../../shared/widgets/notification_bell.dart';
 import '../../shared/widgets/promo_carousel.dart';
 import '../../shared/widgets/quick_action.dart';
 import '../../shared/widgets/reloop_card.dart';
@@ -123,8 +124,25 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
     final firstName = (user?.name ?? 'Mitra').split(' ').first;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
       children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Dashboard',
+                style: TextStyle(
+                  color: context.reloopForeground,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -.4,
+                ),
+              ),
+            ),
+            const NotificationBell(),
+          ],
+        ),
+        const SizedBox(height: 6),
         const PromoCarousel(),
         const SizedBox(height: 16),
         _CollectorSummary(

@@ -56,16 +56,30 @@ Secara default, aplikasi berjalan di environment `dev` (menggunakan konfigurasi 
 python -m rvm.main --config rvm/config.local.json
 ```
 
-Untuk menjalankan di environment `prod` (menggunakan server production dan secret yang spesifik), Anda dapat menggunakan flag `--env prod`:
+Untuk menjalankan di environment `prod`, set dahulu `RVM_SERVER_URL` dan
+`RVM_MACHINE_SECRET` sebagai environment variable (jangan pernah menaruh
+secret produksi di source code), lalu gunakan flag `--env prod`:
+
 ```powershell
+$env:RVM_SERVER_URL="https://your-server.example.com"
+$env:RVM_MACHINE_SECRET="<secret-mesin-dari-superadmin>"
 python -m rvm.main --env prod
 ```
 
-Atau menggunakan Environment Variable:
+Atau set `RVM_ENV=prod` sekaligus kedua variabel di atas melalui secret
+manager pada mesin deploy:
+
 ```powershell
 $env:RVM_ENV="prod"
+$env:RVM_SERVER_URL="https://your-server.example.com"
+$env:RVM_MACHINE_SECRET="<secret-mesin-dari-superadmin>"
 python -m rvm.main
 ```
+
+Proses akan gagal start (`SystemExit`) jika `--env prod` dipakai tanpa kedua
+variabel tersebut. Jika secret produksi lama pernah tercatat di source
+control, rotasi melalui **Superadmin → Mesin → Detail → Rotate Secret**
+sebelum melanjutkan deploy.
 
 Kiosk: `http://127.0.0.1:8765`
 

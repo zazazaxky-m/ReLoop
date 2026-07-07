@@ -1,12 +1,19 @@
-import { handleApiError, jsonOk, jsonError } from "@/lib/api";
+import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { requireApiUser } from "@/lib/rbac";
-import { exportUserData, processErasureRequest } from "@/lib/gdpr";
+import { createUserDataExportStream, processErasureRequest } from "@/lib/gdpr";
 
 export async function GET() {
   try {
     const user = await requireApiUser();
-    const data = await exportUserData(user.id);
-    return jsonOk({ data });
+    const stream = createUserDataExportStream(user.id);
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="reloop-export-${user.id}.json"`,
+        "Cache-Control": "no-store",
+      },
+    });
   } catch (error) {
     return handleApiError(error);
   }

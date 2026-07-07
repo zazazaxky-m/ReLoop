@@ -2,7 +2,6 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { GET } from '@/app/api/reports/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
-import * as csv from '@/lib/csv';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {

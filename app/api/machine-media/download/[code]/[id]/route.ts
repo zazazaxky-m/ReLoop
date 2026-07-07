@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { jsonError } from "@/lib/api";
-import { verifyMachineSignature } from "@/lib/machine-auth";
+import { verifyMachineRequest } from "@/lib/machine-auth";
 import { resolveMachineMediaPath } from "@/lib/machine-media";
 import { prisma } from "@/lib/prisma";
 export const runtime = "nodejs";
@@ -9,7 +9,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ code: st
     const { code, id } = await params;
     const machine = await prisma.machine.findUnique({ where: { machineCode: code }, select: { id: true, ingestSecret: true } });
     if (!machine) return jsonError(404, "Mesin tidak ditemukan");
-    const verdict = verifyMachineSignature({ secret: machine.ingestSecret, timestamp: req.headers.get("x-reloop-timestamp"), nonce: req.headers.get("x-reloop-nonce"), signature: req.headers.get("x-reloop-signature"), rawBody: "" });
+    const verdict = await verifyMachineRequest({ machineId: machine.id, secret: machine.ingestSecret, timestamp: req.headers.get("x-reloop-timestamp"), nonce: req.headers.get("x-reloop-nonce"), signature: req.headers.get("x-reloop-signature"), rawBody: "" });
     if (!verdict.ok || req.headers.get("x-reloop-machine") !== code) return jsonError(401, "Tanda tangan tidak valid");
     const media = await prisma.machineMedia.findFirst({ where: { id, machineId: machine.id, active: true } });
     if (!media) return jsonError(404, "Media tidak ditemukan");

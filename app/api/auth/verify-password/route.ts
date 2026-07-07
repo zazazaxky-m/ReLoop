@@ -17,7 +17,7 @@ const RATE_WINDOW_MS = 300_000;
 export async function POST(req: NextRequest) {
   try {
     const sessionUser = await requireApiUser();
-    const rl = checkRateLimit(
+    const rl = await checkRateLimit(
       `verify-password:${sessionUser.id}`,
       RATE_LIMIT,
       RATE_WINDOW_MS,

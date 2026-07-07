@@ -5,6 +5,7 @@ import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { displayUser } from "@/lib/display-user";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 
 const serviceAreaSchema = z
   .object({
@@ -38,21 +39,30 @@ export async function GET(req: Request) {
     }
     if (statusFilter) where.status = statusFilter as Prisma.EnumPartnerStatusFilter["equals"];
 
-    const partnerships = await prisma.organizationCollectorPartner.findMany({
-      where,
-      orderBy: { updatedAt: "desc" },
-      include: {
-        organization: { select: { id: true, name: true } },
-        collectorUser: { select: { id: true, name: true, email: true, phone: true } },
-      },
-    });
+    const pagination = parsePagination(url);
+    const [partnerships, total] = await Promise.all([
+      prisma.organizationCollectorPartner.findMany({
+        where,
+        orderBy: { updatedAt: "desc" },
+        skip: pagination.skip,
+        take: pagination.take,
+        include: {
+          organization: { select: { id: true, name: true } },
+          collectorUser: { select: { id: true, name: true, email: true, phone: true } },
+        },
+      }),
+      prisma.organizationCollectorPartner.count({ where }),
+    ]);
 
     const decrypted = partnerships.map((p) => ({
       ...p,
       collectorUser: displayUser(p.collectorUser),
     }));
 
-    return jsonOk({ partnerships: decrypted });
+    return jsonOk({
+      partnerships: decrypted,
+      pagination: buildPaginationMeta(total, pagination),
+    });
   } catch (error) {
     return handleApiError(error);
   }

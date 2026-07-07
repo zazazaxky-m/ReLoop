@@ -1,6 +1,15 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { NONCE_HEADER } from "@/lib/security-headers";
 import "./globals.css";
+
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-jakarta",
+  display: "swap",
+});
 
 const appName = process.env.NEXT_PUBLIC_APP_NAME ?? "ReLoop";
 
@@ -26,11 +35,18 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const nonce = (await headers()).get(NONCE_HEADER) ?? undefined;
+
   return (
-    <html lang="id" suppressHydrationWarning>
+    <html
+      lang="id"
+      className={jakarta.variable}
+      suppressHydrationWarning
+      nonce={nonce}
+    >
       <body>
         <ThemeProvider
           attribute="class"

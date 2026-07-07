@@ -17,16 +17,21 @@ class NotificationService {
 
   void Function(String route, Map<String, String>? params)? onNotificationTap;
 
+  /// Safe to call unconditionally at app startup even when Firebase native
+  /// config (google-services.json / GoogleService-Info.plist) is missing:
+  /// every step that depends on it is wrapped so a misconfigured or absent
+  /// Firebase project degrades to "notifications disabled" instead of
+  /// crashing app boot.
   Future<void> initialize() async {
     try {
       _fcm = FirebaseMessaging.instance;
-    } catch (_) {
-      return;
+      await _initLocalNotifications();
+      await _requestPermission();
+      await _getToken();
+      _setupHandlers();
+    } catch (error) {
+      debugPrint('NotificationService.initialize skipped: $error');
     }
-    await _initLocalNotifications();
-    await _requestPermission();
-    await _getToken();
-    _setupHandlers();
   }
 
   Future<void> _initLocalNotifications() async {

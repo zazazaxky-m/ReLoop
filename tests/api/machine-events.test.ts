@@ -8,11 +8,12 @@ import { NextRequest } from 'next/server';
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     machine: { findUnique: vi.fn() },
+    machineEvent: { findMany: vi.fn() },
   },
 }));
 
 vi.mock('@/lib/machine-auth', () => ({
-  verifyMachineSignature: vi.fn(),
+  verifyMachineRequest: vi.fn(),
 }));
 
 vi.mock('@/lib/machine-events', () => ({
@@ -22,6 +23,7 @@ vi.mock('@/lib/machine-events', () => ({
 describe('POST /api/machine-events', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(prisma.machineEvent.findMany).mockResolvedValue([]);
   });
 
   const makeReq = (body: any) => new NextRequest('http://localhost/api/machine-events', {
@@ -42,15 +44,19 @@ describe('POST /api/machine-events', () => {
 
   it('fails if signature is invalid (401)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret' } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: false, reason: 'Invalid' } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: false, reason: 'Invalid' } as any);
     
     const res = await POST(makeReq({ machineCode: 'm1', events: [] }));
     expect(res.status).toBe(401);
   });
 
   it('processes batch events successfully (200)', async () => {
-    vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret' } as any);
-    vi.mocked(mAuth.verifyMachineSignature).mockReturnValue({ ok: true } as any);
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({
+      id: 'm1',
+      ingestSecret: 'secret',
+      organization: { id: 'org1' },
+    } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
     
     vi.mocked(me.ingestMachineEvent)
       .mockResolvedValueOnce({ duplicate: false, eventId: 'evt_1' } as any)
@@ -72,7 +78,7 @@ describe('POST /api/machine-events', () => {
     expect(data.received).toBe(3);
     expect(data.results[0]).toEqual({ localEventId: '1', status: 'accepted', eventId: 'evt_1' });
     expect(data.results[1]).toEqual({ localEventId: '2', status: 'duplicate', eventId: 'evt_2' });
-    expect(data.results[2]).toEqual({ localEventId: '3', status: 'error', error: 'Processing error' });
+    expect(data.results[2]).toEqual({ localEventId: '3', status: 'error', error: 'EVENT_REJECTED' });
     
     expect(me.ingestMachineEvent).toHaveBeenCalledTimes(3);
   });

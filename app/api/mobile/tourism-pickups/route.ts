@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, activePartnerOrgIds } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
     const user = await requireApiUser(["PENGEPUL"]);
     const orgIds = await activePartnerOrgIds(user.id);

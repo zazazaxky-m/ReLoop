@@ -41,6 +41,10 @@ export async function PATCH(
       }
     }
 
+    const shouldInvalidateSession =
+      (data.role !== undefined && data.role !== target.role) ||
+      (data.status !== undefined && data.status !== target.status);
+
     const user = await prisma.user.update({
       where: { id },
       data: {
@@ -48,6 +52,7 @@ export async function PATCH(
         status: data.status,
         organizationId: data.organizationId,
         phone: data.phone,
+        ...(shouldInvalidateSession ? { tokenVersion: { increment: 1 } } : {}),
       },
       select: { id: true, role: true, status: true, organizationId: true },
     });

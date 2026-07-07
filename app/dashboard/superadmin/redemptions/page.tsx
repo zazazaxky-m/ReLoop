@@ -1,23 +1,40 @@
 import type { Metadata } from "next";
-import { MetricCard, PageHeader } from "@/components/ui";
+import { MetricCard, PageHeader, PagePagination } from "@/components/ui";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { getMinRedemption } from "@/lib/config";
+import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 import { Clock, Wallet } from "@/components/ui/icons";
 import { formatRupiah } from "@/lib/format";
 import { RedemptionQueue, type RedemptionAdminRow } from "@/components/admin/RedemptionQueue";
 
 export const metadata: Metadata = { title: "Redemption & Payout" };
 
-export default async function SuperadminRedemptionsPage() {
+export default async function SuperadminRedemptionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   await requirePageUser(["SUPERADMIN"]);
+  const params = await searchParams;
+  const pagination = parsePageSearchParams(params);
 
-  const [redemptions, minRedemption] = await Promise.all([
+  const [redemptions, total, minRedemption, queueCount, paidSum] = await Promise.all([
     prisma.redemption.findMany({
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      skip: pagination.skip,
+      take: pagination.take,
       include: { user: { select: { name: true, email: true } } },
     }),
+    prisma.redemption.count(),
     getMinRedemption(),
+    prisma.redemption.count({
+      where: { status: { in: ["REQUESTED", "APPROVED", "PROCESSING"] } },
+    }),
+    prisma.redemption.aggregate({
+      where: { status: "SUCCESS" },
+      _sum: { amount: true },
+    }),
   ]);
 
   const accountIds = redemptions
@@ -40,16 +57,12 @@ export default async function SuperadminRedemptionsPage() {
       accountName: acc?.accountName ?? null,
       status: r.status,
       note: r.note,
+      manualTransferProofUrl: r.manualTransferProofUrl,
       createdAt: r.createdAt,
     };
   });
 
-  const queueCount = rows.filter((r) =>
-    ["REQUESTED", "APPROVED", "PROCESSING"].includes(r.status),
-  ).length;
-  const paidTotal = rows
-    .filter((r) => r.status === "SUCCESS")
-    .reduce((s, r) => s + r.amount, 0);
+  const pageMeta = buildPaginationMeta(total, pagination);
 
   return (
     <div className="space-y-6">
@@ -59,7 +72,12 @@ export default async function SuperadminRedemptionsPage() {
       />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
         <MetricCard label="Antrian aktif" value={queueCount} icon={Clock} tone="amber" />
-        <MetricCard label="Total dibayar" value={formatRupiah(paidTotal)} icon={Wallet} tone="green" />
+        <MetricCard
+          label="Total dibayar"
+          value={formatRupiah(paidSum._sum.amount ?? 0)}
+          icon={Wallet}
+          tone="green"
+        />
         <MetricCard
           label="Min. pencairan"
           value={formatRupiah(minRedemption)}
@@ -68,6 +86,11 @@ export default async function SuperadminRedemptionsPage() {
         />
       </div>
       <RedemptionQueue redemptions={rows} />
+      <PagePagination
+        basePath="/dashboard/superadmin/redemptions"
+        page={pageMeta.page}
+        totalPages={pageMeta.totalPages}
+      />
     </div>
   );
 }

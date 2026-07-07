@@ -10,6 +10,7 @@ import {
 import { handleApiError, jsonOk } from "@/lib/api";
 import { PICKUP_OPEN } from "@/lib/pickup";
 import { logAudit } from "@/lib/audit";
+import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 
 const createSchema = z.object({
   machineId: z.string().optional(),
@@ -46,19 +47,25 @@ export async function GET(req: Request) {
       where.status = statusFilter as Prisma.EnumPickupStatusFilter["equals"];
     }
 
-    const pickups = await prisma.pickupRequest.findMany({
-      where,
-      orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
-      include: {
-        machine: { select: { id: true, name: true, machineCode: true, fillLevelPercent: true } },
-        organization: { select: { id: true, name: true, contactName: true, contactPhone: true, address: true } },
-        assignedCollector: { select: { id: true, name: true } },
-        items: { include: { wasteType: { select: { name: true } } } },
-        _count: { select: { items: true } },
-      },
-    });
+    const pagination = parsePagination(url);
+    const [total, pickups] = await Promise.all([
+      prisma.pickupRequest.count({ where }),
+      prisma.pickupRequest.findMany({
+        where,
+        orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+        skip: pagination.skip,
+        take: pagination.take,
+        include: {
+          machine: { select: { id: true, name: true, machineCode: true, fillLevelPercent: true } },
+          organization: { select: { id: true, name: true, contactName: true, contactPhone: true, address: true } },
+          assignedCollector: { select: { id: true, name: true } },
+          items: { include: { wasteType: { select: { name: true } } } },
+          _count: { select: { items: true } },
+        },
+      }),
+    ]);
 
-    return jsonOk({ pickups });
+    return jsonOk({ pickups, pagination: buildPaginationMeta(total, pagination) });
   } catch (error) {
     return handleApiError(error);
   }

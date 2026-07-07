@@ -180,6 +180,28 @@ class SkeletonListTile extends StatelessWidget {
   }
 }
 
+class SkeletonWallet extends StatelessWidget {
+  const SkeletonWallet({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        SkeletonBox(width: double.infinity, height: 168, borderRadius: 16),
+        const SizedBox(height: 20),
+        SkeletonBox(width: double.infinity, height: 48, borderRadius: 14),
+        const SizedBox(height: 20),
+        const SkeletonListTile(),
+        const SizedBox(height: 12),
+        const SkeletonListTile(),
+        const SizedBox(height: 12),
+        const SkeletonListTile(),
+      ],
+    );
+  }
+}
+
 class SkeletonDashboard extends StatelessWidget {
   const SkeletonDashboard({super.key});
 

@@ -104,7 +104,7 @@ class AppTheme {
         ),
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor: surface.withValues(alpha: .94),
+        backgroundColor: surface,
         foregroundColor: foreground,
         surfaceTintColor: Colors.transparent,
         elevation: 0,

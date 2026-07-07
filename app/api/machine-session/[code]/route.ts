@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonOk } from "@/lib/api";
-import { verifyMachineSignature } from "@/lib/machine-auth";
+import { verifyMachineRequest } from "@/lib/machine-auth";
 
 const ACTIVE_SESSION_STATUSES = [
   "RESERVED",
@@ -21,12 +21,17 @@ export async function GET(
       id: true,
       ingestSecret: true,
       sessionIdleTimeoutMinutes: true,
+      wasteTypes: {
+        where: { active: true },
+        include: { wasteType: { select: { id: true, name: true, unit: true } } },
+      },
     },
   });
   if (!machine) return jsonError(404, "Mesin tidak ditemukan");
   if (!machine.ingestSecret) return jsonError(401, "Secret mesin belum tersedia");
 
-  const verdict = verifyMachineSignature({
+  const verdict = await verifyMachineRequest({
+    machineId: machine.id,
     secret: machine.ingestSecret,
     timestamp: req.headers.get("x-reloop-timestamp"),
     nonce: req.headers.get("x-reloop-nonce"),
@@ -60,11 +65,18 @@ export async function GET(
     session = null;
   }
 
+  const wasteTypes = (machine.wasteTypes ?? []).map((link) => ({
+    id: link.wasteType.id,
+    name: link.wasteType.name,
+    unit: link.wasteType.unit,
+  }));
+
   if (!session) {
     return jsonOk({
       lease: null,
       session: null,
       idleTimeoutMinutes: machine.sessionIdleTimeoutMinutes,
+      wasteTypes,
     });
   }
 
@@ -115,5 +127,6 @@ export async function GET(
       })),
     },
     idleTimeoutMinutes: machine.sessionIdleTimeoutMinutes,
+    wasteTypes,
   });
 }

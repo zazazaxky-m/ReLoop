@@ -1,31 +1,45 @@
 import type { Metadata } from "next";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, PagePagination } from "@/components/ui";
 import { TravelAgentManager, type TravelAgentRow } from "@/components/travel-agent/TravelAgentManager";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
+import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 
 export const metadata: Metadata = { title: "Travel Agent" };
 
-export default async function AdminTravelAgentsPage() {
+export default async function AdminTravelAgentsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const user = await requirePageUser(["ADMIN"]);
   const orgId = user.organizationId ?? "__none__";
+  const params = await searchParams;
+  const pagination = parsePageSearchParams(params);
 
-  const agents = await prisma.travelAgent.findMany({
-    where: { organizations: { some: { organizationId: orgId } } },
-    orderBy: { name: "asc" },
-    include: {
-      organizations: { where: { organizationId: orgId } },
-      invites: {
-        where: { organizationId: orgId },
-        orderBy: { createdAt: "desc" },
-        take: 1,
+  const where = { organizations: { some: { organizationId: orgId } } };
+
+  const [agents, total] = await Promise.all([
+    prisma.travelAgent.findMany({
+      where,
+      orderBy: { name: "asc" },
+      skip: pagination.skip,
+      take: pagination.take,
+      include: {
+        organizations: { where: { organizationId: orgId } },
+        invites: {
+          where: { organizationId: orgId },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        trips: {
+          where: { campaign: { organizationId: orgId } },
+          select: { id: true, complianceStatus: true },
+        },
       },
-      trips: {
-        where: { campaign: { organizationId: orgId } },
-        select: { id: true, complianceStatus: true },
-      },
-    },
-  });
+    }),
+    prisma.travelAgent.count({ where }),
+  ]);
 
   const rows: TravelAgentRow[] = agents.map((agent) => {
     const trips = agent.trips;
@@ -43,6 +57,8 @@ export default async function AdminTravelAgentsPage() {
     };
   });
 
+  const pageMeta = buildPaginationMeta(total, pagination);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -50,6 +66,11 @@ export default async function AdminTravelAgentsPage() {
         description="Invite agent, kelola relasi tempat wisata, dan pantau kepatuhan rombongan."
       />
       <TravelAgentManager agents={rows} />
+      <PagePagination
+        basePath="/dashboard/admin/travel-agents"
+        page={pageMeta.page}
+        totalPages={pageMeta.totalPages}
+      />
     </div>
   );
 }

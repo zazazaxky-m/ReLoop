@@ -5,12 +5,17 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/auth_provider.dart';
 import '../../core/models.dart';
+import '../../services/offline_service.dart';
+import '../../shared/format.dart';
+import '../../shared/widgets/notification_bell.dart';
 import '../../shared/widgets/promo_carousel.dart';
 import '../../shared/widgets/quick_action.dart';
 import '../../shared/widgets/reloop_card.dart';
 import '../../shared/widgets/skeleton_loading.dart';
+import '../../shared/widgets/state_views.dart';
 import '../../shared/widgets/status_badge.dart';
 import '../../theme/colors.dart';
+import '../../theme/dimens.dart';
 
 class UserDashboardScreen extends StatefulWidget {
   const UserDashboardScreen({super.key});
@@ -20,8 +25,11 @@ class UserDashboardScreen extends StatefulWidget {
 }
 
 class _UserDashboardScreenState extends State<UserDashboardScreen> {
+  static const _cacheKey = 'dashboard';
+
   UserDashboard? _dashboard;
   bool _loading = true;
+  bool _isOffline = false;
   String? _error;
 
   @override
@@ -43,13 +51,27 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
       if (data is! Map<String, dynamic>) {
         throw Exception('Format dashboard tidak valid');
       }
+      await OfflineService().cache(_cacheKey, data);
       if (mounted) {
         setState(() {
           _dashboard = UserDashboard.fromJson(data);
           _loading = false;
+          _isOffline = false;
         });
       }
     } catch (error) {
+      final cached = OfflineService().get(_cacheKey);
+      if (cached is Map<String, dynamic>) {
+        if (mounted) {
+          setState(() {
+            _dashboard = UserDashboard.fromJson(cached);
+            _loading = false;
+            _isOffline = true;
+            _error = null;
+          });
+        }
+        return;
+      }
       if (mounted) {
         setState(() {
           _error = ApiClient.getErrorMessage(error);
@@ -69,20 +91,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
   Widget _body() {
     if (_loading) return const SkeletonDashboard();
     if (_error != null) {
-      return ListView(
-        padding: const EdgeInsets.all(24),
-        children: [
-          const SizedBox(height: 140),
-          Icon(
-            Icons.cloud_off_rounded,
-            size: 48,
-            color: context.reloopMutedSoft,
-          ),
-          const SizedBox(height: 12),
-          Text(_error!, textAlign: TextAlign.center),
-          TextButton(onPressed: _load, child: Text('Coba lagi')),
-        ],
-      );
+      return ReLoopErrorStateScrollable(message: _error!, onRetry: _load);
     }
 
     final dashboard = _dashboard!;
@@ -90,10 +99,64 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     final firstName = (user?.name ?? 'Pengguna').split(' ').first;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
+      padding: const EdgeInsets.fromLTRB(
+        ReLoopSpacing.lg,
+        ReLoopSpacing.sm,
+        ReLoopSpacing.lg,
+        110,
+      ),
       children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Beranda',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: context.reloopForeground,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -.4,
+                ),
+              ),
+            ),
+            const NotificationBell(),
+          ],
+        ),
+        const SizedBox(height: ReLoopSpacing.xs),
+        if (_isOffline) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: ReLoopSpacing.md,
+              vertical: ReLoopSpacing.sm,
+            ),
+            decoration: BoxDecoration(
+              color: context.reloopTone('warning').bg,
+              borderRadius: ReLoopRadius.brSm,
+              border: Border.all(color: context.reloopTone('warning').border),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.cloud_off_rounded,
+                  size: 16,
+                  color: context.reloopTone('warning').text,
+                ),
+                const SizedBox(width: ReLoopSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'Menampilkan data tersimpan (offline). Tarik untuk menyegarkan.',
+                    style: TextStyle(
+                      color: context.reloopTone('warning').text,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: ReLoopSpacing.md),
+        ],
         const PromoCarousel(),
-        const SizedBox(height: 16),
+        const SizedBox(height: ReLoopSpacing.lg),
         _WalletSummary(
           firstName: firstName,
           balance: dashboard.balance,
@@ -103,17 +166,16 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
           onHistory: () => context.push('/wallet'),
           onProfile: () => context.push('/profile'),
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: ReLoopSpacing.xl),
         Text(
           'Layanan ReLoop',
-          style: TextStyle(
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
             color: context.reloopForeground,
-            fontSize: 17,
             fontWeight: FontWeight.w800,
             letterSpacing: -.2,
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: ReLoopSpacing.md),
         GridView.count(
           crossAxisCount: 4,
           shrinkWrap: true,
@@ -147,30 +209,30 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
               icon: Icons.map_outlined,
               title: 'Cari Mesin',
               description: 'Lokasi mesin',
-              tone: QuickActionTone.blue,
+              tone: QuickActionTone.amber,
               onTap: () => context.push('/map'),
             ),
           ],
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: ReLoopSpacing.xxl),
         _SectionTitle(
           title: 'Aktivitas terakhir',
           action: 'Lihat dompet',
           onAction: () => context.push('/wallet'),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: ReLoopSpacing.sm),
         ..._sessions(dashboard),
-        const SizedBox(height: 22),
+        const SizedBox(height: ReLoopSpacing.xl),
         _SectionTitle(
           title: 'Program untuk kamu',
           action: 'Lihat semua',
           onAction: () => context.push('/campaigns'),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: ReLoopSpacing.sm),
         ..._campaigns(dashboard),
-        const SizedBox(height: 22),
+        const SizedBox(height: ReLoopSpacing.xl),
         const _SectionTitle(title: 'Reward terbaru'),
-        const SizedBox(height: 10),
+        const SizedBox(height: ReLoopSpacing.sm),
         ..._ledger(dashboard),
       ],
     );
@@ -178,11 +240,18 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
 
   List<Widget> _sessions(UserDashboard dashboard) {
     if (dashboard.recentSessions.isEmpty) {
-      return const [_EmptyRow('Belum ada aktivitas setor.')];
+      return const [
+        ReLoopEmptyState(
+          compact: true,
+          icon: Icons.recycling_rounded,
+          title: 'Belum ada aktivitas setor',
+          description: 'Setor sampah kamu bakal muncul di sini.',
+        ),
+      ];
     }
     return dashboard.recentSessions.take(4).map((session) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.only(bottom: ReLoopSpacing.sm),
         child: ReLoopCard(
           child: Row(
             children: [
@@ -190,24 +259,23 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                 icon: Icons.recycling_rounded,
                 tone: QuickActionTone.green,
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: ReLoopSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       session.machine?.name ?? 'Mesin ReLoop',
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: context.reloopForeground,
                         fontWeight: FontWeight.w700,
-                        fontSize: 13,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      _formatDate(session.startedAt),
-                      style: TextStyle(
+                      formatDateTimeIso(session.startedAt),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: context.reloopMuted,
-                        fontSize: 11,
                       ),
                     ),
                   ],
@@ -226,11 +294,18 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
         .where((item) => item.status == 'ACTIVE')
         .take(3);
     if (campaigns.isEmpty) {
-      return const [_EmptyRow('Belum ada program aktif.')];
+      return const [
+        ReLoopEmptyState(
+          compact: true,
+          icon: Icons.campaign_outlined,
+          title: 'Belum ada program aktif',
+          description: 'Program baru buat kamu bakal tampil di sini.',
+        ),
+      ];
     }
     return campaigns.map((campaign) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.only(bottom: ReLoopSpacing.sm),
         child: ReLoopCard(
           child: Row(
             children: [
@@ -238,33 +313,29 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                 icon: Icons.campaign_rounded,
                 tone: QuickActionTone.blue,
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: ReLoopSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       campaign.name,
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: context.reloopForeground,
                         fontWeight: FontWeight.w700,
-                        fontSize: 13,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       campaign.organizationName ?? 'ReLoop',
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: context.reloopMuted,
-                        fontSize: 11,
                       ),
                     ),
                   ],
                 ),
               ),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: context.reloopMutedSoft,
-              ),
+              Icon(Icons.chevron_right_rounded, color: context.reloopMutedSoft),
             ],
           ),
         ),
@@ -274,11 +345,18 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
 
   List<Widget> _ledger(UserDashboard dashboard) {
     if (dashboard.recentLedger.isEmpty) {
-      return const [_EmptyRow('Belum ada riwayat reward.')];
+      return const [
+        ReLoopEmptyState(
+          compact: true,
+          icon: Icons.savings_outlined,
+          title: 'Belum ada riwayat reward',
+          description: 'Reward dari setoran kamu bakal tercatat di sini.',
+        ),
+      ];
     }
     return dashboard.recentLedger.take(4).map((entry) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.only(bottom: ReLoopSpacing.sm),
         child: ReLoopCard(
           child: Row(
             children: [
@@ -286,37 +364,35 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                 icon: Icons.savings_outlined,
                 tone: QuickActionTone.amber,
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: ReLoopSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       entry.wasteTypeName ?? entry.entryType,
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: context.reloopForeground,
                         fontWeight: FontWeight.w700,
-                        fontSize: 13,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      _formatDate(entry.createdAt),
-                      style: TextStyle(
+                      formatDateTimeIso(entry.createdAt),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: context.reloopMuted,
-                        fontSize: 11,
                       ),
                     ),
                   ],
                 ),
               ),
               Text(
-                '${entry.amount >= 0 ? '+' : ''}${_currency(entry.amount)}',
-                style: TextStyle(
+                '${entry.amount >= 0 ? '+' : ''}${formatRupiah(entry.amount)}',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: entry.amount >= 0
                       ? context.reloopBrandText
                       : ReLoopColors.danger,
                   fontWeight: FontWeight.w800,
-                  fontSize: 13,
                 ),
               ),
             ],
@@ -348,67 +424,99 @@ class _WalletSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final points = (showPoints && pointsToRupiah > 0)
+        ? balance.available ~/ pointsToRupiah
+        : 0;
     return ReLoopCard(
-      padding: const EdgeInsets.fromLTRB(16, 15, 12, 15),
-      child: Row(
+      padding: const EdgeInsets.all(ReLoopSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
-            onTap: onProfile,
-            borderRadius: BorderRadius.circular(20),
-            child: CircleAvatar(
-              radius: 23,
-              backgroundColor: context.reloopBrandSoftStrong,
-              child: Text(
-                firstName.isEmpty ? '?' : firstName[0].toUpperCase(),
-                style: TextStyle(
-                  color: context.reloopBrandText,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
+          Row(
+            children: [
+              InkWell(
+                onTap: onProfile,
+                borderRadius: BorderRadius.circular(ReLoopRadius.lg),
+                child: CircleAvatar(
+                  radius: 23,
+                  backgroundColor: context.reloopBrandSoftStrong,
+                  child: Text(
+                    firstName.isEmpty ? '?' : firstName[0].toUpperCase(),
+                    style: TextStyle(
+                      color: context.reloopBrandText,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: InkWell(
-              onTap: onWallet,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    showPoints
-                        ? '${balance.availableFormatted} - ${_points(balance.available, pointsToRupiah)} poin'
-                        : balance.availableFormatted,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: showPoints ? 15.5 : 18,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -.3,
-                    ),
+              const SizedBox(width: ReLoopSpacing.md),
+              Expanded(
+                child: InkWell(
+                  onTap: onWallet,
+                  borderRadius: ReLoopRadius.brSm,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Halo, $firstName · Saldo tersedia',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: context.reloopMuted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        formatRupiah(balance.available),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: context.reloopForeground,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -.5,
+                        ),
+                      ),
+                      if (showPoints) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          '≈ ${formatThousands(points)} poin',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: context.reloopBrandText,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Halo, $firstName - Saldo tersedia',
-                    style: TextStyle(
-                      color: context.reloopMuted,
-                      fontSize: 10.5,
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
-          _SummaryAction(
-            icon: Icons.payments_outlined,
-            label: 'Cairkan',
-            onTap: onWallet,
-          ),
-          const SizedBox(width: 5),
-          _SummaryAction(
-            icon: Icons.history_rounded,
-            label: 'Riwayat',
-            onTap: onHistory,
+          const SizedBox(height: ReLoopSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: _SummaryAction(
+                  icon: Icons.payments_outlined,
+                  label: 'Cairkan',
+                  onTap: onWallet,
+                ),
+              ),
+              const SizedBox(width: ReLoopSpacing.sm),
+              Expanded(
+                child: _SummaryAction(
+                  icon: Icons.history_rounded,
+                  label: 'Riwayat',
+                  onTap: onHistory,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -431,28 +539,28 @@ class _SummaryAction extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: SizedBox(
-        width: 50,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      borderRadius: ReLoopRadius.brMd,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: ReLoopA11y.minTouchTarget),
+        padding: const EdgeInsets.symmetric(
+          horizontal: ReLoopSpacing.md,
+          vertical: ReLoopSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: context.reloopBrandSoft,
+          borderRadius: ReLoopRadius.brMd,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: ReLoopColors.brand600,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: Colors.white, size: 19),
-            ),
-            const SizedBox(height: 4),
+            Icon(icon, color: context.reloopBrandText, size: 20),
+            const SizedBox(width: ReLoopSpacing.sm),
             Text(
               label,
               style: TextStyle(
-                color: context.reloopMuted,
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
+                color: context.reloopBrandText,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
@@ -476,9 +584,8 @@ class _SectionTitle extends StatelessWidget {
         Expanded(
           child: Text(
             title,
-            style: TextStyle(
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
               color: context.reloopForeground,
-              fontSize: 16,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -500,21 +607,21 @@ class _ActivityIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final (color, softColor) = switch (tone) {
       QuickActionTone.green => (
-          context.reloopBrandText,
-          context.reloopBrandSoft,
-        ),
+        context.reloopBrandText,
+        context.reloopBrandSoft,
+      ),
       QuickActionTone.blue => (
-          context.isDarkMode ? const Color(0xFF93C5FD) : ReLoopColors.info,
-          context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEDF5FF),
-        ),
+        context.isDarkMode ? const Color(0xFF93C5FD) : ReLoopColors.info,
+        context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEDF5FF),
+      ),
       QuickActionTone.amber => (
-          context.isDarkMode ? const Color(0xFFFCD34D) : ReLoopColors.warning,
-          context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFF5E7),
-        ),
+        context.isDarkMode ? const Color(0xFFFCD34D) : ReLoopColors.warning,
+        context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFF5E7),
+      ),
       QuickActionTone.teal => (
-          context.isDarkMode ? const Color(0xFF5EEAD4) : const Color(0xFF159A91),
-          context.isDarkMode ? const Color(0xFF173936) : const Color(0xFFEAF9F7),
-        ),
+        context.isDarkMode ? const Color(0xFF5EEAD4) : const Color(0xFF159A91),
+        context.isDarkMode ? const Color(0xFF173936) : const Color(0xFFEAF9F7),
+      ),
     };
     return Container(
       width: 40,
@@ -525,50 +632,5 @@ class _ActivityIcon extends StatelessWidget {
       ),
       child: Icon(icon, color: color, size: 20),
     );
-  }
-}
-
-class _EmptyRow extends StatelessWidget {
-  const _EmptyRow(this.message);
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 18),
-      child: Center(
-        child: Text(
-          message,
-          style: TextStyle(color: context.reloopMuted, fontSize: 12),
-        ),
-      ),
-    );
-  }
-}
-
-String _currency(int amount) {
-  final formatted = amount.toString().replaceAllMapped(
-    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-    (match) => '${match[1]}.',
-  );
-  return 'Rp $formatted';
-}
-
-String _points(int amount, int pointsToRupiah) {
-  if (pointsToRupiah <= 0) return '0';
-  final points = amount ~/ pointsToRupiah;
-  return points.toString().replaceAllMapped(
-    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-    (match) => '${match[1]}.',
-  );
-}
-
-String _formatDate(String iso) {
-  try {
-    final date = DateTime.parse(iso).toLocal();
-    final minute = date.minute.toString().padLeft(2, '0');
-    return '${date.day}/${date.month}/${date.year} ${date.hour}:$minute';
-  } catch (_) {
-    return iso;
   }
 }

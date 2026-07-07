@@ -430,6 +430,11 @@ void showAdminMoreBottomSheet(BuildContext context, bool isSuper) {
             '/superadmin/redemptions',
           ),
           _AdminNavItem(
+            'Rekonsiliasi',
+            Icons.rule_folder_outlined,
+            '/superadmin/reconciliation',
+          ),
+          _AdminNavItem(
             'Wilayah',
             Icons.public_outlined,
             '/superadmin/regions',
@@ -875,6 +880,11 @@ const _superadminDesktop = [
     'Redemption',
     Icons.account_balance_wallet_outlined,
     '/superadmin/redemptions',
+  ),
+  _AdminNavItem(
+    'Rekonsiliasi',
+    Icons.rule_folder_outlined,
+    '/superadmin/reconciliation',
   ),
   _AdminNavItem('Log Keamanan', Icons.shield_outlined, '/superadmin/security'),
   _AdminNavItem('Wilayah', Icons.public_outlined, '/superadmin/regions'),

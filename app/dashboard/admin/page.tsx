@@ -18,26 +18,31 @@ export default async function AdminDashboardPage() {
   const user = await requirePageUser(["ADMIN"]);
   const orgId = user.organizationId!;
 
-  const [machines, pickups, campaigns, deposits] = await Promise.all([
-    prisma.machine.findMany({
-      where: { organizationId: orgId },
-      orderBy: { name: "asc" },
-    }),
-    prisma.pickupRequest.findMany({
-      where: { organizationId: orgId, status: { not: "COMPLETED" } },
-      take: 5,
-      include: { machine: { select: { name: true } } },
-    }),
-    prisma.campaign.count({ where: { organizationId: orgId, status: "ACTIVE" } }),
-    prisma.depositSession.count({
-      where: { machine: { organizationId: orgId }, status: "COMPLETED" },
-    }),
-  ]);
-
-  const fullMachines = machines.filter((m) => m.status === "FULL").length;
-  const offlineMachines = machines.filter((m) =>
-    ["OFFLINE", "ERROR", "MAINTENANCE"].includes(m.status),
-  ).length;
+  const [machineCount, fullMachines, offlineMachines, machines, pickups, campaigns, deposits] =
+    await Promise.all([
+      prisma.machine.count({ where: { organizationId: orgId } }),
+      prisma.machine.count({ where: { organizationId: orgId, status: "FULL" } }),
+      prisma.machine.count({
+        where: {
+          organizationId: orgId,
+          status: { in: ["OFFLINE", "ERROR", "MAINTENANCE"] },
+        },
+      }),
+      prisma.machine.findMany({
+        where: { organizationId: orgId },
+        orderBy: { name: "asc" },
+        take: 50,
+      }),
+      prisma.pickupRequest.findMany({
+        where: { organizationId: orgId, status: { not: "COMPLETED" } },
+        take: 5,
+        include: { machine: { select: { name: true } } },
+      }),
+      prisma.campaign.count({ where: { organizationId: orgId, status: "ACTIVE" } }),
+      prisma.depositSession.count({
+        where: { machine: { organizationId: orgId }, status: "COMPLETED" },
+      }),
+    ]);
 
   return (
     <div className="space-y-6">
@@ -52,7 +57,7 @@ export default async function AdminDashboardPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <MetricCard label="Mesin" value={machines.length} icon={Recycle} tone="green" />
+        <MetricCard label="Mesin" value={machineCount} icon={Recycle} tone="green" />
         <MetricCard label="Mesin penuh" value={fullMachines} icon={Truck} hint="Perlu pickup" tone="amber" />
         <MetricCard label="Perlu perhatian" value={offlineMachines} icon={Recycle} tone="slate" />
         <MetricCard label="Campaign aktif" value={campaigns} icon={Megaphone} tone="blue" />

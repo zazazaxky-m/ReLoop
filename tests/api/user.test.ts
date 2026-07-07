@@ -38,7 +38,7 @@ vi.mock('@/lib/campaign', () => ({
 }));
 
 vi.mock('@/lib/gdpr', () => ({
-  exportUserData: vi.fn(),
+  createUserDataExportStream: vi.fn(),
   processErasureRequest: vi.fn(),
 }));
 
@@ -78,14 +78,25 @@ describe('/api/user endpoints', () => {
   });
 
   describe('GET /api/user/data', () => {
-    it('returns exported user data (200)', async () => {
+    it('returns streamed export payload (200)', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1' } as any);
-      vi.mocked(gdpr.exportUserData).mockResolvedValue({ profile: { name: 'John' } } as any);
+      vi.mocked(gdpr.createUserDataExportStream).mockReturnValue(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('{"profile":{"name":"John"}}'),
+            );
+            controller.close();
+          },
+        }),
+      );
 
       const res = await getData();
       expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.data.profile.name).toBe('John');
+      expect(res.headers.get('Content-Type')).toContain('application/json');
+      expect(res.headers.get('Content-Disposition')).toContain('reloop-export-u1.json');
+      const text = await res.text();
+      expect(text).toContain('John');
     });
   });
 

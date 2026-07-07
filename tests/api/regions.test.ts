@@ -2,11 +2,10 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { GET, POST } from '@/app/api/regions/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
-import * as audit from '@/lib/audit';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    region: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
+    region: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), count: vi.fn() },
   },
 }));
 
@@ -32,9 +31,10 @@ describe('/api/regions', () => {
   describe('GET', () => {
     it('returns list of regions (200)', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'super1', role: 'SUPERADMIN' } as any);
+      vi.mocked(prisma.region.count).mockResolvedValue(1);
       vi.mocked(prisma.region.findMany).mockResolvedValue([{ id: 'r1', name: 'Reg 1' }] as any);
 
-      const res = await GET();
+      const res = await GET(new Request("http://localhost/api/regions"));
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.regions).toHaveLength(1);
@@ -42,7 +42,7 @@ describe('/api/regions', () => {
 
     it('denies access if not SUPERADMIN (403)', async () => {
       vi.mocked(rbac.requireApiUser).mockRejectedValue(new (rbac as any).HttpError(403, 'Forbidden'));
-      const res = await GET();
+      const res = await GET(new Request("http://localhost/api/regions"));
       expect(res.status).toBe(403);
     });
   });

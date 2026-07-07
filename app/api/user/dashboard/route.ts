@@ -33,7 +33,7 @@ export async function GET() {
         orderBy: { startAt: "desc" },
         take: 10,
       }),
-      getLedgerHistory(user.id, 5),
+      getLedgerHistory(user.id, { take: 5 }),
       prisma.travelAgentUser.count({ where: { userId: user.id } }),
       getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
     ]);

@@ -125,7 +125,17 @@ class LocalApiServer:
                         ok = controller.activate_lease(data)
                         self.json_response(200 if ok else 401, {"ok": ok})
                         return
+                    if route == "/api/session/waste-type":
+                        ok = controller.select_waste_type(str(data.get("wasteTypeId", "")))
+                        self.json_response(200 if ok else 409, {"ok": ok})
+                        return
                     if route == "/api/maintenance/login":
+                        if controller.maintenance_locked():
+                            self.json_response(
+                                429,
+                                {"token": None, "error": "Terlalu banyak percobaan PIN salah. Coba lagi nanti."},
+                            )
+                            return
                         token = controller.maintenance_login(str(data.get("pin", "")))
                         self.json_response(200 if token else 401, {"token": token})
                         return

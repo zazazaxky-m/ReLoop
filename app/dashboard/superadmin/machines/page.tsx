@@ -1,28 +1,40 @@
 import type { Metadata } from "next";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, PagePagination } from "@/components/ui";
 import { MachineManager } from "@/components/machine/MachineManager";
 import { MachineListTable } from "@/components/machine/MachineListTable";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { wasteTypeOptions, regionOptions, organizationOptions } from "@/lib/queries";
+import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 
 export const metadata: Metadata = { title: "Semua Mesin" };
 
-export default async function SuperadminMachinesPage() {
+export default async function SuperadminMachinesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   await requirePageUser(["SUPERADMIN"]);
+  const params = await searchParams;
+  const pagination = parsePageSearchParams(params);
 
-  const [machines, wasteTypes, regions, organizations] = await Promise.all([
+  const [machines, total, wasteTypes, regions, organizations] = await Promise.all([
     prisma.machine.findMany({
       include: {
         organization: { select: { name: true } },
         region: { select: { name: true } },
       },
       orderBy: { createdAt: "desc" },
+      skip: pagination.skip,
+      take: pagination.take,
     }),
+    prisma.machine.count(),
     wasteTypeOptions(),
     regionOptions(),
     organizationOptions(),
   ]);
+
+  const pageMeta = buildPaginationMeta(total, pagination);
 
   return (
     <div className="space-y-6">
@@ -48,6 +60,11 @@ export default async function SuperadminMachinesPage() {
         }))}
         detailBase="/dashboard/superadmin/machines"
         showOrg
+      />
+      <PagePagination
+        basePath="/dashboard/superadmin/machines"
+        page={pageMeta.page}
+        totalPages={pageMeta.totalPages}
       />
     </div>
   );

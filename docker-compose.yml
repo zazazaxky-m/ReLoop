@@ -40,10 +40,17 @@ services:
       REALTIME_PORT: "3001"
       REALTIME_HOST: "0.0.0.0"
       REALTIME_INTERNAL_SECRET: ${REALTIME_INTERNAL_SECRET:-reloop-dev-realtime-secret}
+      # Must match the web service's secret: the gateway verifies the same
+      # reloop_session cookie to decide whether a socket may receive
+      # security-alert broadcasts.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-change-me-to-a-long-random-string}
+      REALTIME_WS_SESSION_URL: http://web:3000/api/internal/ws-session
     # No host port exposed - proxied through Nginx internally
     depends_on:
       db:
         condition: service_healthy
+      web:
+        condition: service_started
 
   web:
     build:
@@ -61,6 +68,10 @@ services:
       REALTIME_INTERNAL_SECRET: ${REALTIME_INTERNAL_SECRET:-reloop-dev-realtime-secret}
       REALTIME_PUBLISH_URL: http://realtime:3001/publish
       NEXT_PUBLIC_REALTIME_WS_URL: ${NEXT_PUBLIC_REALTIME_WS_URL:-ws://localhost:3001/ws}
+      TRUST_PROXY: "true"
+      REDIS_URL: ${REDIS_URL:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
     depends_on:
       db:
         condition: service_healthy
