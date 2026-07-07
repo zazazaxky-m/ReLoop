@@ -2,6 +2,13 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 enum BuildEnvironment { development, staging, production, test }
 
+BuildEnvironment parseBuildEnvironment(String value) {
+  return BuildEnvironment.values.firstWhere(
+    (env) => env.name == value,
+    orElse: () => throw ArgumentError.value(value, 'BUILD_ENV', 'Unknown build environment'),
+  );
+}
+
 class Environment {
   static BuildEnvironment current = BuildEnvironment.development;
 

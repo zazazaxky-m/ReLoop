@@ -129,11 +129,15 @@ class _ScanScreenState extends State<ScanScreen>
         token = uri.queryParameters['token'];
       }
 
-      machineCode ??= qrData.trim();
+      machineCode ??= qrData.trim().replaceAll(RegExp(r'\s'), '');
       token ??= '';
 
-      if (machineCode.isEmpty) {
-        _failScan('QR tidak mengandung kode mesin');
+      if (machineCode.isEmpty || !RegExp(r'^[A-Za-z0-9_-]{2,40}$').hasMatch(machineCode)) {
+        _failScan('Kode mesin tidak valid');
+        return;
+      }
+      if (token.length > 256) {
+        _failScan('Token tidak valid');
         return;
       }
 

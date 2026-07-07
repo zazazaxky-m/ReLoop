@@ -82,8 +82,12 @@ class ApiClient {
         case DioExceptionType.badResponse:
           final statusCode = error.response?.statusCode;
           final errData = error.response?.data;
-          if (errData is Map && errData['error'] != null) {
-            return errData['error'] as String;
+          // Only forward server error messages for 4xx (client/validation errors).
+          // 5xx raw messages may leak internal details and must not reach the user.
+          if (statusCode != null && statusCode >= 400 && statusCode < 500) {
+            if (errData is Map && errData['error'] is String) {
+              return errData['error'] as String;
+            }
           }
           switch (statusCode) {
             case 400:

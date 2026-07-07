@@ -12,7 +12,7 @@ void main() {
       tempDir = await Directory.systemTemp.createTemp('hive_test');
       Hive.init(tempDir.path);
       offlineService = OfflineService();
-      await offlineService.init();
+      await offlineService.init(encrypted: false);
       await offlineService.clear();
     });
 

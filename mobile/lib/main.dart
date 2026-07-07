@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -22,17 +23,16 @@ Future<void> main({ApiClient? injectedApiClient}) async {
 
   try {
     await Firebase.initializeApp();
-  } catch (_) {}
+  } catch (error) {
+    if (kDebugMode) debugPrint('Firebase initialization skipped: $error');
+  }
 
   // Defaults to development so a plain `flutter run` (or forgetting the
   // --dart-define below) never silently talks to the production API.
   // Release builds MUST pass --dart-define=BUILD_ENV=production explicitly
   // (see mobile/README.md).
   const envStr = String.fromEnvironment('BUILD_ENV', defaultValue: 'development');
-  final env = BuildEnvironment.values.firstWhere(
-    (e) => e.name == envStr,
-    orElse: () => BuildEnvironment.production,
-  );
+  final env = parseBuildEnvironment(envStr);
   await Environment.load(env);
 
   final offline = OfflineService();

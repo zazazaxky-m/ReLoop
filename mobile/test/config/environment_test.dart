@@ -29,5 +29,9 @@ void main() {
       expect(BuildEnvironment.values, contains(BuildEnvironment.production));
       expect(BuildEnvironment.values, contains(BuildEnvironment.test));
     });
+
+    test('parse rejects unknown values', () {
+      expect(() => parseBuildEnvironment('prod'), throwsArgumentError);
+    });
   });
 }

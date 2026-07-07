@@ -16,7 +16,7 @@ void main() {
     setUp(() async {
       tempDir = await Directory.systemTemp.createTemp('hive_test_sync');
       Hive.init(tempDir.path);
-      await OfflineService().init();
+      await OfflineService().init(encrypted: false);
       
       mockApiClient = MockApiClient();
       syncService = BackgroundSyncService();

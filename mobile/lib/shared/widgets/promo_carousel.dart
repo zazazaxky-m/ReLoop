@@ -71,7 +71,10 @@ class _PromoCarouselState extends State<PromoCarousel> {
     final href = slide.href.trim();
     if (href.isEmpty) return;
     if (href.startsWith('http://') || href.startsWith('https://')) {
-      await launchUrl(Uri.parse(href), mode: LaunchMode.externalApplication);
+      final uri = Uri.parse(href);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
       return;
     }
     if (mounted) context.push(href);

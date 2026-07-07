@@ -65,7 +65,7 @@ class NotificationService {
 
   Future<void> _getToken() async {
     _deviceToken = await _fcm!.getToken();
-    debugPrint('FCM Token: $_deviceToken');
+    if (kDebugMode) debugPrint('FCM Token: $_deviceToken');
     _fcm!.onTokenRefresh.listen((token) {
       _deviceToken = token;
       _registerDeviceToken();

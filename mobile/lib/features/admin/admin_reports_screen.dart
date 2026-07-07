@@ -21,6 +21,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   int _pickupCount = 0;
   int _rewardTotal = 0;
   bool _isLoading = true;
+  String? _error;
 
   @override
   void initState() {
@@ -62,8 +63,11 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         _rewardTotal = computedReward;
         _isLoading = false;
       });
-    } catch (_) {
-      setState(() { _isLoading = false; });
+    } catch (e) {
+      setState(() {
+        _error = ApiClient.getErrorMessage(e);
+        _isLoading = false;
+      });
     }
   }
 
@@ -84,7 +88,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal: ${e.toString()}'), backgroundColor: ReLoopColors.danger),
+          SnackBar(content: Text(ApiClient.getErrorMessage(e)), backgroundColor: ReLoopColors.danger),
         );
       }
     }
@@ -103,6 +107,22 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       title: 'Laporan',
       child: _isLoading
           ? ListView(padding: const EdgeInsets.all(16), children: const [SkeletonListTile(), SizedBox(height: 8), SkeletonListTile()])
+          : _error != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.error_outline, size: 48, color: context.reloopMutedSoft),
+                    const SizedBox(height: 12),
+                    Text(_error!, style: TextStyle(color: context.reloopMuted)),
+                    const SizedBox(height: 16),
+                    OutlinedButton(onPressed: _loadSummary, child: const Text('Coba Lagi')),
+                  ],
+                ),
+              ),
+            )
           : ListView(padding: const EdgeInsets.all(16), children: [
         // Summary metrics
         Row(children: [

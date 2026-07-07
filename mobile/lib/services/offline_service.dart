@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 class OfflineService {
@@ -7,10 +8,27 @@ class OfflineService {
   OfflineService._();
 
   static const _boxName = 'offline_cache';
+  static const _keyName = 'offline_cache_key';
+  static const _storage = FlutterSecureStorage();
   Box? _box;
 
-  Future<void> init() async {
-    _box = await Hive.openBox(_boxName);
+  Future<void> init({bool encrypted = true}) async {
+    final cipher = encrypted ? HiveAesCipher(await _encryptionKey()) : null;
+    try {
+      _box = await Hive.openBox(_boxName, encryptionCipher: cipher);
+    } catch (_) {
+      if (!encrypted) rethrow;
+      await Hive.deleteBoxFromDisk(_boxName);
+      _box = await Hive.openBox(_boxName, encryptionCipher: cipher);
+    }
+  }
+
+  Future<List<int>> _encryptionKey() async {
+    final existing = await _storage.read(key: _keyName);
+    if (existing != null) return base64Decode(existing);
+    final key = Hive.generateSecureKey();
+    await _storage.write(key: _keyName, value: base64Encode(key));
+    return key;
   }
 
   Future<void> cache(String key, dynamic data) async {
