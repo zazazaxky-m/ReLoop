@@ -143,7 +143,7 @@ class AuthProvider extends ChangeNotifier {
       await NotificationService().unregisterDeviceToken();
     } catch (_) {}
     await _api.clearCookies();
-    await _storage.deleteAll();
+    await _storage.delete(key: 'user_email');
     _user = null;
     _error = null;
     notifyListeners();
