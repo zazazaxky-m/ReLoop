@@ -22,43 +22,56 @@ import 'package:shared_preferences/shared_preferences.dart';
 ApiClient createMockApiClient() {
   final client = ApiClient(baseUrl: 'http://localhost');
   client.dio.interceptors.add(InterceptorsWrapper(
-    onRequest: (options, handler) async {
+    onRequest: (options, handler) {
       final path = options.path;
       if (path == '/api/auth/login') {
-         return handler.resolve(Response(
+         handler.resolve(Response(
            requestOptions: options,
            data: { 'token': 'mock_token', 'user': { 'id': '2', 'name': 'Pengepul', 'email': 'pengepul@reloop.id', 'role': 'PENGEPUL', 'status': 'ACTIVE' } }
          ));
+         return;
       }
       if (path == '/api/auth/me') {
-         return handler.reject(DioException(
+         handler.reject(DioException(
            requestOptions: options,
            response: Response(requestOptions: options, statusCode: 401, data: {'error': 'Unauthorized'}),
            type: DioExceptionType.badResponse,
          ));
+         return;
       }
       if (path == '/api/pickups') {
-         return handler.resolve(Response(
+         handler.resolve(Response(
            requestOptions: options,
            statusCode: 200,
            data: { 'pickups': [] }
          ));
+         return;
       }
       if (path == '/api/public/machines') {
-         return handler.resolve(Response(
+         handler.resolve(Response(
            requestOptions: options,
            statusCode: 200,
            data: { 'machines': [] }
          ));
+         return;
       }
       if (path == '/api/partnerships') {
-         return handler.resolve(Response(
+         handler.resolve(Response(
            requestOptions: options,
            statusCode: 200,
            data: { 'partnerships': [] }
          ));
+         return;
       }
-      return handler.resolve(Response(requestOptions: options, statusCode: 200, data: {}));
+      if (path == '/api/public/hero-slides') {
+         handler.resolve(Response(
+           requestOptions: options,
+           statusCode: 200,
+           data: { 'slides': [] }
+         ));
+         return;
+      }
+      handler.next(options);
     }
   ));
   return client;
@@ -121,9 +134,10 @@ void main() {
         
         // Login sebagai pengepul
         await loginAs(tester, 'pengepul@reloop.id', 'password123');
+        await tester.pumpAndSettle();
 
-        // Tunggu sedikit ekstra in case API futures belum ter-resolve ke UI
-        await tester.pump(const Duration(seconds: 1));
+        // Scroll ke bagian Ringkasan Operasional (di luar viewport awal)
+        await tester.drag(find.byType(ListView).first, const Offset(0, -400));
         await tester.pumpAndSettle();
 
         // Pastikan masuk ke halaman Dashboard Pengepul
