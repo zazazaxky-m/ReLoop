@@ -31,4 +31,21 @@ describe("getClientIp", () => {
     vi.stubEnv("NODE_ENV", "development");
     expect(getClientIp(req({}))).toBe("unknown");
   });
+
+  it("falls back to unknown in trust-proxy mode without usable headers", () => {
+    vi.stubEnv("TRUST_PROXY", "true");
+    vi.stubEnv("NODE_ENV", "development");
+    expect(getClientIp(req({}))).toBe("unknown");
+    expect(getClientIp(req({ "x-forwarded-for": "  , 10.0.0.1" }))).toBe("unknown");
+  });
+
+  it("uses forwarded-for then real-ip when proxy is not trusted", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("TRUST_PROXY", "false");
+    expect(getClientIp(req({ "x-forwarded-for": "198.51.100.7, 10.0.0.1" }))).toBe(
+      "198.51.100.7",
+    );
+    expect(getClientIp(req({ "x-real-ip": "203.0.113.9" }))).toBe("203.0.113.9");
+    expect(getClientIp(req({ "x-forwarded-for": "  , " }))).toBe("unknown");
+  });
 });

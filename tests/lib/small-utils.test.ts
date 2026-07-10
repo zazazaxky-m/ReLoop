@@ -94,4 +94,38 @@ describe("small utility modules", () => {
     expect(calculateCompliance({ stage: "CHECK_OUT", assignedBagCount: 2, returnedBagCount: 1, conditionStatus: "PARTIAL" })).toEqual({ score: 40, status: "NON_COMPLIANT" });
     expect(calculateCompliance({ stage: "CHECK_OUT", appCompleted: true, assignedBagCount: 0, returnedBagCount: 1 })).toEqual({ score: 70, status: "NEEDS_REVIEW" });
   });
+
+  it("builds security headers correctly", async () => {
+    const { buildSecurityHeaders, HSTS_HEADER } = await import("@/lib/security-headers");
+    
+    // Default without nonce
+    const h1 = buildSecurityHeaders();
+    expect(h1).toEqual([
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      { key: "Permissions-Policy", value: "camera=(self), geolocation=(self), microphone=()" },
+    ]);
+
+    // With nonce and strict policies (default allowUnsafe options are false)
+    const h2 = buildSecurityHeaders({ nonce: "test-nonce" });
+    const csp2 = h2.find((h) => h.key === "Content-Security-Policy")?.value;
+    expect(csp2).toContain("'nonce-test-nonce'");
+    expect(csp2).toContain("script-src 'self' 'nonce-test-nonce' 'strict-dynamic'");
+    expect(csp2).toContain("style-src 'self' 'nonce-test-nonce'");
+    expect(csp2).not.toContain("'unsafe-eval'");
+    expect(csp2).not.toContain("'unsafe-inline'");
+
+    // With unsafe options and HSTS
+    const h3 = buildSecurityHeaders({
+      nonce: "test-nonce-2",
+      allowUnsafeEval: true,
+      allowUnsafeInlineStyles: true,
+      hsts: true,
+    });
+    const csp3 = h3.find((h) => h.key === "Content-Security-Policy")?.value;
+    expect(csp3).toContain("'unsafe-eval'");
+    expect(csp3).toContain("'unsafe-inline'");
+    expect(h3).toContainEqual(HSTS_HEADER);
+  });
 });

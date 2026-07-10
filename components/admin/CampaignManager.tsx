@@ -22,16 +22,16 @@ import { formatDate } from "@/lib/format";
 
 const TYPES = [
   ["MACHINE_DEPOSIT", "Setor Mesin"],
-  ["TRASH_BAG", "Trash Bag / Trip"],
+  ["TRASH_BAG", "Trash Bag (opsional tanpa travel agent)"],
   ["EVENT", "Event"],
   ["SCHOOL_PROGRAM", "Program Sekolah"],
-  ["TOURISM_PROGRAM", "Program Wisata"],
+  ["TOURISM_PROGRAM", "Program Wisata (wajib travel agent)"],
 ] as const;
 
 const STATUSES = ["DRAFT", "ACTIVE", "PAUSED", "ENDED"] as const;
 const REWARD_MODES = [
   ["MONEY_REWARD", "Reward uang"],
-  ["COMPLIANCE_ONLY", "Compliance only"],
+  ["COMPLIANCE_ONLY", "Compliance only (tanpa uang)"],
 ] as const;
 
 export interface CampaignRow {
@@ -325,11 +325,20 @@ export function CampaignManager({
                     onChange={(e) => setForm((f) => ({ ...f, endAt: e.target.value }))}
                   />
                 </FormField>
-                <FormField label="Reward multiplier" htmlFor="c-mult" hint="1.2 = +20% reward">
+                <FormField
+                  label="Reward multiplier"
+                  htmlFor="c-mult"
+                  hint={
+                    form.campaignType === "TRASH_BAG" || form.campaignType === "TOURISM_PROGRAM"
+                      ? "Untuk trash bag: 1.5 = Rp 2.000 × 1.5 per tas (lalu × skor compliance)."
+                      : "Untuk setor mesin: 1.2 = +20% reward."
+                  }
+                >
                   <Input
                     id="c-mult"
                     type="number"
                     step="0.1"
+                    min={0}
                     value={form.rewardMultiplier}
                     onChange={(e) => setForm((f) => ({ ...f, rewardMultiplier: e.target.value }))}
                     placeholder="1.0"

@@ -80,6 +80,18 @@ describe("auth profile routes", () => {
     expect(auth.setSessionCookie).toHaveBeenCalledWith(expect.objectContaining({ sub: "u1", role: "USER", tokenVersion: 0 }));
   });
 
+  it("skips cookie refresh when DB user is missing on GET", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(auth.setSessionCookie).not.toHaveBeenCalled();
+  });
+
+  it("returns handled error when GET auth fails", async () => {
+    vi.mocked(rbac.requireApiUser).mockRejectedValueOnce(new Error("get boom"));
+    expect((await GET()).status).toBe(500);
+  });
+
   it("updates basic profile fields without requiring password", async () => {
     vi.mocked(prisma.user.findUnique).mockResolvedValue(dbUser as never);
     vi.mocked(prisma.user.update).mockResolvedValue({ ...dbUser, name: "New", phone: "123" } as never);
@@ -91,6 +103,36 @@ describe("auth profile routes", () => {
       data: { name: "New", phone: "123" },
     }));
     expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "PROFILE_UPDATE" }));
+  });
+
+  it("clears blank phone to null", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(dbUser as never);
+    vi.mocked(prisma.user.update).mockResolvedValue({ ...dbUser, phone: null } as never);
+
+    const res = await PATCH(req({ phone: "   " }));
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { phone: null } }),
+    );
+  });
+
+  it("rejects password change when passwordHash is missing", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      ...dbUser,
+      passwordHash: null,
+    } as never);
+
+    const res = await PATCH(req({ newPassword: "Password123!xy", currentPassword: "x" }));
+    expect(res.status).toBe(401);
+  });
+
+  it("uses empty string when currentPassword is omitted during email change", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(dbUser as never);
+    vi.mocked(auth.verifyPassword).mockResolvedValue(false);
+
+    const res = await PATCH(req({ email: "new@example.com" }));
+    expect(res.status).toBe(401);
+    expect(auth.verifyPassword).toHaveBeenCalledWith("", "hash");
   });
 
   it("rejects profile changes for missing users", async () => {
@@ -140,6 +182,11 @@ describe("auth profile routes", () => {
     }));
     expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "PROFILE_AND_PASSWORD_UPDATE" }));
   });
+
+  it("returns handled error when PATCH throws", async () => {
+    vi.mocked(rbac.requireApiUser).mockRejectedValueOnce(new Error("patch boom"));
+    expect((await PATCH(req({ name: "X" }))).status).toBe(500);
+  });
 });
 
 describe("verify password route", () => {
@@ -181,5 +228,10 @@ describe("verify password route", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ valid: true });
+  });
+
+  it("returns handled error when verify throws", async () => {
+    vi.mocked(rbac.requireApiUser).mockRejectedValueOnce(new Error("verify boom"));
+    expect((await verifyPasswordPost(req({ password: "secret" }))).status).toBe(500);
   });
 });

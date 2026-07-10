@@ -110,6 +110,7 @@ export async function GET(req: Request) {
         const trips = agent.trips;
         const compliant = trips.filter((t) => t.complianceStatus === "COMPLIANT").length;
         const nonCompliant = trips.filter((t) => t.complianceStatus === "NON_COMPLIANT").length;
+        const needsReview = trips.filter((t) => t.complianceStatus === "NEEDS_REVIEW").length;
         return {
           id: agent.id,
           name: agent.name,
@@ -121,6 +122,7 @@ export async function GET(req: Request) {
           tripCount: trips.length,
           compliantCount: compliant,
           nonCompliantCount: nonCompliant,
+          reviewCount: needsReview,
         };
       }),
       pagination: buildPaginationMeta(total, pagination),

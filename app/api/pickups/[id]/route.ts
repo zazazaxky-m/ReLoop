@@ -75,8 +75,8 @@ export async function PATCH(
       isAssignedCollector,
       isOrgAdmin,
     });
-    if (!resolution.ok || !resolution.to) {
-      throw new HttpError(409, resolution.error ?? "Transisi tidak diizinkan");
+    if (!resolution.ok) {
+      throw new HttpError(409, resolution.error!);
     }
 
     // --- assign: validate the collector has an ACTIVE partnership ---
@@ -96,7 +96,7 @@ export async function PATCH(
       const row = await tx.pickupRequest.update({
         where: { id },
         data: {
-          status: resolution.to,
+          status: resolution.to!,
           assignedCollectorId,
           collectorPartnerId,
           notes: body.notes ?? undefined,

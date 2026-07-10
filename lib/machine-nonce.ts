@@ -49,7 +49,8 @@ class RedisNonceStore implements NonceStore {
     try {
       const moduleName = "ioredis";
       const mod: any = await import(moduleName);
-      const RedisCtor = mod?.default ?? mod;
+      // Dynamic import of ioredis always yields `{ default: Redis }` under ESM.
+      const RedisCtor = mod.default;
       const client = new RedisCtor(this.url, { maxRetriesPerRequest: 1, lazyConnect: false });
       client.on("error", (err: unknown) => {
         console.error("[machine-nonce] Redis error:", err);

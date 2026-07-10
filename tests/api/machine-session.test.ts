@@ -97,4 +97,58 @@ describe('GET /api/machine-session/[code]', () => {
     const data = await res.json();
     expect(data.session).toBeNull(); // Session should be null because it just expired
   });
+
+  it('returns 401 when ingest secret is missing', async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({
+      id: 'm1',
+      ingestSecret: null,
+      sessionIdleTimeoutMinutes: 3,
+    } as any);
+    expect((await GET(makeReq(), { params: Promise.resolve({ code: 'm1' }) })).status).toBe(401);
+  });
+
+  it('uses idle timeout when session has no timeoutAt', async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({
+      id: 'm1',
+      ingestSecret: 'secret',
+      sessionIdleTimeoutMinutes: 3,
+      wasteTypes: [],
+    } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
+    vi.mocked(prisma.depositSession.findFirst).mockResolvedValue({
+      id: 'sess1',
+      status: 'ACTIVE',
+      timeoutAt: null,
+      startedAt: new Date(),
+      user: { id: 'u1', name: 'John' },
+      items: [],
+    } as any);
+
+    const res = await GET(makeReq(), { params: Promise.resolve({ code: 'm1' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.lease.expiresAt).toBeGreaterThan(data.lease.issuedAt);
+  });
+
+  it('maps linked waste types into the idle response', async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({
+      id: 'm1',
+      ingestSecret: 'secret',
+      sessionIdleTimeoutMinutes: 3,
+      wasteTypes: [
+        { wasteType: { id: 'wt1', name: 'PET', unit: 'ITEM' } },
+        { wasteType: { id: 'wt2', name: 'Kaleng', unit: 'KG' } },
+      ],
+    } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
+    vi.mocked(prisma.depositSession.findFirst).mockResolvedValue(null);
+
+    const res = await GET(makeReq(), { params: Promise.resolve({ code: 'm1' }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.wasteTypes).toEqual([
+      { id: 'wt1', name: 'PET', unit: 'ITEM' },
+      { id: 'wt2', name: 'Kaleng', unit: 'KG' },
+    ]);
+  });
 });

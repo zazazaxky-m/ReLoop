@@ -176,6 +176,13 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
               onTap: () => context.push('/pickup'),
             ),
             QuickAction(
+              icon: Icons.beach_access_outlined,
+              title: 'Pickup Wisata',
+              description: 'Trip wisata',
+              tone: QuickActionTone.green,
+              onTap: () => context.push('/pengepul/tourism-pickups'),
+            ),
+            QuickAction(
               icon: Icons.map_outlined,
               title: 'Peta Mesin',
               description: 'Cari mesin',
@@ -188,13 +195,6 @@ class _PengepulDashboardScreenState extends State<PengepulDashboardScreen> {
               description: 'Kelola mitra',
               tone: QuickActionTone.teal,
               onTap: () => context.push('/pengepul/area'),
-            ),
-            QuickAction(
-              icon: Icons.person_outline,
-              title: 'Profil',
-              description: 'Info kontak',
-              tone: QuickActionTone.green,
-              onTap: () => context.push('/profile'),
             ),
           ],
         ),

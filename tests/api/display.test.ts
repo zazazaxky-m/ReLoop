@@ -81,4 +81,66 @@ describe("GET /api/display/[code]", () => {
     expect(data.scanUrl).toContain("token=t1");
     expect(data.qrDataUrl).toBe("data:image/png;base64,qr");
   });
+
+  it("rate limits display requests", async () => {
+    vi.mocked(checkRateLimit).mockResolvedValue({ allowed: false } as any);
+    const res = await GET(req(), { params: Promise.resolve({ code: "RLP-001" }) });
+    expect(res.status).toBe(429);
+  });
+
+  it("returns 404 when machine is missing", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(null);
+    const res = await GET(req(), { params: Promise.resolve({ code: "MISSING" }) });
+    expect(res.status).toBe(404);
+  });
+
+  it("rotates expired QR tokens before returning", async () => {
+    const { rotateToken } = await import("@/lib/qr");
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({
+      id: "m1",
+      machineCode: "RLP-001",
+      name: "Mesin 1",
+      status: "ONLINE",
+      ingestSecret: "secret",
+      qrToken: "old",
+      qrTokenExpiresAt: new Date(Date.now() - 1_000),
+      qrRotationSeconds: 30,
+    } as any);
+    vi.mocked(verifyMachineRequest).mockResolvedValue({ ok: true });
+    vi.mocked(rotateToken).mockResolvedValue({
+      token: "fresh",
+      expiresAt: new Date(Date.now() + 30_000),
+    } as any);
+
+    const res = await GET(req({ "x-reloop-machine": "RLP-001" }), {
+      params: Promise.resolve({ code: "RLP-001" }),
+    });
+    expect(res.status).toBe(200);
+    expect(rotateToken).toHaveBeenCalledWith("m1", 30);
+  });
+
+  it("returns 500 when rotated token is empty", async () => {
+    const { rotateToken } = await import("@/lib/qr");
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({
+      id: "m1",
+      machineCode: "RLP-001",
+      ingestSecret: "secret",
+      qrToken: null,
+      qrTokenExpiresAt: null,
+      qrRotationSeconds: 30,
+    } as any);
+    vi.mocked(verifyMachineRequest).mockResolvedValue({ ok: true });
+    vi.mocked(rotateToken).mockResolvedValue({ token: "", expiresAt: new Date() } as any);
+
+    const res = await GET(req({ "x-reloop-machine": "RLP-001" }), {
+      params: Promise.resolve({ code: "RLP-001" }),
+    });
+    expect(res.status).toBe(500);
+  });
+
+  it("returns handled error on unexpected failure", async () => {
+    vi.mocked(prisma.machine.findUnique).mockRejectedValue(new Error("db boom"));
+    const res = await GET(req(), { params: Promise.resolve({ code: "RLP-001" }) });
+    expect(res.status).toBe(500);
+  });
 });

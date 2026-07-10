@@ -69,6 +69,21 @@ describe("MFA API routes", () => {
     expect(await (await statusMfaGet()).json()).toEqual({ role: "ADMIN", mfaEnabled: true, requiredForRole: true });
   });
 
+  it("returns handled error when MFA status lookup fails", async () => {
+    vi.mocked(rbac.requireApiUser).mockRejectedValueOnce(new (rbac as any).HttpError(403, "Forbidden"));
+    expect((await statusMfaGet()).status).toBe(403);
+  });
+
+  it("returns handled error when MFA setup throws", async () => {
+    vi.mocked(rbac.requireApiUser).mockRejectedValueOnce(new Error("setup boom"));
+    expect((await setupMfaPost()).status).toBe(500);
+  });
+
+  it("returns handled error when MFA disable throws", async () => {
+    vi.mocked(rbac.requireApiUser).mockRejectedValueOnce(new Error("disable boom"));
+    expect((await disableMfaPost(req({ code: "123456" }))).status).toBe(500);
+  });
+
   it("starts MFA setup for privileged users", async () => {
     vi.mocked(mfa.isPrivilegedRole).mockReturnValue(true);
     vi.mocked(mfa.beginMfaSetup).mockResolvedValue({ secret: "secret", otpauthUrl: "otpauth://totp/x" });
@@ -157,5 +172,10 @@ describe("MFA API routes", () => {
     vi.mocked(prisma.user.findUnique).mockResolvedValue({ status: "SUSPENDED" } as never);
 
     expect((await verifyMfaPost(req({ challengeToken: "token", code: "123456" }))).status).toBe(403);
+  });
+
+  it("returns handled error when MFA verify throws", async () => {
+    vi.mocked(rateLimit.checkRateLimit).mockRejectedValue(new Error("verify boom"));
+    expect((await verifyMfaPost(req({ challengeToken: "token", code: "123456" }))).status).toBe(500);
   });
 });

@@ -118,9 +118,10 @@ async function getFirebaseMessaging(): Promise<any | null> {
   try {
     const moduleName = "firebase-admin";
     const imported: any = await import(moduleName);
-    const admin = imported?.default ?? imported;
+    // ESM dynamic import of firebase-admin always exposes `.default`.
+    const admin = imported.default;
     const serviceAccount = JSON.parse(serviceAccountJson);
-    firebaseApp = admin.apps?.length
+    firebaseApp = admin.apps.length
       ? admin.app()
       : admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
     return (firebaseApp as any).messaging();

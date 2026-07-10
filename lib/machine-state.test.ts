@@ -59,5 +59,9 @@ describe('lib/machine-state', () => {
     it('detects backward sequences', () => {
       expect(ms.validateSensorSequence({ steps: ['WEIGHT_STABLE', 'ITEM_PRESENT'] })).toBe('IMPOSSIBLE_SEQUENCE');
     });
+
+    it('ignores unknown step names while validating', () => {
+      expect(ms.validateSensorSequence({ steps: ['UNKNOWN', 'ITEM_PRESENT', 'WEIGHT_STABLE'] })).toBeNull();
+    });
   });
 });

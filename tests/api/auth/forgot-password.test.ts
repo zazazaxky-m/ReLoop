@@ -91,4 +91,9 @@ describe("POST /api/auth/forgot-password", () => {
     const res = await POST(makeRequest({ email: "user@example.com" }));
     expect(res.status).toBe(429);
   });
+
+  it("returns handled error when lookup throws", async () => {
+    vi.mocked(prisma.user.findUnique).mockRejectedValue(new Error("db boom"));
+    expect((await POST(makeRequest({ email: "user@example.com" }))).status).toBe(500);
+  });
 });

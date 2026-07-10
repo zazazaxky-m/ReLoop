@@ -271,6 +271,9 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
         else
           ..._agents.map((item) {
             final agent = item as Map<String, dynamic>;
+            final id = agent['id'] as String? ?? '';
+            final orgStatus =
+                (agent['organizationStatus'] as String?) ?? 'PENDING';
             final tripCount = (agent['tripCount'] as num?)?.toInt() ?? 0;
             final compliantCount =
                 (agent['compliantCount'] as num?)?.toInt() ?? 0;
@@ -345,6 +348,37 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
                           _chip('$nonCompliantCount tidak patuh'),
                       ],
                     ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      children: [
+                        if (orgStatus == 'INVITED')
+                          ReLoopButton(
+                            label: 'Suspend',
+                            variant: ReLoopButtonVariant.outline,
+                            size: ReLoopButtonSize.sm,
+                            expanded: false,
+                            onPressed: () => _setStatus(id, 'SUSPENDED'),
+                          ),
+                        if (orgStatus == 'SUSPENDED')
+                          ReLoopButton(
+                            label: 'Aktifkan',
+                            variant: ReLoopButtonVariant.outline,
+                            size: ReLoopButtonSize.sm,
+                            expanded: false,
+                            onPressed: () => _setStatus(id, 'INVITED'),
+                          ),
+                        if (orgStatus != 'REMOVED')
+                          ReLoopButton(
+                            label: 'Hapus',
+                            variant: ReLoopButtonVariant.ghost,
+                            size: ReLoopButtonSize.sm,
+                            expanded: false,
+                            onPressed: () => _setStatus(id, 'REMOVED'),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -353,6 +387,38 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
         const SizedBox(height: 80),
       ],
     );
+  }
+
+  Future<void> _setStatus(String travelAgentId, String organizationStatus) async {
+    try {
+      await context.read<ApiClient>().patch(
+        '/api/travel-agents/$travelAgentId',
+        data: {'organizationStatus': organizationStatus},
+      );
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            organizationStatus == 'SUSPENDED'
+                ? 'Travel agent ditangguhkan'
+                : organizationStatus == 'REMOVED'
+                    ? 'Travel agent dihapus dari organisasi'
+                    : 'Travel agent diaktifkan kembali',
+          ),
+          backgroundColor: ReLoopColors.success,
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ApiClient.getErrorMessage(e)),
+            backgroundColor: ReLoopColors.danger,
+          ),
+        );
+      }
+    }
   }
 
   Widget _chip(String label) => Container(

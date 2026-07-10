@@ -88,4 +88,12 @@ describe("POST /api/auth/reset-password", () => {
     );
     expect(res.status).toBe(429);
   });
+
+  it("returns handled error when update throws", async () => {
+    vi.mocked(passwordReset.consumePasswordResetToken).mockResolvedValue("user-1");
+    vi.mocked(prisma.user.update).mockRejectedValue(new Error("update boom"));
+    expect(
+      (await POST(makeRequest({ token: "valid-token", password: "secret123456" }))).status,
+    ).toBe(500);
+  });
 });

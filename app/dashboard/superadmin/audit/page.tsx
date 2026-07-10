@@ -20,6 +20,9 @@ const ENTITY_FILTERS = [
   "Campaign",
   "WasteType",
   "Trip",
+  "ManualValidation",
+  "TrashBagAssignment",
+  "TravelAgentOrganization",
 ];
 
 export default async function SuperadminAuditPage({

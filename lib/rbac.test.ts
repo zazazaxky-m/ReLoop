@@ -86,6 +86,39 @@ describe('lib/rbac', () => {
         status: 'ACTIVE',
       });
     });
+
+    it('returns null when session tokenVersion mismatches user tokenVersion', async () => {
+      vi.mocked(auth.readSessionToken).mockResolvedValue('valid_token');
+      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1', tokenVersion: 1 } as any);
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({
+        id: 'user_1',
+        status: 'ACTIVE',
+        tokenVersion: 0,
+        organization: null,
+      } as any);
+
+      expect(await rbac.getCurrentUser()).toBeNull();
+    });
+
+    it('treats missing tokenVersion on payload and user as 0', async () => {
+      vi.mocked(auth.readSessionToken).mockResolvedValue('valid_token');
+      vi.mocked(auth.verifySessionToken).mockResolvedValue({ sub: 'user_1' } as any);
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({
+        id: 'user_1',
+        name: 'A',
+        email: 'a@x.com',
+        phone: null,
+        role: 'USER',
+        organizationId: null,
+        payoutEligible: false,
+        status: 'ACTIVE',
+        tokenVersion: null,
+        organization: null,
+      } as any);
+
+      const user = await rbac.getCurrentUser();
+      expect(user?.id).toBe('user_1');
+    });
   });
 
   describe('requirePageUser', () => {

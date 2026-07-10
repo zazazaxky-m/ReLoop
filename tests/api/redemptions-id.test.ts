@@ -145,4 +145,69 @@ describe('PATCH /api/redemptions/[id]', () => {
 
     expect(res.status).toBe(403);
   });
+
+  it('returns idempotent when status already matches target', async () => {
+    vi.mocked(prisma.redemption.findUnique).mockResolvedValue({
+      id: 'r1', status: 'APPROVED', userId: 'u1', manualTransferProofUrl: null,
+    } as any);
+
+    const res = await PATCH(makeReq({ action: 'approve' }), {
+      params: Promise.resolve({ id: 'r1' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.idempotent).toBe(true);
+  });
+
+  it('settles ledger as failed on fail action', async () => {
+    vi.mocked(prisma.redemption.findUnique).mockResolvedValue({
+      id: 'r1', status: 'PROCESSING', userId: 'u1', manualTransferProofUrl: null,
+    } as any);
+    const { mockTx } = await import('@/lib/prisma') as any;
+    mockTx.redemption.update.mockResolvedValue({ id: 'r1', status: 'FAILED' });
+
+    const res = await PATCH(makeReq({ action: 'fail', note: 'rejected' }), {
+      params: Promise.resolve({ id: 'r1' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(ledger.settleRedeemLedger).toHaveBeenCalledWith('r1', 'failed', expect.anything());
+  });
+
+  it('settles ledger as failed on user cancel', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'USER' } as any);
+    vi.mocked(prisma.redemption.findUnique).mockResolvedValue({
+      id: 'r1', status: 'REQUESTED', userId: 'u1', manualTransferProofUrl: null,
+    } as any);
+    const { mockTx } = await import('@/lib/prisma') as any;
+    mockTx.redemption.update.mockResolvedValue({ id: 'r1', status: 'REVERSED' });
+
+    const res = await PATCH(makeReq({ action: 'cancel' }), {
+      params: Promise.resolve({ id: 'r1' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(ledger.settleRedeemLedger).toHaveBeenCalledWith('r1', 'failed', expect.anything());
+  });
+
+  it('returns 404 when redemption is missing', async () => {
+    vi.mocked(prisma.redemption.findUnique).mockResolvedValue(null);
+    const res = await PATCH(makeReq({ action: 'approve' }), {
+      params: Promise.resolve({ id: 'missing' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects USER cancelling another users redemption', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'USER' } as any);
+    vi.mocked(prisma.redemption.findUnique).mockResolvedValue({
+      id: 'r1', status: 'REQUESTED', userId: 'other', manualTransferProofUrl: null,
+    } as any);
+
+    const res = await PATCH(makeReq({ action: 'cancel' }), {
+      params: Promise.resolve({ id: 'r1' }),
+    });
+    expect(res.status).toBe(403);
+  });
 });

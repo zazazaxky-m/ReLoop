@@ -14,6 +14,7 @@ import {
 } from "@/components/ui";
 import { Clock, Coins, Wallet } from "@/components/ui/icons";
 import { formatDateTime, formatRupiah } from "@/lib/format";
+import { ledgerReasonLabel } from "@/lib/ledger";
 import {
   WalletPanel,
   type AccountRow,
@@ -136,10 +137,14 @@ export default async function UserWalletPage() {
                 >
                   <div className="min-w-0">
                     <p className="truncate font-semibold">
-                      {entry.entryType} · {formatRupiah(entry.amount)}
+                      {ledgerReasonLabel(entry.reasonCode, entry.entryType)} ·{" "}
+                      {formatRupiah(entry.amount)}
                     </p>
                     <p className="flex flex-wrap gap-x-2 text-xs text-muted">
                       <span>{formatDateTime(entry.createdAt)}</span>
+                      {entry.depositItem?.wasteType?.name ? (
+                        <span>{entry.depositItem.wasteType.name}</span>
+                      ) : null}
                       {entry.session?.machine ? (
                         <span>{entry.session.machine.name}</span>
                       ) : null}

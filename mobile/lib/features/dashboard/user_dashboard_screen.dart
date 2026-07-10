@@ -370,7 +370,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      entry.wasteTypeName ?? entry.entryType,
+                      entry.displayLabel,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: context.reloopForeground,
                         fontWeight: FontWeight.w700,

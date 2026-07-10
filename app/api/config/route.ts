@@ -29,7 +29,7 @@ export async function PATCH(req: Request) {
 
     const updated: Record<string, string> = {};
     for (const [key, value] of Object.entries(data)) {
-      if (value === undefined) continue;
+      // Zod omits absent optional keys; every entry here is a concrete value.
       await setConfig(key, String(value));
       updated[key] = String(value);
     }

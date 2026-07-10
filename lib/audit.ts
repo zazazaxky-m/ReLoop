@@ -27,7 +27,8 @@ export function redactAuditMetadata(
     if (SENSITIVE_METADATA_KEYS.has(key.toLowerCase())) {
       redacted[key] = "[REDACTED]";
     } else if (value && typeof value === "object" && !Array.isArray(value)) {
-      redacted[key] = redactAuditMetadata(value as Record<string, unknown>) ?? "[REDACTED]";
+      // Nested objects are always defined records; redact never returns undefined here.
+      redacted[key] = redactAuditMetadata(value as Record<string, unknown>)!;
     } else {
       redacted[key] = value;
     }

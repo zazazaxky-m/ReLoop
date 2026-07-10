@@ -1,0 +1,559 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { processEventSideEffects } from '@/lib/machine-events/side-effects';
+import * as pickup from '@/lib/machine-events/pickup';
+import * as fraud from '@/lib/machine-events/fraud';
+import * as item from '@/lib/machine-events/item';
+import * as acceptance from '@/lib/machine-events/acceptance';
+import * as machineState from '@/lib/machine-state';
+
+vi.mock('@/lib/machine-events/pickup', () => ({
+  maybeCreateAutoPickup: vi.fn(),
+  AUTO_PICKUP_FILL_THRESHOLD: 95,
+}));
+vi.mock('@/lib/machine-events/fraud', () => ({
+  flagAnomaly: vi.fn(),
+  notifyOrgAdmins: vi.fn(),
+}));
+vi.mock('@/lib/machine-events/item', () => ({
+  resolveDepositItemId: vi.fn(),
+  resolveFraudDepositItemId: vi.fn(),
+  resolveOrCreateUnknownWasteType: vi.fn(),
+}));
+vi.mock('@/lib/machine-events/acceptance', () => ({ handleAcceptance: vi.fn() }));
+vi.mock('@/lib/machine-state', () => ({
+  transitionSession: vi.fn(),
+  validateSensorSequence: vi.fn(),
+}));
+
+const mockTx = {
+  machine: { update: vi.fn() },
+  depositSession: { findUnique: vi.fn(), update: vi.fn() },
+  machineWasteType: { findFirst: vi.fn() },
+  wasteType: { findFirst: vi.fn() },
+  depositItem: { create: vi.fn(), update: vi.fn() },
+  machineEvent: { update: vi.fn() },
+  rewardLedger: { updateMany: vi.fn() },
+} as any;
+
+const mockMachine = { id: 'm1', organizationId: 'o1', sessionIdleTimeoutMinutes: 2 } as any;
+
+describe('processEventSideEffects', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('handles HEARTBEAT updates machine and auto pickup', async () => {
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'HEARTBEAT', payload: { fillLevelPercent: 96, status: 'FULL' }, machineCode: 'M1' } as any, 'evt1');
+    expect(mockTx.machine.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ fillLevelPercent: 96, status: 'FULL' }) }));
+    expect(pickup.maybeCreateAutoPickup).toHaveBeenCalledWith(mockTx, mockMachine, 'M1');
+  });
+
+  it('HEARTBEAT without status leaves status undefined', async () => {
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'HEARTBEAT', payload: { fillLevelPercent: 10 }, machineCode: 'M1' } as any,
+      'evt1',
+    );
+    expect(mockTx.machine.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: undefined, fillLevelPercent: 10 }),
+      }),
+    );
+  });
+
+  it('handles CHAMBER_OPENED transitions session', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    vi.mocked(machineState.transitionSession).mockReturnValue('START_ITEM' as any);
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'CHAMBER_OPENED', sessionId: 's1' } as any, 'evt1');
+    expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'START_ITEM' } }));
+  });
+
+  it('handles STATUS_CHANGED updates machine', async () => {
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'STATUS_CHANGED', payload: { status: 'FULL' }, machineCode: 'M1' } as any, 'evt1');
+    expect(mockTx.machine.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'FULL' } }));
+    expect(pickup.maybeCreateAutoPickup).toHaveBeenCalledWith(mockTx, mockMachine, 'M1');
+  });
+
+  it('handles FILL_LEVEL_UPDATED updates machine and auto pickup', async () => {
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'FILL_LEVEL_UPDATED', payload: { fillLevelPercent: 98 }, machineCode: 'M1' } as any, 'evt1');
+    expect(mockTx.machine.update).toHaveBeenCalledWith(expect.objectContaining({ data: { fillLevelPercent: 98, status: 'FULL' } }));
+    expect(pickup.maybeCreateAutoPickup).toHaveBeenCalledWith(mockTx, mockMachine, 'M1');
+  });
+
+  it('handles FILL_LEVEL_UPDATED below auto-pickup threshold without FULL status', async () => {
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'FILL_LEVEL_UPDATED', payload: { fillLevelPercent: 50 }, machineCode: 'M1' } as any,
+      'evt1',
+    );
+    expect(mockTx.machine.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ fillLevelPercent: 50, status: undefined }),
+      }),
+    );
+    expect(pickup.maybeCreateAutoPickup).not.toHaveBeenCalled();
+  });
+
+  it('ignores FILL_LEVEL_UPDATED without numeric fill', async () => {
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'FILL_LEVEL_UPDATED', payload: { fillLevelPercent: 'high' }, machineCode: 'M1' } as any,
+      'evt1',
+    );
+    expect(mockTx.machine.update).not.toHaveBeenCalled();
+  });
+
+  it('skips CHAMBER_OPENED when session is not ACTIVE/RESERVED', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'COMPLETED' });
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'CHAMBER_OPENED', sessionId: 's1' } as any,
+      'evt1',
+    );
+    expect(mockTx.depositSession.update).not.toHaveBeenCalled();
+  });
+
+  it('handles CHAMBER_TIMEOUT transitions session to ITEM_DONE', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'PROCESSING_ITEM' });
+    vi.mocked(machineState.transitionSession).mockReturnValue('ITEM_DONE' as any);
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'CHAMBER_TIMEOUT', sessionId: 's1' } as any, 'evt1');
+    expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ITEM_DONE' } }));
+  });
+
+  it('handles ITEM_DETECTED creates deposit item', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    vi.mocked(item.resolveOrCreateUnknownWasteType).mockResolvedValue('wt1');
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
+    
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: {} } as any, 'evt1');
+    
+    expect(mockTx.depositItem.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'REVIEW', wasteTypeId: 'wt1' })
+    }));
+    expect(mockTx.machineEvent.update).toHaveBeenCalledWith(expect.objectContaining({ data: { depositItemId: 'd1' } }));
+    expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'PROCESSING_ITEM' } }));
+  });
+
+  it('handles WEIGHT_MEASURED, IMAGE_CLASSIFIED, BARCODE_READ', async () => {
+    vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
+    
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'WEIGHT_MEASURED', sessionId: 's1', payload: { weightGrams: 50 } } as any, 'evt1');
+    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { measuredWeightGrams: 50 } }));
+
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'IMAGE_CLASSIFIED', sessionId: 's1', payload: { detectedType: 'PET', confidence: 0.9 } } as any, 'evt1');
+    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { aiDetectedType: 'PET', aiConfidence: 0.9 } }));
+
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'BARCODE_READ', sessionId: 's1', payload: { barcode: '123' } } as any, 'evt1');
+    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { barcodeValue: '123' } }));
+  });
+
+  it('breaks WEIGHT/IMAGE/BARCODE/SENSOR when deposit item cannot be resolved', async () => {
+    vi.mocked(item.resolveDepositItemId).mockResolvedValue(null);
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'WEIGHT_MEASURED', sessionId: 's1', payload: { weightGrams: 1 } } as any, 'evt1');
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'IMAGE_CLASSIFIED', sessionId: 's1', payload: { detectedType: 'PET', confidence: 0.1 } } as any, 'evt1');
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'BARCODE_READ', sessionId: 's1', payload: { barcode: 'x' } } as any, 'evt1');
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'SENSOR_SEQUENCE', sessionId: 's1', payload: {} } as any, 'evt1');
+    expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+  });
+
+  it('handles SENSOR_SEQUENCE and flags anomaly', async () => {
+    vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
+    vi.mocked(machineState.validateSensorSequence).mockReturnValue('WRONG_SEQ');
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'SENSOR_SEQUENCE', sessionId: 's1', payload: { seq: 1 } } as any, 'evt1');
+    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { sensorSequenceJson: { seq: 1 } } }));
+    expect(fraud.flagAnomaly).toHaveBeenCalledWith(mockTx, 's1', 'd1', 'WRONG_SEQ');
+  });
+
+  it('SENSOR_SEQUENCE skips anomaly flag when sessionId missing', async () => {
+    vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
+    vi.mocked(machineState.validateSensorSequence).mockReturnValue('WRONG_SEQ');
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'SENSOR_SEQUENCE', payload: { seq: 1 } } as any, 'evt1');
+    expect(fraud.flagAnomaly).not.toHaveBeenCalled();
+  });
+
+  it('handles ITEM_REJECTED', async () => {
+    vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'PROCESSING_ITEM' });
+    vi.mocked(machineState.transitionSession).mockReturnValue('ITEM_DONE' as any);
+    
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_REJECTED', sessionId: 's1', payload: { reason: 'TOO_LIGHT' } } as any, 'evt1');
+    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'REJECTED', validationReasonCode: 'TOO_LIGHT' } }));
+    expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ITEM_DONE' } }));
+  });
+
+  it('ITEM_REJECTED defaults reason and skips session transition when not PROCESSING_ITEM', async () => {
+    vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'ITEM_REJECTED', sessionId: 's1', payload: {} } as any,
+      'evt1',
+    );
+    expect(mockTx.depositItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ validationReasonCode: 'REJECTED' }),
+      }),
+    );
+    expect(mockTx.depositSession.update).not.toHaveBeenCalled();
+  });
+
+  it('ITEM_ACCEPTED_POINT and ITEM_REJECTED break when item cannot be resolved', async () => {
+    vi.mocked(item.resolveDepositItemId).mockResolvedValue(null);
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'ITEM_ACCEPTED_POINT', sessionId: 's1' } as any,
+      'evt1',
+    );
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'ITEM_REJECTED', sessionId: 's1', payload: {} } as any,
+      'evt1',
+    );
+    expect(acceptance.handleAcceptance).not.toHaveBeenCalled();
+    expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+  });
+
+  it('ITEM_ACCEPTED_POINT breaks when sessionId is missing', async () => {
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'ITEM_ACCEPTED_POINT' } as any,
+      'evt1',
+    );
+    expect(item.resolveDepositItemId).not.toHaveBeenCalled();
+  });
+
+  it('FRAUD_DETECTED uses eventType as reason and empty machineCode fallback', async () => {
+    vi.mocked(item.resolveFraudDepositItemId).mockResolvedValue(null);
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'FRAUD_DETECTED', sessionId: null, payload: {} } as any,
+      'evt1',
+    );
+    expect(fraud.notifyOrgAdmins).toHaveBeenCalledWith(
+      'o1',
+      expect.objectContaining({
+        body: expect.stringContaining('fraud detected'),
+      }),
+    );
+  });
+
+  it('handles COMPACTION_STARTED and COMPACTION_COMPLETED', async () => {
+    vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'COMPACTION_STARTED', sessionId: 's1' } as any, 'evt1');
+    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { compactionStatus: 'PENDING' } }));
+
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'COMPACTION_COMPLETED', sessionId: 's1' } as any, 'evt1');
+    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { compactionStatus: 'COMPACTED' } }));
+  });
+
+  it('skips compaction updates when deposit item cannot be resolved', async () => {
+    vi.mocked(item.resolveDepositItemId).mockResolvedValue(null);
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'COMPACTION_STARTED', sessionId: 's1' } as any, 'evt1');
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'COMPACTION_COMPLETED', sessionId: 's1' } as any, 'evt1');
+    expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+  });
+
+  it('notifies fraud without deposit item when none is resolved', async () => {
+    vi.mocked(item.resolveFraudDepositItemId).mockResolvedValue(null);
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'FRAUD_DETECTED', sessionId: null, payload: {}, machineCode: 'M1' } as any,
+      'evt1',
+    );
+    expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+    expect(fraud.notifyOrgAdmins).toHaveBeenCalledWith(
+      'o1',
+      expect.objectContaining({ title: 'Indikasi fraud terdeteksi' }),
+    );
+  });
+
+  it('handles ITEM_ACCEPTED_POINT calls handleAcceptance', async () => {
+    vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_ACCEPTED_POINT', sessionId: 's1' } as any, 'evt1');
+    expect(acceptance.handleAcceptance).toHaveBeenCalledWith(mockTx, mockMachine, 's1', 'd1', 'evt1');
+  });
+
+  it('handles FRAUD_DETECTED flags anomaly', async () => {
+    vi.mocked(item.resolveFraudDepositItemId).mockResolvedValue('d1');
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'FRAUD_DETECTED', sessionId: 's1', payload: { reason: 'test' }, machineCode: 'M1' } as any, 'evt1');
+    
+    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'REVIEW', externalFraudFlag: true }) }));
+    expect(mockTx.rewardLedger.updateMany).toHaveBeenCalled();
+    expect(fraud.flagAnomaly).toHaveBeenCalledWith(mockTx, 's1', 'd1', 'test');
+    expect(fraud.notifyOrgAdmins).toHaveBeenCalled();
+  });
+
+  it('handles SAFE_STATE_ENTERED updates machine and session', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    vi.mocked(machineState.transitionSession).mockReturnValue('SAFE_STATE' as any);
+    
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'SAFE_STATE_ENTERED', sessionId: 's1' } as any, 'evt1');
+    
+    expect(mockTx.machine.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ERROR' } }));
+    expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'SAFE_STATE' }) }));
+  });
+
+  it('ITEM_DETECTED trusts linked wasteTypeId from kiosk', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
+    const onItemCreated = vi.fn();
+
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: { wasteTypeId: 'wt-real', quantity: 2 } } as any,
+      'evt1',
+      onItemCreated,
+    );
+
+    expect(mockTx.depositItem.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          wasteTypeId: 'wt-real',
+          source: 'MACHINE',
+          status: 'PENDING',
+          quantity: 2,
+        }),
+      }),
+    );
+    expect(onItemCreated).toHaveBeenCalledWith('d1');
+  });
+
+  it('ITEM_DETECTED resolves wasteTypeName and wasteTypeKey fallbacks', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'RESERVED' });
+    mockTx.machineWasteType.findFirst.mockResolvedValue(null);
+    mockTx.wasteType.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'wt-organik' });
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd2' });
+
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      {
+        eventType: 'ITEM_DETECTED',
+        sessionId: 's1',
+        payload: { wasteTypeName: 'Missing (x)', wasteTypeKey: 'botol-organik' },
+      } as any,
+      'evt2',
+    );
+
+    expect(mockTx.wasteType.findFirst).toHaveBeenCalled();
+    expect(mockTx.depositItem.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ wasteTypeId: 'wt-organik', status: 'PENDING' }),
+      }),
+    );
+  });
+
+  it('ITEM_DETECTED uses wasteTypeName when lookup finds a row', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.wasteType.findFirst.mockResolvedValue({ id: 'wt-by-name' });
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd-name' });
+
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      {
+        eventType: 'ITEM_DETECTED',
+        sessionId: 's1',
+        payload: { wasteTypeName: 'Organik (PET)' },
+      } as any,
+      'evt-name',
+    );
+
+    expect(mockTx.depositItem.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ wasteTypeId: 'wt-by-name' }),
+      }),
+    );
+  });
+
+  it('ITEM_DETECTED clears unlinked wasteTypeId then maps anorganik key', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.machineWasteType.findFirst.mockResolvedValue(null);
+    mockTx.wasteType.findFirst.mockResolvedValue({ id: 'wt-anorganik' });
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd3' });
+
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      {
+        eventType: 'ITEM_DETECTED',
+        sessionId: 's1',
+        payload: { wasteTypeId: 'wt-unlinked', wasteTypeKey: 'kaleng-anorganik' },
+      } as any,
+      'evt3',
+    );
+
+    expect(mockTx.depositItem.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ wasteTypeId: 'wt-anorganik' }),
+      }),
+    );
+  });
+
+  it('ITEM_DETECTED maps unknown wasteTypeKey to Anorganik default', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.machineWasteType.findFirst.mockResolvedValue(null);
+    mockTx.wasteType.findFirst.mockResolvedValue({ id: 'wt-default' });
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd4' });
+
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      {
+        eventType: 'ITEM_DETECTED',
+        sessionId: 's1',
+        payload: { wasteTypeKey: 'other-material' },
+      } as any,
+      'evt4',
+    );
+
+    expect(mockTx.wasteType.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          name: { contains: 'Anorganik', mode: 'insensitive' },
+        }),
+      }),
+    );
+  });
+
+  it('ITEM_DETECTED breaks when sessionId is missing', async () => {
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'ITEM_DETECTED', payload: { wasteTypeKey: 'x' } } as any,
+      'evt0',
+    );
+    expect(mockTx.depositSession.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('ITEM_DETECTED breaks when session row is missing', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue(null);
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'ITEM_DETECTED', sessionId: 'missing', payload: {} } as any,
+      'evt0',
+    );
+    expect(mockTx.depositItem.create).not.toHaveBeenCalled();
+  });
+
+  it('ITEM_DETECTED falls through when wasteTypeName and wasteTypeKey lookups miss', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.wasteType.findFirst.mockResolvedValue(null);
+    vi.mocked(item.resolveOrCreateUnknownWasteType).mockResolvedValue('wt-unknown');
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd5' });
+
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      {
+        eventType: 'ITEM_DETECTED',
+        sessionId: 's1',
+        payload: { wasteTypeName: 'Ghost', wasteTypeKey: 'ghost-key' },
+      } as any,
+      'evt5',
+    );
+
+    expect(item.resolveOrCreateUnknownWasteType).toHaveBeenCalled();
+    expect(mockTx.depositItem.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ wasteTypeId: 'wt-unknown', status: 'REVIEW' }),
+      }),
+    );
+  });
+
+  it('ITEM_DETECTED writes deposit item id into cache when provided', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd-cache' });
+    const cache = new Map<string, string | null>();
+
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: { wasteTypeId: 'wt1' } } as any,
+      'evt6',
+      undefined,
+      cache,
+    );
+
+    expect(cache.get('s1')).toBe('d-cache');
+  });
+
+  it('handles VANDALISM_DETECTED with depositItemId', async () => {
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      {
+        eventType: 'VANDALISM_DETECTED',
+        sessionId: 's1',
+        depositItemId: 'd9',
+        payload: { reason: 'DOOR_FORCED' },
+        machineCode: 'M1',
+      } as any,
+      'evt9',
+    );
+
+    expect(mockTx.depositItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'd9' },
+        data: expect.objectContaining({ externalFraudFlag: true }),
+      }),
+    );
+    expect(fraud.notifyOrgAdmins).toHaveBeenCalledWith(
+      'o1',
+      expect.objectContaining({ title: 'Indikasi vandalisme terdeteksi' }),
+    );
+  });
+
+  it('VANDALISM_DETECTED without depositItemId skips item update', async () => {
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      {
+        eventType: 'VANDALISM_DETECTED',
+        sessionId: 's1',
+        payload: { reason: 'DOOR_FORCED' },
+        machineCode: 'M1',
+      } as any,
+      'evt10',
+    );
+    expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+    expect(fraud.notifyOrgAdmins).toHaveBeenCalled();
+  });
+
+  it('ignores unknown event types', async () => {
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'UNKNOWN_EVENT' } as any,
+      'evt0',
+    );
+    expect(mockTx.machine.update).not.toHaveBeenCalled();
+  });
+
+  it('STATUS_CHANGED without FULL skips auto pickup', async () => {
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'STATUS_CHANGED', payload: { status: 'ONLINE' }, machineCode: 'M1' } as any,
+      'evt1',
+    );
+    expect(pickup.maybeCreateAutoPickup).not.toHaveBeenCalled();
+  });
+});

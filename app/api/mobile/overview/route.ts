@@ -5,6 +5,7 @@ import { getWalletBalance, getLedgerHistory } from "@/lib/ledger";
 import { requireApiUser, activePartnerOrgIds } from "@/lib/rbac";
 import { isCampaignEligible } from "@/lib/campaign";
 import { getSecurityEvents, getSecuritySummary } from "@/lib/security-events";
+import { getInvitedTravelAgentTripFilters } from "@/lib/trip";
 
 export async function GET() {
   try {
@@ -17,7 +18,7 @@ export async function GET() {
         campaigns,
         ledger,
         minRedemption,
-        travelAgentLinkCount,
+        invitedAgentOrgs,
         pointsToRupiah,
       ] =
         await Promise.all([
@@ -39,14 +40,36 @@ export async function GET() {
           }),
           getLedgerHistory(user.id, { take: 8 }),
           getMinRedemption(),
-          prisma.travelAgentUser.count({ where: { userId: user.id } }),
+          getInvitedTravelAgentTripFilters(user.id),
           getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
         ]);
+
+      const tripWhere = {
+        OR: [
+          { userId: user.id },
+          ...invitedAgentOrgs.map((link) => ({
+            travelAgentId: link.travelAgentId,
+            campaign: { organizationId: link.organizationId },
+          })),
+        ],
+      };
+      const [activeTrips, completedTrips, trashBagRewardSum] = await Promise.all([
+        prisma.trip.count({
+          where: { AND: [tripWhere, { status: { in: ["PLANNED", "ACTIVE"] } }] },
+        }),
+        prisma.trip.count({
+          where: { AND: [tripWhere, { status: "COMPLETED" }] },
+        }),
+        prisma.rewardLedger.aggregate({
+          where: { userId: user.id, reasonCode: "TRASH_BAG_RETURN", entryType: "EARN" },
+          _sum: { amount: true },
+        }),
+      ]);
 
       return jsonOk({
         role: user.role,
         balance,
-        isTravelAgent: travelAgentLinkCount > 0,
+        isTravelAgent: invitedAgentOrgs.length > 0,
         pointsToRupiah,
         recentSessions: sessions,
         campaigns: campaigns.filter((campaign) =>
@@ -54,6 +77,11 @@ export async function GET() {
         ),
         recentLedger: ledger,
         minRedemption,
+        tourismSummary: {
+          activeTrips,
+          completedTrips,
+          trashBagRewardTotal: trashBagRewardSum._sum.amount ?? 0,
+        },
       });
     }
 
@@ -109,7 +137,8 @@ export async function GET() {
 
     if (user.role === "ADMIN") {
       const organizationId = user.organizationId ?? "__none__";
-      const [machines, pickups, campaignCount, depositCount, partnerships] =
+      const tripOrgWhere = { campaign: { organizationId } };
+      const [machines, pickups, campaignCount, depositCount, partnerships, tripTotal, tripCompliant, tripNeedsReview, tripNonCompliant, tripActive] =
         await Promise.all([
           prisma.machine.findMany({
             where: { organizationId },
@@ -140,6 +169,11 @@ export async function GET() {
           prisma.organizationCollectorPartner.count({
             where: { organizationId, status: "ACTIVE" },
           }),
+          prisma.trip.count({ where: tripOrgWhere }),
+          prisma.trip.count({ where: { ...tripOrgWhere, complianceStatus: "COMPLIANT" } }),
+          prisma.trip.count({ where: { ...tripOrgWhere, complianceStatus: "NEEDS_REVIEW" } }),
+          prisma.trip.count({ where: { ...tripOrgWhere, complianceStatus: "NON_COMPLIANT" } }),
+          prisma.trip.count({ where: { ...tripOrgWhere, status: { in: ["PLANNED", "ACTIVE"] } } }),
         ]);
 
       return jsonOk({
@@ -149,6 +183,16 @@ export async function GET() {
         campaignCount,
         depositCount,
         partnershipCount: partnerships,
+        tourismSummary: {
+          tripTotal,
+          tripActive,
+          compliant: tripCompliant,
+          needsReview: tripNeedsReview,
+          nonCompliant: tripNonCompliant,
+          complianceRate: tripTotal
+            ? Math.round((tripCompliant / tripTotal) * 100)
+            : 0,
+        },
       });
     }
 

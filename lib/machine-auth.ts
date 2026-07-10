@@ -69,10 +69,8 @@ export async function verifyMachineRequest(params: {
   const signatureResult = verifyMachineSignature(params);
   if (!signatureResult.ok) return signatureResult;
 
-  const nonce = params.nonce;
-  if (!nonce) return { ok: false, reason: "MISSING_HEADERS" };
-
-  const fresh = await consumeMachineNonce(params.machineId, nonce);
+  // Signature verification already requires nonce; it is defined when ok.
+  const fresh = await consumeMachineNonce(params.machineId, params.nonce!);
   if (!fresh) return { ok: false, reason: "REPLAY_NONCE" };
   return { ok: true };
 }

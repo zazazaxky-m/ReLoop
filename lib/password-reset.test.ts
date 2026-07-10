@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { createPasswordResetToken, consumePasswordResetToken, RESET_TOKEN_TTL_MS } from "./password-reset";
+import { createPasswordResetToken, consumePasswordResetToken } from "./password-reset";
 import { prisma } from "./prisma";
 
 vi.mock("./prisma", () => ({
@@ -84,6 +84,21 @@ describe("consumePasswordResetToken", () => {
     } as any);
 
     const userId = await consumePasswordResetToken("expired-token");
+    expect(userId).toBeNull();
+  });
+
+  it("returns null when claim race loses (updateMany count 0)", async () => {
+    vi.mocked(prisma.passwordResetToken.findUnique).mockResolvedValue({
+      id: "tok_1",
+      userId: "user_1",
+      tokenHash: "hash",
+      usedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date(),
+    } as any);
+    vi.mocked(prisma.passwordResetToken.updateMany).mockResolvedValue({ count: 0 } as any);
+
+    const userId = await consumePasswordResetToken("raced-token");
     expect(userId).toBeNull();
   });
 });

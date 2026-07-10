@@ -20,6 +20,19 @@ MVP ini memakai `Campaign` sebagai payung program.
 
 Travel agent bukan role baru. Travel agent adalah entitas bisnis yang bisa terhubung ke banyak organisasi/tempat wisata.
 
+Status hubungan agent ↔ organisasi:
+
+- `PENDING`: email belum punya akun user.
+- `INVITED`: aktif — boleh dipakai buat trip, terbitkan kantong, dan validasi gerbang.
+- `SUSPENDED` / `REMOVED`: tidak boleh buat trip baru; check-in/out & terbit kantong untuk trip agent tersebut ditolak. User yang terhubung agent juga tidak melihat trip org tersebut. Pickup bank sampah setelah trip `COMPLETED` tetap diizinkan.
+
+Mode reward campaign:
+
+- `COMPLIANCE_ONLY` (default wisata): skor kepatuhan tanpa payout uang.
+- `MONEY_REWARD`: setelah check-out, reward `TRASH_BAG_RETURN` masuk ledger penerima (`userEmail` trip) jika ada kantong rewardable.
+
+Field **berat aktual (kg)** di form check-out bersifat catatan operasional; skor compliance dihitung dari aplikasi + jumlah/kondisi kantong, bukan dari berat.
+
 ## Setup Awal Admin
 
 1. Login sebagai `ADMIN`.

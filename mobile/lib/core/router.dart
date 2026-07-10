@@ -644,7 +644,7 @@ class _AppScaffold extends StatelessWidget {
 
     if (isAdmin) {
       if (location == '/profile') return AdminShell(title: 'Profil', child: child);
-      if (location == '/scan') return AdminShell(title: 'Scan Trash Bag', child: child);
+      if (location == '/scan') return AdminShell(title: 'Scan Mesin', child: child);
       return child;
     }
 

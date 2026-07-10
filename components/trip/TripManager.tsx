@@ -23,6 +23,11 @@ interface Option {
   name: string;
 }
 
+interface CampaignOption extends Option {
+  campaignType?: string;
+  rewardMode?: string;
+}
+
 interface TravelAgentOption extends Option {
   email: string;
 }
@@ -42,6 +47,8 @@ export interface TripRow {
   bagCount: number;
   validationCount: number;
   hasUser: boolean;
+  rewardUserEmail?: string | null;
+  rewardUserName?: string | null;
 }
 
 const EMPTY = {
@@ -58,6 +65,7 @@ const EMPTY_VALIDATION = {
   validationStage: "CHECK_OUT",
   appCompleted: true,
   notes: "",
+  actualWeightKg: "",
 };
 
 export function TripManager({
@@ -67,7 +75,7 @@ export function TripManager({
   wasteTypes,
 }: {
   trips: TripRow[];
-  campaigns: Option[];
+  campaigns: CampaignOption[];
   travelAgents: TravelAgentOption[];
   wasteTypes: Option[];
 }) {
@@ -76,21 +84,30 @@ export function TripManager({
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY, campaignId: campaigns[0]?.id ?? "" });
+  const selectedCampaign = campaigns.find((c) => c.id === form.campaignId);
+  const agentRequired = selectedCampaign?.campaignType === "TOURISM_PROGRAM";
+  const moneyReward = selectedCampaign?.rewardMode === "MONEY_REWARD";
   
   const [bagTripId, setBagTripId] = useState<string | null>(null);
-  const [bagCount, setBagCount] = useState("5");
+  const [bagCount, setBagCount] = useState("10");
   const [bagWasteTypeId, setBagWasteTypeId] = useState("");
   const [issuedQrs, setIssuedQrs] = useState<string[]>([]);
   
   const [valTripId, setValTripId] = useState<string | null>(null);
   const [val, setVal] = useState({ ...EMPTY_VALIDATION });
   const [valTripBags, setValTripBags] = useState<any[]>([]);
-  
+  const [viewQrTripId, setViewQrTripId] = useState<string | null>(null);
+  const [viewQrBags, setViewQrBags] = useState<any[]>([]);
+
   const [globalScanQr, setGlobalScanQr] = useState("");
   const [cameraOn, setCameraOn] = useState(false);
 
   async function createTrip(e: React.FormEvent) {
     e.preventDefault();
+    if (moneyReward && !form.userEmail.trim()) {
+      setError("Campaign reward uang wajib mengisi email user penerima reward");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -120,7 +137,32 @@ export function TripManager({
     }
   }
 
+  async function updateTripStatus(tripId: string, status: "CANCELLED" | "PLANNED") {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/trips/${tripId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setError(d?.error ?? "Gagal mengubah status trip");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function assignBags(tripId: string) {
+    const count = Number(bagCount) || 1;
+    if (count < 1 || count > 200) {
+      setError("Jumlah tas harus antara 1 dan 200");
+      return;
+    }
     setBusy(true);
     setError(null);
     setIssuedQrs([]);
@@ -130,7 +172,7 @@ export function TripManager({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tripId,
-          bagCount: Number(bagCount) || 1,
+          bagCount: count,
           wasteTypeId: bagWasteTypeId || undefined,
         }),
       });
@@ -172,10 +214,19 @@ export function TripManager({
     setError(null);
     try {
       const stage = val.validationStage;
-      const bagsPayload = valTripBags.map(b => ({
-        id: b.id,
-        status: b.status || "NOT_RETURNED"
-      }));
+      // CHECK_IN must not send bags[] — empty statuses would stamp every bag NOT_RETURNED.
+      const bagsPayload =
+        stage === "CHECK_OUT"
+          ? valTripBags.map((b) => ({
+              id: b.id,
+              status: b.status || "NOT_RETURNED",
+            }))
+          : undefined;
+
+      if (stage === "CHECK_OUT" && (!bagsPayload || bagsPayload.length === 0)) {
+        setError("Belum ada kantong untuk check-out. Terbitkan kantong dulu.");
+        return;
+      }
 
       const res = await fetch("/api/manual-validations", {
         method: "POST",
@@ -186,7 +237,10 @@ export function TripManager({
           gateType: stage === "CHECK_IN" ? "ENTRY" : "EXIT",
           appCompleted: val.appCompleted,
           notes: val.notes || undefined,
-          bags: bagsPayload,
+          ...(val.actualWeightKg.trim()
+            ? { actualWeightKg: Number(val.actualWeightKg) }
+            : {}),
+          ...(bagsPayload ? { bags: bagsPayload } : {}),
         }),
       });
       const d = await res.json();
@@ -212,7 +266,14 @@ export function TripManager({
       const data = await res.json();
       if (res.ok && data.bags && data.bags.length > 0) {
         const bag = data.bags[0];
+        const tripStatus = bag.trip?.status as string | undefined;
+        setBagTripId(null);
+        setViewQrTripId(null);
         setValTripId(bag.tripId);
+        setVal({
+          ...EMPTY_VALIDATION,
+          validationStage: tripStatus === "PLANNED" ? "CHECK_IN" : "CHECK_OUT",
+        });
         await loadBagsForTrip(bag.tripId, bag.bagQrCode);
         setGlobalScanQr("");
       } else {
@@ -244,7 +305,11 @@ export function TripManager({
           <p className="text-xs text-muted">
             {r.travelAgentName ?? "Travel agent belum dipilih"} - {r.participantCount} peserta
             {r.leaderName ? ` - ${r.leaderName}` : ""}
-            {r.hasUser && r.rewardMode === "MONEY_REWARD" ? " - reward ke user" : ""}
+            {r.rewardMode === "MONEY_REWARD"
+              ? r.rewardUserEmail
+                ? ` - reward: ${r.rewardUserEmail}`
+                : " - tanpa penerima reward"
+              : ""}
           </p>
         </div>
       ),
@@ -266,47 +331,117 @@ export function TripManager({
       key: "actions",
       header: "",
       align: "right",
-      render: (r) => (
-        <div className="flex justify-end gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => {
-              setBagTripId(bagTripId === r.id ? null : r.id);
-              setValTripId(null);
-              setIssuedQrs([]);
-              setBagWasteTypeId("");
-            }}
-          >
-            Tas
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={busy}
-            onClick={() => {
-              const isOpening = valTripId !== r.id;
-              setValTripId(isOpening ? r.id : null);
-              setBagTripId(null);
-              if (isOpening) {
-                loadBagsForTrip(r.id);
-              }
-            }}
-          >
-            Lihat Tas
-          </Button>
-          {r.bagCount > 0 ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => window.open(`/print/trips/${r.id}`, "_blank")}
-            >
-              Print
-            </Button>
-          ) : null}
-        </div>
-      ),
+      render: (r) => {
+        const canOperate = r.status === "PLANNED" || r.status === "ACTIVE";
+        return (
+          <div className="flex flex-wrap justify-end gap-1.5">
+            {canOperate ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  setBagTripId(bagTripId === r.id ? null : r.id);
+                  setValTripId(null);
+                  setViewQrTripId(null);
+                  setViewQrBags([]);
+                  setIssuedQrs([]);
+                  setBagWasteTypeId("");
+                }}
+              >
+                Tas
+              </Button>
+            ) : null}
+            {canOperate ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  const isOpening = valTripId !== r.id;
+                  setValTripId(isOpening ? r.id : null);
+                  setBagTripId(null);
+                  setViewQrTripId(null);
+                  setViewQrBags([]);
+                  if (isOpening) {
+                    setVal({
+                      ...EMPTY_VALIDATION,
+                      validationStage: r.status === "PLANNED" ? "CHECK_IN" : "CHECK_OUT",
+                    });
+                    loadBagsForTrip(r.id);
+                  }
+                }}
+              >
+                Validasi
+              </Button>
+            ) : null}
+            {r.bagCount > 0 ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (viewQrTripId === r.id) {
+                      setViewQrTripId(null);
+                      setViewQrBags([]);
+                      return;
+                    }
+                    setBagTripId(null);
+                    setValTripId(null);
+                    setBusy(true);
+                    try {
+                      const res = await fetch(`/api/trash-bags?tripId=${r.id}`);
+                      const data = await res.json();
+                      if (res.ok) {
+                        setViewQrBags(data.bags || []);
+                        setViewQrTripId(r.id);
+                      } else {
+                        setError(data?.error ?? "Gagal memuat QR");
+                      }
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Lihat QR
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => window.open(`/print/trips/${r.id}`, "_blank")}
+                >
+                  Print
+                </Button>
+              </>
+            ) : null}
+            {canOperate ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  if (window.confirm("Batalkan trip ini?")) {
+                    void updateTripStatus(r.id, "CANCELLED");
+                  }
+                }}
+              >
+                Batalkan
+              </Button>
+            ) : null}
+            {r.status === "CANCELLED" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void updateTripStatus(r.id, "PLANNED")}
+              >
+                Buka Ulang
+              </Button>
+            ) : null}
+          </div>
+        );
+      },
     },
   ];
 
@@ -376,27 +511,58 @@ export function TripManager({
           <CardContent>
             <form onSubmit={createTrip} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="Campaign" htmlFor="t-campaign" required>
+                <FormField
+                  label="Campaign"
+                  htmlFor="t-campaign"
+                  required
+                  hint="Hanya campaign ACTIVE bertipe Trash Bag / Program Wisata."
+                >
                   <Select
                     id="t-campaign"
                     value={form.campaignId}
-                    onChange={(e) => setForm((f) => ({ ...f, campaignId: e.target.value }))}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        campaignId: e.target.value,
+                        travelAgentId: "",
+                      }))
+                    }
                   >
-                    {campaigns.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
+                    {campaigns.length === 0 ? (
+                      <option value="">Belum ada campaign ACTIVE</option>
+                    ) : (
+                      campaigns.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                          {c.campaignType === "TOURISM_PROGRAM"
+                            ? " · Wisata"
+                            : c.campaignType === "TRASH_BAG"
+                              ? " · Trash Bag"
+                              : ""}
+                        </option>
+                      ))
+                    )}
                   </Select>
                 </FormField>
-                <FormField label="Travel agent" htmlFor="t-agent" required>
+                <FormField
+                  label="Travel agent"
+                  htmlFor="t-agent"
+                  required={agentRequired}
+                  hint={
+                    agentRequired
+                      ? "Wajib untuk Program Wisata."
+                      : "Opsional untuk Trash Bag (boleh tanpa agent)."
+                  }
+                >
                   <Select
                     id="t-agent"
                     value={form.travelAgentId}
                     onChange={(e) => setForm((f) => ({ ...f, travelAgentId: e.target.value }))}
-                    required
+                    required={agentRequired}
                   >
-                    <option value="">Pilih travel agent</option>
+                    <option value="">
+                      {agentRequired ? "Pilih travel agent" : "Tanpa travel agent"}
+                    </option>
                     {travelAgents.map((agent) => (
                       <option key={agent.id} value={agent.id}>
                         {agent.name} ({agent.email})
@@ -436,19 +602,42 @@ export function TripManager({
                   />
                 </FormField>
                 <FormField
-                  label="Email user (opsional)"
+                  label={moneyReward ? "Email user penerima reward" : "Email user (opsional)"}
                   htmlFor="t-user"
-                  hint="Hanya dipakai jika campaign memakai reward uang."
+                  required={moneyReward}
+                  hint={
+                    moneyReward
+                      ? "Wajib. Reward uang hanya masuk jika email user terisi."
+                      : "Opsional. Campaign ini compliance-only (tanpa reward uang)."
+                  }
                 >
                   <Input
                     id="t-user"
                     type="email"
                     value={form.userEmail}
                     onChange={(e) => setForm((f) => ({ ...f, userEmail: e.target.value }))}
+                    required={moneyReward}
                   />
                 </FormField>
               </div>
-              <Button type="submit" disabled={busy || travelAgents.length === 0}>
+              {campaigns.length === 0 ? (
+                <p className="text-sm text-amber-700">
+                  Belum ada campaign ACTIVE tipe Trash Bag / Program Wisata. Aktifkan campaign dulu.
+                </p>
+              ) : null}
+              {agentRequired && travelAgents.length === 0 ? (
+                <p className="text-sm text-amber-700">
+                  Program Wisata membutuhkan travel agent berstatus INVITED.
+                </p>
+              ) : null}
+              <Button
+                type="submit"
+                disabled={
+                  busy ||
+                  campaigns.length === 0 ||
+                  (agentRequired && (travelAgents.length === 0 || !form.travelAgentId))
+                }
+              >
                 {busy ? "Menyimpan..." : "Buat Trip"}
               </Button>
             </form>
@@ -468,6 +657,7 @@ export function TripManager({
                   id="bag-count"
                   type="number"
                   min={1}
+                  max={200}
                   value={bagCount}
                   onChange={(e) => setBagCount(e.target.value)}
                 />
@@ -509,41 +699,85 @@ export function TripManager({
         </Card>
       ) : null}
 
+      {viewQrTripId ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>QR Kantong Trip</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {viewQrBags.length === 0 ? (
+              <p className="text-sm text-muted">Belum ada kantong untuk trip ini.</p>
+            ) : (
+              <div className="rounded-xl bg-mint/50 px-3 py-2 text-xs text-brand-800 dark:text-brand-400">
+                <p className="mb-1 font-semibold">{viewQrBags.length} QR:</p>
+                <p className="font-mono break-all">
+                  {viewQrBags.map((b: { bagQrCode: string }) => b.bagQrCode).join(", ")}
+                </p>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => window.open(`/print/trips/${viewQrTripId}`, "_blank")}
+              >
+                Cetak QR
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setViewQrTripId(null);
+                  setViewQrBags([]);
+                }}
+              >
+                Tutup
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {valTripId ? (
         <Card>
           <CardHeader>
             <CardTitle>Daftar Tas & Validasi Gerbang</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            {valTripBags.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-800 p-4 text-center text-sm text-muted">
-                Tidak ada tas yang terdaftar untuk trip ini.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {valTripBags.map((bag) => (
-                    <div key={bag.id} className="p-3 border rounded-xl border-gray-200 dark:border-gray-800 space-y-2 bg-surface">
-                      <div className="flex justify-between items-center">
-                        <span className="font-mono text-sm font-semibold text-brand-800 dark:text-brand-400">{bag.bagQrCode}</span>
-                        {bag.wasteType?.name && (
-                          <span className="text-xs text-muted-soft">{bag.wasteType.name}</span>
-                        )}
-                      </div>
-                      <Select
-                        value={bag.status || ""}
-                        onChange={(e) => setBagStatus(bag.id, e.target.value)}
-                        className="text-sm"
-                      >
-                        <option value="" disabled>Pilih Kondisi...</option>
-                        <option value="GOOD">Terpilah dengan baik</option>
-                        <option value="PARTIAL">Tercampur sebagian</option>
-                        <option value="POOR">Tercampur (Buruk)</option>
-                        <option value="NOT_RETURNED">Hilang / Tidak Kembali</option>
-                      </Select>
-                    </div>
-                  ))}
+            {val.validationStage === "CHECK_OUT" ? (
+              valTripBags.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-800 p-4 text-center text-sm text-muted">
+                  Tidak ada tas yang terdaftar untuk trip ini.
                 </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {valTripBags.map((bag) => (
+                      <div key={bag.id} className="p-3 border rounded-xl border-gray-200 dark:border-gray-800 space-y-2 bg-surface">
+                        <div className="flex justify-between items-center">
+                          <span className="font-mono text-sm font-semibold text-brand-800 dark:text-brand-400">{bag.bagQrCode}</span>
+                          {bag.wasteType?.name && (
+                            <span className="text-xs text-muted-soft">{bag.wasteType.name}</span>
+                          )}
+                        </div>
+                        <Select
+                          value={bag.status || ""}
+                          onChange={(e) => setBagStatus(bag.id, e.target.value)}
+                          className="text-sm"
+                        >
+                          <option value="" disabled>Pilih Kondisi...</option>
+                          <option value="GOOD">Terpilah dengan baik</option>
+                          <option value="PARTIAL">Tercampur sebagian</option>
+                          <option value="POOR">Tercampur (Buruk)</option>
+                          <option value="NOT_RETURNED">Hilang / Tidak Kembali</option>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-800 p-4 text-sm text-muted">
+                Check-in hanya mencatat gerbang masuk. Kondisi kantong diisi saat check-out.
+                {valTripBags.length > 0 ? ` (${valTripBags.length} kantong terdaftar)` : ""}
               </div>
             )}
 
@@ -577,19 +811,40 @@ export function TripManager({
                   onChange={(e) => setVal((s) => ({ ...s, notes: e.target.value }))}
                 />
               </FormField>
+              {val.validationStage === "CHECK_OUT" ? (
+                <FormField label="Berat aktual (kg, opsional)" htmlFor="v-weight" className="mt-3">
+                  <Input
+                    id="v-weight"
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    value={val.actualWeightKg}
+                    onChange={(e) => setVal((s) => ({ ...s, actualWeightKg: e.target.value }))}
+                    placeholder="Contoh: 12.5"
+                  />
+                </FormField>
+              ) : null}
             </div>
-            
+
             <div className="flex gap-2">
-              <Button disabled={busy || valTripBags.length === 0} onClick={() => submitValidation(valTripId)}>
+              <Button
+                disabled={
+                  busy ||
+                  (val.validationStage === "CHECK_OUT" && valTripBags.length === 0)
+                }
+                onClick={() => submitValidation(valTripId)}
+              >
                 Simpan Validasi
               </Button>
               <Button variant="ghost" onClick={() => setValTripId(null)}>
                 Batal
               </Button>
             </div>
-            <p className="text-xs text-muted">
-              Pastikan semua kondisi tas sudah sesuai. Tas yang kondisinya kosong akan dianggap hilang (Tidak Kembali).
-            </p>
+            {val.validationStage === "CHECK_OUT" ? (
+              <p className="text-xs text-muted">
+                Pastikan semua kondisi tas sudah sesuai. Tas yang kondisinya kosong akan dianggap hilang (Tidak Kembali).
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

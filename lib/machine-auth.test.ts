@@ -20,6 +20,20 @@ describe("machine HMAC handshake", () => {
     expect(r.ok).toBe(true);
   });
 
+  it("uses Date.now when nowSeconds is omitted", () => {
+    const liveTs = String(Math.floor(Date.now() / 1000));
+    const liveNonce = "live-nonce";
+    const sig = signMachinePayload(secret, liveTs, liveNonce, body);
+    const r = verifyMachineSignature({
+      secret,
+      timestamp: liveTs,
+      nonce: liveNonce,
+      rawBody: body,
+      signature: sig,
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it("rejects a tampered body", () => {
     const sig = signMachinePayload(secret, ts, nonce, body);
     const r = verifyMachineSignature({
@@ -57,6 +71,46 @@ describe("machine HMAC handshake", () => {
   it("rejects missing headers / no secret", () => {
     expect(verifyMachineSignature({ secret: null, timestamp: ts, nonce, rawBody: body, signature: "x" }).ok).toBe(false);
     expect(verifyMachineSignature({ secret, timestamp: null, nonce, rawBody: body, signature: "x", nowSeconds: now }).ok).toBe(false);
+    expect(verifyMachineSignature({ secret, timestamp: ts, nonce: null, rawBody: body, signature: "x", nowSeconds: now }).reason).toBe("MISSING_HEADERS");
+    expect(verifyMachineSignature({ secret, timestamp: ts, nonce, rawBody: body, signature: null, nowSeconds: now }).reason).toBe("MISSING_HEADERS");
+  });
+
+  it("rejects non-numeric timestamps and mismatched signature length", () => {
+    expect(
+      verifyMachineSignature({
+        secret,
+        timestamp: "not-a-number",
+        nonce,
+        rawBody: body,
+        signature: "x",
+        nowSeconds: now,
+      }).reason,
+    ).toBe("BAD_TIMESTAMP");
+
+    const sig = signMachinePayload(secret, ts, nonce, body);
+    expect(
+      verifyMachineSignature({
+        secret,
+        timestamp: ts,
+        nonce,
+        rawBody: body,
+        signature: sig.slice(0, 8),
+        nowSeconds: now,
+      }).reason,
+    ).toBe("BAD_SIGNATURE");
+  });
+
+  it("verifyMachineRequest returns signature failure before nonce check", async () => {
+    const result = await verifyMachineRequest({
+      machineId: "mach_3",
+      secret: null,
+      timestamp: ts,
+      nonce,
+      rawBody: body,
+      signature: "x",
+      nowSeconds: now,
+    });
+    expect(result).toEqual({ ok: false, reason: "NO_SECRET" });
   });
 
   it("rejects replayed nonces", async () => {

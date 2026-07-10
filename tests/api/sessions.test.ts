@@ -69,6 +69,20 @@ describe('/api/sessions/[id]', () => {
   });
 
   describe('PATCH', () => {
+    it('fails if session not found (404)', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1' } as any);
+      vi.mocked(prisma.depositSession.findUnique).mockResolvedValue(null);
+      const res = await PATCH(makeReq('PATCH', { action: 'finish' }), { params: Promise.resolve({ id: 'sess1' }) });
+      expect(res.status).toBe(404);
+    });
+
+    it('fails if session does not belong to user (403)', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1' } as any);
+      vi.mocked(prisma.depositSession.findUnique).mockResolvedValue({ id: 'sess1', userId: 'other_user' } as any);
+      const res = await PATCH(makeReq('PATCH', { action: 'finish' }), { params: Promise.resolve({ id: 'sess1' }) });
+      expect(res.status).toBe(403);
+    });
+
     it('cancels session and returns updated balance (200)', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1' } as any);
       vi.mocked(prisma.depositSession.findUnique).mockResolvedValue({ id: 'sess1', userId: 'u1', status: 'ACTIVE' } as any);
@@ -102,6 +116,24 @@ describe('/api/sessions/[id]', () => {
         data: expect.objectContaining({ status: 'COMPLETED' }) // Based on transitionSession('ACTIVE', 'FINISH')
       });
       expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'DEPOSIT_SESSION_FINISH' }));
+    });
+    it('returns session if already COMPLETED, CANCELLED, or EXPIRED', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1' } as any);
+      vi.mocked(prisma.depositSession.findUnique).mockResolvedValue({ id: 'sess1', userId: 'u1', status: 'COMPLETED' } as any);
+      
+      const res = await PATCH(makeReq('PATCH', { action: 'finish' }), { params: Promise.resolve({ id: 'sess1' }) });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.session.id).toBe('sess1');
+      expect(prisma.depositSession.update).not.toHaveBeenCalled();
+    });
+
+    it('returns 500 on unexpected errors', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1' } as any);
+      vi.mocked(prisma.depositSession.findUnique).mockRejectedValue(new Error('db error'));
+      
+      const res = await PATCH(makeReq('PATCH', { action: 'finish' }), { params: Promise.resolve({ id: 'sess1' }) });
+      expect(res.status).toBe(500);
     });
   });
 });

@@ -137,5 +137,48 @@ describe('/api/users API', () => {
       }));
       expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'USER_CREATE', actorId: 'admin' }));
     });
+
+    it('creates PENGEPUL with organizationId successfully', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin' } as any);
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+      vi.mocked(auth.hashPassword).mockResolvedValue('hashed');
+      vi.mocked(prisma.user.create).mockResolvedValue({ id: 'new', email: 'new@a.com', role: 'PENGEPUL' } as any);
+
+      const req = makePostReq({ name: 'New User', email: 'NEW@a.com', password: 'password1234', role: 'PENGEPUL', organizationId: 'org1' });
+      const res = await POST(req);
+
+      expect(res.status).toBe(201);
+      expect(prisma.user.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ organizationId: 'org1', role: 'PENGEPUL' })
+      }));
+    });
+
+    it('creates ADMIN with organizationId', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin' } as any);
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+      vi.mocked(auth.hashPassword).mockResolvedValue('hashed');
+      vi.mocked(prisma.user.create).mockResolvedValue({ id: 'new', email: 'admin@a.com', role: 'ADMIN' } as any);
+
+      const req = makePostReq({
+        name: 'Admin',
+        email: 'admin@a.com',
+        password: 'password1234',
+        role: 'ADMIN',
+        organizationId: 'org1',
+      });
+      const res = await POST(req);
+
+      expect(res.status).toBe(201);
+      expect(prisma.user.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ organizationId: 'org1', role: 'ADMIN' }),
+      }));
+    });
+
+    it('handles unexpected errors', async () => {
+      vi.mocked(rbac.requireApiUser).mockRejectedValue(new Error('Unexpected POST error'));
+      const req = makePostReq({ name: 'New User', email: 'NEW@a.com', password: 'password1234', role: 'USER' });
+      const res = await POST(req);
+      expect(res.status).toBe(500);
+    });
   });
 });

@@ -119,7 +119,77 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
       },
     },
     { key: "trips", header: "Trip", render: (r) => `${r.tripCount}` },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (r) => (
+        <div className="flex flex-wrap justify-end gap-2">
+          {r.organizationStatus === "INVITED" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => updateStatus(r.id, "SUSPENDED")}
+            >
+              Suspend
+            </Button>
+          ) : null}
+          {r.organizationStatus === "SUSPENDED" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => updateStatus(r.id, "INVITED")}
+            >
+              Aktifkan
+            </Button>
+          ) : null}
+          {r.organizationStatus !== "REMOVED" ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => updateStatus(r.id, "REMOVED")}
+            >
+              Hapus
+            </Button>
+          ) : null}
+        </div>
+      ),
+    },
   ];
+
+  async function updateStatus(
+    travelAgentId: string,
+    organizationStatus: "INVITED" | "SUSPENDED" | "REMOVED",
+  ) {
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch(`/api/travel-agents/${travelAgentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizationStatus }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.error ?? "Gagal mengubah status travel agent");
+        return;
+      }
+      setSuccess(
+        organizationStatus === "SUSPENDED"
+          ? "Travel agent ditangguhkan. Tidak bisa dipakai di trip baru."
+          : organizationStatus === "REMOVED"
+            ? "Travel agent dihapus dari organisasi."
+            : "Travel agent diaktifkan kembali.",
+      );
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-4">

@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
       signature: req.headers.get("x-reloop-signature"),
     });
     if (!verify.ok) {
-      return jsonError(401, verify.reason ?? "Unauthorised");
+      return jsonError(401, verify.reason || "Unauthorised");
     }
 
     const ingestMachine = machine as IngestMachine;

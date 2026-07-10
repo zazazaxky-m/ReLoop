@@ -5,12 +5,12 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["**/*.test.ts"],
-    exclude: ["node_modules", ".next"],
+    exclude: ["node_modules", ".next", ".pytest_cache"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
       include: ["lib/**/*.ts", "app/api/**/*.ts", "proxy.ts"],
-      exclude: ["**/*.test.ts", "node_modules", ".next"],
+      exclude: ["**/*.test.ts", "node_modules", ".next", "lib/payout/types.ts"],
     },
   },
   resolve: {

@@ -137,4 +137,103 @@ describe("/api/scan", () => {
       expect.objectContaining({ action: "DEPOSIT_SESSION_START" }),
     );
   });
+  it("denies if rate limit exceeded", async () => {
+    vi.mocked(rateLimit.checkRateLimit).mockResolvedValue({
+      allowed: false,
+      remaining: 0,
+      resetAt: Date.now() + 60_000,
+    });
+    const res = await POST(makeReq({ machineCode: "RVM-001" }));
+    expect(res.status).toBe(429);
+    const data = await res.json();
+    expect(data.error).toBe("Terlalu banyak percobaan scan. Coba lagi sebentar lagi.");
+  });
+
+  it("returns 404 if machine not found", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(null);
+    const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 401 if QR token is invalid", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
+    vi.mocked(qr.isTokenValid).mockReturnValue(false);
+    const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 if QR token is missing", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
+    vi.mocked(qr.isTokenValid).mockReturnValue(false);
+    const res = await POST(makeReq({ machineCode: "RVM-001" }));
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 409 if organization is inactive", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({
+      ...baseMachine,
+      organization: { ...baseMachine.organization, status: "INACTIVE" },
+    } as any);
+    const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error).toBe("Organisasi mesin tidak aktif");
+  });
+
+  it("returns 409 if machine has no waste types", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({
+      ...baseMachine,
+      wasteTypes: [],
+    } as any);
+    const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error).toBe("Mesin belum dikonfigurasi jenis sampah");
+  });
+
+  it("returns 409 if active session exists for another user", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
+    vi.mocked(prisma.depositSession.findFirst).mockResolvedValue({
+      id: "sess1",
+      userId: "u2",
+    } as any);
+    const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error).toBe("Mesin sedang digunakan pengguna lain");
+  });
+
+  it("resumes session if active session exists for same user", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
+    vi.mocked(prisma.depositSession.findFirst).mockResolvedValue({
+      id: "sess1",
+      userId: "u1",
+    } as any);
+    const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.resumed).toBe(true);
+    expect(data.session.id).toBe("sess1");
+  });
+
+  it("returns 422 if campaign invalid for machine org", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
+    vi.mocked(prisma.depositSession.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.campaign.findUnique).mockResolvedValue({
+      id: "c1",
+      organizationId: "org2", // mismatch
+    } as any);
+    const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok", campaignId: "c1" }));
+    expect(res.status).toBe(422);
+    const data = await res.json();
+    expect(data.error).toBe("Campaign tidak valid untuk mesin ini");
+  });
+
+  it("returns 422 if campaign not found", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
+    vi.mocked(prisma.depositSession.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.campaign.findUnique).mockResolvedValue(null);
+    const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok", campaignId: "c1" }));
+    expect(res.status).toBe(422);
+  });
 });

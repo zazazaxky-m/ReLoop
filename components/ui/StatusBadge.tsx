@@ -96,6 +96,12 @@ const REGISTRY: Record<string, StatusMeta> = {
   CHECK_IN: { label: "Gerbang Masuk", tone: "info", Icon: MapPin },
   CHECK_OUT: { label: "Gerbang Pulang", tone: "brand", Icon: MapPin },
   BANK_SAMPAH_PICKUP: { label: "Pickup Bank Sampah", tone: "success", Icon: Truck },
+
+  // Trash bag condition
+  GOOD: { label: "Baik", tone: "success", Icon: CheckCircle },
+  PARTIAL: { label: "Sebagian", tone: "warning", Icon: AlertTriangle },
+  POOR: { label: "Rusak", tone: "danger", Icon: XCircle },
+  NOT_RETURNED: { label: "Tidak Dikembalikan", tone: "neutral", Icon: XCircle },
 };
 
 function humanize(status: string) {

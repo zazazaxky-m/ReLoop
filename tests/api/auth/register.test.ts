@@ -112,5 +112,51 @@ describe('POST /api/auth/register', () => {
     
     expect(auth.setSessionCookie).toHaveBeenCalledWith(expect.objectContaining({ sub: 'u1' }));
     expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'USER_REGISTER' }));
+    expect(mockTx.travelAgentInvite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('links pending travel-agent invites during registration (200)', async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+    vi.mocked(auth.hashPassword).mockResolvedValue('hashed_pwd');
+
+    const { mockTx } = await import('@/lib/prisma') as any;
+    mockTx.user.create.mockResolvedValue({
+      id: 'u2',
+      name: 'Agent Owner',
+      email: 'owner@example.com',
+      role: 'USER',
+      tokenVersion: 0,
+    });
+    mockTx.travelAgentInvite.findMany.mockResolvedValue([
+      { travelAgentId: 'ta1', organizationId: 'org1' },
+      { travelAgentId: 'ta2', organizationId: 'org2' },
+    ]);
+    mockTx.travelAgentUser.upsert.mockResolvedValue({} as any);
+    mockTx.travelAgentOrganization.updateMany.mockResolvedValue({ count: 1 } as any);
+    mockTx.travelAgentInvite.updateMany.mockResolvedValue({ count: 2 } as any);
+
+    const req = makeReq({
+      name: 'Agent Owner',
+      email: 'Owner@Example.com',
+      password: 'password1234',
+      phone: '08123456789',
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect(mockTx.travelAgentUser.upsert).toHaveBeenCalledTimes(2);
+    expect(mockTx.travelAgentUser.upsert).toHaveBeenCalledWith({
+      where: { travelAgentId_userId: { travelAgentId: 'ta1', userId: 'u2' } },
+      update: { roleInAgent: 'OWNER' },
+      create: { travelAgentId: 'ta1', userId: 'u2', roleInAgent: 'OWNER' },
+    });
+    expect(mockTx.travelAgentOrganization.updateMany).toHaveBeenCalledWith({
+      where: { travelAgentId: 'ta1', organizationId: 'org1', status: 'PENDING' },
+      data: { status: 'INVITED', approvedAt: expect.any(Date) },
+    });
+    expect(mockTx.travelAgentInvite.updateMany).toHaveBeenCalledWith({
+      where: { email: 'owner@example.com', status: 'PENDING' },
+      data: { status: 'INVITED' },
+    });
   });
 });

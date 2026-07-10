@@ -94,7 +94,7 @@ export async function GET(
       return jsonError(404, "Bukti transfer belum diunggah");
     }
 
-    const extension = redemption.manualTransferProofUrl.split(".").pop() ?? "";
+    const extension = redemption.manualTransferProofUrl.split(".").pop() || "";
     const mime = PROOF_MIME_BY_EXTENSION[extension] ?? "application/octet-stream";
     const bytes = await readFile(resolveProofPath(redemption.manualTransferProofUrl));
     return new Response(new Uint8Array(bytes), {

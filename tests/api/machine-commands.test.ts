@@ -49,6 +49,16 @@ describe('GET /api/machine-commands/[code]', () => {
     expect(res.status).toBe(401);
   });
 
+  it('fails if machine header does not match code (401)', async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'mach_1', ingestSecret: 'secret' } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
+
+    const res = await GET(makeReq(), { params: Promise.resolve({ code: 'other' }) });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toContain('tidak cocok');
+  });
+
   it('returns null if no pending commands (200)', async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'mach_1', ingestSecret: 'secret' } as any);
     vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
@@ -96,5 +106,24 @@ describe('GET /api/machine-commands/[code]', () => {
     expect(data.command.id).toBe('cmd_1');
     expect(data.command.command).toBe('REFRESH_STATE');
     expect(data.command.payload).toEqual({ foo: 'bar' });
+  });
+
+  it('returns already-DISPATCHED pending command without updating', async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'mach_1', ingestSecret: 'secret' } as any);
+    vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
+    const { mockTx } = await import('@/lib/prisma') as any;
+    mockTx.machineRemoteCommand.findFirst.mockResolvedValue({
+      id: 'cmd_2',
+      status: 'DISPATCHED',
+      command: 'REBOOT',
+      payloadJson: null,
+      expiresAt: new Date(Date.now() + 10000),
+    });
+
+    const res = await GET(makeReq(), { params: Promise.resolve({ code: 'm1' }) });
+    expect(res.status).toBe(200);
+    expect(mockTx.machineRemoteCommand.update).not.toHaveBeenCalled();
+    const data = await res.json();
+    expect(data.command.id).toBe('cmd_2');
   });
 });

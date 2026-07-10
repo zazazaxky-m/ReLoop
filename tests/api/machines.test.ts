@@ -62,6 +62,31 @@ describe('/api/machines endpoints', () => {
         where: { organizationId: 'org1', status: 'ONLINE' }
       }));
     });
+
+    it('uses __none__ when ADMIN has no organization', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ role: 'ADMIN', organizationId: null } as any);
+      vi.mocked(prisma.machine.count).mockResolvedValue(0);
+      vi.mocked(prisma.machine.findMany).mockResolvedValue([]);
+      await getList(makeReq('http://localhost/api/machines'));
+      expect(prisma.machine.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { organizationId: '__none__' },
+      }));
+    });
+
+    it('filters SUPERADMIN list by organizationId', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ role: 'SUPERADMIN' } as any);
+      vi.mocked(prisma.machine.count).mockResolvedValue(0);
+      vi.mocked(prisma.machine.findMany).mockResolvedValue([]);
+      await getList(makeReq('http://localhost/api/machines?organizationId=org9'));
+      expect(prisma.machine.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { organizationId: 'org9' },
+      }));
+    });
+
+    it('returns handled error on list failure', async () => {
+      vi.mocked(rbac.requireApiUser).mockRejectedValue(new Error('list boom'));
+      expect((await getList(makeReq('http://localhost/api/machines'))).status).toBe(500);
+    });
   });
 
   describe('POST create', () => {
@@ -88,6 +113,68 @@ describe('/api/machines endpoints', () => {
         data: expect.objectContaining({ machineCode: 'M-001', qrToken: 'qr_token' })
       }));
     });
+
+    it('creates machine with wasteTypeIds', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'SUPERADMIN' } as any);
+      vi.mocked(prisma.organization.findUnique).mockResolvedValue({ id: 'org1' } as any);
+      vi.mocked(prisma.machine.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.machine.create).mockResolvedValue({
+        id: 'new_m2',
+        machineCode: 'M-002',
+        name: 'Machine 2',
+        organizationId: 'org1',
+      } as any);
+
+      const res = await POST(makeReq('http://localhost/api/machines', 'POST', {
+        machineCode: 'M-002',
+        name: 'Machine 2',
+        organizationId: 'org1',
+        wasteTypeIds: ['wt1', 'wt2'],
+      }));
+      expect(res.status).toBe(201);
+      expect(prisma.machine.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          wasteTypes: {
+            create: [
+              { wasteTypeId: 'wt1', active: true },
+              { wasteTypeId: 'wt2', active: true },
+            ],
+          },
+        }),
+      }));
+    });
+
+    it('returns 422 when organization missing', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'SUPERADMIN' } as any);
+      vi.mocked(prisma.organization.findUnique).mockResolvedValue(null);
+      const res = await POST(makeReq('http://localhost/api/machines', 'POST', {
+        machineCode: 'M-003',
+        name: 'Machine 3',
+        organizationId: 'missing',
+      }));
+      expect(res.status).toBe(422);
+    });
+
+    it('returns 409 when machine code exists', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'SUPERADMIN' } as any);
+      vi.mocked(prisma.organization.findUnique).mockResolvedValue({ id: 'org1' } as any);
+      vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'existing' } as any);
+      const res = await POST(makeReq('http://localhost/api/machines', 'POST', {
+        machineCode: 'M-001',
+        name: 'Machine 1',
+        organizationId: 'org1',
+      }));
+      expect(res.status).toBe(409);
+    });
+
+    it('returns handled error on create failure', async () => {
+      vi.mocked(rbac.requireApiUser).mockRejectedValue(new Error('create boom'));
+      expect((await POST(makeReq('http://localhost/api/machines', 'POST', {
+        machineCode: 'M-001',
+        name: 'Machine 1',
+        organizationId: 'org1',
+      }))).status).toBe(500);
+    });
   });
 
   describe('GET detail', () => {
@@ -109,6 +196,14 @@ describe('/api/machines endpoints', () => {
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.machine.id).toBe('m1');
+    });
+
+    it('returns 404 when machine missing', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ role: 'SUPERADMIN' } as any);
+      vi.mocked(prisma.machine.findUnique).mockResolvedValue(null);
+      expect((await getOne(makeReq('http://localhost/api/machines/m1'), {
+        params: Promise.resolve({ id: 'm1' }),
+      })).status).toBe(404);
     });
   });
 
@@ -132,6 +227,28 @@ describe('/api/machines endpoints', () => {
       }));
       expect(mockTx.machineWasteType.deleteMany).toHaveBeenCalled();
       expect(mockTx.machineWasteType.createMany).toHaveBeenCalled();
+    });
+
+    it('clears waste types when empty array provided', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'SUPERADMIN' } as any);
+      vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', organizationId: 'org1' } as any);
+      const { mockTx } = await import('@/lib/prisma') as any;
+      mockTx.machine.update.mockResolvedValue({ id: 'm1' });
+      mockTx.machineWasteType.createMany.mockClear();
+
+      const res = await PATCH(makeReq('http://localhost/api/machines/m1', 'PATCH', {
+        wasteTypeIds: [],
+      }), { params: Promise.resolve({ id: 'm1' }) });
+      expect(res.status).toBe(200);
+      expect(mockTx.machineWasteType.deleteMany).toHaveBeenCalled();
+      expect(mockTx.machineWasteType.createMany).not.toHaveBeenCalled();
+    });
+
+    it('returns handled error on patch failure', async () => {
+      vi.mocked(rbac.requireApiUser).mockRejectedValue(new Error('patch boom'));
+      expect((await PATCH(makeReq('http://localhost/api/machines/m1', 'PATCH', {
+        name: 'X',
+      }), { params: Promise.resolve({ id: 'm1' }) })).status).toBe(500);
     });
   });
 
@@ -157,6 +274,13 @@ describe('/api/machines endpoints', () => {
       const res = await DELETE(req, { params: Promise.resolve({ id: 'm1' }) });
       expect(res.status).toBe(200);
       expect(prisma.machine.delete).toHaveBeenCalledWith({ where: { id: 'm1' } });
+    });
+
+    it('returns handled error on delete failure', async () => {
+      vi.mocked(rbac.requireApiUser).mockRejectedValue(new Error('delete boom'));
+      expect((await DELETE(makeReq('http://localhost/api/machines/m1', 'DELETE'), {
+        params: Promise.resolve({ id: 'm1' }),
+      })).status).toBe(500);
     });
   });
 });

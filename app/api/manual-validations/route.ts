@@ -2,9 +2,11 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireApiUser, assertOrgScope, assertActivePartnership, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
-import { TRASH_BAG_REWARD_PER_BAG, isRewardableCondition } from "@/lib/trip";
+import { TRASH_BAG_REWARD_PER_BAG, isRewardableCondition, computeTrashBagRewardAmount, canValidateTripStage, getTripTravelAgentGateBlockReason } from "@/lib/trip";
 import { calculateCompliance } from "@/lib/tourism";
 import { logAudit } from "@/lib/audit";
+import { createNotification } from "@/lib/notifications";
+import { formatRupiah } from "@/lib/format";
 
 const createSchema = z.object({
   tripId: z.string().min(1),
@@ -30,7 +32,7 @@ export async function POST(req: Request) {
     const trip = await prisma.trip.findUnique({
       where: { id: data.tripId },
       include: {
-        campaign: { select: { organizationId: true, rewardMode: true, campaignType: true } },
+        campaign: { select: { organizationId: true, rewardMode: true, campaignType: true, rewardMultiplier: true, name: true } },
         _count: { select: { bagAssignments: true } },
       },
     });
@@ -42,6 +44,30 @@ export async function POST(req: Request) {
       }
     } else {
       assertOrgScope(user, trip.campaign.organizationId);
+    }
+
+    // Gate ops require invited agent; bank-sampah pickup after COMPLETED is allowed even if later suspended.
+    if (data.validationStage !== "BANK_SAMPAH_PICKUP") {
+      const agentBlock = await getTripTravelAgentGateBlockReason({
+        travelAgentId: trip.travelAgentId,
+        organizationId: trip.campaign.organizationId,
+      });
+      if (agentBlock) throw new HttpError(422, agentBlock);
+    }
+
+    const stageGuard = canValidateTripStage(trip.status, data.validationStage);
+    if (!stageGuard.ok) {
+      throw new HttpError(422, stageGuard.reason!);
+    }
+
+    if (data.validationStage === "BANK_SAMPAH_PICKUP") {
+      const existingPickup = await prisma.manualValidation.findFirst({
+        where: { tripId: trip.id, validationStage: "BANK_SAMPAH_PICKUP" },
+        select: { id: true },
+      });
+      if (existingPickup) {
+        throw new HttpError(422, "Pickup bank sampah untuk trip ini sudah dicatat");
+      }
     }
 
     if (data.bagQrCode) {
@@ -77,18 +103,21 @@ export async function POST(req: Request) {
     });
 
     const rewardPerBag = TRASH_BAG_REWARD_PER_BAG;
-    let baseRewardAmount = 0;
+    let rewardableBagCount = 0;
     let rewardAmount = 0;
     if (trip.campaign.rewardMode === "MONEY_REWARD" && data.validationStage === "CHECK_OUT" && trip.userId) {
       if (data.bags && data.bags.length > 0) {
-        const rewardableBags = data.bags.filter(b => isRewardableCondition(b.status)).length;
-        baseRewardAmount = rewardableBags * rewardPerBag;
+        rewardableBagCount = data.bags.filter((b) => isRewardableCondition(b.status)).length;
       } else if (isRewardableCondition(finalConditionStatus) && finalReturnedBagCount > 0) {
-        baseRewardAmount = finalReturnedBagCount * rewardPerBag;
+        rewardableBagCount = finalReturnedBagCount;
       }
-      
-      const complianceMultiplier = compliance.score / 100.0;
-      rewardAmount = Math.floor(baseRewardAmount * complianceMultiplier);
+
+      rewardAmount = computeTrashBagRewardAmount({
+        rewardableBagCount,
+        complianceScore: compliance.score,
+        rewardMultiplier: trip.campaign.rewardMultiplier,
+        rewardPerBag,
+      });
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -98,7 +127,11 @@ export async function POST(req: Request) {
           data.bags.map((b) =>
             tx.trashBagAssignment.update({
               where: { id: b.id },
-              data: { status: b.status, returnedAt },
+              data: {
+                status: b.status,
+                // NOT_RETURNED means the bag was never returned — do not stamp returnedAt.
+                returnedAt: b.status === "NOT_RETURNED" ? null : returnedAt,
+              },
             }),
           ),
         );
@@ -150,32 +183,97 @@ export async function POST(req: Request) {
       }
 
       if (rewardAmount > 0 && trip.userId) {
-        await tx.rewardLedger.create({
-          data: {
+        // Prefer Trip-scoped idempotency so progressive PATCH + bulk CHECK_OUT cannot double-pay.
+        const existingReward = await tx.rewardLedger.findFirst({
+          where: {
             userId: trip.userId,
-            organizationId: trip.campaign.organizationId,
             campaignId: trip.campaignId,
-            entryType: "EARN",
-            amount: rewardAmount,
-            status: "AVAILABLE",
             reasonCode: "TRASH_BAG_RETURN",
-            referenceType: "ManualValidation",
-            referenceId: validation.id,
+            OR: [
+              { referenceType: "Trip", referenceId: trip.id },
+              { referenceType: "ManualValidation", referenceId: validation.id },
+            ],
           },
+          select: { id: true },
         });
+        if (!existingReward) {
+          await tx.rewardLedger.create({
+            data: {
+              userId: trip.userId,
+              organizationId: trip.campaign.organizationId,
+              campaignId: trip.campaignId,
+              entryType: "EARN",
+              amount: rewardAmount,
+              status: "AVAILABLE",
+              reasonCode: "TRASH_BAG_RETURN",
+              referenceType: "Trip",
+              referenceId: trip.id,
+            },
+          });
+          return { validation, rewardAmount };
+        }
       }
-      return validation;
+      return { validation, rewardAmount: 0 };
     });
 
     await logAudit({
       actorId: user.id,
       action: "MANUAL_VALIDATION",
       entityType: "ManualValidation",
-      entityId: result.id,
-      metadata: { tripId: trip.id, rewardAmount },
+      entityId: result.validation.id,
+      metadata: { tripId: trip.id, rewardAmount: result.rewardAmount },
     });
 
-    return jsonOk({ validation: result, rewardAmount, compliance }, 201);
+    // Best-effort in-app notifications for trip stakeholders.
+    const notifyUserIds = new Set<string>();
+    if (trip.userId) notifyUserIds.add(trip.userId);
+    if (trip.travelAgentId) {
+      const agentUsers = await prisma.travelAgentUser.findMany({
+        where: { travelAgentId: trip.travelAgentId },
+        select: { userId: true },
+      });
+      const invited = await prisma.travelAgentOrganization.findMany({
+        where: {
+          travelAgentId: trip.travelAgentId,
+          organizationId: trip.campaign.organizationId,
+          status: "INVITED",
+        },
+        select: { id: true },
+      });
+      if (invited.length > 0) {
+        for (const link of agentUsers) notifyUserIds.add(link.userId);
+      }
+    }
+    const groupLabel = trip.groupName ?? trip.campaign.name;
+    const stageLabel =
+      data.validationStage === "CHECK_IN"
+        ? "check-in"
+        : data.validationStage === "CHECK_OUT"
+          ? "check-out"
+          : "pickup bank sampah";
+    for (const userId of notifyUserIds) {
+      void createNotification({
+        userId,
+        type: "TRIP_STATUS",
+        title: `Trip ${stageLabel}`,
+        body: `${groupLabel}: status ${stageLabel} tercatat (skor ${compliance.score}/100).`,
+        data: { tripId: trip.id, stage: data.validationStage },
+      });
+      if (result.rewardAmount > 0 && userId === trip.userId) {
+        void createNotification({
+          userId,
+          type: "TRASH_BAG_REWARD",
+          title: "Reward trash bag masuk",
+          body: `${formatRupiah(result.rewardAmount)} dari trip ${groupLabel} sudah tersedia di dompet.`,
+          data: { tripId: trip.id, rewardAmount: result.rewardAmount },
+        });
+      }
+    }
+
+    return jsonOk(
+      { validation: result.validation, rewardAmount: result.rewardAmount, compliance },
+      201,
+    );
   } catch (error) {
     return handleApiError(error);
   }

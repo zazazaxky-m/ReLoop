@@ -8,7 +8,7 @@ import {
   PageHeader,
   buttonVariants,
 } from "@/components/ui";
-import { Coins, Download, Recycle, Truck } from "@/components/ui/icons";
+import { Coins, Download, Recycle, Truck, Users } from "@/components/ui/icons";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { formatRupiah } from "@/lib/format";
@@ -19,7 +19,7 @@ export default async function AdminReportsPage() {
   const user = await requirePageUser(["ADMIN"]);
   const orgId = user.organizationId ?? "__none__";
 
-  const [deposits, rewardAgg, pickupsDone] = await Promise.all([
+  const [deposits, rewardAgg, pickupsDone, tripsCount] = await Promise.all([
     prisma.depositItem.count({
       where: {
         status: "ACCEPTED",
@@ -33,12 +33,16 @@ export default async function AdminReportsPage() {
     prisma.pickupRequest.count({
       where: { organizationId: orgId, status: "COMPLETED" },
     }),
+    prisma.trip.count({
+      where: { campaign: { organizationId: orgId } },
+    }),
   ]);
 
   const downloads = [
     { type: "deposits", label: "Data Deposit" },
     { type: "rewards", label: "Data Reward" },
     { type: "pickups", label: "Data Pickup" },
+    { type: "trips", label: "Data Trip / Compliance" },
   ];
 
   return (
@@ -48,7 +52,7 @@ export default async function AdminReportsPage() {
         description="Pantau ringkasan operasional dan unduh data organisasi."
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <MetricCard
           label="Item diterima"
           value={deposits}
@@ -62,11 +66,16 @@ export default async function AdminReportsPage() {
           tone="blue"
         />
         <MetricCard
+          label="Trip wisata"
+          value={tripsCount}
+          icon={Users}
+          tone="teal"
+        />
+        <MetricCard
           label="Reward diterbitkan"
           value={formatRupiah(rewardAgg._sum.amount ?? 0)}
           icon={Coins}
           tone="amber"
-          className="col-span-2 sm:col-span-1"
         />
       </div>
 
@@ -79,7 +88,7 @@ export default async function AdminReportsPage() {
             Unduh data terbaru dalam format CSV untuk dibuka melalui Excel
             atau Google Sheets.
           </p>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {downloads.map((download) => (
               <a
                 key={download.type}

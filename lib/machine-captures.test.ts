@@ -24,6 +24,16 @@ describe('lib/machine-captures', () => {
     it('prevents directory traversal attacks', () => {
       expect(() => mc.resolveCapturePath('../../../etc/passwd')).toThrow('Path bukti kamera tidak valid');
     });
+
+    it('uses CAPTURE_STORAGE_DIR when provided', async () => {
+      vi.resetModules();
+      vi.stubEnv('CAPTURE_STORAGE_DIR', '/custom/captures');
+      const mod = await import('./machine-captures');
+      const resolved = mod.resolveCapturePath('img.jpg');
+      expect(resolved.startsWith(path.resolve('/custom/captures'))).toBe(true);
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    });
   });
 
   describe('getMachineCaptures', () => {
@@ -65,6 +75,25 @@ describe('lib/machine-captures', () => {
         sessionId: 'sess_1',
         metadata: { conf: 0.99 },
       });
+    });
+
+    it('maps null metadataJson to null metadata', async () => {
+      vi.mocked(prisma.machineCapture.findMany).mockResolvedValue([
+        {
+          id: 'cap_2',
+          kind: 'FACE',
+          reason: 'x',
+          faceCount: 0,
+          personDetected: false,
+          occurredAt: new Date(),
+          receivedAt: new Date(),
+          sessionId: null,
+          metadataJson: null,
+        },
+      ] as any);
+
+      const captures = await mc.getMachineCaptures('mach_1');
+      expect(captures[0].metadata).toBeNull();
     });
   });
 

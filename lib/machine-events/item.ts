@@ -57,7 +57,8 @@ export async function resolveDepositItemId(
   if (!input.sessionId) return null;
 
   if (cache?.has(input.sessionId)) {
-    return cache.get(input.sessionId) ?? null;
+    // has() guarantees the key exists; value may be null.
+    return cache.get(input.sessionId) as string | null;
   }
 
   const item = await tx.depositItem.findFirst({

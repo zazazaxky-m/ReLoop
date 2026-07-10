@@ -47,4 +47,78 @@ describe("proxy", () => {
     const res = await proxy(new NextRequest("http://localhost/api/wallet"));
     expect(res.status).toBe(401);
   });
+
+  it("allows public API paths without a session", async () => {
+    const res = await proxy(new NextRequest("http://localhost/api/auth/login"));
+    expect(res.status).toBe(200);
+  });
+
+  it("allows public API prefix paths without a session", async () => {
+    const res = await proxy(new NextRequest("http://localhost/api/display/ABC123"));
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects cross-site unsafe requests via sec-fetch-site", async () => {
+    const req = await authedRequest("http://localhost/api/wallet", {
+      method: "DELETE",
+      headers: { "sec-fetch-site": "cross-site" },
+    });
+    const res = await proxy(req);
+    expect(res.status).toBe(403);
+  });
+
+  it("allows dashboard access with a valid session", async () => {
+    const req = await authedRequest("http://localhost/dashboard/user");
+    const res = await proxy(req);
+    expect(res.status).toBe(200);
+  });
+
+  it("redirects unauthenticated dashboard requests to login", async () => {
+    const res = await proxy(new NextRequest("http://localhost/dashboard/admin"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/login");
+  });
+
+  it("passes through non-API non-dashboard paths", async () => {
+    const res = await proxy(new NextRequest("http://localhost/about"));
+    expect(res.status).toBe(200);
+  });
+
+  it("treats invalid session cookies as unauthenticated", async () => {
+    const req = new NextRequest("http://localhost/api/wallet");
+    req.cookies.set(SESSION_COOKIE, "not.a.valid.jwt");
+    const res = await proxy(req);
+    expect(res.status).toBe(401);
+  });
+
+  it("uses configured AUTH_JWT_SECRET when set", async () => {
+    const prev = process.env.AUTH_JWT_SECRET;
+    process.env.AUTH_JWT_SECRET = "unit-test-secret-value";
+    try {
+      // Cookie forces getJwtSecret() so the configured-secret return path runs.
+      const req = new NextRequest("http://localhost/api/wallet");
+      req.cookies.set(SESSION_COOKIE, "not.a.valid.jwt");
+      const res = await proxy(req);
+      expect(res.status).toBe(401);
+    } finally {
+      process.env.AUTH_JWT_SECRET = prev;
+    }
+  });
+
+  it("treats insecure AUTH_JWT_SECRET as invalid session in production", async () => {
+    const prevSecret = process.env.AUTH_JWT_SECRET;
+    const prevEnv = process.env.NODE_ENV;
+    process.env.AUTH_JWT_SECRET = "dev-insecure-secret-change-me";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+    try {
+      // getJwtSecret throws; hasValidSession catches it and returns false → 401.
+      const req = new NextRequest("http://localhost/api/wallet");
+      req.cookies.set(SESSION_COOKIE, "any.token.value");
+      const res = await proxy(req);
+      expect(res.status).toBe(401);
+    } finally {
+      process.env.AUTH_JWT_SECRET = prevSecret;
+      (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+    }
+  });
 });

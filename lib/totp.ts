@@ -17,11 +17,10 @@ function base32Encode(buffer: Buffer): string {
       bits -= 5;
     }
   }
-
+  
   if (bits > 0) {
     output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
   }
-
   return output;
 }
 

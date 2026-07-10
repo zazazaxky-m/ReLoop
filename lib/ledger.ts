@@ -1,6 +1,32 @@
 import type { LedgerEntryType, LedgerStatus, Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 
+/** Human-readable label for RewardLedger.reasonCode (wallet / reports UI). */
+export function ledgerReasonLabel(
+  reasonCode: string | null | undefined,
+  fallback = "Transaksi",
+): string {
+  switch (reasonCode) {
+    case "TRASH_BAG_RETURN":
+      return "Reward trash bag";
+    case "DEPOSIT_ACCEPTED":
+    case "ITEM_ACCEPTED":
+      return "Setoran mesin";
+    case "ANOMALY_REVIEW":
+      return "Setoran ditinjau";
+    case "TOURISM_COMPLIANCE_BONUS":
+      return "Bonus kepatuhan wisata";
+    case "REDEMPTION_SUCCESS":
+    case "REDEMPTION_PROCESSING":
+    case "REDEMPTION_RESERVE":
+      return "Pencairan";
+    case "REDEMPTION_REVERSED":
+      return "Pencairan dibatalkan";
+    default:
+      return reasonCode?.replaceAll("_", " ") || fallback;
+  }
+}
+
 export interface WalletBalance {
   /** Spendable now = earned available − reserved − settled redemptions (signed sum). */
   available: number;

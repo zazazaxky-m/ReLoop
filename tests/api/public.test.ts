@@ -44,6 +44,21 @@ describe('/api/public endpoints', () => {
         where: { visibility: 'PUBLIC', status: 'ACTIVE' }
       }));
     });
+
+    it('defaults missing domains to empty array', async () => {
+      vi.mocked(prisma.campaign.findMany).mockResolvedValue([
+        { id: 'c2', allowedEmailDomainsJson: null, organization: { name: 'Org 2' } }
+      ] as any);
+
+      const res = await getCampaigns(makeReq('http://localhost/api/public/campaigns') as any);
+      const data = await res.json();
+      expect(data.campaigns[0].allowedEmailDomains).toEqual([]);
+    });
+
+    it('returns handled error on failure', async () => {
+      vi.mocked(prisma.campaign.findMany).mockRejectedValue(new Error('db down'));
+      expect((await getCampaigns(makeReq('http://localhost/api/public/campaigns') as any)).status).toBe(500);
+    });
   });
 
   describe('machines', () => {
@@ -75,6 +90,22 @@ describe('/api/public endpoints', () => {
           organizationId: { in: ['org1'] }
         })
       }));
+    });
+
+    it('uses __none__ when PENGEPUL has no partner orgs', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'coll1', role: 'PENGEPUL' } as any);
+      vi.mocked(rbac.activePartnerOrgIds).mockResolvedValue([]);
+      vi.mocked(prisma.machine.findMany).mockResolvedValue([]);
+
+      await getMachines(makeReq('http://localhost/api/public/machines?scope=partners') as any);
+      expect(prisma.machine.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ organizationId: '__none__' }),
+      }));
+    });
+
+    it('returns handled error on machines failure', async () => {
+      vi.mocked(rbac.requireApiUser).mockRejectedValue(new Error('machines boom'));
+      expect((await getMachines(makeReq('http://localhost/api/public/machines') as any)).status).toBe(500);
     });
   });
 

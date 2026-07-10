@@ -270,6 +270,8 @@ enum TravelAgentStatus {
 enum TravelAgentOrgStatus {
   PENDING
   INVITED
+  SUSPENDED
+  REMOVED
 }
 
 enum TravelAgentInviteStatus {
@@ -308,6 +310,8 @@ enum NotificationType {
   REDEMPTION_STATUS
   MACHINE_FULL
   MACHINE_FRAUD
+  TRIP_STATUS
+  TRASH_BAG_REWARD
 }
 
 // ============================================================
@@ -340,6 +344,7 @@ model User {
   collectorPartnerships OrganizationCollectorPartner[] @relation("CollectorPartnerships")
   assignedPickups       PickupRequest[]                @relation("AssignedCollector")
   travelAgentLinks      TravelAgentUser[]
+  trips                 Trip[]
   notifications         Notification[]
   deviceTokens          DeviceToken[]
   passwordResetTokens   PasswordResetToken[]
@@ -896,6 +901,7 @@ model Trip {
   campaignId       String
   campaign         Campaign         @relation(fields: [campaignId], references: [id])
   userId           String?
+  user             User?            @relation(fields: [userId], references: [id])
   travelAgentId    String?
   travelAgent      TravelAgent?     @relation(fields: [travelAgentId], references: [id])
   travelAgentName  String?
@@ -916,6 +922,7 @@ model Trip {
 
   @@index([campaignId])
   @@index([travelAgentId])
+  @@index([userId])
   @@index([complianceStatus])
 }
 

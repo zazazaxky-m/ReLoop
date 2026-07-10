@@ -103,7 +103,8 @@ class _AdminComplianceScreenState extends State<AdminComplianceScreen> {
       final compliantCount = (agent['compliantCount'] as num?)?.toInt() ?? 0;
       final nonCompliantCount =
           (agent['nonCompliantCount'] as num?)?.toInt() ?? 0;
-      final reviewCount = tripCount - compliantCount - nonCompliantCount;
+      // Match web: only explicit NEEDS_REVIEW (not CHECKED_IN / NOT_STARTED).
+      final reviewCount = (agent['reviewCount'] as num?)?.toInt() ?? 0;
       final rate = tripCount > 0
           ? ((compliantCount / tripCount) * 100).round()
           : 0;

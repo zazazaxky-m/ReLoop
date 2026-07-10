@@ -29,6 +29,7 @@ export default async function AdminTripsPage({
       include: {
         campaign: { select: { name: true, rewardMode: true } },
         travelAgent: { select: { id: true, name: true } },
+        user: { select: { id: true, name: true, email: true } },
         _count: { select: { bagAssignments: true, validations: true } },
       },
     }),
@@ -37,9 +38,10 @@ export default async function AdminTripsPage({
       where: {
         organizationId: orgId,
         campaignType: { in: ["TRASH_BAG", "TOURISM_PROGRAM"] },
+        status: "ACTIVE",
       },
       orderBy: { createdAt: "desc" },
-      select: { id: true, name: true },
+      select: { id: true, name: true, campaignType: true, rewardMode: true },
     }),
     prisma.travelAgentOrganization.findMany({
       where: { organizationId: orgId, status: "INVITED" },
@@ -64,6 +66,8 @@ export default async function AdminTripsPage({
     bagCount: t._count.bagAssignments,
     validationCount: t._count.validations,
     hasUser: t.userId != null,
+    rewardUserEmail: t.user?.email ?? null,
+    rewardUserName: t.user?.name ?? null,
   }));
 
   const pageMeta = buildPaginationMeta(total, pagination);

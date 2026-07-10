@@ -9,8 +9,9 @@ Component:
 
 | Endpoint | Peran | Fungsi |
 | --- | --- | --- |
-| `GET /api/mobile/overview` | Semua role | Ringkasan dashboard sesuai role |
-| `GET /api/mobile/map` | Semua role | Mesin berkoordinat dan campaign publik; pengepul dibatasi mitra aktif |
+| `GET /api/mobile/overview` | Semua role | Ringkasan dashboard sesuai role (USER/ADMIN termasuk `tourismSummary`) |
+| `GET /api/mobile/map` | Semua role | Mesin berkoordinat dan campaign publik; pengepul dibatasi mitra aktif (bukan layer trip wisata) |
+| `GET /api/mobile/tourism-pickups` | PENGEPUL | Daftar trip `COMPLETED` siap pickup bank sampah (mitra aktif) |
 | `GET /api/mobile/audit-security` | Superadmin | Audit log, security event, dan ringkasan alert |
 
 Kelompok endpoint existing yang dipakai:
@@ -18,6 +19,8 @@ Kelompok endpoint existing yang dipakai:
 - Auth: `/api/auth/login`, `/register`, `/me`, `/logout`
 - User: `/api/user/dashboard`, `/api/scan`, `/api/sessions/:id`,
   `/api/wallet`, `/api/payout-accounts`, `/api/redemptions`, `/api/trips`
+- Trash bag / wisata: `/api/trips`, `/api/trips/:id`, `/api/trash-bags`,
+  `/api/manual-validations`, `/api/travel-agents`, `/api/travel-agents/:id`
 - Operasional: `/api/machines`, `/api/pickups`, `/api/partnerships`,
   `/api/campaigns`, `/api/waste-types`, `/api/reward-rates`
 - Superadmin: `/api/organizations`, `/api/users`, `/api/regions`,

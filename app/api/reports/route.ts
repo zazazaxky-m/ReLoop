@@ -65,7 +65,10 @@ export async function GET(req: Request) {
         where,
         orderBy: { createdAt: "desc" },
         take: 5000,
-        include: { user: { select: { email: true } } },
+        include: {
+          user: { select: { email: true } },
+          campaign: { select: { name: true, campaignType: true } },
+        },
       });
       const csv = toCsv(
         rows.map((r) => ({
@@ -75,6 +78,10 @@ export async function GET(req: Request) {
           jumlah: r.amount,
           status: r.status,
           alasan: r.reasonCode ?? "",
+          referensiTipe: r.referenceType ?? "",
+          referensiId: r.referenceId ?? "",
+          campaign: r.campaign?.name ?? "",
+          campaignTipe: r.campaign?.campaignType ?? "",
         })),
         [
           { key: "tanggal", header: "Tanggal" },
@@ -83,6 +90,10 @@ export async function GET(req: Request) {
           { key: "jumlah", header: "Jumlah (Rp)" },
           { key: "status", header: "Status" },
           { key: "alasan", header: "Alasan" },
+          { key: "referensiTipe", header: "Referensi Tipe" },
+          { key: "referensiId", header: "Referensi ID" },
+          { key: "campaign", header: "Campaign" },
+          { key: "campaignTipe", header: "Tipe Campaign" },
         ],
       );
       return csvResponse(csv, `rewards-${stamp}.csv`);
@@ -121,7 +132,63 @@ export async function GET(req: Request) {
       return csvResponse(csv, `pickups-${stamp}.csv`);
     }
 
-    return jsonError(422, "type tidak dikenal (deposits|rewards|pickups)");
+    if (type === "trips") {
+      const where: Prisma.TripWhereInput = orgId
+        ? { campaign: { organizationId: orgId } }
+        : {};
+      const rows = await prisma.trip.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: 5000,
+        include: {
+          campaign: { select: { name: true, campaignType: true, rewardMode: true } },
+          travelAgent: { select: { name: true, email: true } },
+          user: { select: { email: true } },
+          _count: { select: { bagAssignments: true, validations: true } },
+        },
+      });
+      const csv = toCsv(
+        rows.map((r) => ({
+          tanggal: ymd(r.createdAt),
+          tripId: r.id,
+          grup: r.groupName ?? "",
+          campaign: r.campaign.name,
+          campaignTipe: r.campaign.campaignType,
+          rewardMode: r.campaign.rewardMode,
+          travelAgent: r.travelAgent?.name ?? r.travelAgentName ?? "",
+          penerimaReward: r.user?.email ?? "",
+          status: r.status,
+          compliance: r.complianceStatus,
+          skor: r.complianceScore,
+          peserta: r.participantCount,
+          kantong: r._count.bagAssignments,
+          validasi: r._count.validations,
+          checkIn: r.checkInAt ? ymd(r.checkInAt) : "",
+          checkOut: r.checkOutAt ? ymd(r.checkOutAt) : "",
+        })),
+        [
+          { key: "tanggal", header: "Tanggal" },
+          { key: "tripId", header: "Trip ID" },
+          { key: "grup", header: "Grup" },
+          { key: "campaign", header: "Campaign" },
+          { key: "campaignTipe", header: "Tipe Campaign" },
+          { key: "rewardMode", header: "Mode Reward" },
+          { key: "travelAgent", header: "Travel Agent" },
+          { key: "penerimaReward", header: "Penerima Reward" },
+          { key: "status", header: "Status Trip" },
+          { key: "compliance", header: "Compliance" },
+          { key: "skor", header: "Skor" },
+          { key: "peserta", header: "Peserta" },
+          { key: "kantong", header: "Kantong" },
+          { key: "validasi", header: "Validasi" },
+          { key: "checkIn", header: "Check-in" },
+          { key: "checkOut", header: "Check-out" },
+        ],
+      );
+      return csvResponse(csv, `trips-${stamp}.csv`);
+    }
+
+    return jsonError(422, "type tidak dikenal (deposits|rewards|pickups|trips)");
   } catch (error) {
     return handleApiError(error);
   }

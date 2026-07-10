@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ManualTransferProvider, MockPayoutProvider, LinkAjaProvider } from "@/lib/payout";
+import { ManualTransferProvider, MockPayoutProvider, LinkAjaProvider, getPayoutProvider } from "@/lib/payout";
 
 describe("payout providers", () => {
   it("manual transfer provider succeeds with note", async () => {
@@ -32,5 +32,19 @@ describe("payout providers", () => {
     });
     expect(r.success).toBe(false);
     expect(r.message).toMatch(/TBD/i);
+  });
+
+  it("getPayoutProvider returns correct provider", () => {
+    expect(getPayoutProvider("MANUAL_TRANSFER")).toBeInstanceOf(ManualTransferProvider);
+    expect(getPayoutProvider("MOCK")).toBeInstanceOf(MockPayoutProvider);
+    expect(getPayoutProvider("LINKAJA")).toBeInstanceOf(LinkAjaProvider);
+  });
+
+  it("getPayoutProvider defaults to MANUAL_TRANSFER", () => {
+    expect(getPayoutProvider()).toBeInstanceOf(ManualTransferProvider);
+  });
+
+  it("getPayoutProvider falls back to MANUAL_TRANSFER on unknown", () => {
+    expect(getPayoutProvider("UNKNOWN" as any)).toBeInstanceOf(ManualTransferProvider);
   });
 });

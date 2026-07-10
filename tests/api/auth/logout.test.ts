@@ -14,4 +14,10 @@ describe('POST /api/auth/logout', () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
   });
+
+  it('returns handled error when clearing the session fails', async () => {
+    vi.mocked(auth.clearSessionCookie).mockRejectedValueOnce(new Error('cookie clear failed'));
+    const res = await POST();
+    expect(res.status).toBe(500);
+  });
 });

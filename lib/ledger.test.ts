@@ -6,6 +6,9 @@ import {
   createRedeemReserve, 
   settleRedeemLedger,
   assertAppendOnlyPolicy,
+  ledgerReasonLabel,
+  getReconciliationReport,
+  getLedgerHistory,
   type LedgerGroup 
 } from './ledger';
 import { prisma } from './prisma';
@@ -18,13 +21,31 @@ vi.mock('./prisma', () => ({
       create: vi.fn(), 
       update: vi.fn(),
       findMany: vi.fn(),
-    }
+    },
+    redemption: { groupBy: vi.fn() },
+    organization: { findMany: vi.fn() },
   }
 }));
 
 describe('lib/ledger', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('ledgerReasonLabel', () => {
+    it('labels trash bag and deposit reasons', () => {
+      expect(ledgerReasonLabel('TRASH_BAG_RETURN')).toBe('Reward trash bag');
+      expect(ledgerReasonLabel('DEPOSIT_ACCEPTED')).toBe('Setoran mesin');
+      expect(ledgerReasonLabel('ITEM_ACCEPTED')).toBe('Setoran mesin');
+      expect(ledgerReasonLabel('ANOMALY_REVIEW')).toBe('Setoran ditinjau');
+      expect(ledgerReasonLabel('TOURISM_COMPLIANCE_BONUS')).toBe('Bonus kepatuhan wisata');
+      expect(ledgerReasonLabel('REDEMPTION_PROCESSING')).toBe('Pencairan');
+      expect(ledgerReasonLabel('REDEMPTION_RESERVE')).toBe('Pencairan');
+      expect(ledgerReasonLabel('REDEMPTION_REVERSED')).toBe('Pencairan dibatalkan');
+      expect(ledgerReasonLabel('FOO_BAR')).toBe('FOO BAR');
+      expect(ledgerReasonLabel(null, 'EARN')).toBe('EARN');
+      expect(ledgerReasonLabel(undefined)).toBe('Transaksi');
+    });
   });
 
   describe('computeBalance', () => {
@@ -37,6 +58,20 @@ describe('lib/ledger', () => {
       expect(b.available).toBe(12500);
       expect(b.pending).toBe(200);
       expect(b.totalEarned).toBe(12700);
+    });
+
+    it('treats null amount as 0', () => {
+      const b = computeBalance([
+        { entryType: 'EARN', status: 'AVAILABLE', amount: null as any },
+      ]);
+      expect(b.available).toBe(0);
+    });
+
+    it('treats undefined amount as 0', () => {
+      const b = computeBalance([
+        { entryType: 'EARN', status: 'AVAILABLE', amount: undefined as any },
+      ]);
+      expect(b.available).toBe(0);
     });
 
     it('reserves available on a pending redemption', () => {
@@ -100,6 +135,24 @@ describe('lib/ledger', () => {
         where: { userId: 'user1' },
         _sum: { amount: true },
       });
+    });
+
+    it('treats null group sum as 0', async () => {
+      vi.mocked(prisma.rewardLedger.groupBy).mockResolvedValue([
+        { entryType: 'EARN', status: 'AVAILABLE', _sum: { amount: null } },
+      ] as any);
+      const bal = await getWalletBalance('user1');
+      expect(bal.available).toBe(0);
+    });
+  });
+
+  describe('getLedgerHistory', () => {
+    it('defaults take to 50 when options.take omitted', async () => {
+      vi.mocked(prisma.rewardLedger.findMany).mockResolvedValue([]);
+      await getLedgerHistory('u1', { skip: 0 });
+      expect(prisma.rewardLedger.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 0, take: 50 }),
+      );
     });
   });
 
@@ -204,6 +257,47 @@ describe('lib/ledger', () => {
   describe('assertAppendOnlyPolicy', () => {
     it('throws error', () => {
       expect(() => assertAppendOnlyPolicy('update')).toThrowError('append-only');
+    });
+  });
+
+  describe('getReconciliationReport', () => {
+    it('aggregates org liability and payout reconciliation with null sums', async () => {
+      vi.mocked(prisma.rewardLedger.groupBy)
+        .mockResolvedValueOnce([
+          { organizationId: 'org1', status: 'AVAILABLE', _sum: { amount: 100 } },
+          { organizationId: 'org1', status: 'PENDING', _sum: { amount: 20 } },
+          { organizationId: null, status: 'AVAILABLE', _sum: { amount: null } },
+          { organizationId: 'gone', status: 'AVAILABLE', _sum: { amount: 5 } },
+        ] as any)
+        .mockResolvedValueOnce([
+          { organizationId: 'org1', status: 'AVAILABLE', _sum: { amount: -10 } },
+          { organizationId: 'org1', status: 'PENDING', _sum: { amount: null } },
+          { organizationId: 'org1', status: 'REDEEMED', _sum: { amount: 1 } },
+        ] as any)
+        .mockResolvedValueOnce([
+          { status: 'REDEEMED', _sum: { amount: -50 } },
+          { status: 'PENDING', _sum: { amount: null } },
+          { status: 'AVAILABLE', _sum: { amount: -1 } },
+        ] as any);
+      vi.mocked(prisma.redemption.groupBy).mockResolvedValue([
+        { status: 'SUCCESS', _sum: { amount: 40 } },
+        { status: 'REQUESTED', _sum: { amount: 5 } },
+        { status: 'APPROVED', _sum: { amount: null } },
+        { status: 'FAILED', _sum: { amount: 9 } },
+      ] as any);
+      vi.mocked(prisma.organization.findMany).mockResolvedValue([
+        { id: 'org1', name: 'Org One' },
+      ] as any);
+
+      const report = await getReconciliationReport();
+      expect(report.organizations.some((o) => o.organizationName === 'Org One')).toBe(true);
+      expect(report.organizations.some((o) => o.organizationName === 'Tanpa organisasi')).toBe(true);
+      expect(report.organizations.some((o) => o.organizationName === '(organisasi dihapus)')).toBe(true);
+      expect(report.ledgerRedeemed).toBe(50);
+      expect(report.ledgerReserved).toBe(0);
+      expect(report.redemptionSuccessTotal).toBe(40);
+      expect(report.redemptionInFlightTotal).toBe(5);
+      expect(report.hasDiscrepancy).toBe(true);
     });
   });
 });

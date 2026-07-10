@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toCsv } from "@/lib/csv";
-import { isRewardableCondition, generateBagQrCode } from "@/lib/trip";
+import { isRewardableCondition, generateBagQrCode, computeTrashBagRewardAmount, requiresTravelAgent, canManuallySetTripStatus, canValidateTripStage } from "@/lib/trip";
 
 describe("toCsv", () => {
   it("emits a header and rows", () => {
@@ -41,5 +41,49 @@ describe("trash bag helpers", () => {
     const b = generateBagQrCode();
     expect(a).toMatch(/^BAG-[0-9A-F]{12}$/);
     expect(a).not.toBe(b);
+  });
+
+  it("requires travel agent only for tourism programs", () => {
+    expect(requiresTravelAgent("TOURISM_PROGRAM")).toBe(true);
+    expect(requiresTravelAgent("TRASH_BAG")).toBe(false);
+    expect(requiresTravelAgent("MACHINE_DEPOSIT")).toBe(false);
+  });
+
+  it("applies campaign multiplier and compliance to trash bag reward", () => {
+    expect(
+      computeTrashBagRewardAmount({
+        rewardableBagCount: 2,
+        complianceScore: 100,
+        rewardMultiplier: 1,
+      }),
+    ).toBe(4000);
+    expect(
+      computeTrashBagRewardAmount({
+        rewardableBagCount: 2,
+        complianceScore: 50,
+        rewardMultiplier: 1.5,
+      }),
+    ).toBe(3000);
+    expect(
+      computeTrashBagRewardAmount({
+        rewardableBagCount: 0,
+        complianceScore: 100,
+      }),
+    ).toBe(0);
+  });
+
+  it("guards manual trip status transitions", () => {
+    expect(canManuallySetTripStatus("PLANNED", "CANCELLED").ok).toBe(true);
+    expect(canManuallySetTripStatus("CANCELLED", "PLANNED").ok).toBe(true);
+    expect(canManuallySetTripStatus("PLANNED", "COMPLETED").ok).toBe(false);
+    expect(canManuallySetTripStatus("ACTIVE", "COMPLETED").ok).toBe(false);
+  });
+
+  it("guards validation stages against trip status", () => {
+    expect(canValidateTripStage("PLANNED", "CHECK_IN").ok).toBe(true);
+    expect(canValidateTripStage("PLANNED", "CHECK_OUT").ok).toBe(false);
+    expect(canValidateTripStage("ACTIVE", "CHECK_OUT").ok).toBe(true);
+    expect(canValidateTripStage("COMPLETED", "CHECK_OUT").ok).toBe(false);
+    expect(canValidateTripStage("COMPLETED", "BANK_SAMPAH_PICKUP").ok).toBe(true);
   });
 });

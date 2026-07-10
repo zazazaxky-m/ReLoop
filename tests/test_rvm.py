@@ -8,6 +8,13 @@ import time
 import unittest
 from pathlib import Path
 
+try:
+    import cv2  # noqa: F401
+    import numpy  # noqa: F401
+    HAVE_CV2 = True
+except ImportError:
+    HAVE_CV2 = False
+
 from rvm.camera import CameraWorker
 from rvm.config import RvmConfig
 from rvm.controller import MachineState, RvmController, SIMULATION_SCENARIOS
@@ -30,6 +37,7 @@ class DatabaseTest(unittest.TestCase):
 
 
 class CameraEvidenceTest(unittest.TestCase):
+    @unittest.skipUnless(HAVE_CV2, "opencv + numpy not installed")
     def test_capture_saves_scene_face_crop_and_durable_queue(self):
         import cv2
         import numpy as np
@@ -68,6 +76,35 @@ class CameraEvidenceTest(unittest.TestCase):
             db.mark_capture_sent(pending[0]["db_id"])
             self.assertEqual(db.capture_queue_depth(), 0)
             db.close()
+
+
+class CameraDisabledTest(unittest.TestCase):
+    def test_disabled_camera_does_not_capture(self):
+        worker = CameraWorker(
+            False, 0, "unused", 18.0, 25.0, "", ["unknown"], 224,
+            lambda *_a: None,
+        )
+        self.assertIsNone(
+            worker.capture_evidence("SESSION_START", "SESSION_ACTIVATED", "s")
+        )
+        self.assertEqual(
+            worker.classify(),
+            {"detectedType": "unknown", "confidence": 0.0, "reason": "CAMERA_DISABLED"},
+        )
+
+    def test_detect_returns_empty_without_cv2(self):
+        worker = CameraWorker(
+            True, 0, "unused", 18.0, 25.0, "", ["unknown"], 224,
+            lambda *_a: None,
+        )
+        self.assertEqual(worker._detect(None), ([], False))
+
+    def test_cleanup_is_safe_without_evidence_dir(self):
+        worker = CameraWorker(
+            True, 0, "nonexistent-evidence", 18.0, 25.0, "", ["unknown"], 224,
+            lambda *_a: None,
+        )
+        self.assertIsNone(worker.cleanup_old_captures())
 
 
 class MediaSyncTest(unittest.TestCase):

@@ -77,11 +77,16 @@ class AnalyticsService {
     );
   }
 
-  Future<void> trackTrashBagSubmit(String wasteType) {
+  Future<void> trackTrashBagIssue(String wasteType) {
     return logEvent(
-      name: 'submit_trash_bag',
+      name: 'admin_bag_issue',
       parameters: {'waste_type': wasteType},
     );
+  }
+
+  @Deprecated('Use trackTrashBagIssue for admin bag issuance')
+  Future<void> trackTrashBagSubmit(String wasteType) {
+    return trackTrashBagIssue(wasteType);
   }
 
   Future<void> trackPickupAction(String status) {

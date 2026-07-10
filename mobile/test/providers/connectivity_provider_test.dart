@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:reloop_mobile/providers/connectivity_provider.dart';
 
 void main() {
@@ -12,12 +13,13 @@ void main() {
   
   group('ConnectivityProvider', () {
     test('Can be instantiated', () {
-      try {
-        final provider = ConnectivityProvider();
-        expect(provider.isOnline, isTrue); // Default awal adalah true sebelum check selesai
-      } catch (e) {
-        // Abaikan MissingPluginException saat test berjalan di headless environment
-      }
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('dev.fluttercommunity.plus/connectivity'),
+        (MethodCall methodCall) async => ['wifi'],
+      );
+
+      final provider = ConnectivityProvider();
+      expect(provider.isOnline, isTrue);
     });
   });
 }

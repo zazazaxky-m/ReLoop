@@ -512,6 +512,14 @@ class _WalletScreenState extends State<WalletScreen> {
                                           color: context.reloopMutedSoft,
                                           fontSize: 12,
                                         ),
+                                      )
+                                    else
+                                      Text(
+                                        entry.displayLabel,
+                                        style: TextStyle(
+                                          color: context.reloopMutedSoft,
+                                          fontSize: 12,
+                                        ),
                                       ),
                                     if (entry.complianceMultiplier != null && entry.complianceMultiplier! < 1.0)
                                       Padding(

@@ -51,6 +51,11 @@ describe('Payout Accounts API', () => {
         })
       );
     });
+
+    it('returns handled error on GET failure', async () => {
+      vi.mocked(rbac.requireApiUser).mockRejectedValue(new Error('get boom'));
+      expect((await GET()).status).toBe(500);
+    });
   });
 
   describe('POST', () => {

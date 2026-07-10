@@ -1,6 +1,11 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
+import '../../services/analytics_service.dart';
+import '../../shared/widgets/bag_qr_scanner.dart';
 import '../../shared/widgets/reloop_card.dart';
 import '../../shared/widgets/reloop_button.dart';
 import '../../shared/widgets/status_badge.dart';
@@ -79,6 +84,12 @@ class _AdminTripsScreenState extends State<AdminTripsScreen> {
   Future<void> _createTrip() async {
     String? campaignId;
     String? travelAgentId;
+    final tripCampaigns = _campaigns.where((c) {
+      final item = c as Map<String, dynamic>;
+      final type = item['campaignType'] as String? ?? '';
+      final status = item['status'] as String? ?? '';
+      return (type == 'TRASH_BAG' || type == 'TOURISM_PROGRAM') && status == 'ACTIVE';
+    }).toList();
     final invitedTravelAgents = _travelAgents.where((agent) {
       final a = agent as Map<String, dynamic>;
       return (a['organizationStatus'] as String? ?? 'PENDING') == 'INVITED';
@@ -86,134 +97,167 @@ class _AdminTripsScreenState extends State<AdminTripsScreen> {
     final groupCtrl = TextEditingController();
     final leaderCtrl = TextEditingController();
     final contactCtrl = TextEditingController();
-    final agentCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
     final countCtrl = TextEditingController(text: '1');
+
+    if (tripCampaigns.isEmpty) {
+      _showError(
+        'Belum ada campaign ACTIVE tipe Trash Bag / Program Wisata. Aktifkan campaign dulu.',
+      );
+      return;
+    }
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          title: Text('Buat Trip Baru'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: campaignId,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Campaign'),
-                  items: [
-                    _ddNull('Pilih campaign...'),
-                    ..._campaigns.map(
-                      (c) => DropdownMenuItem(
-                        value: c['id'] as String? ?? '',
-                        child: Text((c['name'] as String?) ?? ''),
-                      ),
+        builder: (ctx, setSt) {
+          final selected = tripCampaigns.cast<Map<String, dynamic>>().where((c) => c['id'] == campaignId).firstOrNull;
+          final agentRequired = (selected?['campaignType'] as String?) == 'TOURISM_PROGRAM';
+          final moneyReward = (selected?['rewardMode'] as String?) == 'MONEY_REWARD';
+          return AlertDialog(
+            title: Text('Buat Trip Baru'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: campaignId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Campaign',
+                      helperText: 'Hanya campaign ACTIVE Trash Bag / Wisata',
                     ),
-                  ],
-                  onChanged: (v) => setSt(() => campaignId = v),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: travelAgentId,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Travel Agent'),
-                  items: [
-                    _ddNull('Tanpa travel agent'),
-                    ...invitedTravelAgents.map((agent) {
-                      final a = agent as Map<String, dynamic>;
-                      final orgStatus =
-                          a['organizationStatus'] as String? ?? 'PENDING';
-                      return DropdownMenuItem(
-                        value: a['id'] as String? ?? '',
-                        child: Text(
-                          '${a['name'] ?? '-'} (${_travelAgentStatusLabel(orgStatus)})',
-                        ),
-                      );
+                    items: [
+                      _ddNull('Pilih campaign...'),
+                      ...tripCampaigns.map(
+                        (c) {
+                          final item = c as Map<String, dynamic>;
+                          final type = item['campaignType'] as String? ?? '';
+                          return DropdownMenuItem(
+                            value: item['id'] as String? ?? '',
+                            child: Text(
+                              '${item['name'] ?? '-'}${type == 'TOURISM_PROGRAM' ? ' · Wisata' : ' · Trash Bag'}',
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                    onChanged: (v) => setSt(() {
+                      campaignId = v;
+                      travelAgentId = null;
                     }),
-                  ],
-                  onChanged: (v) => setSt(() => travelAgentId = v),
-                ),
-                if (invitedTravelAgents.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Belum ada travel agent berstatus invited.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.reloopMutedSoft,
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: travelAgentId,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: 'Travel Agent',
+                      helperText: agentRequired
+                          ? 'Wajib untuk Program Wisata'
+                          : 'Opsional untuk Trash Bag',
+                    ),
+                    items: [
+                      _ddNull(agentRequired ? 'Pilih travel agent...' : 'Tanpa travel agent'),
+                      ...invitedTravelAgents.map((agent) {
+                        final a = agent as Map<String, dynamic>;
+                        return DropdownMenuItem(
+                          value: a['id'] as String? ?? '',
+                          child: Text('${a['name'] ?? '-'} (Terhubung)'),
+                        );
+                      }),
+                    ],
+                    onChanged: (v) => setSt(() => travelAgentId = v),
+                  ),
+                  if (agentRequired && invitedTravelAgents.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Belum ada travel agent berstatus invited.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: context.reloopMutedSoft,
+                          ),
                         ),
                       ),
                     ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: groupCtrl,
+                    decoration: const InputDecoration(labelText: 'Nama Grup'),
                   ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: groupCtrl,
-                  decoration: const InputDecoration(labelText: 'Nama Grup'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: leaderCtrl,
-                  decoration: const InputDecoration(labelText: 'Nama Ketua'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: contactCtrl,
-                  decoration: const InputDecoration(labelText: 'Kontak Ketua'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: agentCtrl,
-                  decoration: InputDecoration(
-                    labelText: travelAgentId == null
-                        ? 'Nama Travel Agent Manual'
-                        : 'Nama Travel Agent Manual',
-                    helperText: travelAgentId == null
-                        ? 'Opsional bila agen belum ada di daftar'
-                        : 'Kosongkan agar nama mengikuti agen terpilih',
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: leaderCtrl,
+                    decoration: const InputDecoration(labelText: 'Nama Ketua'),
                   ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: countCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Jumlah Peserta',
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: contactCtrl,
+                    decoration: const InputDecoration(labelText: 'Kontak Ketua'),
                   ),
-                  keyboardType: TextInputType.number,
-                ),
-              ],
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: emailCtrl,
+                    decoration: InputDecoration(
+                      labelText: moneyReward
+                          ? 'Email User Penerima Reward'
+                          : 'Email User (opsional)',
+                      helperText: moneyReward
+                          ? 'Wajib untuk campaign reward uang'
+                          : 'Opsional (campaign compliance-only)',
+                    ),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: countCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Jumlah Peserta',
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('Batal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, {
-                'campaignId': campaignId,
-                'travelAgentId': travelAgentId,
-                'groupName': groupCtrl.text.trim().isEmpty
-                    ? null
-                    : groupCtrl.text.trim(),
-                'leaderName': leaderCtrl.text.trim().isEmpty
-                    ? null
-                    : leaderCtrl.text.trim(),
-                'leaderContact': contactCtrl.text.trim().isEmpty
-                    ? null
-                    : contactCtrl.text.trim(),
-                'travelAgentName':
-                    travelAgentId == null && agentCtrl.text.trim().isNotEmpty
-                    ? agentCtrl.text.trim()
-                    : null,
-                'participantCount': int.tryParse(countCtrl.text) ?? 1,
-              }),
-              child: Text('Buat'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text('Batal'),
+              ),
+              TextButton(
+                onPressed: () {
+                  if (campaignId == null) return;
+                  if (agentRequired && (travelAgentId == null || travelAgentId!.isEmpty)) {
+                    return;
+                  }
+                  if (moneyReward && emailCtrl.text.trim().isEmpty) {
+                    return;
+                  }
+                  Navigator.pop(ctx, {
+                    'campaignId': campaignId,
+                    'travelAgentId': travelAgentId,
+                    'groupName': groupCtrl.text.trim().isEmpty
+                        ? null
+                        : groupCtrl.text.trim(),
+                    'leaderName': leaderCtrl.text.trim().isEmpty
+                        ? null
+                        : leaderCtrl.text.trim(),
+                    'leaderContact': contactCtrl.text.trim().isEmpty
+                        ? null
+                        : contactCtrl.text.trim(),
+                    if (emailCtrl.text.trim().isNotEmpty)
+                      'userEmail': emailCtrl.text.trim(),
+                    'participantCount': int.tryParse(countCtrl.text) ?? 1,
+                  });
+                },
+                child: Text('Buat'),
+              ),
+            ],
+          );
+        },
       ),
     );
     if (result == null || result['campaignId'] == null || !mounted) return;
@@ -242,8 +286,10 @@ class _AdminTripsScreenState extends State<AdminTripsScreen> {
                   controller: countCtrl,
                   decoration: const InputDecoration(
                     labelText: 'Jumlah kantong',
+                    helperText: 'Maksimal 200',
                   ),
                   keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
@@ -271,10 +317,19 @@ class _AdminTripsScreenState extends State<AdminTripsScreen> {
               child: Text('Batal'),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(ctx, {
-                'bagCount': int.tryParse(countCtrl.text) ?? 0,
-                'wasteTypeId': wasteTypeId,
-              }),
+              onPressed: () {
+                final count = int.tryParse(countCtrl.text) ?? 0;
+                if (count < 1 || count > 200) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Jumlah harus 1–200')),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx, {
+                  'bagCount': count,
+                  'wasteTypeId': wasteTypeId,
+                });
+              },
               child: Text('Bagikan'),
             ),
           ],
@@ -295,134 +350,454 @@ class _AdminTripsScreenState extends State<AdminTripsScreen> {
         },
       );
       final data = res.data as Map<String, dynamic>;
-      final bagCount = (data['bags'] as List?)?.length ?? 0;
+      final bags = (data['bags'] as List?)?.cast<dynamic>() ?? [];
+      final wasteTypeName = _wasteTypes
+          .cast<Map<String, dynamic>>()
+          .where((wt) => wt['id'] == result?['wasteTypeId'])
+          .map((wt) => wt['name'] as String?)
+          .firstOrNull;
+      await AnalyticsService().trackTrashBagIssue(
+        wasteTypeName ?? 'unspecified',
+      );
       await _load();
-      _showSuccess('$bagCount kantong berhasil dibuat');
+      if (!mounted) return;
+      _showSuccess('${bags.length} kantong berhasil dibuat');
+      await _showBagCodesDialog(bags);
     } catch (e) {
       if (mounted) _showError(ApiClient.getErrorMessage(e));
     }
   }
 
-  Future<void> _validateBag(String tripId) async {
-    final qrCtrl = TextEditingController();
-    String stage = 'CHECK_OUT';
-    String condition = 'GOOD';
-    bool appCompleted = false;
-    final returnedCtrl = TextEditingController(text: '0');
-    final weightCtrl = TextEditingController();
+  Future<void> _viewBags(String tripId) async {
+    try {
+      final api = context.read<ApiClient>();
+      final res = await api.get('/api/trash-bags', queryParameters: {
+        'tripId': tripId,
+      });
+      final data = res.data as Map<String, dynamic>;
+      final bags = (data['bags'] as List?)?.cast<dynamic>() ?? [];
+      if (!mounted) return;
+      if (bags.isEmpty) {
+        _showError('Belum ada kantong untuk trip ini');
+        return;
+      }
+      await _showBagCodesDialog(bags);
+    } catch (e) {
+      if (mounted) _showError(ApiClient.getErrorMessage(e));
+    }
+  }
+
+  Future<void> _openPrintPage(String tripId) async {
+    final base = ApiClient.baseUrl.replaceFirst(RegExp(r'/+$'), '');
+    final uri = Uri.parse('$base/print/trips/$tripId');
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        _showError('Tidak bisa membuka halaman cetak');
+      }
+    } catch (e) {
+      if (mounted) _showError('Gagal membuka cetak: $e');
+    }
+  }
+
+  Future<void> _showBagCodesDialog(List<dynamic> bags) async {
+    final codes = bags
+        .map((b) {
+          final bag = b as Map<String, dynamic>;
+          return (bag['bagQrCode'] as String?) ?? '';
+        })
+        .where((c) => c.isNotEmpty)
+        .toList();
+    if (codes.isEmpty || !mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Kode QR Kantong (${codes.length})'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Salin atau bagikan kode berikut untuk dicetak / ditempel di kantong fisik.',
+                style: TextStyle(fontSize: 12, color: context.reloopMuted),
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 280),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: bags.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final bag = bags[i] as Map<String, dynamic>;
+                    final code = (bag['bagQrCode'] as String?) ?? '-';
+                    final waste =
+                        (bag['wasteType'] as Map<String, dynamic>?)?['name']
+                            as String?;
+                    final status = bag['status'] as String?;
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        code,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      subtitle: Text(
+                        [
+                          if (waste != null && waste.isNotEmpty) waste,
+                          if (status != null) _bagStatusLabel(status),
+                          if (status == null) 'Belum divalidasi',
+                        ].join(' · '),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.reloopMutedSoft,
+                        ),
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Salin',
+                        icon: const Icon(Icons.copy, size: 18),
+                        onPressed: () async {
+                          await Clipboard.setData(ClipboardData(text: code));
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(
+                                content: Text('Disalin: $code'),
+                                backgroundColor: ReLoopColors.success,
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(
+                ClipboardData(text: codes.join('\n')),
+              );
+              if (ctx.mounted) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(
+                    content: Text('${codes.length} kode disalin'),
+                    backgroundColor: ReLoopColors.success,
+                  ),
+                );
+              }
+            },
+            child: Text('Salin Semua'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await Share.share(
+                'Kode QR Trash Bag ReLoop:\n${codes.join('\n')}',
+                subject: 'Kode QR Trash Bag',
+              );
+            },
+            child: Text('Bagikan'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Tutup'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _bagStatusLabel(String status) {
+    switch (status) {
+      case 'GOOD':
+        return 'Baik';
+      case 'PARTIAL':
+        return 'Sebagian';
+      case 'POOR':
+        return 'Rusak';
+      case 'NOT_RETURNED':
+        return 'Tidak dikembalikan';
+      default:
+        return status;
+    }
+  }
+
+  Future<void> _scanAndValidate({String? tripId}) async {
+    final scanned = await scanBagQrCode(context);
+    if (scanned == null || !mounted) return;
+
+    String? resolvedTripId = tripId;
+    if (resolvedTripId == null) {
+      try {
+        final api = context.read<ApiClient>();
+        final res = await api.get(
+          '/api/trash-bags',
+          queryParameters: {'qrCode': scanned},
+        );
+        final data = res.data as Map<String, dynamic>;
+        final bags = (data['bags'] as List?)?.cast<dynamic>() ?? [];
+        if (bags.isEmpty) {
+          _showError('QR kantong tidak ditemukan');
+          return;
+        }
+        resolvedTripId =
+            (bags.first as Map<String, dynamic>)['tripId'] as String?;
+        if (resolvedTripId == null || resolvedTripId.isEmpty) {
+          _showError('Trip untuk kantong ini tidak ditemukan');
+          return;
+        }
+      } catch (e) {
+        if (mounted) _showError(ApiClient.getErrorMessage(e));
+        return;
+      }
+    }
+
+    await _validateBag(resolvedTripId, prefillQr: scanned);
+  }
+
+  Future<void> _cancelTrip(String tripId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Batalkan Trip?'),
+        content: Text(
+          'Trip yang dibatalkan tidak bisa divalidasi atau diterbitkan kantong baru.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Tidak')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Batalkan', style: TextStyle(color: ReLoopColors.danger)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    try {
+      await context.read<ApiClient>().patch(
+        '/api/trips/$tripId',
+        data: {'status': 'CANCELLED'},
+      );
+      await _load();
+      _showSuccess('Trip dibatalkan');
+    } catch (e) {
+      if (mounted) _showError(ApiClient.getErrorMessage(e));
+    }
+  }
+
+  Future<void> _reopenTrip(String tripId) async {
+    try {
+      await context.read<ApiClient>().patch(
+        '/api/trips/$tripId',
+        data: {'status': 'PLANNED'},
+      );
+      await _load();
+      _showSuccess('Trip dibuka ulang');
+    } catch (e) {
+      if (mounted) _showError(ApiClient.getErrorMessage(e));
+    }
+  }
+
+  Future<void> _validateBag(String tripId, {String? prefillQr}) async {
+    List<Map<String, dynamic>> bags = [];
+    try {
+      final api = context.read<ApiClient>();
+      final res = await api.get(
+        '/api/trash-bags',
+        queryParameters: {'tripId': tripId},
+      );
+      final data = res.data as Map<String, dynamic>;
+      bags = ((data['bags'] as List?) ?? [])
+          .cast<dynamic>()
+          .map((b) {
+            final bag = Map<String, dynamic>.from(b as Map);
+            if (prefillQr != null && bag['bagQrCode'] == prefillQr) {
+              bag['status'] = bag['status'] ?? 'GOOD';
+            }
+            return bag;
+          })
+          .toList();
+    } catch (e) {
+      if (mounted) _showError(ApiClient.getErrorMessage(e));
+      return;
+    }
+    if (!mounted) return;
+
+    // Prefer CHECK_IN when trip still PLANNED; otherwise CHECK_OUT.
+    Map<String, dynamic>? tripMap;
+    for (final t in _trips) {
+      final m = t as Map<String, dynamic>;
+      if (m['id'] == tripId) {
+        tripMap = m;
+        break;
+      }
+    }
+    final tripStatus = tripMap?['status'] as String? ?? 'ACTIVE';
+    String stage = tripStatus == 'PLANNED' ? 'CHECK_IN' : 'CHECK_OUT';
+    bool appCompleted = true;
     final noteCtrl = TextEditingController();
+    final weightCtrl = TextEditingController();
+    final bagStatuses = <String, String>{
+      for (final b in bags)
+        (b['id'] as String): (b['status'] as String?) ?? 'NOT_RETURNED',
+    };
+    if (prefillQr != null) {
+      for (final b in bags) {
+        if (b['bagQrCode'] == prefillQr) {
+          bagStatuses[b['id'] as String] = (b['status'] as String?) ?? 'GOOD';
+        }
+      }
+    }
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
-          title: Text('Validasi Kantong'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: stage,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Tahap Validasi',
+          title: Text('Validasi Trip'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: stage,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Tahap Validasi'),
+                    items: const [
+                      DropdownMenuItem(value: 'CHECK_IN', child: Text('Check In')),
+                      DropdownMenuItem(value: 'CHECK_OUT', child: Text('Check Out')),
+                    ],
+                    onChanged: (v) => setSt(() => stage = v ?? 'CHECK_OUT'),
                   ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'CHECK_IN',
-                      child: Text('Check In'),
+                  const SizedBox(height: 10),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('Proses aplikasi selesai'),
+                    value: appCompleted,
+                    onChanged: (value) => setSt(() => appCompleted = value),
+                  ),
+                  if (stage == 'CHECK_OUT') ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        bags.isEmpty
+                            ? 'Belum ada kantong. Terbitkan dulu sebelum check-out.'
+                            : 'Kondisi per kantong (${bags.length})',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: context.reloopForeground,
+                        ),
+                      ),
                     ),
-                    DropdownMenuItem(
-                      value: 'CHECK_OUT',
-                      child: Text('Check Out'),
+                    const SizedBox(height: 8),
+                    ...bags.map((bag) {
+                      final id = bag['id'] as String;
+                      final code = (bag['bagQrCode'] as String?) ?? '-';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                code,
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 140,
+                              child: DropdownButtonFormField<String>(
+                                initialValue: bagStatuses[id] ?? 'NOT_RETURNED',
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 8,
+                                  ),
+                                ),
+                                items: const [
+                                  DropdownMenuItem(value: 'GOOD', child: Text('Baik')),
+                                  DropdownMenuItem(value: 'PARTIAL', child: Text('Sebagian')),
+                                  DropdownMenuItem(value: 'POOR', child: Text('Rusak')),
+                                  DropdownMenuItem(
+                                    value: 'NOT_RETURNED',
+                                    child: Text('Hilang'),
+                                  ),
+                                ],
+                                onChanged: (v) => setSt(
+                                  () => bagStatuses[id] = v ?? 'NOT_RETURNED',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: noteCtrl,
+                    decoration: const InputDecoration(labelText: 'Catatan'),
+                    maxLines: 2,
+                  ),
+                  if (stage == 'CHECK_OUT') ...[
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: weightCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Berat aktual (kg, opsional)',
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                     ),
                   ],
-                  onChanged: (v) => setSt(() => stage = v ?? 'CHECK_OUT'),
-                ),
-                const SizedBox(height: 10),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('Proses aplikasi selesai'),
-                  subtitle: Text(
-                    'Aktifkan jika seluruh alur aplikasi sudah diselesaikan',
-                  ),
-                  value: appCompleted,
-                  onChanged: (value) => setSt(() => appCompleted = value),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: qrCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Kode QR Kantong',
-                    hintText: 'wajib',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                if (stage == 'CHECK_OUT') ...[
-                  DropdownButtonFormField<String>(
-                    initialValue: condition,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Kondisi'),
-                    items: const [
-                      DropdownMenuItem(value: 'GOOD', child: Text('Baik')),
-                      DropdownMenuItem(
-                        value: 'PARTIAL',
-                        child: Text('Sebagian'),
-                      ),
-                      DropdownMenuItem(value: 'POOR', child: Text('Rusak')),
-                      DropdownMenuItem(
-                        value: 'NOT_RETURNED',
-                        child: Text('Tidak Dikembalikan'),
-                      ),
-                    ],
-                    onChanged: (v) => setSt(() => condition = v ?? 'GOOD'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: returnedCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Jumlah dikembalikan',
-                    ),
-                    keyboardType: TextInputType.number,
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: weightCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Berat aktual (kg)',
-                    ),
-                    keyboardType: TextInputType.number,
-                  ),
                 ],
-                const SizedBox(height: 10),
-                TextField(
-                  controller: noteCtrl,
-                  decoration: const InputDecoration(labelText: 'Catatan'),
-                  maxLines: 2,
-                ),
-              ],
+              ),
             ),
           ),
           actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Batal')),
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('Batal'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, {
-                'tripId': tripId,
-                'validationStage': stage,
-                'appCompleted': appCompleted,
-                'bagQrCode': qrCtrl.text.trim(),
-                if (stage == 'CHECK_OUT') 'conditionStatus': condition,
-                if (stage == 'CHECK_OUT')
-                  'returnedBagCount': int.tryParse(returnedCtrl.text) ?? 0,
-                if (stage == 'CHECK_OUT' && weightCtrl.text.trim().isNotEmpty)
-                  'actualWeightKg': double.tryParse(weightCtrl.text),
-                'notes': noteCtrl.text.trim().isEmpty
-                    ? null
-                    : noteCtrl.text.trim(),
-              }),
+              onPressed: () {
+                if (stage == 'CHECK_OUT' && bags.isEmpty) return;
+                final weight = double.tryParse(weightCtrl.text.trim());
+                Navigator.pop(ctx, {
+                  'tripId': tripId,
+                  'validationStage': stage,
+                  'gateType': stage == 'CHECK_IN' ? 'ENTRY' : 'EXIT',
+                  'appCompleted': appCompleted,
+                  if (prefillQr != null && prefillQr.isNotEmpty) 'bagQrCode': prefillQr,
+                  if (stage == 'CHECK_OUT')
+                    'bags': bags
+                        .map(
+                          (b) => {
+                            'id': b['id'],
+                            'status': bagStatuses[b['id'] as String] ?? 'NOT_RETURNED',
+                          },
+                        )
+                        .toList(),
+                  if (stage == 'CHECK_OUT' && weight != null) 'actualWeightKg': weight,
+                  'notes': noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
+                });
+              },
               child: Text('Validasi'),
             ),
           ],
@@ -477,11 +852,26 @@ class _AdminTripsScreenState extends State<AdminTripsScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        ReLoopButton(
-          label: 'Buat Trip',
-          icon: Icons.add,
-          variant: ReLoopButtonVariant.primary,
-          onPressed: _createTrip,
+        Row(
+          children: [
+            Expanded(
+              child: ReLoopButton(
+                label: 'Buat Trip',
+                icon: Icons.add,
+                variant: ReLoopButtonVariant.primary,
+                onPressed: _createTrip,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ReLoopButton(
+                label: 'Scan Kantong',
+                icon: Icons.qr_code_scanner,
+                variant: ReLoopButtonVariant.outline,
+                onPressed: () => _scanAndValidate(),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 16),
         if (_trips.isEmpty)
@@ -511,7 +901,10 @@ class _AdminTripsScreenState extends State<AdminTripsScreen> {
             final travelAgentName =
                 (travelAgent?['name'] as String?) ??
                 (trip['travelAgentName'] as String?);
+            final rewardUser = trip['user'] as Map<String, dynamic>?;
+            final rewardMode = campaign?['rewardMode'] as String?;
             final id = trip['id'] as String? ?? '';
+            final canOperate = status == 'PLANNED' || status == 'ACTIVE';
 
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -563,27 +956,72 @@ class _AdminTripsScreenState extends State<AdminTripsScreen> {
                         if (complianceStatus != null &&
                             complianceStatus.isNotEmpty)
                           _chip(_complianceLabel(complianceStatus)),
+                        if (rewardUser != null && rewardMode == 'MONEY_REWARD')
+                          _chip('Reward: ${rewardUser['email'] ?? rewardUser['name'] ?? 'user'}'),
+                        if (rewardMode == 'MONEY_REWARD' && rewardUser == null)
+                          _chip('Tanpa penerima reward'),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        ReLoopButton(
-                          label: 'Bagikan Kantong',
-                          variant: ReLoopButtonVariant.outline,
-                          size: ReLoopButtonSize.sm,
-                          expanded: false,
-                          onPressed: () => _issueBags(id),
-                        ),
-                        const SizedBox(width: 8),
-                        ReLoopButton(
-                          label: 'Validasi',
-                          variant: ReLoopButtonVariant.primary,
-                          size: ReLoopButtonSize.sm,
-                          expanded: false,
-                          onPressed: () => _validateBag(id),
-                        ),
+                        if (bags > 0) ...[
+                          ReLoopButton(
+                            label: 'Lihat QR',
+                            variant: ReLoopButtonVariant.ghost,
+                            size: ReLoopButtonSize.sm,
+                            expanded: false,
+                            onPressed: () => _viewBags(id),
+                          ),
+                          ReLoopButton(
+                            label: 'Cetak',
+                            variant: ReLoopButtonVariant.outline,
+                            size: ReLoopButtonSize.sm,
+                            expanded: false,
+                            onPressed: () => _openPrintPage(id),
+                          ),
+                        ],
+                        if (canOperate) ...[
+                          ReLoopButton(
+                            label: 'Bagikan Kantong',
+                            variant: ReLoopButtonVariant.outline,
+                            size: ReLoopButtonSize.sm,
+                            expanded: false,
+                            onPressed: () => _issueBags(id),
+                          ),
+                          ReLoopButton(
+                            label: 'Scan',
+                            variant: ReLoopButtonVariant.outline,
+                            size: ReLoopButtonSize.sm,
+                            expanded: false,
+                            onPressed: () => _scanAndValidate(tripId: id),
+                          ),
+                          ReLoopButton(
+                            label: 'Validasi',
+                            variant: ReLoopButtonVariant.primary,
+                            size: ReLoopButtonSize.sm,
+                            expanded: false,
+                            onPressed: () => _validateBag(id),
+                          ),
+                          ReLoopButton(
+                            label: 'Batalkan',
+                            variant: ReLoopButtonVariant.ghost,
+                            size: ReLoopButtonSize.sm,
+                            expanded: false,
+                            onPressed: () => _cancelTrip(id),
+                          ),
+                        ],
+                        if (status == 'CANCELLED')
+                          ReLoopButton(
+                            label: 'Buka Ulang',
+                            variant: ReLoopButtonVariant.outline,
+                            size: ReLoopButtonSize.sm,
+                            expanded: false,
+                            onPressed: () => _reopenTrip(id),
+                          ),
                       ],
                     ),
                   ],

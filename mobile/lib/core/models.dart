@@ -373,6 +373,35 @@ class RewardLedgerEntry {
       complianceMultiplier: (json['depositItem']?['complianceMultiplier'] as num?)?.toDouble(),
     );
   }
+
+  /// Label untuk UI wallet / dashboard (prioritas jenis sampah mesin, lalu reasonCode).
+  String get displayLabel {
+    if (wasteTypeName != null && wasteTypeName!.isNotEmpty) {
+      return wasteTypeName!;
+    }
+    switch (reasonCode) {
+      case 'TRASH_BAG_RETURN':
+        return 'Reward trash bag';
+      case 'DEPOSIT_ACCEPTED':
+      case 'ITEM_ACCEPTED':
+        return 'Setoran mesin';
+      case 'ANOMALY_REVIEW':
+        return 'Setoran ditinjau';
+      case 'TOURISM_COMPLIANCE_BONUS':
+        return 'Bonus kepatuhan wisata';
+      case 'REDEMPTION_SUCCESS':
+      case 'REDEMPTION_PROCESSING':
+      case 'REDEMPTION_RESERVE':
+        return 'Pencairan';
+      case 'REDEMPTION_REVERSED':
+        return 'Pencairan dibatalkan';
+      default:
+        if (reasonCode != null && reasonCode!.isNotEmpty) {
+          return reasonCode!.replaceAll('_', ' ');
+        }
+        return entryType;
+    }
+  }
 }
 
 class ScanResult {

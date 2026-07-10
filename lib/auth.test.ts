@@ -58,6 +58,25 @@ describe('lib/auth', () => {
       const verified = await auth.verifySessionToken('invalid.token.string');
       expect(verified).toBeNull();
     });
+
+    it('defaults missing tokenVersion to 0 when verifying', async () => {
+      const { SignJWT } = await import('jose');
+      const secret = new TextEncoder().encode('dev-insecure-secret-change-me');
+      // Build a token without tokenVersion claim.
+      const token = await new SignJWT({
+        email: 't@x.com',
+        name: 'T',
+        role: 'USER',
+        organizationId: null,
+      })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setSubject('user_x')
+        .setExpirationTime('1h')
+        .sign(secret);
+
+      const verified = await auth.verifySessionToken(token);
+      expect(verified?.tokenVersion).toBe(0);
+    });
   });
 
   describe('Cookie Management', () => {

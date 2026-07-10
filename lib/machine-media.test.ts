@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { resolveMachineMediaPath, serializeMachineMedia } from "./machine-media";
 
@@ -19,6 +20,16 @@ describe("resolveMachineMediaPath", () => {
 
   it("throws on absolute path escape", () => {
     expect(() => resolveMachineMediaPath("/etc/passwd")).toThrow();
+  });
+
+  it("uses MACHINE_MEDIA_STORAGE_DIR when provided", async () => {
+    vi.resetModules();
+    vi.stubEnv("MACHINE_MEDIA_STORAGE_DIR", "/custom/media");
+    const mod = await import("./machine-media");
+    const result = mod.resolveMachineMediaPath("photo.jpg");
+    expect(result.startsWith(path.resolve("/custom/media"))).toBe(true);
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 });
 

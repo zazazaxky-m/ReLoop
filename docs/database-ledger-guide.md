@@ -10,10 +10,12 @@ Tabel `RewardLedger` mencatat semua arus masuk dan keluar poin/uang dalam platfo
 
 ### Kolom Kunci:
 - `userId`: Pengguna yang memiliki saldo tersebut.
-- `transactionType`: Jenis transaksi, misalnya:
-  - `DEPOSIT_REWARD`: Pendapatan poin dari menyetor sampah di Kiosk.
-  - `TRIP_REWARD`: Pendapatan poin hasil konversi Trash Bag dari sistem Trip pariwisata.
-  - `REDEMPTION_WITHDRAWAL`: Pemotongan saldo karena pengguna mencairkan poin ke e-Wallet / Bank.
+- `entryType`: Jenis entri ledger (`EARN`, `REDEEM`, dll.).
+- `reasonCode`: Alasan bisnis, misalnya:
+  - `DEPOSIT_ACCEPTED` / `ITEM_ACCEPTED`: Pendapatan dari setoran mesin RVM.
+  - `TRASH_BAG_RETURN`: Reward pengembalian trash bag setelah check-out trip wisata (`referenceType: Trip`).
+  - `TOURISM_COMPLIANCE_BONUS`: Bonus demo/seed kepatuhan wisata (bukan jalur produksi utama).
+  - `REDEMPTION_RESERVE` / `REDEMPTION_SUCCESS`: Pencairan ke e-wallet / bank.
 - `status`: Status dari transaksi tersebut:
   - `PENDING`: Poin sudah didapat tapi masih ditahan (misal: mesin belum di-verifikasi, atau sedang dalam proses pencairan). Saldo jenis ini belum bisa dibelanjakan.
   - `AVAILABLE`: Poin sudah sah dan bisa ditarik/dibelanjakan oleh pengguna.

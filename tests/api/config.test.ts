@@ -79,5 +79,18 @@ describe('/api/config endpoints', () => {
       const data = await res.json();
       expect(data.updated.min_redemption).toBe('5000');
     });
+
+    it('updates only provided keys after zod parse', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin' } as any);
+      vi.mocked(config.getAllConfig).mockResolvedValue({});
+
+      const res = await PATCH(makePatchReq({
+        min_redemption: 1000,
+        points_to_rupiah: undefined,
+      }));
+      expect(res.status).toBe(200);
+      expect(config.setConfig).toHaveBeenCalledWith('min_redemption', '1000');
+      expect(config.setConfig).not.toHaveBeenCalledWith('points_to_rupiah', expect.anything());
+    });
   });
 });

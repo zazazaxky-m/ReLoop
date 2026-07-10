@@ -107,6 +107,64 @@ describe('Redemptions API - GET', () => {
       })
     );
   });
+
+  it('attaches payout accounts when redemptions have payoutAccountId', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin_1', role: 'SUPERADMIN' } as any);
+    vi.mocked(prisma.redemption.count).mockResolvedValue(1);
+    vi.mocked(prisma.redemption.findMany).mockResolvedValue([
+      {
+        id: 'r1',
+        userId: 'user_1',
+        payoutAccountId: 'acc_1',
+        amount: 50000,
+        user: { id: 'user_1', name: 'A', email: 'a@x.com' },
+      } as any,
+    ]);
+    vi.mocked(prisma.payoutAccount.findMany).mockResolvedValue([
+      { id: 'acc_1', provider: 'BCA' } as any,
+    ]);
+
+    const res = await GET(new Request('http://localhost/api/redemptions?queue=1'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.redemptions[0].payoutAccount).toEqual(
+      expect.objectContaining({ id: 'acc_1' }),
+    );
+    expect(prisma.payoutAccount.findMany).toHaveBeenCalled();
+  });
+
+  it('filters by status query param', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin_1', role: 'SUPERADMIN' } as any);
+    vi.mocked(prisma.redemption.count).mockResolvedValue(0);
+    vi.mocked(prisma.redemption.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.payoutAccount.findMany).mockResolvedValue([]);
+
+    const res = await GET(new Request('http://localhost/api/redemptions?status=REQUESTED'));
+    expect(res.status).toBe(200);
+    expect(prisma.redemption.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: 'REQUESTED' } }),
+    );
+  });
+
+  it('returns null payoutAccount when account id is missing from lookup', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin_1', role: 'SUPERADMIN' } as any);
+    vi.mocked(prisma.redemption.count).mockResolvedValue(1);
+    vi.mocked(prisma.redemption.findMany).mockResolvedValue([
+      {
+        id: 'r1',
+        userId: 'user_1',
+        payoutAccountId: 'acc_missing',
+        amount: 50000,
+        user: { id: 'user_1', name: 'A', email: 'a@x.com' },
+      } as any,
+    ]);
+    vi.mocked(prisma.payoutAccount.findMany).mockResolvedValue([]);
+
+    const res = await GET(new Request('http://localhost/api/redemptions'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.redemptions[0].payoutAccount).toBeNull();
+  });
 });
 
 describe('Redemptions API - POST', () => {
@@ -181,5 +239,84 @@ describe('Redemptions API - POST', () => {
     expect(res.status).toBe(201);
     // Prisma check transaction should be called
     expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('generates idempotencyKey when omitted on POST', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'user_1', role: 'USER' } as any);
+    vi.mocked(prisma.payoutAccount.findUnique).mockResolvedValue({
+      id: 'acc_1', userId: 'user_1', status: 'ACTIVE', provider: 'BCA',
+    } as any);
+    vi.mocked(ledger.getWalletBalance).mockResolvedValue({ available: 100000 } as any);
+    vi.mocked(prisma.redemption.findUnique).mockResolvedValue(null);
+
+    const res = await POST(new Request('http://localhost/api/redemptions', {
+      method: 'POST',
+      body: JSON.stringify({ amount: 50000, payoutAccountId: 'acc_1' }),
+    }));
+    expect(res.status).toBe(201);
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('returns 409 when payout account is DISABLED', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'user_1', role: 'USER' } as any);
+    vi.mocked(prisma.payoutAccount.findUnique).mockResolvedValue({
+      id: 'acc_1', userId: 'user_1', status: 'DISABLED',
+    } as any);
+
+    const res = await POST(new Request('http://localhost/api/redemptions', {
+      method: 'POST',
+      body: JSON.stringify({ amount: 50000, payoutAccountId: 'acc_1' }),
+    }));
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain('dinonaktifkan');
+  });
+
+  it('returns 404 when payout account missing or owned by another user', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'user_1', role: 'USER' } as any);
+    vi.mocked(prisma.payoutAccount.findUnique).mockResolvedValue({
+      id: 'acc_1', userId: 'other', status: 'ACTIVE',
+    } as any);
+
+    const res = await POST(new Request('http://localhost/api/redemptions', {
+      method: 'POST',
+      body: JSON.stringify({ amount: 50000, payoutAccountId: 'acc_1' }),
+    }));
+
+    expect(res.status).toBe(404);
+  });
+
+  it('returns existing redemption when idempotency key already used', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'user_1', role: 'USER' } as any);
+    vi.mocked(prisma.redemption.findUnique).mockResolvedValue({
+      id: 'r_existing', amount: 50000, idempotencyKey: 'idem-key-12',
+    } as any);
+
+    const res = await POST(new Request('http://localhost/api/redemptions', {
+      method: 'POST',
+      body: JSON.stringify({
+        amount: 50000,
+        payoutAccountId: 'acc_1',
+        idempotencyKey: 'idem-key-12',
+      }),
+    }));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.idempotent).toBe(true);
+    expect(body.redemption.id).toBe('r_existing');
+  });
+
+  it('handles unexpected POST errors via handleApiError', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'user_1', role: 'USER' } as any);
+    vi.mocked(prisma.payoutAccount.findUnique).mockRejectedValue(new Error('db down'));
+
+    const res = await POST(new Request('http://localhost/api/redemptions', {
+      method: 'POST',
+      body: JSON.stringify({ amount: 50000, payoutAccountId: 'acc_1' }),
+    }));
+
+    expect(res.status).toBe(500);
   });
 });

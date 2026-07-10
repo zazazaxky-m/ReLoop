@@ -16,11 +16,10 @@ function decryptValue(value: unknown): unknown {
 // so callers never need to remember to call displayUser manually.
 const PII_FIELDS = ["name", "email", "phone"] as const;
 
-function looksLikeUser(obj: unknown): obj is Record<string, unknown> {
-  if (!obj || typeof obj !== "object") return false;
-  const o = obj as Record<string, unknown>;
-  if (typeof o.id !== "string") return false;
-  return PII_FIELDS.some((f) => f in o);
+/** Caller already narrowed to a non-null object (see walkAndDecryptUsers). */
+function looksLikeUser(obj: Record<string, unknown>): boolean {
+  if (typeof obj.id !== "string") return false;
+  return PII_FIELDS.some((f) => f in obj);
 }
 
 function decryptUserFieldsInPlace(obj: Record<string, unknown>): void {

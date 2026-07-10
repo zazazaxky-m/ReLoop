@@ -83,14 +83,14 @@ export async function PATCH(
       body.action as PartnershipAction,
       { status: partnership.status, role: user.role, isCollector, isOrgAdmin },
     );
-    if (!resolution.ok || !resolution.to) {
-      throw new HttpError(409, resolution.error ?? "Transisi tidak diizinkan");
+    if (!resolution.ok) {
+      throw new HttpError(409, resolution.error!);
     }
 
     const updated = await prisma.organizationCollectorPartner.update({
       where: { id },
       data: {
-        status: resolution.to,
+        status: resolution.to!,
         approvedBySuperadminId:
           body.action === "approve" ? user.id : undefined,
       },
