@@ -1001,6 +1001,37 @@ model ConsentRecord {
   @@index([createdAt])
 }
 
+model DeletionRequest {
+  id          String           @id @default(cuid())
+  email       String
+  userId      String?
+  // PARTIAL = some data categories; FULL = account + all data
+  scope       DeletionRequestScope @default(PARTIAL)
+  dataTypes   String[]         // For PARTIAL: which categories were requested
+  reason      String?
+  status      DeletionRequestStatus @default(PENDING)
+  ipAddress   String?
+  userAgent   String?
+  processedAt DateTime?
+  createdAt   DateTime         @default(now())
+
+  @@index([email])
+  @@index([status, createdAt])
+}
+
+enum DeletionRequestScope {
+  PARTIAL
+  FULL
+}
+
+enum DeletionRequestStatus {
+  PENDING
+  VERIFIED
+  PROCESSING
+  COMPLETED
+  REJECTED
+}
+
 model SystemConfig {
   key       String   @id
   value     String

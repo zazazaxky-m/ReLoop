@@ -52,6 +52,12 @@ export default function LegalLayout({ children }: { children: ReactNode }) {
             >
               Syarat &amp; Ketentuan
             </Link>
+            <Link
+              href="/account-deletion"
+              className="font-semibold text-muted transition-colors hover:text-brand-700 dark:hover:text-brand-400"
+            >
+              Hapus Akun
+            </Link>
           </nav>
         </div>
       </footer>

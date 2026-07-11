@@ -26,7 +26,7 @@ const sections = [
   },
   {
     title: "4. Hak Anda",
-    body: "Anda berhak untuk: (a) mengakses data pribadi yang kami simpan; (b) meminta koreksi atas data yang tidak akurat; (c) menghapus akun dan data pribadi Anda; (d) menarik persetujuan atas pemrosesan data kapan saja; (e) mengajukan keluhan kepada otoritas perlindungan data yang berwenang. Anda dapat menggunakan hak-hak tersebut dengan menghubungi kami melalui email di bawah ini atau melalui menu Privasi di aplikasi.",
+    body: "Anda berhak untuk: (a) mengakses data pribadi yang kami simpan; (b) meminta koreksi atas data yang tidak akurat; (c) menghapus akun dan data pribadi Anda; (d) menarik persetujuan atas pemrosesan data kapan saja; (e) mengajukan keluhan kepada otoritas perlindungan data yang berwenang. Anda dapat menggunakan hak-hak tersebut dengan menghubungi kami melalui email di bawah ini, melalui menu Privasi di aplikasi, atau dengan mengunjungi halaman Hapus Akun (/account-deletion) atau Hapus Data (/data-deletion).",
   },
   {
     title: "5. Cookie & Teknologi Pelacakan",
