@@ -276,7 +276,23 @@ export default async function Home() {
             className="h-8 w-auto"
           />
           <p>Pengelolaan sampah yang kembali memberi nilai.</p>
-          <p>&copy; {new Date().getFullYear()} ReLoop</p>
+          <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">
+            <nav aria-label="Tautan legal" className="flex items-center gap-4">
+              <Link
+                href="/privacy"
+                className="font-semibold text-muted transition-colors hover:text-brand-700 dark:hover:text-brand-400"
+              >
+                Kebijakan Privasi
+              </Link>
+              <Link
+                href="/terms"
+                className="font-semibold text-muted transition-colors hover:text-brand-700 dark:hover:text-brand-400"
+              >
+                Syarat &amp; Ketentuan
+              </Link>
+            </nav>
+            <p>&copy; {new Date().getFullYear()} ReLoop</p>
+          </div>
         </div>
       </footer>
     </div>

@@ -27,6 +27,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
     phone: "",
     password: "",
   });
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
     if (error) errorRef.current?.focus();
@@ -39,6 +40,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isRegister && !agreedToTerms) {
+      setError("Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi terlebih dahulu.");
+      return;
+    }
     setLoading(true);
     setError(null);
 
@@ -260,6 +265,39 @@ export function AuthForm({ mode }: { mode: Mode }) {
             Lupa kata sandi?
           </Link>
         </div>
+      ) : null}
+
+      {isRegister ? (
+        <label className="flex items-start gap-3 text-[13px] leading-5 text-muted sm:col-span-2">
+          <input
+            type="checkbox"
+            checked={agreedToTerms}
+            onChange={(e) => setAgreedToTerms(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-brand-600 focus:ring-brand-500"
+            data-testid="agree-terms"
+          />
+          <span>
+            Saya menyetujui{" "}
+            <Link
+              href="/terms"
+              target="_blank"
+              rel="noopener"
+              className="font-semibold text-brand-700 underline-offset-2 hover:underline dark:text-brand-400"
+            >
+              Syarat &amp; Ketentuan
+            </Link>{" "}
+            dan{" "}
+            <Link
+              href="/privacy"
+              target="_blank"
+              rel="noopener"
+              className="font-semibold text-brand-700 underline-offset-2 hover:underline dark:text-brand-400"
+            >
+              Kebijakan Privasi
+            </Link>{" "}
+            ReLoop.
+          </span>
+        </label>
       ) : null}
 
       <Button
