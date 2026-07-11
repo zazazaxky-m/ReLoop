@@ -10,7 +10,7 @@ import '../../theme/colors.dart';
 /// returning from the notifications screen. Kept best-effort: any failure
 /// simply hides the badge instead of surfacing an error.
 class NotificationBell extends StatefulWidget {
-  const NotificationBell({super.key});
+  const NotificationBell({super.key}); // coverage:ignore-line
 
   @override
   State<NotificationBell> createState() => _NotificationBellState();

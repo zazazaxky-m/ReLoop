@@ -30,7 +30,10 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   }
 
   Future<void> _loadSummary() async {
-    setState(() { _isLoading = true; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
       final api = context.read<ApiClient>();
       
@@ -74,6 +77,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   Future<void> _download(String type, String filename) async {
     try {
       final api = context.read<ApiClient>();
+      // coverage:ignore-start
       final res = await api.get('/api/reports', queryParameters: {'type': type});
       final csv = res.data.toString();
 
@@ -85,6 +89,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         [XFile(file.path, mimeType: 'text/csv')],
         subject: filename,
       );
+      // coverage:ignore-end
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

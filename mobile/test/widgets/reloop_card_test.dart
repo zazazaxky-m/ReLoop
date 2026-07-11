@@ -48,5 +48,18 @@ void main() {
 
       expect(find.text('Tombol Footer'), findsOneWidget);
     });
+
+    testWidgets('T4: custom padding and margin', (tester) async {
+      await tester.pumpWidget(
+        wrapInMaterial(
+          const ReLoopCard(
+            padding: EdgeInsets.all(8),
+            margin: EdgeInsets.all(4),
+            child: Text('Padded'),
+          ),
+        ),
+      );
+      expect(find.text('Padded'), findsOneWidget);
+    });
   });
 }

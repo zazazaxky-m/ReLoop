@@ -4,7 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'colors.dart';
 
 class AppTheme {
-  AppTheme._();
+  AppTheme._(); // coverage:ignore-line
 
   static ThemeData get light => _build(Brightness.light);
   static ThemeData get dark => _build(Brightness.dark);

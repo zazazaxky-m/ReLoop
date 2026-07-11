@@ -49,5 +49,27 @@ void main() {
       final creds = await biometricService.getCredentials();
       expect(creds, isNull);
     });
+
+    test('availableBiometrics returns empty without plugin', () async {
+      final types = await biometricService.availableBiometrics;
+      expect(types, isEmpty);
+    });
+
+    test('getBiometricTypeName defaults to Biometric', () async {
+      expect(await biometricService.getBiometricTypeName(), 'Biometric');
+      expect(biometricService.biometricLabel, 'Biometric');
+    });
+
+    test('authenticate returns false without plugin', () async {
+      expect(await biometricService.authenticate(reason: 'Tes'), isFalse);
+    });
+
+    test('getCredentials returns null for malformed value', () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'biometric_credentials': 'only-one-part',
+      });
+      final creds = await biometricService.getCredentials();
+      expect(creds, isNull);
+    });
   });
 }

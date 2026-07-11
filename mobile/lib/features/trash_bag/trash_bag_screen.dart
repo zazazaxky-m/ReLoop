@@ -94,7 +94,7 @@ class _TrashBagScreenState extends State<TrashBagScreen> {
                   Text(
                     'Reward: Rp ${_formatRp((detail['trashBagRewardAmount'] as num).toInt())}',
                     style: TextStyle(
-                      color: context.reloopBrand,
+                      color: context.reloopBrandText,
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                     ),

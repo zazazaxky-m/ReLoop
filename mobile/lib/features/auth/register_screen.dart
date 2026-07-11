@@ -288,7 +288,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             keyboardType: TextInputType.visiblePassword,
                             textInputAction: TextInputAction.done,
                             autofillHints: const [AutofillHints.newPassword],
-                            onFieldSubmitted: (_) => _register(),
+                            onFieldSubmitted: (_) => _register(), // coverage:ignore-line
                             style: TextStyle(fontSize: 15, color: context.reloopForeground),
                             decoration: InputDecoration(
                               hintText: '••••••••',

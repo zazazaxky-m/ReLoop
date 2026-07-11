@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
@@ -14,16 +15,46 @@ class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
   @override
-  State<MapScreen> createState() => _MapScreenState();
+  MapScreenState createState() => MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class MapScreenState extends State<MapScreen> {
   List<MachineInfo> _machines = [];
   List<CampaignInfo> _campaigns = [];
   bool _isLoading = true;
   String? _error;
   MachineInfo? _selectedMachine;
   CampaignInfo? _selectedCampaign;
+
+  @visibleForTesting
+  List<MachineInfo> get debugMachines => _machines;
+
+  @visibleForTesting
+  List<CampaignInfo> get debugCampaigns => _campaigns;
+
+  @visibleForTesting
+  void debugSelectMachine(MachineInfo machine) {
+    setState(() {
+      _selectedMachine = machine;
+      _selectedCampaign = null;
+    });
+  }
+
+  @visibleForTesting
+  void debugSelectCampaign(CampaignInfo campaign) {
+    setState(() {
+      _selectedCampaign = campaign;
+      _selectedMachine = null;
+    });
+  }
+
+  @visibleForTesting
+  void debugClearSelection() {
+    setState(() {
+      _selectedMachine = null;
+      _selectedCampaign = null;
+    });
+  }
 
   @override
   void initState() {

@@ -26,10 +26,12 @@ class ApiClient {
 
   Future<void> _initCookies() async {
     try {
+      // coverage:ignore-start
       final dir = await getApplicationDocumentsDirectory();
       _cookieJar = PersistCookieJar(
         storage: FileStorage('${dir.path}/.cookies'),
       );
+      // coverage:ignore-end
     } catch (_) {
       // Fallback to in-memory cookie jar for tests or environments without path_provider
       _cookieJar = CookieJar();
@@ -37,11 +39,13 @@ class ApiClient {
     if (_cookieJar != null) {
       dio.interceptors.add(CookieManager(_cookieJar!));
     }
+    // coverage:ignore-start
     dio.interceptors.add(InterceptorsWrapper(
       onError: (error, handler) {
         handler.next(error);
       },
     ));
+    // coverage:ignore-end
   }
 
   static void setBaseUrl(String url) {

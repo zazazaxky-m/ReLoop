@@ -128,4 +128,48 @@ void main() {
     expect(find.text('Data tidak ditemukan.'), findsOneWidget);
     expect(find.text('Coba Lagi'), findsOneWidget);
   });
+
+  testWidgets('ERROR status uses error color branch', (tester) async {
+    when(() => mockApi.get('/api/machines/m1')).thenAnswer(
+      (_) async => Response(
+        requestOptions: RequestOptions(path: '/api/machines/m1'),
+        data: {
+          'machine': {
+            'id': 'm1',
+            'name': 'Mesin Error',
+            'machineCode': 'MAC-E',
+            'status': 'ERROR',
+            'fillLevelPercent': 10,
+            'sessions': [],
+          },
+        },
+      ),
+    );
+
+    await tester.pumpWidget(buildScreen());
+    await tester.pumpAndSettle();
+    expect(find.text('Mesin Error'), findsWidgets);
+  });
+
+  testWidgets('MAINTENANCE status uses maintenance color branch', (tester) async {
+    when(() => mockApi.get('/api/machines/m1')).thenAnswer(
+      (_) async => Response(
+        requestOptions: RequestOptions(path: '/api/machines/m1'),
+        data: {
+          'machine': {
+            'id': 'm1',
+            'name': 'Mesin Maint',
+            'machineCode': 'MAC-M',
+            'status': 'MAINTENANCE',
+            'fillLevelPercent': 20,
+            'sessions': [],
+          },
+        },
+      ),
+    );
+
+    await tester.pumpWidget(buildScreen());
+    await tester.pumpAndSettle();
+    expect(find.text('Mesin Maint'), findsWidgets);
+  });
 }

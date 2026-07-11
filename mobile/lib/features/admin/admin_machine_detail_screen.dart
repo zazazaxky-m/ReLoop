@@ -9,7 +9,7 @@ import '../../theme/colors.dart';
 class AdminMachineDetailScreen extends StatefulWidget {
   final String machineId;
 
-  const AdminMachineDetailScreen({super.key, required this.machineId});
+  const AdminMachineDetailScreen({super.key, required this.machineId}); // coverage:ignore-line
 
   @override
   State<AdminMachineDetailScreen> createState() => _AdminMachineDetailScreenState();

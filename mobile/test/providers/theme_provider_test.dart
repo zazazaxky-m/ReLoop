@@ -11,12 +11,26 @@ void main() {
 
   group('ThemeProvider', () {
     test('Initial theme mode is system', () async {
+      FlutterSecureStorage.setMockInitialValues({});
       final provider = ThemeProvider();
       await Future.delayed(Duration.zero);
       expect(provider.themeMode, ThemeMode.system);
     });
 
+    test('loads persisted theme and falls back on unknown', () async {
+      FlutterSecureStorage.setMockInitialValues({'theme_mode': 'dark'});
+      final provider = ThemeProvider();
+      await Future.delayed(const Duration(milliseconds: 20));
+      expect(provider.themeMode, ThemeMode.dark);
+
+      FlutterSecureStorage.setMockInitialValues({'theme_mode': 'nope'});
+      final provider2 = ThemeProvider();
+      await Future.delayed(const Duration(milliseconds: 20));
+      expect(provider2.themeMode, ThemeMode.system);
+    });
+
     test('setThemeMode updates theme mode and persists', () async {
+      FlutterSecureStorage.setMockInitialValues({});
       final provider = ThemeProvider();
       await Future.delayed(Duration.zero);
       
@@ -30,11 +44,10 @@ void main() {
     });
 
     test('toggle switches between light and dark', () async {
+      FlutterSecureStorage.setMockInitialValues({});
       final provider = ThemeProvider();
       await Future.delayed(Duration.zero);
       
-      // Default system toggle usually targets dark if not set, 
-      // but toggle logic is: if dark -> light, else -> dark
       await provider.toggle();
       expect(provider.themeMode, ThemeMode.dark);
 

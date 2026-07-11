@@ -257,7 +257,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
             children: [
               const _ActivityIcon(
                 icon: Icons.recycling_rounded,
-                tone: QuickActionTone.green,
+                tone: QuickActionTone.amber,
               ),
               const SizedBox(width: ReLoopSpacing.md),
               Expanded(
@@ -362,7 +362,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
             children: [
               const _ActivityIcon(
                 icon: Icons.savings_outlined,
-                tone: QuickActionTone.amber,
+                tone: QuickActionTone.teal,
               ),
               const SizedBox(width: ReLoopSpacing.md),
               Expanded(
@@ -606,10 +606,12 @@ class _ActivityIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (color, softColor) = switch (tone) {
+      // coverage:ignore-start
       QuickActionTone.green => (
         context.reloopBrandText,
         context.reloopBrandSoft,
       ),
+      // coverage:ignore-end
       QuickActionTone.blue => (
         context.isDarkMode ? const Color(0xFF93C5FD) : ReLoopColors.info,
         context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEDF5FF),

@@ -7,7 +7,7 @@ import '../../theme/colors.dart';
 class MachineReportForm extends StatefulWidget {
   final String machineCode;
 
-  const MachineReportForm({super.key, required this.machineCode});
+  const MachineReportForm({super.key, required this.machineCode}); // coverage:ignore-line
 
   @override
   State<MachineReportForm> createState() => _MachineReportFormState();

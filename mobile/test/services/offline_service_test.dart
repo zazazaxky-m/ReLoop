@@ -49,5 +49,22 @@ void main() {
       final result = offlineService.get('test_key');
       expect(result, isNull);
     });
+
+    test('get returns null for missing key', () {
+      expect(offlineService.get('missing'), isNull);
+      expect(offlineService.lastUpdated('missing'), isNull);
+    });
+
+    test('cache list and nested map', () async {
+      await offlineService.cache('list', [1, 2, 3]);
+      expect(offlineService.get('list'), [1, 2, 3]);
+
+      await offlineService.cache('nested', {
+        'a': {'b': true},
+      });
+      expect(offlineService.get('nested'), {
+        'a': {'b': true},
+      });
+    });
   });
 }

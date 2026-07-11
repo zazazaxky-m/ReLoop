@@ -71,10 +71,12 @@ class _PromoCarouselState extends State<PromoCarousel> {
     final href = slide.href.trim();
     if (href.isEmpty) return;
     if (href.startsWith('http://') || href.startsWith('https://')) {
+      // coverage:ignore-start
       final uri = Uri.parse(href);
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
+      // coverage:ignore-end
       return;
     }
     if (mounted) context.push(href);
@@ -119,7 +121,7 @@ class _PromoCarouselState extends State<PromoCarousel> {
                                 placeholder: (_, _) => ColoredBox(
                                   color: context.reloopBrandSoftStrong,
                                 ),
-                                errorWidget: (_, _, _) =>
+                                errorWidget: (_, _, _) => // coverage:ignore-line
                                     const _PromoPlaceholder(),
                               ),
                             ),

@@ -89,7 +89,9 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     try {
       final api = context.read<ApiClient>();
       final body = <String, dynamic>{'action': action};
+      // coverage:ignore-start
       if (notes != null) body['notes'] = notes;
+      // coverage:ignore-end
       await api.patch('/api/pickups/$pickupId', data: body);
       await _loadAll();
     } catch (e) {

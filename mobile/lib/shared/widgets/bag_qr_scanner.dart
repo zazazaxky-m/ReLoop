@@ -49,6 +49,7 @@ class _BagQrScannerScreenState extends State<BagQrScannerScreen>
     super.dispose();
   }
 
+  // coverage:ignore-start
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_controller.value.hasCameraPermission) return;
@@ -62,6 +63,7 @@ class _BagQrScannerScreenState extends State<BagQrScannerScreen>
         unawaited(_controller.stop());
     }
   }
+  // coverage:ignore-end
 
   String? _extractBagCode(String raw) {
     final trimmed = raw.trim();
@@ -77,6 +79,7 @@ class _BagQrScannerScreenState extends State<BagQrScannerScreen>
     return null;
   }
 
+  // coverage:ignore-start
   void _onDetect(BarcodeCapture capture) {
     if (_handled) return;
     final raw = capture.barcodes.firstOrNull?.rawValue;
@@ -98,6 +101,7 @@ class _BagQrScannerScreenState extends State<BagQrScannerScreen>
     unawaited(_controller.stop());
     if (mounted) Navigator.of(context).pop(code);
   }
+  // coverage:ignore-end
 
   void _submitManual() {
     final code = _extractBagCode(_manualCtrl.text);
@@ -141,10 +145,12 @@ class _BagQrScannerScreenState extends State<BagQrScannerScreen>
                   ),
                   IconButton(
                     tooltip: _torchOn ? 'Matikan flash' : 'Nyalakan flash',
+                    // coverage:ignore-start
                     onPressed: () async {
                       await _controller.toggleTorch();
                       setState(() => _torchOn = !_torchOn);
                     },
+                    // coverage:ignore-end
                     icon: Icon(
                       _torchOn ? Icons.flash_on : Icons.flash_off,
                       color: Colors.white,
@@ -162,6 +168,7 @@ class _BagQrScannerScreenState extends State<BagQrScannerScreen>
                     MobileScanner(
                       controller: _controller,
                       onDetect: _onDetect,
+                      // coverage:ignore-start
                       errorBuilder: (context, error) {
                         final denied =
                             error.errorCode == MobileScannerErrorCode.permissionDenied;
@@ -194,6 +201,7 @@ class _BagQrScannerScreenState extends State<BagQrScannerScreen>
                           ),
                         );
                       },
+                      // coverage:ignore-end
                     ),
                     IgnorePointer(
                       child: CustomPaint(
@@ -340,6 +348,8 @@ class _BagScannerOverlayPainter extends CustomPainter {
     );
   }
 
+  // coverage:ignore-start
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  // coverage:ignore-end
 }

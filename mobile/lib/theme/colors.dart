@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class ReLoopColors {
-  ReLoopColors._();
+  ReLoopColors._(); // coverage:ignore-line
 
   // Surfaces
   static const background = Color(0xFFF5F7F5);

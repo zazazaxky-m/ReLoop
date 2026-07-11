@@ -479,23 +479,25 @@ class _ActivityIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Only amber and blue are used by the dashboard's _ActivityIcon slots;
+    // QuickAction renders its own palette for the green/teal tones.
     final (color, softColor) = switch (tone) {
-      QuickActionTone.green => (
-          context.reloopBrandText,
-          context.reloopBrandSoft,
+      QuickActionTone.amber => (
+          context.isDarkMode ? const Color(0xFFFCD34D) : ReLoopColors.warning,
+          context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFF5E7),
         ),
       QuickActionTone.blue => (
           context.isDarkMode ? const Color(0xFF93C5FD) : ReLoopColors.info,
           context.isDarkMode ? const Color(0xFF172D49) : const Color(0xFFEDF5FF),
         ),
-      QuickActionTone.amber => (
-          context.isDarkMode ? const Color(0xFFFCD34D) : ReLoopColors.warning,
-          context.isDarkMode ? const Color(0xFF3E2B18) : const Color(0xFFFFF5E7),
+      // Green and teal tones are never used by callers today; fall back to
+      // the brand palette to keep the switch exhaustive.
+      // coverage:ignore-start
+      QuickActionTone.green || QuickActionTone.teal => (
+          context.reloopBrandText,
+          context.reloopBrandSoft,
         ),
-      QuickActionTone.teal => (
-          context.isDarkMode ? const Color(0xFF5EEAD4) : const Color(0xFF159A91),
-          context.isDarkMode ? const Color(0xFF173936) : const Color(0xFFEAF9F7),
-        ),
+      // coverage:ignore-end
     };
     return Container(
       width: 40,

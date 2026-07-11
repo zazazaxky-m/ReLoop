@@ -208,6 +208,8 @@ class _SuperadminDashboardScreenState extends State<SuperadminDashboardScreen> {
         queryParameters: {'type': type},
         options: Options(responseType: ResponseType.stream),
       );
+      // File write + share_plus require platform channels.
+      // coverage:ignore-start
       final stream = response.data!.stream;
       final bytes = await stream.fold<List<int>>(
         <int>[],
@@ -222,6 +224,7 @@ class _SuperadminDashboardScreenState extends State<SuperadminDashboardScreen> {
         [XFile(file.path, mimeType: 'text/csv')],
         subject: 'ReLoop $type CSV',
       );
+      // coverage:ignore-end
     } catch (error) {
       if (!mounted) return;
       messenger.showSnackBar(

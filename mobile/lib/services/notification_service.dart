@@ -25,15 +25,19 @@ class NotificationService {
   Future<void> initialize() async {
     try {
       _fcm = FirebaseMessaging.instance;
+      // Native FCM / local-notification plugin paths are device-only.
+      // coverage:ignore-start
       await _initLocalNotifications();
       await _requestPermission();
       await _getToken();
       _setupHandlers();
+      // coverage:ignore-end
     } catch (error) {
       debugPrint('NotificationService.initialize skipped: $error');
     }
   }
 
+  // coverage:ignore-start
   Future<void> _initLocalNotifications() async {
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosSettings = DarwinInitializationSettings(
@@ -114,6 +118,7 @@ class NotificationService {
       payload: jsonEncode(message.data),
     );
   }
+  // coverage:ignore-end
 
   void _handleTap(String? payload) {
     if (payload == null) return;
@@ -127,6 +132,13 @@ class NotificationService {
       }
     } catch (_) {}
   }
+
+  /// Test-only helpers for covering tap/token registration without FCM.
+  @visibleForTesting
+  void debugHandleTap(String? payload) => _handleTap(payload);
+
+  @visibleForTesting
+  set debugDeviceToken(String? token) => _deviceToken = token;
 
   Future<void> registerDeviceToken() async {
     if (_deviceToken == null) return;

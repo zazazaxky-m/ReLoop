@@ -19,12 +19,27 @@ void main() {
     when(() => mockAuth.error).thenReturn(null);
   });
 
-  Widget buildScreen() {
+  Widget buildScreen({String initial = '/'}) {
     final router = GoRouter(
-      initialLocation: '/',
+      initialLocation: initial,
       routes: [
-        GoRoute(path: '/', builder: (context, state) => const RegisterScreen()),
-        GoRoute(path: '/dashboard', builder: (context, state) => const Scaffold()),
+        GoRoute(
+          path: '/login',
+          builder: (context, state) => const Scaffold(body: Text('login page')),
+        ),
+        GoRoute(
+          path: '/',
+          builder: (context, state) => const RegisterScreen(),
+        ),
+        GoRoute(
+          path: '/dashboard',
+          builder: (context, state) => const Scaffold(body: Text('dash')),
+        ),
+        GoRoute(
+          path: '/onboarding',
+          builder: (context, state) =>
+              const Scaffold(body: Text('onboarding page')),
+        ),
       ],
     );
 
@@ -39,19 +54,23 @@ void main() {
     );
   }
 
-  testWidgets('RegisterScreen renders fields and button', (WidgetTester tester) async {
+  testWidgets('RegisterScreen renders fields and button', (tester) async {
     await tester.pumpWidget(buildScreen());
+    await tester.pump();
 
     expect(find.text('MULAI PERJALANANMU'), findsOneWidget);
-    expect(find.byType(TextFormField), findsNWidgets(4)); // Name, Email, Phone, Password
+    expect(find.byType(TextFormField), findsNWidgets(4));
     expect(find.text('Daftar'), findsWidgets);
   });
 
-  testWidgets('RegisterScreen calls auth register on valid submit', (WidgetTester tester) async {
-    when(() => mockAuth.register(any(), any(), any(), any())).thenAnswer((_) async => true);
+  testWidgets('RegisterScreen calls auth register on valid submit',
+      (tester) async {
+    when(() => mockAuth.register(any(), any(), any(), any()))
+        .thenAnswer((_) async => true);
     when(() => mockAuth.dashboardRoute).thenReturn('/dashboard');
-    
+
     await tester.pumpWidget(buildScreen());
+    await tester.pump();
 
     final fields = find.byType(TextFormField);
     await tester.enterText(fields.at(0), 'John Doe');
@@ -65,6 +84,84 @@ void main() {
     await tester.tap(submitButton);
     await tester.pumpAndSettle();
 
-    verify(() => mockAuth.register('John Doe', 'test@example.com', 'password123', '081234567890')).called(1);
+    verify(() => mockAuth.register(
+          'John Doe',
+          'test@example.com',
+          'password123',
+          '081234567890',
+        )).called(1);
+    expect(find.text('dash'), findsOneWidget);
+  });
+
+  testWidgets('toggles password visibility', (tester) async {
+    await tester.pumpWidget(buildScreen());
+    await tester.pump();
+
+    expect(find.byIcon(Icons.visibility_off_outlined), findsOneWidget);
+    await tester.ensureVisible(find.byIcon(Icons.visibility_off_outlined));
+    await tester.tap(find.byIcon(Icons.visibility_off_outlined));
+    await tester.pump();
+    expect(find.byIcon(Icons.visibility_outlined), findsOneWidget);
+  });
+
+  testWidgets('shows auth error banner', (tester) async {
+    when(() => mockAuth.error).thenReturn('Email sudah terdaftar');
+    await tester.pumpWidget(buildScreen());
+    await tester.pump();
+    expect(find.text('Email sudah terdaftar'), findsOneWidget);
+  });
+
+  testWidgets('pops to previous route on Sudah punya akun', (tester) async {
+    final router = GoRouter(
+      initialLocation: '/login',
+      routes: [
+        GoRoute(
+          path: '/login',
+          builder: (context, state) => Scaffold(
+            body: TextButton(
+              onPressed: () => context.push('/register'),
+              child: const Text('Go register'),
+            ),
+          ),
+        ),
+        GoRoute(
+          path: '/register',
+          builder: (context, state) => const RegisterScreen(),
+        ),
+        GoRoute(
+          path: '/onboarding',
+          builder: (context, state) =>
+              const Scaffold(body: Text('onboarding page')),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AuthProvider>.value(value: mockAuth),
+        ],
+        child: MaterialApp.router(
+          theme: AppTheme.light,
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.tap(find.text('Go register'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.textContaining('Sudah punya akun'));
+    await tester.tap(find.textContaining('Sudah punya akun'));
+    await tester.pumpAndSettle();
+    expect(find.text('Go register'), findsOneWidget);
+  });
+
+  testWidgets('navigates to onboarding', (tester) async {
+    await tester.pumpWidget(buildScreen());
+    await tester.pump();
+    await tester.ensureVisible(find.textContaining('Kembali ke pengenalan'));
+    await tester.tap(find.textContaining('Kembali ke pengenalan'));
+    await tester.pumpAndSettle();
+    expect(find.text('onboarding page'), findsOneWidget);
   });
 }

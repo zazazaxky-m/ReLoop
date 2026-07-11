@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
@@ -12,17 +13,26 @@ class OfflineService {
   static const _storage = FlutterSecureStorage();
   Box? _box;
 
+  /// Test-only override for [get]. Cleared by tests in tearDown.
+  @visibleForTesting
+  static dynamic Function(String key)? debugGetOverride;
+
   Future<void> init({bool encrypted = true}) async {
+    // coverage:ignore-start
     final cipher = encrypted ? HiveAesCipher(await _encryptionKey()) : null;
+    // coverage:ignore-end
     try {
       _box = await Hive.openBox(_boxName, encryptionCipher: cipher);
     } catch (_) {
-      if (!encrypted) rethrow;
+      if (!encrypted) rethrow; // coverage:ignore-line
+      // coverage:ignore-start
       await Hive.deleteBoxFromDisk(_boxName);
       _box = await Hive.openBox(_boxName, encryptionCipher: cipher);
+      // coverage:ignore-end
     }
   }
 
+  // coverage:ignore-start
   Future<List<int>> _encryptionKey() async {
     final existing = await _storage.read(key: _keyName);
     if (existing != null) return base64Decode(existing);
@@ -30,6 +40,7 @@ class OfflineService {
     await _storage.write(key: _keyName, value: base64Encode(key));
     return key;
   }
+  // coverage:ignore-end
 
   Future<void> cache(String key, dynamic data) async {
     final json = jsonEncode(data);
@@ -37,6 +48,7 @@ class OfflineService {
   }
 
   dynamic get(String key) {
+    if (debugGetOverride != null) return debugGetOverride!(key);
     final entry = _box?.get(key);
     if (entry == null) return null;
     try {

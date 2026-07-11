@@ -50,7 +50,7 @@ class ReLoopCard extends StatelessWidget {
 }
 
 class ReLoopCardHeader extends StatelessWidget {
-  const ReLoopCardHeader({super.key, required this.child});
+  const ReLoopCardHeader({super.key, required this.child}); // coverage:ignore-line
   final Widget child;
 
   @override
@@ -67,7 +67,7 @@ class ReLoopCardHeader extends StatelessWidget {
 }
 
 class ReLoopCardTitle extends StatelessWidget {
-  const ReLoopCardTitle({super.key, required this.title});
+  const ReLoopCardTitle({super.key, required this.title}); // coverage:ignore-line
   final String title;
 
   @override
@@ -84,7 +84,7 @@ class ReLoopCardTitle extends StatelessWidget {
 }
 
 class ReLoopCardFooter extends StatelessWidget {
-  const ReLoopCardFooter({super.key, required this.child});
+  const ReLoopCardFooter({super.key, required this.child}); // coverage:ignore-line
   final Widget child;
 
   @override

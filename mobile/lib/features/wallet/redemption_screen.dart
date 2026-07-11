@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -13,10 +14,10 @@ class RedemptionScreen extends StatefulWidget {
   const RedemptionScreen({super.key});
 
   @override
-  State<RedemptionScreen> createState() => _RedemptionScreenState();
+  State<RedemptionScreen> createState() => RedemptionScreenState();
 }
 
-class _RedemptionScreenState extends State<RedemptionScreen> {
+class RedemptionScreenState extends State<RedemptionScreen> {
   List<Redemption> _redemptions = [];
   List<PayoutAccountModel> _accounts = [];
   int _available = 0;
@@ -25,6 +26,21 @@ class _RedemptionScreenState extends State<RedemptionScreen> {
   String? _error;
   final _amountCtrl = TextEditingController();
   String? _selectedAccountId;
+
+  /// Test-only helper: clears the auto-selected payout account so callers can
+  /// exercise the "no account selected" validation path.
+  @visibleForTesting
+  void debugClearSelectedAccount() {
+    setState(() {
+      _selectedAccountId = null;
+    });
+  }
+
+  /// Test-only helper: invokes the redemption request flow directly to
+  /// exercise the defensive "no accounts" / "no selection" branches that
+  /// are otherwise unreachable from the UI.
+  @visibleForTesting
+  Future<void> debugRequestRedemption() => _requestRedemption();
 
   @override
   void initState() {

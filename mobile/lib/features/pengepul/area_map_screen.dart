@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
@@ -11,13 +12,15 @@ import '../../shared/widgets/status_badge.dart';
 import '../../theme/colors.dart';
 
 class AreaMapScreen extends StatefulWidget {
+  // coverage:ignore-start
   const AreaMapScreen({super.key});
+  // coverage:ignore-end
 
   @override
-  State<AreaMapScreen> createState() => _AreaMapScreenState();
+  AreaMapScreenState createState() => AreaMapScreenState();
 }
 
-class _AreaMapScreenState extends State<AreaMapScreen>
+class AreaMapScreenState extends State<AreaMapScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
@@ -30,6 +33,36 @@ class _AreaMapScreenState extends State<AreaMapScreen>
   String? _error;
 
   MachineInfo? _selectedMachine;
+
+  @visibleForTesting
+  List<MachineInfo> get debugMachines => _machines;
+
+  @visibleForTesting
+  void debugSelectMachineTab() {
+    _tabController.animateTo(1);
+  }
+
+  @visibleForTesting
+  void debugSelectMachine(MachineInfo machine) {
+    setState(() => _selectedMachine = machine);
+  }
+
+  @visibleForTesting
+  void debugClearMachine() {
+    setState(() => _selectedMachine = null);
+  }
+
+  @visibleForTesting
+  Future<void> debugUpdatePartnership(String id, String action) =>
+      _updatePartnership(id, action);
+
+  @visibleForTesting
+  Future<void> debugSaveArea(String id, String regions, String note) =>
+      _saveArea(id, regions, note);
+
+  @visibleForTesting
+  Future<void> debugCreatePartnership(String organizationId) =>
+      _createPartnership(organizationId);
 
   @override
   void initState() {
@@ -247,9 +280,9 @@ class _AreaMapScreenState extends State<AreaMapScreen>
         actions: [
           TextButton(
             onPressed: () {
+              Navigator.pop(ctx);
               regionsCtrl.dispose();
               noteCtrl.dispose();
-              Navigator.pop(ctx);
             },
             child: const Text('Batal'),
           ),
@@ -257,9 +290,9 @@ class _AreaMapScreenState extends State<AreaMapScreen>
             onPressed: () {
               final regions = regionsCtrl.text;
               final note = noteCtrl.text;
+              Navigator.pop(ctx);
               regionsCtrl.dispose();
               noteCtrl.dispose();
-              Navigator.pop(ctx);
               _saveArea(id, regions, note);
             },
             child: const Text('Simpan'),

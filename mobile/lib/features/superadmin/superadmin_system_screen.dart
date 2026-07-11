@@ -135,7 +135,12 @@ class _SuperadminSystemScreenState extends State<SuperadminSystemScreen> {
         _ensureSlideControllers('mobile', _mobileSlides);
         _ensureSlideControllers('landing', _landingSlides);
       }
-      if (mounted) setState(() => _data = data);
+      if (mounted) {
+        setState(() {
+          _data = data;
+          _error = null;
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _error = ApiClient.getErrorMessage(error));
     }
@@ -1262,7 +1267,8 @@ class _SecurityEventTile extends StatelessWidget {
 
     final palette = _severityPalette(context, severity);
     final icon = _iconForAction(action, severity);
-    return Row(
+    return IntrinsicHeight(
+      child: Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Timeline rail
@@ -1435,6 +1441,7 @@ class _SecurityEventTile extends StatelessWidget {
           ),
         ),
       ],
+      ),
     );
   }
 

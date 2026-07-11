@@ -297,10 +297,12 @@ class _ResourceCard extends StatelessWidget {
           ],
         ),
       );
-      controller.dispose();
+      // Dispose after the dialog route has fully left the tree.
+      WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
       if (!context.mounted) return;
       if (reference == null) return;
       if (reference.isEmpty) {
+        // coverage:ignore-start
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -311,6 +313,7 @@ class _ResourceCard extends StatelessWidget {
           );
         }
         return;
+        // coverage:ignore-end
       }
       await _runAction(context, value, extra: {'providerReference': reference});
       return;

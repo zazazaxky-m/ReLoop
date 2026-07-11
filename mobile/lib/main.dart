@@ -16,6 +16,9 @@ import 'services/offline_service.dart';
 import 'services/background_sync_service.dart';
 import 'theme/app_theme.dart';
 
+// App bootstrap depends on Hive/Firebase/platform channels; ReloopApp is
+// covered by widget tests. Keep main() out of unit coverage.
+// coverage:ignore-start
 Future<void> main({ApiClient? injectedApiClient}) async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -80,6 +83,7 @@ Future<void> main({ApiClient? injectedApiClient}) async {
     ),
   );
 }
+// coverage:ignore-end
 
 class ReloopApp extends StatelessWidget {
   final AuthProvider authProvider;

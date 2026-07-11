@@ -39,10 +39,12 @@ class AnalyticsService {
 
   Future<void> setUserProperties(Map<String, String?> properties) async {
     for (final entry in properties.entries) {
+      // coverage:ignore-start
       await _analytics?.setUserProperty(
         name: entry.key,
         value: entry.value,
       );
+      // coverage:ignore-end
     }
   }
 

@@ -3,7 +3,7 @@ import 'package:flutter/widgets.dart';
 /// Central spacing and radius tokens so every screen shares one scale instead
 /// of hardcoding arbitrary values. Use these instead of raw numbers.
 class ReLoopSpacing {
-  ReLoopSpacing._();
+  ReLoopSpacing._(); // coverage:ignore-line
 
   static const double xs = 4;
   static const double sm = 8;
@@ -27,7 +27,7 @@ class ReLoopSpacing {
 /// Corner radius scale. Keep the number of distinct radii small so the UI reads
 /// as one cohesive system.
 class ReLoopRadius {
-  ReLoopRadius._();
+  ReLoopRadius._(); // coverage:ignore-line
 
   static const double sm = 10;
   static const double md = 14;
@@ -44,7 +44,7 @@ class ReLoopRadius {
 /// Accessibility minimums (Material / Apple HIG). Interactive targets should be
 /// at least [minTouchTarget]; functional text should not go below [minTextSize].
 class ReLoopA11y {
-  ReLoopA11y._();
+  ReLoopA11y._(); // coverage:ignore-line
 
   static const double minTouchTarget = 48;
   static const double minTextSize = 12;

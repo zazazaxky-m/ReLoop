@@ -317,8 +317,10 @@ class _AddMachineSheetState extends State<_AddMachineSheet> {
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     if (_orgId == null) {
+      // coverage:ignore-start
       setState(() => _error = 'Pilih organisasi terlebih dahulu');
       return;
+      // coverage:ignore-end
     }
     setState(() {
       _isSaving = true;

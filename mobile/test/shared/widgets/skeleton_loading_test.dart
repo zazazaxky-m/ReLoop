@@ -55,4 +55,17 @@ void main() {
       expect(find.byType(SkeletonDashboard), findsOneWidget);
     });
   });
+
+  group('SkeletonWallet', () {
+    testWidgets('renders wallet loading placeholder', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: SkeletonWallet()),
+        ),
+      );
+
+      expect(find.byType(SkeletonWallet), findsOneWidget);
+      expect(find.byType(SkeletonListTile), findsNWidgets(3));
+    });
+  });
 }

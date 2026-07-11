@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -12,16 +13,30 @@ class BiometricService {
   static const _keyEnabled = 'biometric_enabled';
   static const _keyCredentials = 'biometric_credentials';
 
+  /// Test overrides so widget tests can exercise biometric UI without plugins.
+  @visibleForTesting
+  static bool? debugAvailabilityOverride;
+
+  @visibleForTesting
+  static bool? debugAuthenticateResult;
+
+  @visibleForTesting
+  static List<BiometricType>? debugAvailableTypes;
+
   Future<bool> get isBiometricAvailable async {
+    if (debugAvailabilityOverride != null) return debugAvailabilityOverride!;
     try {
+      // coverage:ignore-start
       return await _auth.canCheckBiometrics &&
           await _auth.isDeviceSupported();
+      // coverage:ignore-end
     } catch (_) {
       return false;
     }
   }
 
   Future<List<BiometricType>> get availableBiometrics async {
+    if (debugAvailableTypes != null) return debugAvailableTypes!;
     try {
       return await _auth.getAvailableBiometrics();
     } catch (_) {
@@ -52,8 +67,10 @@ class BiometricService {
   }
 
   Future<bool> authenticate({String? reason}) async {
+    if (debugAuthenticateResult != null) return debugAuthenticateResult!;
     try {
       final typeName = await getBiometricTypeName();
+      // coverage:ignore-start
       return await _auth.authenticate(
         localizedReason: reason ?? 'Gunakan $typeName untuk melanjutkan',
         options: const AuthenticationOptions(
@@ -61,6 +78,7 @@ class BiometricService {
           biometricOnly: true,
         ),
       );
+      // coverage:ignore-end
     } catch (_) {
       return false;
     }

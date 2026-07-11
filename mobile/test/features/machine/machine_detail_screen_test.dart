@@ -5,6 +5,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:provider/provider.dart';
 import 'package:reloop_mobile/core/api_client.dart';
 import 'package:reloop_mobile/features/machine/machine_detail_screen.dart';
+import 'package:reloop_mobile/features/machine/machine_report_form.dart';
 
 class MockApiClient extends Mock implements ApiClient {}
 
@@ -118,5 +119,36 @@ void main() {
 
     expect(find.text('Data tidak ditemukan.'), findsOneWidget);
     expect(find.text('Coba Lagi'), findsOneWidget);
+  });
+
+  testWidgets('tapping report opens MachineReportForm', (tester) async {
+    when(() => mockApi.get('/api/public/machines/MAC-123')).thenAnswer(
+      (_) async => Response(
+        requestOptions: RequestOptions(path: '/api/public/machines/MAC-123'),
+        data: {
+          'machine': {
+            'id': 'm1',
+            'machineCode': 'MAC-123',
+            'name': 'Mesin A',
+            'status': 'ONLINE',
+            'fillLevelPercent': 10,
+          },
+          'recentSessions': [],
+        },
+      ),
+    );
+
+    await tester.pumpWidget(buildScreen());
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('Laporkan Masalah', skipOffstage: false),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Laporkan Masalah'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(MachineReportForm), findsOneWidget);
   });
 }

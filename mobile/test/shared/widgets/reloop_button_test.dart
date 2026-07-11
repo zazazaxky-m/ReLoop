@@ -85,5 +85,63 @@ void main() {
       );
       expect(find.text('Danger'), findsOneWidget);
     });
+
+    testWidgets('renders outline ghost secondary and sizes', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                ReLoopButton(
+                  label: 'Outline',
+                  variant: ReLoopButtonVariant.outline,
+                  size: ReLoopButtonSize.sm,
+                  onPressed: () {},
+                ),
+                ReLoopButton(
+                  label: 'Ghost',
+                  variant: ReLoopButtonVariant.ghost,
+                  size: ReLoopButtonSize.lg,
+                  expanded: false,
+                  onPressed: () {},
+                ),
+                ReLoopButton(
+                  label: 'Secondary',
+                  variant: ReLoopButtonVariant.secondary,
+                  onPressed: () {},
+                ),
+                ReLoopButton(
+                  label: 'Icon',
+                  size: ReLoopButtonSize.icon,
+                  icon: Icons.add,
+                  onPressed: () {},
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(find.text('Outline'), findsOneWidget);
+      expect(find.text('Ghost'), findsOneWidget);
+      expect(find.text('Secondary'), findsOneWidget);
+      expect(find.text('Icon'), findsOneWidget);
+      expect(find.byIcon(Icons.add), findsOneWidget);
+    });
+
+    testWidgets('danger loading uses white indicator', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ReLoopButton(
+              label: 'Danger Load',
+              variant: ReLoopButtonVariant.danger,
+              isLoading: true,
+              onPressed: () {},
+            ),
+          ),
+        ),
+      );
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    });
   });
 }

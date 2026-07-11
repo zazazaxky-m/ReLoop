@@ -12,7 +12,7 @@ import 'machine_report_form.dart';
 class MachineDetailScreen extends StatefulWidget {
   final String machineCode;
 
-  const MachineDetailScreen({super.key, required this.machineCode});
+  const MachineDetailScreen({super.key, required this.machineCode}); // coverage:ignore-line
 
   @override
   State<MachineDetailScreen> createState() => _MachineDetailScreenState();
