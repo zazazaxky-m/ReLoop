@@ -25,8 +25,8 @@ describe('lib/auth', () => {
       const hash = await auth.hashPassword(password);
       
       expect(hash).not.toBe(password);
-      expect(hash).toContain('$2a$'); // bcrypt prefix
-      
+      expect(hash).toMatch(/^\$2[aby]\$12\$/); // bcrypt cost 12
+
       const isValid = await auth.verifyPassword(password, hash);
       expect(isValid).toBe(true);
     });

@@ -1,0 +1,302 @@
+:root {
+  --reloop-ink: #052e1c;
+  --reloop-brand: #0ca160;
+  --reloop-soft: #ecfdf5;
+}
+
+.print-root {
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* ===== Sticker layout (A4, 2×4) ===== */
+.sticker-page {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  padding: 18mm 14mm 14mm;
+  margin-bottom: 24px;
+}
+
+.sticker-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10mm;
+  padding-bottom: 4mm;
+  border-bottom: 1.5px solid #d1fae5;
+}
+
+.sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8mm 10mm;
+}
+
+.sticker-label {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 70mm;
+  padding: 5mm 4mm 4mm;
+  border: 1.5px dashed #94a3b8;
+  border-radius: 4mm;
+  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 28%, #ffffff 100%);
+}
+
+.sticker-label-top {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2mm;
+}
+
+.sticker-brand {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--reloop-brand);
+}
+
+.sticker-index {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.sticker-qr-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2mm;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 3mm;
+  box-shadow: inset 0 0 0 3px white;
+}
+
+.sticker-qr {
+  width: 38mm;
+  height: 38mm;
+  object-fit: contain;
+}
+
+.sticker-code {
+  margin-top: 3mm;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--reloop-ink);
+}
+
+.sticker-meta {
+  margin-top: 2mm;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 2mm;
+  font-size: 9px;
+  color: #475569;
+}
+
+.sticker-waste {
+  font-weight: 700;
+  color: #065f46;
+  background: var(--reloop-soft);
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  padding: 1mm 2.5mm;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sticker-group {
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  align-self: center;
+}
+
+.sticker-footer {
+  margin-top: auto;
+  padding-top: 2mm;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.sticker-cut-marks {
+  pointer-events: none;
+  position: absolute;
+  inset: -1.5mm;
+  border: 0.4px solid transparent;
+}
+
+/* ===== Sheet / card layout ===== */
+.sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.sheet-card {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.sheet-card-brand {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.sheet-qr-wrap {
+  padding: 12px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ecfdf5, #ffffff);
+  border: 1px solid #d1fae5;
+}
+
+.sheet-qr {
+  width: 180px;
+  height: 180px;
+  object-fit: contain;
+}
+
+.sheet-code {
+  margin-top: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--reloop-ink);
+}
+
+.sheet-details {
+  margin-top: 14px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  text-align: center;
+}
+
+.sheet-details .label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.sheet-details .value {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-hint {
+  margin-top: 14px;
+  font-size: 10px;
+  color: #64748b;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .sheet-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@page {
+  size: A4;
+  margin: 8mm;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .print-root {
+    background: white !important;
+    min-height: auto !important;
+  }
+
+  .print-root > .mx-auto {
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .sticker-page {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100%;
+    min-height: auto;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .sticker-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .sticker-page-header {
+    margin-bottom: 6mm;
+  }
+
+  .sticker-grid {
+    gap: 6mm 8mm;
+  }
+
+  .sticker-label {
+    min-height: 62mm;
+    background: white !important;
+  }
+
+  .sheet-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10mm;
+  }
+
+  .sheet-card {
+    box-shadow: none !important;
+    border: 1.5px solid #cbd5e1 !important;
+  }
+}

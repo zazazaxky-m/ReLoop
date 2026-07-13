@@ -321,7 +321,10 @@ enum NotificationType {
 model User {
   id             String        @id @default(cuid())
   name           String
-  email          String        @unique
+  /// AES-GCM ciphertext (random IV). Equality lookups use emailLookup, not this field.
+  email          String
+  /// HMAC blind index for login/register (middleware fills on write; cuid default only for create typing).
+  emailLookup    String        @unique @default(cuid())
   phone          String?
   passwordHash   String?
   authProvider   String        @default("CREDENTIALS")

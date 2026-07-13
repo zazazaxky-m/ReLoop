@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { encrypt, decrypt, encryptDeterministic, isEncrypted } from "./encryption";
+import { encrypt, decrypt, isEncrypted, emailLookupHash } from "./encryption";
 
 function decryptValue(value: unknown): unknown {
   if (typeof value !== "string" || value.length === 0) return value;
@@ -69,40 +69,61 @@ export const prisma = basePrisma.$extends({
       async $allOperations({ args, query }) {
         const a = args as Record<string, unknown>;
 
-        const processEncrypt = (val: unknown, deterministic = false): unknown => {
-          if (typeof val === "string") return deterministic ? encryptDeterministic(val) : encrypt(val);
+        const processEncrypt = (val: unknown): unknown => {
+          if (typeof val === "string") return encrypt(val);
           if (val && typeof val === "object") {
             const obj = val as Record<string, unknown>;
-            if (typeof obj.equals === "string") obj.equals = deterministic ? encryptDeterministic(obj.equals) : encrypt(obj.equals);
-            if (typeof obj.set === "string") obj.set = deterministic ? encryptDeterministic(obj.set) : encrypt(obj.set);
-            if (Array.isArray(obj.in)) obj.in = obj.in.map(e => typeof e === "string" ? (deterministic ? encryptDeterministic(e) : encrypt(e)) : e);
+            if (typeof obj.equals === "string") obj.equals = encrypt(obj.equals);
+            if (typeof obj.set === "string") obj.set = encrypt(obj.set);
+            if (Array.isArray(obj.in)) {
+              obj.in = obj.in.map((e) => (typeof e === "string" ? encrypt(e) : e));
+            }
           }
           return val;
         };
 
-        const where = a.where as Record<string, unknown> | undefined;
-        if (where?.email) where.email = processEncrypt(where.email, true);
+        /** where.email → where.emailLookup (HMAC), so call sites stay unchanged. */
+        const rewriteEmailWhere = (where: Record<string, unknown> | undefined) => {
+          if (!where || where.email === undefined) return;
+          const email = where.email;
+          delete where.email;
+          if (typeof email === "string") {
+            where.emailLookup = emailLookupHash(email);
+            return;
+          }
+          if (email && typeof email === "object") {
+            const obj = email as Record<string, unknown>;
+            const next: Record<string, unknown> = {};
+            if (typeof obj.equals === "string") next.equals = emailLookupHash(obj.equals);
+            if (Array.isArray(obj.in)) {
+              next.in = obj.in.map((e) =>
+                typeof e === "string" ? emailLookupHash(e) : e,
+              );
+            }
+            where.emailLookup = Object.keys(next).length ? next : emailLookupHash(String(email));
+          }
+        };
 
-        const data = a.data as Record<string, unknown> | undefined;
-        if (data) {
-          if (data.name) data.name = processEncrypt(data.name);
-          if (data.phone) data.phone = processEncrypt(data.phone);
-          if (data.email) data.email = processEncrypt(data.email, true);
-        }
+        const stampEmailWrite = (bag: Record<string, unknown> | undefined) => {
+          if (!bag) return;
+          if (typeof bag.email === "string") {
+            bag.emailLookup = emailLookupHash(bag.email);
+            bag.email = encrypt(bag.email);
+          } else if (bag.email && typeof bag.email === "object") {
+            const obj = bag.email as Record<string, unknown>;
+            if (typeof obj.set === "string") {
+              bag.emailLookup = emailLookupHash(obj.set);
+              obj.set = encrypt(obj.set);
+            }
+          }
+          if (bag.name) bag.name = processEncrypt(bag.name);
+          if (bag.phone) bag.phone = processEncrypt(bag.phone);
+        };
 
-        const createData = a.create as Record<string, unknown> | undefined;
-        if (createData) {
-          if (createData.name) createData.name = processEncrypt(createData.name);
-          if (createData.phone) createData.phone = processEncrypt(createData.phone);
-          if (createData.email) createData.email = processEncrypt(createData.email, true);
-        }
-
-        const updateData = a.update as Record<string, unknown> | undefined;
-        if (updateData) {
-          if (updateData.name) updateData.name = processEncrypt(updateData.name);
-          if (updateData.phone) updateData.phone = processEncrypt(updateData.phone);
-          if (updateData.email) updateData.email = processEncrypt(updateData.email, true);
-        }
+        rewriteEmailWhere(a.where as Record<string, unknown> | undefined);
+        stampEmailWrite(a.data as Record<string, unknown> | undefined);
+        stampEmailWrite(a.create as Record<string, unknown> | undefined);
+        stampEmailWrite(a.update as Record<string, unknown> | undefined);
 
         const result = await query(args);
 

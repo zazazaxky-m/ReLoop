@@ -3,9 +3,9 @@ import * as encryption from '@/lib/encryption';
 
 vi.mock('@/lib/encryption', () => ({
   encrypt: vi.fn(val => `enc:${val}`),
-  decrypt: vi.fn(val => val.replace('enc:', '').replace('det:', '')),
-  encryptDeterministic: vi.fn(val => `det:${val}`),
-  isEncrypted: vi.fn(val => typeof val === 'string' && (val.startsWith('enc:') || val.startsWith('det:'))),
+  decrypt: vi.fn(val => String(val).replace('enc:', '')),
+  emailLookupHash: vi.fn(val => `lookup:${String(val).toLowerCase().trim()}`),
+  isEncrypted: vi.fn(val => typeof val === 'string' && val.startsWith('enc:')),
 }));
 
 const mockExtends = vi.fn();
@@ -32,7 +32,7 @@ describe('prisma extensions', () => {
     
     // Test global $allOperations
     const globalQuery = config.query.$allOperations;
-    const globalRes = await globalQuery({ args: {}, query: async () => ({ id: '1', name: 'enc:Test', email: 'det:test@test.com' }) });
+    const globalRes = await globalQuery({ args: {}, query: async () => ({ id: '1', name: 'enc:Test', email: 'enc:test@test.com' }) });
     expect(globalRes.name).toBe('Test');
     expect(globalRes.email).toBe('test@test.com');
 
@@ -48,15 +48,20 @@ describe('prisma extensions', () => {
       },
       query: async (a: any) => {
         queryArgs = a;
-        return { id: '1', name: 'enc:Test', email: 'det:test@test.com', phone: 'enc:123' };
+        return { id: '1', name: 'enc:Test', email: 'enc:test@test.com', phone: 'enc:123' };
       }
     });
 
-    expect(queryArgs.where.email).toBe('det:test@test.com');
+    expect(queryArgs.where.email).toBeUndefined();
+    expect(queryArgs.where.emailLookup).toBe('lookup:test@test.com');
     expect(queryArgs.data.name).toBe('enc:Test');
+    expect(queryArgs.data.email).toBe('enc:test@test.com');
+    expect(queryArgs.data.emailLookup).toBe('lookup:test@test.com');
     expect(queryArgs.create.name).toBe('enc:Test2');
+    expect(queryArgs.create.emailLookup).toBe('lookup:test2@test.com');
     expect(queryArgs.update.name).toBe('enc:Test3');
-    
+    expect(queryArgs.update.emailLookup).toBe('lookup:test3@test.com');
+
     expect(userRes.name).toBe('Test');
     
     // Test payoutAccount $allOperations
@@ -104,9 +109,10 @@ describe('prisma extensions', () => {
       }
     });
 
-    expect(queryArgs.where.email.equals).toBe('det:test@a.com');
-    expect(queryArgs.where.email.in[0]).toBe('det:b@a.com');
-    expect(queryArgs.where.email.in[1]).toBe(123); // ignores non-string
+    expect(queryArgs.where.email).toBeUndefined();
+    expect(queryArgs.where.emailLookup.equals).toBe('lookup:test@a.com');
+    expect(queryArgs.where.emailLookup.in[0]).toBe('lookup:b@a.com');
+    expect(queryArgs.where.emailLookup.in[1]).toBe(123); // ignores non-string
     expect(queryArgs.data.name.set).toBe('enc:NewName');
     
     expect(res[0].name).toBe('A');
@@ -308,14 +314,14 @@ describe('prisma extensions', () => {
     expect(queryArgs.data.phone.equals).toBe('enc:1');
   });
 
-  it('encrypts email filter set/in via deterministic path', async () => {
+  it('rewrites email filters to emailLookup and encrypts email writes', async () => {
     await import('@/lib/prisma');
     const config = mockExtends.mock.calls[0][0];
     const userQuery = config.query.user.$allOperations;
     let queryArgs: any;
     await userQuery({
       args: {
-        where: { email: { equals: 'a@x.com', set: 'b@x.com', in: ['c@x.com', 1] } },
+        where: { email: { equals: 'a@x.com', in: ['c@x.com', 1] } },
         data: { email: { set: 'd@x.com' } },
       },
       query: async (a: any) => {
@@ -323,10 +329,11 @@ describe('prisma extensions', () => {
         return { id: '1' };
       },
     });
-    expect(queryArgs.where.email.equals).toBe('det:a@x.com');
-    expect(queryArgs.where.email.set).toBe('det:b@x.com');
-    expect(queryArgs.where.email.in[0]).toBe('det:c@x.com');
-    expect(queryArgs.data.email.set).toBe('det:d@x.com');
+    expect(queryArgs.where.email).toBeUndefined();
+    expect(queryArgs.where.emailLookup.equals).toBe('lookup:a@x.com');
+    expect(queryArgs.where.emailLookup.in[0]).toBe('lookup:c@x.com');
+    expect(queryArgs.data.email.set).toBe('enc:d@x.com');
+    expect(queryArgs.data.emailLookup).toBe('lookup:d@x.com');
   });
 });
 

@@ -5,6 +5,7 @@ import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { logAudit } from "@/lib/audit";
+import { userWhereEmail } from "@/lib/encryption";
 
 const schema = z.object({
   email: z.string().email("Email tidak valid"),
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
     // if the email isn't on file (so the endpoint can't be used to enumerate
     // which emails are registered).
     const user = await prisma.user.findUnique({
-      where: { email },
+      where: userWhereEmail(email),
       select: { id: true, status: true },
     });
 

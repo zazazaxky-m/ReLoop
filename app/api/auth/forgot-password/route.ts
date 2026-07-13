@@ -5,6 +5,7 @@ import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { userWhereEmail } from "@/lib/encryption";
 import { sendPasswordResetEmail } from "@/lib/mailer";
 import { createPasswordResetToken } from "@/lib/password-reset";
 
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
     const data = schema.parse(await req.json());
     const email = data.email.toLowerCase().trim();
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: userWhereEmail(email) });
 
     // Only issue a token for an active, credential-based account. We still
     // return the same generic response in every branch so the endpoint can't

@@ -39,7 +39,7 @@ export const DEFAULT_MOBILE_HERO_SLIDES: HeroSlide[] = [
     href: "/campaigns",
   },
 ];
-function isSafeUrl(value: string) {
+export function isSafeUrl(value: string) {
   return (
     value === "" ||
     value.startsWith("/") ||

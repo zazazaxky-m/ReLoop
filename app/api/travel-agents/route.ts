@@ -5,6 +5,7 @@ import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { normalizeTravelAgentEmail } from "@/lib/tourism";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
+import { emailLookupHash, userWhereEmail } from "@/lib/encryption";
 
 const inviteSchema = z.object({
   name: z.string().min(2).max(160),
@@ -34,7 +35,7 @@ export async function GET(req: Request) {
     const pendingEmails = pendingLinks.map((link) => link.travelAgent.email);
     const existingUsers = pendingEmails.length
       ? await prisma.user.findMany({
-          where: { email: { in: pendingEmails } },
+          where: { emailLookup: { in: pendingEmails.map(emailLookupHash) } },
           select: { id: true, email: true },
         })
       : [];
@@ -144,7 +145,7 @@ export async function POST(req: Request) {
 
     const email = normalizeTravelAgentEmail(data.email);
     const existingUser = await prisma.user.findUnique({
-      where: { email },
+      where: userWhereEmail(email),
       select: { id: true },
     });
     const inviteStatus = existingUser ? "INVITED" : "PENDING";

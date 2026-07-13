@@ -8,6 +8,7 @@ import { logAudit } from "@/lib/audit";
 import { displayUsers } from "@/lib/display-user";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 import { passwordSchema } from "@/lib/password-policy";
+import { userWhereEmail } from "@/lib/encryption";
 
 const createSchema = z.object({
   name: z.string().min(2).max(120),
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
     const actor = await requireApiUser(["SUPERADMIN"]);
     const data = createSchema.parse(await req.json());
 
-    const existing = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
+    const existing = await prisma.user.findUnique({ where: userWhereEmail(data.email) });
     if (existing) return jsonError(409, "Email sudah terdaftar");
 
     if (data.role === "ADMIN" && !data.organizationId) {

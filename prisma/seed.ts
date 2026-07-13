@@ -92,7 +92,7 @@ async function main() {
   console.log("Seeding ReLoop database...");
   await wipe();
 
-  const passwordHash = await bcrypt.hash("password1234", 10);
+  const passwordHash = await bcrypt.hash("password1234", 12);
 
   // ==========================================================
   // Regions (Jawa Barat -> Pangandaran)

@@ -1,44 +1,535 @@
 name: Security Scan
 
 on:
+  pull_request:
+  push:
+    branches: [main, develop]
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
+    inputs:
+      zap_target:
+        description: "Optional live URL for OWASP ZAP baseline (empty = skip ZAP)"
+        required: false
+        default: ""
+      scan_images:
+        description: "Build and scan Docker images with Trivy"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  pull-requests: write
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
 
 jobs:
-  scan:
-    name: Vulnerability Scan
+  gitleaks:
+    name: Gitleaks (secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  semgrep:
+    name: Semgrep (SAST)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Semgrep scan (web + mobile)
+        run: |
+          mkdir -p reports
+          semgrep scan \
+            --config p/typescript \
+            --config p/javascript \
+            --config p/react \
+            --config p/nodejs \
+            --config p/dart \
+            --config p/flutter \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --sarif \
+            --output reports/semgrep.sarif \
+            --error \
+            --metrics=off \
+            .
+        continue-on-error: true
+
+      - name: Upload Semgrep SARIF
+        if: always() && hashFiles('reports/semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/semgrep.sarif
+          category: semgrep
+        continue-on-error: true
+
+      - name: Upload Semgrep artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  codeql:
+    name: CodeQL (SAST)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended,security-and-quality
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+        continue-on-error: true
+
+  bearer:
+    name: Bearer (privacy / SAST)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bearer scan
+        uses: bearer/bearer-action@v2
+        with:
+          path: .
+          format: sarif
+          output: bearer-results.sarif
+          skip-path: node_modules,.next,coverage,rvm
+        continue-on-error: true
+
+      - name: Upload Bearer SARIF
+        if: always() && hashFiles('bearer-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bearer-results.sarif
+          category: bearer
+        continue-on-error: true
+
+      - name: Upload Bearer artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bearer-report
+          path: bearer-results.sarif
+          if-no-files-found: ignore
+          retention-days: 14
+
+  flutter-sast:
+    name: Flutter / Dart (analyze + Semgrep)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Flutter analyze
+        run: |
+          mkdir -p ../reports
+          flutter analyze --no-fatal-infos 2>&1 | tee ../reports/flutter-analyze.txt
+        continue-on-error: true
+
+      - name: Semgrep mobile (Dart / Flutter)
+        run: |
+          pip install --quiet semgrep
+          mkdir -p ../reports
+          semgrep scan \
+            --config p/dart \
+            --config p/flutter \
+            --config p/owasp-top-ten \
+            --sarif \
+            --output ../reports/semgrep-mobile.sarif \
+            --error \
+            --metrics=off \
+            . || true
+        continue-on-error: true
+
+      - name: Upload Flutter Semgrep SARIF
+        if: always() && hashFiles('reports/semgrep-mobile.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/semgrep-mobile.sarif
+          category: semgrep-flutter
+        continue-on-error: true
+
+      - name: Upload Flutter SAST artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-sast-report
+          path: |
+            reports/flutter-analyze.txt
+            reports/semgrep-mobile.sarif
+          if-no-files-found: ignore
+          retention-days: 14
+
+  trivy-fs:
+    name: Trivy (deps + filesystem)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy filesystem / dependency scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH,MEDIUM
+          format: sarif
+          output: trivy-fs.sarif
+          exit-code: "0"
+          ignore-unfixed: true
+
+      - name: Upload Trivy FS SARIF
+        if: always() && hashFiles('trivy-fs.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+        continue-on-error: true
+
+      - name: Trivy table (artifact)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          format: table
+          output: trivy-fs.txt
+          exit-code: "0"
+          ignore-unfixed: true
+
+      - name: Upload Trivy FS artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-fs-report
+          path: |
+            trivy-fs.sarif
+            trivy-fs.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  trivy-image:
+    name: Trivy (container images)
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.scan_images) ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'))
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: reloop-app:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build realtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.realtime
+          load: true
+          tags: reloop-realtime:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy scan app image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: reloop-app:scan
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-app.sarif
+          exit-code: "0"
+          ignore-unfixed: true
+
+      - name: Trivy scan realtime image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: reloop-realtime:scan
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-realtime.sarif
+          exit-code: "0"
+          ignore-unfixed: true
+
+      - name: Upload Trivy image SARIF (app)
+        if: always() && hashFiles('trivy-app.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-app.sarif
+          category: trivy-image-app
+        continue-on-error: true
+
+      - name: Upload Trivy image SARIF (realtime)
+        if: always() && hashFiles('trivy-realtime.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-realtime.sarif
+          category: trivy-image-realtime
+        continue-on-error: true
+
+      - name: Upload Trivy image artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-reports
+          path: |
+            trivy-app.sarif
+            trivy-realtime.sarif
+          if-no-files-found: ignore
+          retention-days: 14
+
+  checkov:
+    name: Checkov (IaC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: dockerfile,docker_compose,github_actions
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+          soft_fail: true
+          skip_path: node_modules,.next,coverage,mobile
+
+      - name: Upload Checkov SARIF
+        if: always() && hashFiles('checkov.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+        continue-on-error: true
+
+      - name: Upload Checkov artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-report
+          path: checkov.sarif
+          if-no-files-found: ignore
+          retention-days: 14
+
+  npm-audit:
+    name: npm audit + license
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - run: npm ci
 
       - name: npm audit
-        run: npm audit --audit-level=high
-        continue-on-error: true
-
-      - name: Secret scan with Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Check for hardcoded secrets
         run: |
-          echo "Checking for common secret patterns..."
-          ! rg -n '(?i)(password|secret|key|token|credential).*['"'"'"].{8,}['"'"'"]' \
-            --glob '!node_modules' \
-            --glob '!.git' \
-            --glob '!*.test.ts' \
-            --glob '!.env*' \
-            --glob '!*.md' \
-            --type ts --type json --type yaml
+          mkdir -p reports
+          npm audit --json > reports/npm-audit.json || true
+          npm audit --audit-level=high | tee reports/npm-audit.txt || true
 
       - name: Dependency license audit
-        run: npx license-checker --summary --failOn 'GPL;AGPL' \
-          --onlyAllow 'MIT;Apache-2.0;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense'
+        run: |
+          npx license-checker --summary --failOn 'GPL;AGPL' \
+            --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense;BlueOak-1.0.0;Python-2.0' \
+            | tee reports/licenses.txt
+
+      - name: Upload npm audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-report
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  zap:
+    name: OWASP ZAP baseline (optional)
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      inputs.zap_target != ''
+    steps:
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: ${{ inputs.zap_target }}
+          fail_action: false
+          allow_issue_writing: false
+          cmd_options: "-a"
+
+      - name: Upload ZAP artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report_html.html
+          if-no-files-found: ignore
+          retention-days: 14
+
+  summary:
+    name: Security summary
+    runs-on: ubuntu-latest
+    needs:
+      - gitleaks
+      - semgrep
+      - codeql
+      - bearer
+      - flutter-sast
+      - trivy-fs
+      - trivy-image
+      - checkov
+      - npm-audit
+      - zap
+    if: always()
+    steps:
+      - name: Download reports
+        uses: actions/download-artifact@v4
+        with:
+          path: security-reports
+        continue-on-error: true
+
+      - name: Write job summary
+        run: |
+          {
+            echo "## Security scan summary"
+            echo ""
+            echo "| Job | Result |"
+            echo "|-----|--------|"
+            echo "| Gitleaks | ${{ needs.gitleaks.result }} |"
+            echo "| Semgrep | ${{ needs.semgrep.result }} |"
+            echo "| CodeQL | ${{ needs.codeql.result }} |"
+            echo "| Bearer | ${{ needs.bearer.result }} |"
+            echo "| Flutter / Dart | ${{ needs.flutter-sast.result }} |"
+            echo "| Trivy FS | ${{ needs.trivy-fs.result }} |"
+            echo "| Trivy images | ${{ needs.trivy-image.result }} |"
+            echo "| Checkov | ${{ needs.checkov.result }} |"
+            echo "| npm audit | ${{ needs.npm-audit.result }} |"
+            echo "| ZAP | ${{ needs.zap.result }} |"
+            echo ""
+            echo "SARIF uploaded to **Security** tab (when GHAS / public repo allows)."
+            echo "Full reports attached as workflow artifacts."
+            echo ""
+            echo "### Trigger"
+            echo "- event: \`${{ github.event_name }}\`"
+            echo "- ref: \`${{ github.ref }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bundle all reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports-bundle
+          path: security-reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              '## Security scan',
+              '',
+              '| Job | Result |',
+              '|-----|--------|',
+              `| Gitleaks | ${{ needs.gitleaks.result }} |`,
+              `| Semgrep | ${{ needs.semgrep.result }} |`,
+              `| CodeQL | ${{ needs.codeql.result }} |`,
+              `| Bearer | ${{ needs.bearer.result }} |`,
+              `| Flutter / Dart | ${{ needs.flutter-sast.result }} |`,
+              `| Trivy FS | ${{ needs.trivy-fs.result }} |`,
+              `| Trivy images | ${{ needs.trivy-image.result }} |`,
+              `| Checkov | ${{ needs.checkov.result }} |`,
+              `| npm audit | ${{ needs.npm-audit.result }} |`,
+              '',
+              'Details: **Actions → Security Scan → Artifacts** and **Security** tab (SARIF).',
+              '',
+              '_ZAP runs only via workflow_dispatch with `zap_target`._',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const marker = '## Security scan';
+            const existing = comments.find(c =>
+              c.user?.type === 'Bot' && c.body?.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

@@ -3,7 +3,9 @@ let maintenanceToken=sessionStorage.getItem("rvmMaintenanceToken")||"";
 let mediaVersion="",mediaItems=[],mediaIndex=0,mediaTimer=null,mediaVisible=false;
 const rupiah=value=>new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(Number(value||0));
 const label=value=>String(value||"").replaceAll("_"," ");
-const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
+const safeMediaUrl=value=>{try{const u=new URL(String(value||""),location.origin);return["http:","https:"].includes(u.protocol)?u.href:""}catch{return""}};
+const el=(tag,props={},...kids)=>{const n=document.createElement(tag);for(const[k,v]of Object.entries(props)){if(k==="className")n.className=v;else if(k==="dataset")Object.assign(n.dataset,v);else if(k.startsWith("on")&&typeof v==="function")n.addEventListener(k.slice(2).toLowerCase(),v);else if(v!=null)n.setAttribute(k,v)}for(const c of kids){if(c==null)continue;n.append(typeof c==="string"||typeof c==="number"?document.createTextNode(String(c)):c)}return n};
+const clear=node=>{while(node.firstChild)node.removeChild(node.firstChild);return node};
 
 function stopMedia(){
   if(mediaTimer){clearTimeout(mediaTimer);mediaTimer=null}
@@ -15,14 +17,17 @@ function playMedia(){
   if(!mediaVisible||!mediaItems.length)return;
   if(mediaTimer){clearTimeout(mediaTimer);mediaTimer=null}
   const item=mediaItems[mediaIndex],image=$("adImage"),video=$("adVideo");
+  const url=safeMediaUrl(item.url);
+  if(!url){nextMedia();return}
   image.hidden=item.mediaType!=="IMAGE";video.hidden=item.mediaType!=="VIDEO";
   $("adTitle").textContent=item.title||"Bersama menjaga lingkungan";
-  $("adDots").innerHTML=mediaItems.map((_,index)=>`<i class="${index===mediaIndex?"active":""}"></i>`).join("");
-  if(item.mediaType==="VIDEO"){image.removeAttribute("src");video.src=item.url;video.currentTime=0;video.onended=nextMedia;video.onerror=nextMedia;video.play().catch(()=>{mediaTimer=setTimeout(nextMedia,3000)})}
-  else{video.pause();video.removeAttribute("src");image.src=item.url;image.onerror=nextMedia;mediaTimer=setTimeout(nextMedia,Math.max(3,Number(item.durationSeconds||8))*1000)}
+  const dots=clear($("adDots"));
+  mediaItems.forEach((_,index)=>dots.append(el("i",{className:index===mediaIndex?"active":""})));
+  if(item.mediaType==="VIDEO"){image.removeAttribute("src");video.src=url;video.currentTime=0;video.onended=nextMedia;video.onerror=nextMedia;video.play().catch(()=>{mediaTimer=setTimeout(nextMedia,3000)})}
+  else{video.pause();video.removeAttribute("src");image.src=url;image.onerror=nextMedia;mediaTimer=setTimeout(nextMedia,Math.max(3,Number(item.durationSeconds||8))*1000)}
 }
 function renderMedia(media,show){
-  const items=media?.enabled&&Array.isArray(media.items)?media.items:[];
+  const items=(media?.enabled&&Array.isArray(media.items)?media.items:[]).filter(i=>safeMediaUrl(i.url));
   if(!show||!items.length){if(mediaVisible)stopMedia();return}
   const changed=mediaVersion!==String(media.version||"");
   mediaItems=items;
@@ -36,20 +41,31 @@ function renderWastePicker(d){
   picker.hidden=!show;
   if(!show)return;
   const selected=d.selectedWasteTypeId;
-  $("wasteTypeButtons").innerHTML=wasteTypes.map(wt=>`<button type="button" class="${wt.id===selected?"selected":""}" data-waste-type="${escapeHtml(wt.id)}">${escapeHtml(wt.name)}</button>`).join("");
+  const host=clear($("wasteTypeButtons"));
+  for(const wt of wasteTypes){
+    const btn=el("button",{type:"button",className:wt.id===selected?"selected":"",dataset:{wasteType:String(wt.id??"")}},String(wt.name??""));
+    host.append(btn);
+  }
 }
 
 function renderItems(session){
-  const list=$("itemList"),items=session?.items||[];
+  const list=clear($("itemList")),items=session?.items||[];
   $("totalItems").textContent=session?.totalQuantity||0;
   $("totalReward").textContent=rupiah(session?.totalReward||0);
-  if(!items.length){list.innerHTML='<div class="empty">Belum ada item. Masukkan sampah pertama Anda.</div>';return}
+  if(!items.length){list.append(el("div",{className:"empty"},"Belum ada item. Masukkan sampah pertama Anda."));return}
   const grouped=new Map();
   for(const item of items){
     const current=grouped.get(item.wasteTypeName)||{name:item.wasteTypeName,quantity:0,reward:0,status:item.status};
     current.quantity+=Number(item.quantity||0);current.reward+=Number(item.rewardAmount||0);current.status=item.status;grouped.set(item.wasteTypeName,current);
   }
-  list.innerHTML=[...grouped.values()].map(item=>`<div class="item-row"><span class="item-icon">${/kaleng/i.test(item.name)?"🥫":"♻"}</span><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(label(item.status))}</small></div><b>${item.quantity} pcs</b><em>${rupiah(item.reward)}</em></div>`).join("");
+  for(const item of grouped.values()){
+    list.append(el("div",{className:"item-row"},
+      el("span",{className:"item-icon"},/kaleng/i.test(item.name)?"🥫":"♻"),
+      el("div",{},el("strong",{},String(item.name??"")),el("small",{},label(item.status))),
+      el("b",{},`${item.quantity} pcs`),
+      el("em",{},rupiah(item.reward)),
+    ));
+  }
 }
 
 const alertMessages={

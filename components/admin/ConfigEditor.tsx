@@ -12,7 +12,7 @@ import {
   Input,
 } from "@/components/ui";
 import { Plus, Trash } from "@/components/ui/icons";
-import type { HeroSlide } from "@/lib/hero-slides";
+import { isSafeUrl, type HeroSlide } from "@/lib/hero-slides";
 
 type SlideKind = "landing" | "mobile";
 
@@ -308,9 +308,9 @@ function SlideEditor({
                       kind === "mobile" ? "aspect-[12/5]" : "aspect-[16/7]"
                     }`}
                     style={
-                      slide.imageUrl
+                      slide.imageUrl && isSafeUrl(slide.imageUrl)
                         ? {
-                            backgroundImage: `url("${slide.imageUrl.replaceAll('"', "%22")}")`,
+                            backgroundImage: `url(${JSON.stringify(slide.imageUrl)})`,
                           }
                         : undefined
                     }

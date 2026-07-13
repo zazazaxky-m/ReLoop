@@ -5,6 +5,7 @@ import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { logAudit } from "@/lib/audit";
+import { userWhereEmail } from "@/lib/encryption";
 
 const ALLOWED_TYPES = [
   "profile",
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
     const dataTypes = parsed.data.dataTypes as unknown as string[];
 
     const user = await prisma.user.findUnique({
-      where: { email },
+      where: userWhereEmail(email),
       select: { id: true, status: true },
     });
 

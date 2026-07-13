@@ -47,6 +47,23 @@ export function encryptDeterministic(plaintext: string): string {
   return `${iv.toString("hex")}:${tag.toString("hex")}:${encrypted}`;
 }
 
+/**
+ * Blind index for email equality lookups. Not reversible; not ciphertext.
+ * Prefer this over deterministic AES so ciphertext equality doesn't leak.
+ */
+export function emailLookupHash(email: string): string {
+  const normalized = email.toLowerCase().trim();
+  return createHmac("sha256", getKey())
+    .update("reloop-email-lookup-v1")
+    .update(normalized)
+    .digest("hex");
+}
+
+/** Prisma unique where for user-by-email (use instead of { email }). */
+export function userWhereEmail(email: string): { emailLookup: string } {
+  return { emailLookup: emailLookupHash(email) };
+}
+
 export function isEncrypted(value: string): boolean {
   return /^[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/.test(value);
 }

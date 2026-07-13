@@ -115,6 +115,10 @@ describe("small utility modules", () => {
     expect(csp2).toContain("style-src 'self' 'nonce-test-nonce'");
     expect(csp2).not.toContain("'unsafe-eval'");
     expect(csp2).not.toContain("'unsafe-inline'");
+    expect(csp2).toContain("connect-src 'self'");
+    // No scheme-only wildcards (old: connect-src 'self' ws: wss: https:)
+    expect(csp2).not.toContain("ws: wss: https:");
+    expect(csp2).not.toMatch(/connect-src[^;]*\shttps:(;|$)/);
 
     // With unsafe options and HSTS
     const h3 = buildSecurityHeaders({

@@ -6,6 +6,7 @@ import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { displayUser } from "@/lib/display-user";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
+import { userWhereEmail } from "@/lib/encryption";
 
 const serviceAreaSchema = z
   .object({
@@ -82,7 +83,7 @@ export async function POST(req: Request) {
       if (!user.organizationId) throw new HttpError(422, "Admin tidak terhubung ke organisasi");
       if (!data.collectorEmail) throw new HttpError(422, "Email pengepul wajib diisi");
       const collector = await prisma.user.findUnique({
-        where: { email: data.collectorEmail.toLowerCase() },
+        where: userWhereEmail(data.collectorEmail),
       });
       if (!collector || collector.role !== "PENGEPUL") {
         throw new HttpError(404, "Pengepul dengan email tersebut tidak ditemukan");

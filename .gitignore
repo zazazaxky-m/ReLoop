@@ -5,6 +5,11 @@
 
 # testing
 /coverage
+.coverage
+coverage*.txt
+cov-*.txt
+mobile-cov*.txt
+test-batch*.txt
 
 # next.js
 /.next/

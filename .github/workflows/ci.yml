@@ -8,6 +8,9 @@ on:
 env:
   NODE_VERSION: "20"
 
+# Security scanners live in security-scan.yml (Semgrep, CodeQL, Trivy, …)
+# and run on the same PR/push events in parallel.
+
 jobs:
   quality:
     name: Quality Gates

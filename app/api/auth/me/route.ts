@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser } from "@/lib/rbac";
 import { passwordSchema } from "@/lib/password-policy";
 import type { AppRole } from "@/lib/roles";
+import { userWhereEmail } from "@/lib/encryption";
 
 const patchSchema = z.object({
   name: z.string().min(2).max(80).optional(),
@@ -77,7 +78,7 @@ export async function PATCH(req: Request) {
 
     if (changingEmail) {
       const existing = await prisma.user.findUnique({
-        where: { email: normalizedEmail },
+        where: userWhereEmail(normalizedEmail),
         select: { id: true },
       });
       if (existing && existing.id !== user.id) {

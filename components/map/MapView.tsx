@@ -107,7 +107,7 @@ export function MapView({
             <p style="margin:2px 0 6px;color:#64748b;font-size:12px">${escapeHtml(m.machineCode)} · ${escapeHtml(m.organizationName)}</p>
             <p style="margin:0;display:flex;align-items:center;gap:6px">
               <span style="display:inline-block;width:9px;height:9px;border-radius:9999px;background:${color}"></span>
-              <strong style="color:${color}">${STATUS_LABEL[m.status] ?? m.status}</strong>
+              <strong style="color:${color}">${escapeHtml(STATUS_LABEL[m.status] ?? m.status)}</strong>
             </p>
             <p style="margin:4px 0 0;color:#475569">Kapasitas tersisa: <strong>${100 - m.fillLevelPercent}%</strong> (terisi ${m.fillLevelPercent}%)</p>
             ${m.capacityKg != null ? `<p style="margin:2px 0 0;color:#475569">Kapasitas: ${m.capacityKg} kg</p>` : ""}

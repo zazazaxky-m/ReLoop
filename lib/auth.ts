@@ -52,8 +52,11 @@ export function buildSessionPayload(user: {
   };
 }
 
+/** bcrypt cost 12 — slow enough for passwords; verify still accepts older cost-10 hashes. */
+export const BCRYPT_COST = 12;
+
 export async function hashPassword(plain: string): Promise<string> {
-  return bcrypt.hash(plain, 10);
+  return bcrypt.hash(plain, BCRYPT_COST);
 }
 
 export async function verifyPassword(

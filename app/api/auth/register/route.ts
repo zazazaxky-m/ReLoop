@@ -8,6 +8,7 @@ import { dashboardPath } from "@/lib/roles";
 import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { passwordSchema } from "@/lib/password-policy";
+import { userWhereEmail } from "@/lib/encryption";
 
 // Looser than login (legitimate signups are rare per visitor) but still
 // closes the previously wide-open account-creation endpoint.
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
     const data = schema.parse(await req.json());
     const email = data.email.toLowerCase().trim();
 
-    const existing = await prisma.user.findUnique({ where: { email } });
+    const existing = await prisma.user.findUnique({ where: userWhereEmail(email) });
     if (existing) return jsonError(409, "Email sudah terdaftar");
 
     const user = await prisma.$transaction(async (tx) => {

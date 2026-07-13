@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit";
 import { dashboardPath, type AppRole } from "@/lib/roles";
 import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { userWhereEmail } from "@/lib/encryption";
 import {
   requiresMfaAtLogin,
   signMfaChallenge,
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
     const data = schema.parse(await req.json());
     const email = data.email.toLowerCase().trim();
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: userWhereEmail(email) });
     const valid =
       user?.passwordHash &&
       (await verifyPassword(data.password, user.passwordHash));

@@ -10,6 +10,7 @@ import {
   requiresTravelAgent,
   getInvitedTravelAgentTripFilters,
 } from "@/lib/trip";
+import { userWhereEmail } from "@/lib/encryption";
 
 const createSchema = z.object({
   campaignId: z.string().min(1),
@@ -175,7 +176,7 @@ export async function POST(req: Request) {
 
     let userId: string | null = null;
     if (data.userEmail) {
-      const u = await prisma.user.findUnique({ where: { email: data.userEmail.toLowerCase() } });
+      const u = await prisma.user.findUnique({ where: userWhereEmail(data.userEmail) });
       if (!u) throw new HttpError(404, "Pengguna dengan email tersebut tidak ditemukan");
       userId = u.id;
     }

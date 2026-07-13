@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { encrypt, decrypt, encryptDeterministic, isEncrypted } from "./encryption";
+import {
+  encrypt,
+  decrypt,
+  encryptDeterministic,
+  emailLookupHash,
+  userWhereEmail,
+  isEncrypted,
+} from "./encryption";
 
 describe("lib/encryption", () => {
   it("encrypts and decrypts roundtrip", () => {
@@ -21,6 +28,17 @@ describe("lib/encryption", () => {
     expect(a).toBe(b);
     expect(isEncrypted(a)).toBe(true);
     expect(decrypt(a)).toBe(plain);
+  });
+
+  it("emailLookupHash is stable and case-insensitive", () => {
+    expect(emailLookupHash("User@Example.com")).toBe(
+      emailLookupHash(" user@example.com "),
+    );
+    expect(emailLookupHash("a@b.com")).not.toBe(emailLookupHash("c@d.com"));
+    expect(emailLookupHash("a@b.com")).toMatch(/^[0-9a-f]{64}$/);
+    expect(userWhereEmail("a@b.com")).toEqual({
+      emailLookup: emailLookupHash("a@b.com"),
+    });
   });
 
   it("isEncrypted returns false for plain text", () => {
