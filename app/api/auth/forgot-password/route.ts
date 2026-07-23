@@ -39,7 +39,8 @@ export async function POST(req: NextRequest) {
     let devResetUrl: string | undefined;
     if (user && user.status === "ACTIVE" && user.passwordHash) {
       const rawToken = await createPasswordResetToken(user.id);
-      const resetUrl = `${req.nextUrl.origin}/reset-password?token=${rawToken}`;
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/+$/, "") ?? req.nextUrl.origin;
+      const resetUrl = `${baseUrl}/reset-password?token=${rawToken}`;
 
       await sendPasswordResetEmail({ to: email, resetUrl });
 
