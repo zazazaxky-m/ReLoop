@@ -2,14 +2,14 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { realtimeWsUrl } from "@/lib/realtime-url";
 
 export function RealtimeRefresh() {
   const router = useRouter();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const url =
-      process.env.NEXT_PUBLIC_REALTIME_WS_URL ?? "ws://localhost:3001/ws";
+    const url = realtimeWsUrl();
     let socket: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;

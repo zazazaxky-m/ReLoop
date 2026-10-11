@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
+import { realtimeWsUrl } from "@/lib/realtime-url";
 
 interface Payload {
   machineCode: string;
@@ -51,8 +52,7 @@ export function MachineDisplay({ code, kiosk = false }: { code: string; kiosk?: 
       void fetchPayload();
     }, 30000);
     const tick = setInterval(() => setNow(Date.now()), 500);
-    const realtimeUrl =
-      process.env.NEXT_PUBLIC_REALTIME_WS_URL ?? "ws://localhost:3001/ws";
+    const realtimeUrl = realtimeWsUrl();
     const socket = new WebSocket(realtimeUrl);
     socket.onmessage = (event) => {
       try {
