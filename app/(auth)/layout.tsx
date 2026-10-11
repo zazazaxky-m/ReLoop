@@ -26,9 +26,10 @@ export default function AuthLayout({
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-lime-300">
             Sampah selesai. Dampak dimulai.
           </p>
-          <h2 className="mt-5 text-4xl font-black leading-[1.05] tracking-[-0.05em] xl:text-5xl">
+          {/* Decorative tagline: keep the page's <h1> (in the form) as the first heading. */}
+          <p className="mt-5 text-balance text-4xl font-black leading-[1.05] tracking-[-0.05em] [word-spacing:0.05em] xl:text-5xl">
             Satu akun untuk setiap aksi baikmu.
-          </h2>
+          </p>
           <div className="mt-8 space-y-4 text-sm font-medium text-white/80">
             <p className="flex items-center gap-3">
               <CheckCircle className="text-lg text-lime-300" />
@@ -41,7 +42,7 @@ export default function AuthLayout({
           </div>
         </div>
 
-        <p className="relative text-xs text-white/30">
+        <p className="relative text-xs text-white/50">
           &copy; {new Date().getFullYear()} ReLoop
         </p>
       </aside>
@@ -66,7 +67,7 @@ export default function AuthLayout({
           </div>
           <Link
             href="/"
-            className="mx-auto mt-3 text-xs font-semibold text-muted transition-colors hover:text-brand-700 dark:hover:text-brand-400 sm:mt-4"
+            className="relative mx-auto mt-3 text-xs font-semibold text-muted transition-colors before:absolute before:inset-x-0 before:-inset-y-2 hover:text-brand-700 dark:hover:text-brand-400 sm:mt-4"
           >
             ← Kembali ke halaman utama
           </Link>

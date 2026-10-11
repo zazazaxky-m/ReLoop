@@ -6,5 +6,5 @@ export const passwordSchema = z
   .string()
   .min(
     PASSWORD_MIN_LENGTH,
-    `Password minimal ${PASSWORD_MIN_LENGTH} karakter`,
+    `Kata sandi minimal ${PASSWORD_MIN_LENGTH} karakter`,
   );

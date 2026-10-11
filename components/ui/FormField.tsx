@@ -93,7 +93,7 @@ export function FormField({
       {label ? (
         <Label htmlFor={htmlFor}>
           {label}
-          {required ? <span className="text-status-error"> *</span> : null}
+          {required ? <span className="text-status-error dark:text-red-400"> *</span> : null}
         </Label>
       ) : null}
       {children}

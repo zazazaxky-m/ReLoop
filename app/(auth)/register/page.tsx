@@ -15,7 +15,7 @@ export default function RegisterPage() {
         <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-600 dark:text-brand-400">
           Mulai perjalananmu
         </p>
-        <h1 className="mt-1.5 text-2xl font-black tracking-[-0.045em] text-foreground sm:text-3xl">
+        <h1 className="mt-1.5 text-2xl font-black tracking-[-0.045em] [word-spacing:0.05em] text-foreground sm:text-3xl">
           Buat akun ReLoop
         </h1>
         <p className="mt-1 text-sm leading-5 text-muted sm:mt-2 sm:leading-6">

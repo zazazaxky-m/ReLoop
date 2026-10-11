@@ -92,9 +92,10 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
           <p className="text-xs font-black uppercase tracking-[0.18em] text-lime-300">
             {current.eyebrow}
           </p>
-          <h2 className="mt-3 max-w-lg text-3xl font-black leading-[1.05] tracking-[-0.045em] sm:text-4xl">
+          {/* Admin-managed banner copy, so a paragraph rather than a page heading. */}
+          <p className="mt-3 max-w-lg text-3xl font-black leading-[1.05] tracking-[-0.045em] [word-spacing:0.05em] sm:text-4xl">
             {current.title}
-          </h2>
+          </p>
           <div className="mt-4 flex items-end justify-between gap-5">
             <p className="max-w-sm text-sm leading-6 text-white/65">
               {current.description}
@@ -112,19 +113,24 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
 
       {slides.length > 1 ? (
         <div className="mt-4 flex items-center justify-between px-1">
-          <div className="flex gap-2">
+          <div className="-ml-2 flex">
             {slides.map((slide, index) => (
               <button
                 key={`${slide.title}-dot`}
                 type="button"
                 aria-label={`Tampilkan slide ${index + 1}`}
+                aria-current={active === index ? "true" : undefined}
                 onClick={() => setActive(index)}
-                className={`h-2 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
-                  active === index
-                    ? "w-8 bg-brand-700 dark:bg-brand-500"
-                    : "w-2 bg-brand-950/15 hover:bg-brand-950/30 dark:bg-brand-100/15 dark:hover:bg-brand-100/30"
-                }`}
-              />
+                className="group flex h-6 min-w-6 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+              >
+                <span
+                  className={`h-2 rounded-full transition-all ${
+                    active === index
+                      ? "w-8 bg-brand-700 dark:bg-brand-500"
+                      : "w-2 bg-brand-950/15 group-hover:bg-brand-950/30 dark:bg-brand-100/15 dark:group-hover:bg-brand-100/30"
+                  }`}
+                />
+              </button>
             ))}
           </div>
           <div className="flex gap-2">

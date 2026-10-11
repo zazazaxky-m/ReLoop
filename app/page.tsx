@@ -110,12 +110,12 @@ export default async function Home() {
       />
       <header className="relative z-30 border-b border-border bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex h-18 max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
-          <Link href="/" className="flex items-center">
+          <Link href="/" className="flex shrink-0 items-center">
             <BrandLogo
               width={138}
               height={41}
               priority
-              className="h-10 w-auto"
+              className="h-8 w-auto sm:h-10"
             />
           </Link>
 
@@ -126,7 +126,7 @@ export default async function Home() {
               className={buttonVariants({
                 variant: "ghost",
                 size: "sm",
-                className: "rounded-full px-4 text-emerald-950 dark:text-emerald-100",
+                className: "relative rounded-full px-4 text-emerald-950 before:absolute before:inset-x-0 before:-inset-y-1.5 max-[359px]:hidden dark:text-emerald-100",
               })}
             >
               Masuk
@@ -137,7 +137,7 @@ export default async function Home() {
                 variant: "primary",
                 size: "sm",
                 className:
-                  "rounded-full bg-emerald-950 px-5 shadow-none hover:bg-emerald-800",
+                  "relative rounded-full bg-emerald-950 px-5 shadow-none before:absolute before:inset-x-0 before:-inset-y-1.5 hover:bg-emerald-800",
               })}
             >
               Daftar
@@ -158,7 +158,7 @@ export default async function Home() {
                 Bank sampah digital
               </div>
 
-              <h1 className="mt-7 max-w-3xl text-[2.85rem] font-black leading-[0.94] tracking-[-0.065em] text-emerald-950 dark:text-emerald-100 min-[370px]:text-[3.15rem] sm:text-7xl lg:text-[5.35rem]">
+              <h1 className="mt-7 max-w-3xl text-[2.85rem] font-black leading-[0.94] tracking-[-0.065em] [word-spacing:0.1em] text-emerald-950 dark:text-emerald-100 min-[370px]:text-[3.15rem] sm:text-7xl lg:text-[5.35rem]">
                 Setor sampah.
                 <span className="mt-2 block text-emerald-600">
                   Dapat reward.
@@ -221,7 +221,7 @@ export default async function Home() {
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-lime-300">
                 Cara kerja
               </p>
-              <h2 className="mt-4 max-w-md text-3xl font-black leading-tight tracking-[-0.045em] sm:text-4xl">
+              <h2 className="mt-4 max-w-md text-balance text-3xl font-black leading-tight tracking-[-0.045em] [word-spacing:0.05em] sm:text-4xl">
                 Tiga langkah dari sampah jadi saldo.
               </h2>
               <p className="mt-4 max-w-sm leading-7 text-white/80">
@@ -244,7 +244,7 @@ export default async function Home() {
                     <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-lime-300 text-xl text-emerald-950">
                       <step.icon />
                     </span>
-                    <span className="text-xs font-bold tracking-[0.15em] text-white/40">
+                    <span className="text-xs font-bold tracking-[0.15em] text-white/55">
                       {step.number}
                     </span>
                   </div>
@@ -260,10 +260,10 @@ export default async function Home() {
 
         <section className="mx-auto grid max-w-7xl gap-12 px-5 py-20 sm:px-8 lg:grid-cols-2 lg:px-10 lg:py-28">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-600">
               Satu sistem, semua peran
             </p>
-            <h2 className="mt-4 max-w-xl text-4xl font-black leading-[1.05] tracking-[-0.05em] text-emerald-950 dark:text-emerald-100 sm:text-5xl">
+            <h2 className="mt-4 max-w-xl text-balance text-4xl font-black leading-[1.05] tracking-[-0.05em] [word-spacing:0.05em] text-emerald-950 dark:text-emerald-100 sm:text-5xl">
               Dari botolmu sampai pabrik daur ulang.
             </h2>
           </div>
@@ -298,10 +298,10 @@ export default async function Home() {
           <div className="relative mx-auto max-w-7xl overflow-hidden rounded-[2rem] bg-lime-300 px-7 py-12 dark:bg-brand-600 sm:px-12 sm:py-16 lg:flex lg:items-center lg:justify-between">
             <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full border-[55px] border-emerald-950/5 dark:border-brand-950/30" />
             <div className="relative">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-800 dark:text-brand-100">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-800 dark:text-lime-100">
                 Giliranmu ikut memutar
               </p>
-              <h2 className="mt-3 max-w-2xl text-3xl font-black leading-tight tracking-[-0.045em] text-emerald-950 dark:text-white sm:text-5xl">
+              <h2 className="mt-3 max-w-2xl text-balance text-3xl font-black leading-tight tracking-[-0.045em] [word-spacing:0.05em] text-emerald-950 dark:text-white sm:text-5xl">
                 Botol pertamamu, poin pertamamu.
               </h2>
             </div>
@@ -321,24 +321,24 @@ export default async function Home() {
       </main>
 
       <footer className="px-5 py-8 sm:px-8 lg:px-10">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 border-t border-border pt-7 text-sm text-muted sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 border-t border-border pt-7 text-sm text-muted lg:flex-row lg:items-center lg:justify-between">
           <BrandLogo
             width={112}
             height={34}
-            className="h-8 w-auto"
+            className="h-8 w-auto self-start lg:self-auto"
           />
           <p>Sampah selesai. Dampak dimulai.</p>
           <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">
             <nav aria-label="Tautan legal" className="flex items-center gap-4">
               <Link
                 href="/privacy"
-                className="font-semibold text-muted transition-colors hover:text-brand-700 dark:hover:text-brand-400"
+                className="relative font-semibold text-muted transition-colors before:absolute before:inset-x-0 before:-inset-y-3 hover:text-brand-700 dark:hover:text-brand-400"
               >
                 Kebijakan Privasi
               </Link>
               <Link
                 href="/terms"
-                className="font-semibold text-muted transition-colors hover:text-brand-700 dark:hover:text-brand-400"
+                className="relative font-semibold text-muted transition-colors before:absolute before:inset-x-0 before:-inset-y-3 hover:text-brand-700 dark:hover:text-brand-400"
               >
                 Syarat &amp; Ketentuan
               </Link>
