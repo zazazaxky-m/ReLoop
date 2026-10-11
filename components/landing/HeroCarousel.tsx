@@ -72,6 +72,7 @@ export function HeroCarousel({ slides }: { slides: HeroSlide[] }) {
                 alt=""
                 className="absolute inset-0 h-full w-full object-cover"
                 loading={index === 0 ? "eager" : "lazy"}
+                fetchPriority={index === 0 ? "high" : "low"}
                 decoding="async"
               />
             ) : (

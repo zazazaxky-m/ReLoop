@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { CheckCircle } from "@/components/ui/icons";
 
-export const metadata: Metadata = { title: "Masuk" };
+export const metadata: Metadata = {
+  title: "Masuk",
+  description:
+    "Masuk ke akun ReLoop untuk memantau setoran sampah, saldo reward, dan pencairan, atau mengelola mesin dan pengambilan material organisasi Anda.",
+  alternates: { canonical: "/login" },
+};
 
 export default async function LoginPage({
   searchParams,

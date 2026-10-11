@@ -1,9 +1,11 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui";
 import { HeroCarousel } from "@/components/landing/HeroCarousel";
 import { CONFIG_KEYS, getConfig } from "@/lib/config";
 import { parseHeroSlides } from "@/lib/hero-slides";
+import { absoluteUrl, SITE_DESCRIPTION, SITE_NAME } from "@/lib/site";
 import {
   ArrowRight,
   CheckCircle,
@@ -19,31 +21,77 @@ import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 export const revalidate = 300;
 
+const HOME_TITLE = `${SITE_NAME} — Bank Sampah Digital: Setor Sampah, Dapat Reward`;
+
+export const metadata: Metadata = {
+  title: { absolute: HOME_TITLE },
+  description: SITE_DESCRIPTION,
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    url: "/",
+    title: HOME_TITLE,
+    description: SITE_DESCRIPTION,
+    siteName: SITE_NAME,
+    locale: "id_ID",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: HOME_TITLE,
+    description: SITE_DESCRIPTION,
+  },
+};
+
+function homeJsonLd() {
+  const url = absoluteUrl("/");
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": `${url}#organization`,
+        name: SITE_NAME,
+        url,
+        logo: absoluteUrl("/icons/icon-512.png"),
+        description: SITE_DESCRIPTION,
+      },
+      {
+        "@type": "WebSite",
+        "@id": `${url}#website`,
+        name: SITE_NAME,
+        url,
+        inLanguage: "id-ID",
+        publisher: { "@id": `${url}#organization` },
+      },
+    ],
+  };
+}
+
 const steps = [
   {
     icon: QrCode,
     number: "01",
-    title: "Pindai & setor",
-    desc: "Temukan titik ReLoop terdekat, pindai kode, lalu setorkan material.",
+    title: "Pindai QR mesin",
+    desc: "Buka aplikasi ReLoop, lalu pindai kode QR di layar mesin ReLoop terdekat.",
   },
   {
     icon: Coins,
     number: "02",
-    title: "Dapatkan nilai",
-    desc: "Setiap setoran tervalidasi dan reward langsung tercatat di akunmu.",
+    title: "Masukkan sampah",
+    desc: "Mesin mendeteksi jenis dan berat sampahmu, lalu poin langsung masuk ke akun.",
   },
   {
     icon: Wallet,
     number: "03",
-    title: "Gunakan reward",
-    desc: "Pantau saldo dan ajukan pencairan dengan proses yang transparan.",
+    title: "Cairkan poin",
+    desc: "Tukar poin ke e-wallet atau rekening bank, dan pantau status pencairannya.",
   },
 ];
 
 const ecosystem = [
-  "Warga menyetor lebih mudah",
-  "Organisasi memantau dampak",
-  "Pengepul bekerja lebih terarah",
+  "Warga setor sampah, dapat poin",
+  "Pengelola memantau setoran & mesin",
+  "Pengepul menjemput sampah terpilah",
 ];
 
 export default async function Home() {
@@ -53,6 +101,13 @@ export default async function Home() {
 
   return (
     <div className="min-h-screen overflow-hidden bg-background">
+      <script
+        type="application/ld+json"
+        // JSON-LD data block; escape "<" so values can never close the tag.
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(homeJsonLd()).replace(/</g, "\\u003c"),
+        }}
+      />
       <header className="relative z-30 border-b border-border bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex h-18 max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
           <Link href="/" className="flex items-center">
@@ -88,7 +143,7 @@ export default async function Home() {
                   "rounded-full bg-emerald-950 px-5 shadow-none hover:bg-emerald-800",
               })}
             >
-              Mulai
+              Daftar
             </Link>
           </nav>
         </div>
@@ -103,19 +158,20 @@ export default async function Home() {
             <div className="relative z-10 min-w-0">
               <div className="inline-flex items-center gap-2 rounded-full border border-emerald-900/10 dark:border-emerald-900/30 bg-white/75 dark:bg-emerald-950/20 px-3.5 py-2 text-xs font-bold uppercase tracking-[0.13em] text-emerald-800 dark:text-emerald-400 shadow-sm backdrop-blur">
                 <Leaf className="text-base" />
-                Satu aksi, dampak berulang
+                Bank sampah digital
               </div>
 
               <h1 className="mt-7 max-w-3xl text-[2.85rem] font-black leading-[0.94] tracking-[-0.065em] text-emerald-950 dark:text-emerald-100 min-[370px]:text-[3.15rem] sm:text-7xl lg:text-[5.35rem]">
-                Sampah selesai.
+                Setor sampah.
                 <span className="mt-2 block text-emerald-600">
-                  Dampak dimulai.
+                  Dapat reward.
                 </span>
               </h1>
 
               <p className="mt-7 max-w-xl text-base leading-7 text-muted sm:text-lg sm:leading-8">
-                ReLoop membuat setoran, reward, dan pengambilan material bergerak
-                dalam satu alur yang sederhana—untuk warga, komunitas, dan kota.
+                Pindai QR di mesin ReLoop, masukkan sampahmu, dan poin langsung
+                masuk ke akun. Cairkan ke GoPay, OVO, DANA, ShopeePay, atau
+                rekening bank.
               </p>
 
               <div className="mt-9 flex flex-col gap-3 sm:flex-row">
@@ -128,7 +184,7 @@ export default async function Home() {
                       "h-14 rounded-full bg-emerald-700 px-7 shadow-[0_12px_30px_rgba(4,120,87,0.24)] hover:bg-emerald-800 dark:bg-brand-600 dark:hover:bg-brand-500",
                   })}
                 >
-                  Mulai setor <ArrowRight />
+                  Daftar gratis <ArrowRight />
                 </Link>
                 <Link
                   href="/login"
@@ -139,18 +195,18 @@ export default async function Home() {
                       "h-14 rounded-full border-emerald-950/10 dark:border-border bg-white/70 dark:bg-surface/70 px-7 shadow-none backdrop-blur hover:bg-white dark:hover:bg-surface",
                   })}
                 >
-                  Buka dashboard
+                  Masuk ke akun
                 </Link>
               </div>
 
               <div className="mt-10 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold text-muted">
                 <span className="flex items-center gap-2">
                   <CheckCircle className="text-lg text-emerald-600" />
-                  Reward transparan
+                  Setiap setoran tercatat
                 </span>
                 <span className="flex items-center gap-2">
                   <CheckCircle className="text-lg text-emerald-600" />
-                  Dampak tercatat
+                  Poin bisa dicairkan
                 </span>
               </div>
             </div>
@@ -166,14 +222,14 @@ export default async function Home() {
             <div className="relative overflow-hidden p-8 sm:p-10 lg:p-12">
               <div className="absolute -bottom-24 -right-20 h-64 w-64 rounded-full border-[45px] border-lime-300/10" />
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-lime-300">
-                Sesederhana itu
+                Cara kerja
               </p>
               <h2 className="mt-4 max-w-md text-3xl font-black leading-tight tracking-[-0.045em] sm:text-4xl">
-                Dari barang bekas menjadi nilai baru.
+                Tiga langkah dari sampah jadi saldo.
               </h2>
               <p className="mt-4 max-w-sm leading-7 text-white/80">
-                Tanpa alur rumit. Setiap langkah terasa jelas dari awal sampai
-                reward masuk.
+                Tanpa timbang manual. Setiap setoran tercatat otomatis oleh
+                mesin.
               </p>
             </div>
 
@@ -208,17 +264,18 @@ export default async function Home() {
         <section className="mx-auto grid max-w-7xl gap-12 px-5 py-20 sm:px-8 lg:grid-cols-2 lg:px-10 lg:py-28">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">
-              Dibangun untuk bergerak bersama
+              Satu sistem, semua peran
             </p>
             <h2 className="mt-4 max-w-xl text-4xl font-black leading-[1.05] tracking-[-0.05em] text-emerald-950 dark:text-emerald-100 sm:text-5xl">
-              Semua orang punya peran dalam satu putaran.
+              Dari botolmu sampai pabrik daur ulang.
             </h2>
           </div>
 
           <div className="lg:pt-3">
             <p className="max-w-xl text-base leading-7 text-muted sm:text-lg sm:leading-8">
-              Dari setoran harian hingga pengangkutan skala organisasi, ReLoop
-              menjaga data dan pekerjaan tetap terhubung.
+              Pengelola wisata dan bank sampah mengumpulkan setoran, pengepul
+              menjemputnya saat gudang penuh. Setiap kilogram tercatat di satu
+              sistem yang sama.
             </p>
             <div className="mt-8 space-y-3">
               {ecosystem.map((item, index) => {
@@ -248,7 +305,7 @@ export default async function Home() {
                 Giliranmu ikut memutar
               </p>
               <h2 className="mt-3 max-w-2xl text-3xl font-black leading-tight tracking-[-0.045em] text-emerald-950 dark:text-white sm:text-5xl">
-                Mulai dari satu setoran hari ini.
+                Botol pertamamu, poin pertamamu.
               </h2>
             </div>
             <Link
@@ -275,7 +332,7 @@ export default async function Home() {
             height={34}
             className="h-8 w-auto"
           />
-          <p>Pengelolaan sampah yang kembali memberi nilai.</p>
+          <p>Sampah selesai. Dampak dimulai.</p>
           <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">
             <nav aria-label="Tautan legal" className="flex items-center gap-4">
               <Link

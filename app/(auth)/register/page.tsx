@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import { AuthForm } from "@/components/auth/AuthForm";
 
-export const metadata: Metadata = { title: "Daftar" };
+export const metadata: Metadata = {
+  title: "Daftar Gratis",
+  description:
+    "Buat akun ReLoop gratis: setor sampah daur ulang di mesin ReLoop terdekat, kumpulkan reward, dan cairkan saldo dengan proses yang transparan.",
+  alternates: { canonical: "/register" },
+};
 
 export default function RegisterPage() {
   return (

@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { ResetPasswordForm } from "@/components/auth/ResetPasswordForm";
 
-export const metadata: Metadata = { title: "Atur Ulang Kata Sandi" };
+export const metadata: Metadata = {
+  title: "Atur Ulang Kata Sandi",
+  robots: { index: false, follow: false },
+};
 
 export default async function ResetPasswordPage({
   searchParams,
