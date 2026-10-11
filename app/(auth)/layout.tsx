@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { BrandLogo } from "@/components/BrandLogo";
 import Link from "next/link";
 import { CheckCircle } from "@/components/ui/icons";
 
@@ -14,9 +14,7 @@ export default function AuthLayout({
         <div className="absolute -right-28 -top-28 h-96 w-96 rounded-full bg-emerald-700/20 blur-3xl" />
 
         <Link href="/" className="relative inline-flex self-start rounded-2xl bg-surface px-4 py-2.5">
-          <Image
-            src="/reloop-logo-name.svg"
-            alt="ReLoop"
+          <BrandLogo
             width={145}
             height={43}
             priority
@@ -53,9 +51,7 @@ export default function AuthLayout({
 
         <header className="relative flex h-18 items-center px-5 sm:px-8 lg:hidden">
           <Link href="/" className="flex items-center">
-            <Image
-              src="/reloop-logo-name.svg"
-              alt="ReLoop"
+            <BrandLogo
               width={125}
               height={37}
               priority

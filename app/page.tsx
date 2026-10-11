@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Image from "next/image";
+import { BrandLogo } from "@/components/BrandLogo";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui";
 import { HeroCarousel } from "@/components/landing/HeroCarousel";
@@ -111,13 +111,10 @@ export default async function Home() {
       <header className="relative z-30 border-b border-border bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex h-18 max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
           <Link href="/" className="flex items-center">
-            <Image
-              src="/reloop-logo-name.svg"
-              alt="ReLoop"
+            <BrandLogo
               width={138}
               height={41}
               priority
-              loading="eager"
               className="h-10 w-auto"
             />
           </Link>
@@ -325,9 +322,7 @@ export default async function Home() {
 
       <footer className="px-5 py-8 sm:px-8 lg:px-10">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 border-t border-border pt-7 text-sm text-muted sm:flex-row sm:items-center sm:justify-between">
-          <Image
-            src="/reloop-logo-name.svg"
-            alt="ReLoop"
+          <BrandLogo
             width={112}
             height={34}
             className="h-8 w-auto"
