@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { CheckCircle } from "@/components/ui/icons";
 
-export const metadata: Metadata = { title: "Masuk" };
+export const metadata: Metadata = {
+  title: "Masuk",
+  description:
+    "Masuk ke akun ReLoop untuk memantau setoran sampah, saldo poin, dan pencairan, atau mengelola mesin dan penjemputan sampah di organisasimu.",
+  alternates: { canonical: "/login" },
+};
 
 export default async function LoginPage({
   searchParams,
@@ -17,7 +22,7 @@ export default async function LoginPage({
         <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-600 dark:text-brand-400">
           Selamat datang kembali
         </p>
-        <h1 className="mt-2 text-3xl font-black tracking-[-0.045em] text-foreground">
+        <h1 className="mt-2 text-3xl font-black tracking-[-0.045em] [word-spacing:0.05em] text-foreground">
           Masuk ke ReLoop
         </h1>
         <p className="mt-2 text-sm leading-6 text-muted">

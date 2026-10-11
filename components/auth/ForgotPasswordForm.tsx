@@ -47,7 +47,7 @@ export function ForgotPasswordForm() {
         </span>
         <div className="space-y-1.5">
           <h2 className="text-xl font-black tracking-[-0.03em] text-foreground">
-            Cek email Anda
+            Cek emailmu
           </h2>
           <p className="text-sm leading-6 text-muted">
             Jika <span className="font-semibold text-foreground">{email}</span>{" "}
@@ -110,14 +110,14 @@ export function ForgotPasswordForm() {
       <Button
         type="submit"
         size="lg"
-        className="mt-2 h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 sm:h-13"
+        className="mt-2 h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 sm:h-13"
         disabled={loading}
       >
         {loading ? "Mengirim..." : "Kirim tautan reset"}
       </Button>
 
       <p className="pt-1 text-center text-sm text-muted">
-        Ingat kata sandi Anda?{" "}
+        Ingat kata sandimu?{" "}
         <Link
           href="/login"
           className="font-bold text-brand-700 hover:underline dark:text-brand-400"

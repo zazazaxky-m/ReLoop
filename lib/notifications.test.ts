@@ -50,8 +50,9 @@ describe("lib/notifications", () => {
       data: { k: 1 },
     });
     expect(res.id).toBe("n1");
-    await new Promise((r) => setTimeout(r, 0));
-    expect(sendEachForMulticast).toHaveBeenCalled();
+    // Push is fire-and-forget behind a dynamic import, so poll instead of
+    // assuming one macrotask is enough (also keeps it from leaking into later tests).
+    await vi.waitFor(() => expect(sendEachForMulticast).toHaveBeenCalled());
   });
 
   it("gets unread count", async () => {
@@ -110,7 +111,9 @@ describe("lib/notifications", () => {
       title: "t",
       body: "b",
     });
-    await new Promise((r) => setTimeout(r, 0));
+    // Wait until the background push reaches the token lookup (after firebase
+    // init) so its initializeApp call can't land in the next test.
+    await vi.waitFor(() => expect(prisma.deviceToken.findMany).toHaveBeenCalled());
     expect(sendEachForMulticast).not.toHaveBeenCalled();
   });
 

@@ -28,6 +28,14 @@ export function buildConnectSrc(
   return `connect-src ${[...sources].join(" ")}`;
 }
 
+/**
+ * React's streaming renderer emits hidden segments as `style="display:none"`.
+ * Nonces can't cover style attributes, so allow exactly that value by hash
+ * (sha256 of "display:none") instead of opening up 'unsafe-inline'.
+ */
+const REACT_STREAMING_STYLE_HASH =
+  "'sha256-aqNNdDLnnrDOnTNdkJpYlAxKVJtLt9CtFLklmInuUAE='";
+
 function buildCsp(
   nonce: string,
   options?: { allowUnsafeEval?: boolean; allowUnsafeInlineStyles?: boolean },
@@ -38,7 +46,7 @@ function buildCsp(
 
   const styleSrc = options?.allowUnsafeInlineStyles
     ? `style-src 'self' 'nonce-${nonce}' 'unsafe-inline'`
-    : `style-src 'self' 'nonce-${nonce}'`;
+    : `style-src 'self' 'nonce-${nonce}' 'unsafe-hashes' ${REACT_STREAMING_STYLE_HASH}`;
 
   return [
     "default-src 'self'",

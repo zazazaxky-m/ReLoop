@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { BrandLogo } from "@/components/BrandLogo";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -14,9 +14,7 @@ export default function LegalLayout({ children }: { children: ReactNode }) {
       <header className="border-b border-border bg-surface/80 backdrop-blur supports-[backdrop-filter]:bg-surface/60">
         <div className="mx-auto flex h-16 max-w-3xl items-center justify-between px-5 sm:px-8">
           <Link href="/" className="flex items-center" aria-label="ReLoop beranda">
-            <Image
-              src="/reloop-logo-name.svg"
-              alt="ReLoop"
+            <BrandLogo
               width={125}
               height={37}
               priority

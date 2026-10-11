@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
+import { BrandLogo } from "@/components/BrandLogo";
+import { realtimeWsUrl } from "@/lib/realtime-url";
 
 interface Payload {
   machineCode: string;
@@ -51,8 +52,7 @@ export function MachineDisplay({ code, kiosk = false }: { code: string; kiosk?: 
       void fetchPayload();
     }, 30000);
     const tick = setInterval(() => setNow(Date.now()), 500);
-    const realtimeUrl =
-      process.env.NEXT_PUBLIC_REALTIME_WS_URL ?? "ws://localhost:3001/ws";
+    const realtimeUrl = realtimeWsUrl();
     const socket = new WebSocket(realtimeUrl);
     socket.onmessage = (event) => {
       try {
@@ -83,9 +83,7 @@ export function MachineDisplay({ code, kiosk = false }: { code: string; kiosk?: 
   return (
     <div className={`flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-brand-700 to-brand-900 text-white ${kiosk ? "cursor-none p-8" : "p-6"}`}>
       <div className="rounded-2xl bg-surface px-4 py-2.5 shadow-lg border border-border">
-        <Image
-          src="/reloop-logo-name.svg"
-          alt="ReLoop"
+        <BrandLogo
           width={150}
           height={45}
           priority

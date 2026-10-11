@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, FormField, Input } from "@/components/ui";
 import { Eye, EyeOff } from "@/components/ui/icons";
+import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 
 const inputClass =
   "h-11 rounded-xl border-border bg-surface px-4 text-[15px] shadow-none hover:border-muted sm:h-12";
@@ -85,15 +86,15 @@ export function ResetPasswordForm({ token }: { token: string }) {
             type={showPassword ? "text" : "password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
+            placeholder={`Minimal ${PASSWORD_MIN_LENGTH} karakter`}
             autoComplete="new-password"
-            minLength={12}
+            minLength={PASSWORD_MIN_LENGTH}
             required
           />
           <button
             type="button"
             onClick={() => setShowPassword((v) => !v)}
-            aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+            aria-label={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
             aria-pressed={showPassword}
             className="absolute inset-y-0 right-2 my-auto flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:hover:text-brand-400"
           >
@@ -109,9 +110,9 @@ export function ResetPasswordForm({ token }: { token: string }) {
           type={showPassword ? "text" : "password"}
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
-          placeholder="••••••••"
+          placeholder="Ulangi kata sandi baru"
           autoComplete="new-password"
-          minLength={12}
+          minLength={PASSWORD_MIN_LENGTH}
           required
         />
       </FormField>
@@ -119,7 +120,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
       <Button
         type="submit"
         size="lg"
-        className="mt-2 h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 sm:h-13"
+        className="mt-2 h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 sm:h-13"
         disabled={loading}
       >
         {loading ? "Menyimpan..." : "Simpan kata sandi baru"}

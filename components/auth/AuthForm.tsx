@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, FormField, Input } from "@/components/ui";
 import { Eye, EyeOff } from "@/components/ui/icons";
+import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 
 type Mode = "login" | "register";
 
@@ -41,7 +42,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (isRegister && !agreedToTerms) {
-      setError("Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi terlebih dahulu.");
+      setError("Kamu perlu menyetujui Syarat & Ketentuan dan Kebijakan Privasi terlebih dahulu.");
       return;
     }
     setLoading(true);
@@ -128,7 +129,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         ) : null}
 
         <div className="rounded-xl border border-brand-200 bg-brand-50 px-3.5 py-3 text-sm text-brand-800 dark:border-brand-900/30 dark:bg-brand-950/20 dark:text-brand-400">
-          Password benar. Masukkan kode 6 digit dari aplikasi authenticator Anda.
+          Kata sandi benar. Masukkan kode 6 digit dari aplikasi autentikatormu.
         </div>
 
         <FormField label="Kode MFA" htmlFor="mfa-code" required>
@@ -149,7 +150,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         <Button
           type="submit"
           size="lg"
-          className="mt-2 h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 sm:h-13"
+          className="mt-2 h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 sm:h-13"
           disabled={loading}
         >
           {loading ? "Memverifikasi..." : "Verifikasi MFA"}
@@ -164,7 +165,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
             setError(null);
           }}
         >
-          Kembali ke login
+          Kembali ke halaman masuk
         </button>
       </form>
     );
@@ -193,7 +194,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
             className={inputClass}
             value={form.name}
             onChange={update("name")}
-            placeholder="Nama Anda"
+            placeholder="Nama lengkapmu"
             autoComplete="name"
             required
           />
@@ -232,7 +233,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         </FormField>
       ) : null}
 
-      <FormField label="Password" htmlFor="password" required>
+      <FormField label="Kata sandi" htmlFor="password" required>
         <div className="relative">
           <Input
             id="password"
@@ -240,14 +241,19 @@ export function AuthForm({ mode }: { mode: Mode }) {
             type={showPassword ? "text" : "password"}
             value={form.password}
             onChange={update("password")}
-            placeholder="••••••••"
+            placeholder={
+              isRegister
+                ? `Minimal ${PASSWORD_MIN_LENGTH} karakter`
+                : "Masukkan kata sandi"
+            }
+            minLength={isRegister ? PASSWORD_MIN_LENGTH : undefined}
             autoComplete={isRegister ? "new-password" : "current-password"}
             required
           />
           <button
             type="button"
             onClick={() => setShowPassword((v) => !v)}
-            aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+            aria-label={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
             aria-pressed={showPassword}
             className="absolute inset-y-0 right-2 my-auto flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:hover:text-brand-400"
           >
@@ -260,7 +266,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         <div className="-mt-1 text-right">
           <Link
             href="/forgot-password"
-            className="text-sm font-semibold text-brand-700 hover:underline dark:text-brand-400"
+            className="relative text-sm font-semibold text-brand-700 before:absolute before:inset-x-0 before:-inset-y-2 hover:underline dark:text-brand-400"
           >
             Lupa kata sandi?
           </Link>
@@ -303,7 +309,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
       <Button
         type="submit"
         size="lg"
-        className={`h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 sm:h-13 ${
+        className={`h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 sm:h-13 ${
           isRegister ? "sm:col-span-2" : "mt-2"
         }`}
         disabled={loading}
@@ -319,7 +325,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         {isRegister ? "Sudah punya akun? " : "Belum punya akun? "}
         <Link
           href={isRegister ? "/login" : "/register"}
-          className="font-bold text-brand-700 hover:underline dark:text-brand-400"
+          className="relative font-bold text-brand-700 before:absolute before:-inset-x-1 before:-inset-y-2 hover:underline dark:text-brand-400"
         >
           {isRegister ? "Masuk" : "Daftar"}
         </Link>

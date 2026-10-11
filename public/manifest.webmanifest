@@ -1,7 +1,7 @@
 {
   "name": "ReLoop",
   "short_name": "ReLoop",
-  "description": "Platform pengelolaan sampah digital untuk pengguna, organisasi, dan pengepul.",
+  "description": "Bank sampah digital: setor sampah di mesin ReLoop, kumpulkan poin, dan cairkan ke e-wallet atau rekening bank.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -11,10 +11,28 @@
   "lang": "id",
   "icons": [
     {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

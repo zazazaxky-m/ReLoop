@@ -151,7 +151,7 @@ export function DataDeletionForm() {
       <Button
         type="submit"
         size="lg"
-        className="h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600 sm:h-13"
+        className="h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 sm:h-13"
         disabled={loading}
       >
         <ShieldCheck className="mr-2 text-lg" />

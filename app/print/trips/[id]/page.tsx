@@ -6,7 +6,10 @@ import { prisma } from "@/lib/prisma";
 import { PrintControls } from "@/components/trip/PrintControls";
 import "./print-trip.css";
 
-export const metadata: Metadata = { title: "Cetak QR Trash Bag" };
+export const metadata: Metadata = {
+  title: "Cetak QR Trash Bag",
+  robots: { index: false, follow: false },
+};
 
 interface PageProps {
   params: Promise<{ id: string }>;

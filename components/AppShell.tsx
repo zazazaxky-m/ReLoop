@@ -7,7 +7,7 @@ import {
   type ComponentType,
   type SVGProps,
 } from "react";
-import Image from "next/image";
+import { BrandLogo } from "@/components/BrandLogo";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
@@ -112,9 +112,8 @@ function isActive(pathname: string, item: NavItem) {
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <Link href="/" className="flex items-center">
-      <Image
-        src={compact ? "/reloop-logo.svg" : "/reloop-logo-name.svg"}
-        alt="ReLoop"
+      <BrandLogo
+        variant={compact ? "mark" : "wordmark"}
         width={compact ? 40 : 128}
         height={40}
         className={compact ? "h-9 w-9" : "h-10 w-auto"}

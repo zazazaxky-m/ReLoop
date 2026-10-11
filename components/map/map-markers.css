@@ -1,0 +1,89 @@
+/*
+ * Leaflet marker/popup HTML is injected as strings, so these styles live in a
+ * stylesheet: inline style="" attributes are blocked by the production CSP.
+ * Status colors match STATUS_COLOR in MapView and the MapLegend dots.
+ */
+.rl-status--online { color: #16a34a; }
+.rl-status--full { color: #d97706; }
+.rl-status--maintenance { color: #2563eb; }
+.rl-status--error { color: #dc2626; }
+.rl-status--offline { color: #64748b; }
+
+/* iconAnchor already places the tip on the coordinate; no extra translate. */
+.rl-pin {
+  position: relative;
+  width: 30px;
+  height: 38px;
+}
+.rl-pin svg {
+  display: block;
+}
+.rl-pin__label {
+  position: absolute;
+  top: 7px;
+  left: 0;
+  width: 30px;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.rl-campaign-pin {
+  width: 26px;
+  height: 26px;
+  border-radius: 9999px;
+  background: #0d9488;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 13px;
+}
+
+.rl-popup {
+  min-width: 180px;
+  font-family: system-ui;
+}
+.rl-popup--campaign {
+  min-width: 160px;
+}
+.rl-popup p {
+  margin: 4px 0 0;
+  color: #475569;
+}
+.rl-popup .rl-popup__title {
+  margin: 0;
+  font-weight: 700;
+  color: #0f172a;
+}
+.rl-popup .rl-popup__meta {
+  margin: 2px 0 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+.rl-popup--campaign .rl-popup__meta {
+  margin-bottom: 4px;
+}
+.rl-popup .rl-popup__status {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rl-popup__dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  background: currentColor;
+}
+.rl-popup .rl-popup__capacity {
+  margin-top: 2px;
+}
+.rl-popup .rl-popup__reward {
+  margin: 0;
+  color: #0d9488;
+  font-weight: 600;
+}
