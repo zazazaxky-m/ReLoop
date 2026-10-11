@@ -111,7 +111,9 @@ describe("lib/notifications", () => {
       title: "t",
       body: "b",
     });
-    await new Promise((r) => setTimeout(r, 0));
+    // Wait until the background push reaches the token lookup (after firebase
+    // init) so its initializeApp call can't land in the next test.
+    await vi.waitFor(() => expect(prisma.deviceToken.findMany).toHaveBeenCalled());
     expect(sendEachForMulticast).not.toHaveBeenCalled();
   });
 
