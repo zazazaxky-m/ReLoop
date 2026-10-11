@@ -304,17 +304,18 @@ function SlideEditor({
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <div
-                    className={`relative overflow-hidden rounded-xl border border-border bg-emerald-950 bg-cover bg-center ${
+                    className={`relative overflow-hidden rounded-xl border border-border bg-emerald-950 ${
                       kind === "mobile" ? "aspect-[12/5]" : "aspect-[16/7]"
                     }`}
-                    style={
-                      slide.imageUrl && isSafeUrl(slide.imageUrl)
-                        ? {
-                            backgroundImage: `url(${JSON.stringify(slide.imageUrl)})`,
-                          }
-                        : undefined
-                    }
                   >
+                    {slide.imageUrl && isSafeUrl(slide.imageUrl) ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- Admin preview of an arbitrary slide URL; a background-image style would be blocked by CSP.
+                      <img
+                        src={slide.imageUrl}
+                        alt=""
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    ) : null}
                     {!slide.imageUrl ? (
                       <div className="flex h-full items-center justify-center text-sm font-medium text-white/60">
                         Belum ada gambar

@@ -24,7 +24,15 @@ const eslintConfig = [
         "warn",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
+      // Production CSP blocks inline style attributes (no 'unsafe-inline'),
+      // and dev allows them, so they silently break only in production.
+      "react/forbid-dom-props": ["error", { forbid: ["style"] }],
     },
+  },
+  {
+    // next/og renders JSX to an image with Satori, not to the DOM.
+    files: ["app/**/opengraph-image.tsx", "app/**/twitter-image.tsx"],
+    rules: { "react/forbid-dom-props": "off" },
   },
 ];
 

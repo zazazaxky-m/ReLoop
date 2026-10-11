@@ -67,7 +67,7 @@ export default async function PengepulMapPage({
         <CardContent className="space-y-4 p-4">
           <MapLegend showCampaign={false} />
           {mapMachines.length > 0 ? (
-            <MapView machines={mapMachines} height={420} />
+            <MapView machines={mapMachines} heightClassName="h-[420px]" />
           ) : (
             <p className="py-8 text-center text-sm text-muted">
               Belum ada mesin dengan koordinat pada organisasi mitra Anda.

@@ -47,7 +47,7 @@ export default async function MapPage() {
       <Card>
         <CardContent className="space-y-4 p-4">
           <MapLegend />
-          <MapView machines={mapMachines} campaigns={mapCampaigns} height={520} />
+          <MapView machines={mapMachines} campaigns={mapCampaigns} heightClassName="h-[520px]" />
           <p className="text-xs text-muted">
             {mapMachines.length} mesin · {mapCampaigns.length} program publik aktif
             {machines.length >= MAX_MAP_MACHINES ? " (tampilan dibatasi)" : ""}.

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { DataTable, StatusBadge, type Column } from "@/components/ui";
 import { ArrowUpRight } from "@/components/ui/icons";
 import { timeAgo } from "@/lib/format";
+import { FillLevelBar } from "./FillLevelBar";
 
 export interface MachineRow {
   id: string;
@@ -67,16 +68,7 @@ export function MachineListTable({
       header: "Kapasitas",
       render: (m) => (
         <div className="flex min-w-32 items-center gap-2.5">
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
-            <div
-              className={
-                m.fillLevelPercent >= 80
-                  ? "h-full bg-amber-500"
-                  : "h-full bg-brand-500"
-              }
-              style={{ width: `${Math.min(m.fillLevelPercent, 100)}%` }}
-            />
-          </div>
+          <FillLevelBar percent={m.fillLevelPercent} className="bg-slate-200" />
           <span className="w-9 text-right text-xs font-semibold text-muted">
             {m.fillLevelPercent}%
           </span>

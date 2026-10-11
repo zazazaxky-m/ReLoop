@@ -13,6 +13,7 @@ import {
   buttonVariants,
 } from "@/components/ui";
 import { FileText, Megaphone, Recycle, Truck, Users } from "@/components/ui/icons";
+import { FillLevelBar } from "@/components/machine/FillLevelBar";
 
 export default async function AdminDashboardPage() {
   const user = await requirePageUser(["ADMIN"]);
@@ -112,12 +113,7 @@ export default async function AdminDashboardPage() {
                     <StatusBadge status={m.status} />
                   </div>
                   <div className="mt-2 flex items-center gap-3">
-                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-border">
-                      <div
-                        className={m.fillLevelPercent >= 80 ? "h-full bg-amber-500" : "h-full bg-brand-500"}
-                        style={{ width: `${Math.min(m.fillLevelPercent, 100)}%` }}
-                      />
-                    </div>
+                    <FillLevelBar percent={m.fillLevelPercent} />
                     <span className="w-9 text-right text-xs font-semibold text-muted">
                       {m.fillLevelPercent}%
                     </span>
