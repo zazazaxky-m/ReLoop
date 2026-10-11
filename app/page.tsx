@@ -178,7 +178,7 @@ export default async function Home() {
                     variant: "primary",
                     size: "lg",
                     className:
-                      "h-14 rounded-full bg-emerald-700 px-7 shadow-[0_12px_30px_rgba(4,120,87,0.24)] hover:bg-emerald-800 dark:bg-brand-600 dark:hover:bg-brand-500",
+                      "h-14 rounded-full bg-emerald-700 px-7 shadow-[0_12px_30px_rgba(4,120,87,0.24)] hover:bg-emerald-800 dark:bg-brand-600 dark:hover:bg-brand-700",
                   })}
                 >
                   Daftar gratis <ArrowRight />
