@@ -1,9 +1,22 @@
 import type Redis from "ioredis";
 
 export class MfaChallengeStoreUnavailable extends Error {
-  constructor() {
-    super("Layanan masuk sementara tidak tersedia. Silakan coba lagi.");
+  constructor(options?: { cause?: unknown }) {
+    super("Layanan masuk sementara tidak tersedia. Silakan coba lagi.", options);
   }
+}
+
+/**
+ * Operator-facing summary of a Redis failure. Deliberately not the raw error object: connection
+ * errors can carry the Redis URL (credentials included), so only name/code/message are logged,
+ * with any occurrence of the URL redacted. The full error stays available as the thrown `cause`.
+ */
+function describeRedisFailure(error: unknown, url: string): string {
+  const err = error as { name?: unknown; code?: unknown; message?: unknown } | null | undefined;
+  const name = typeof err?.name === "string" ? err.name : "Error";
+  const code = typeof err?.code === "string" ? ` (${err.code})` : "";
+  const message = typeof err?.message === "string" ? err.message : String(error);
+  return `${name}${code}: ${message.split(url).join("[redacted]")}`;
 }
 
 const consumed = new Map<string, number>();
@@ -54,11 +67,13 @@ export async function consumeMfaChallenge(challengeId: string, expiresAt: number
   try {
     current = await redisClient(url);
     return await current.set(`mfa-consumed:${challengeId}`, "1", "EXAT", expiresAt, "NX") === "OK";
-  } catch {
+  } catch (error) {
+    // Covers connect and command failures alike. Never log the challenge id, tokens or the URL.
+    console.error("[mfa-challenge] Redis consume failed:", describeRedisFailure(error, url));
     if (current && client === current) {
       client = undefined;
       current.disconnect();
     }
-    throw new MfaChallengeStoreUnavailable();
+    throw new MfaChallengeStoreUnavailable({ cause: error });
   }
 }
