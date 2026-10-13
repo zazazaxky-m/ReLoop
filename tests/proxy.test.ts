@@ -106,6 +106,27 @@ describe("proxy", () => {
   it("passes through non-API non-dashboard paths", async () => {
     const res = await proxy(new NextRequest("http://localhost/about"));
     expect(res.status).toBe(200);
+    expect(res.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+    expect(res.headers.get("x-robots-tag")).toBeNull();
+  });
+
+  it.each(["/accept-invitation", "/verify-email"])(
+    "keeps the emailed-token page %s out of Referer headers, indexes and caches (A03)",
+    async (path) => {
+      const res = await proxy(new NextRequest(`http://localhost${path}`));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(res.headers.get("content-security-policy")).toContain("script-src 'self' 'nonce-");
+    },
+  );
+
+  it("requires a session for the invitation accept and email verification APIs (A03)", async () => {
+    for (const path of ["/api/travel-agent-invitations/accept", "/api/auth/verify-email", "/api/auth/verify-email/resend"]) {
+      const res = await proxy(new NextRequest(`http://localhost${path}`, { method: "POST" }));
+      expect(res.status).toBe(401);
+    }
   });
 
   it("treats invalid session cookies as unauthenticated", async () => {

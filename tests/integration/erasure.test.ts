@@ -296,6 +296,42 @@ describe("account erasure (real PostgreSQL foreign keys)", () => {
   });
 });
 
+describe("email verification and invitation rows (A03)", () => {
+  it("erases the account's verification tokens and queued mail; accepted invitations keep history without the address", async () => {
+    const userId = f.ids.userA;
+    const oldEmail = f.credentials("userA").email;
+    // An invitation userA accepted (membership verified), a pending verification
+    // link and a queued mail, plus another user's rows that must stay.
+    const invite = await f.pendingInvite(oldEmail);
+    expect((await f.json("userA", "POST", "/api/travel-agent-invitations/accept", { token: invite.token })).status).toBe(200);
+    await f.db.emailVerificationToken.create({ data: { userId, emailLookup: emailLookupHash(oldEmail),
+      tokenHash: randomBytes(32).toString("hex"), expiresAt: later(HOUR_MS) } });
+    await f.db.emailOutbox.create({ data: { kind: "EMAIL_VERIFICATION", userId, emailLookup: emailLookupHash(oldEmail) } });
+    const other = await f.db.emailVerificationToken.create({ data: { userId: f.ids.userB,
+      emailLookup: emailLookupHash(f.credentials("userB").email), tokenHash: randomBytes(32).toString("hex"), expiresAt: later(HOUR_MS) } });
+    const otherInvite = await f.pendingInvite(f.credentials("userB").email);
+
+    const { response, body } = await eraseViaApi();
+    expect(response.status).toBe(202);
+    await runErasureJob(body.requestId);
+    expect((await getErasureStatus(body.requestId)).status).toBe("COMPLETED");
+
+    expect(await f.db.emailVerificationToken.findMany({ where: { userId } })).toEqual([]);
+    expect(await f.db.emailOutbox.findMany({ where: { userId } })).toEqual([]);
+    expect((await f.db.user.findUniqueOrThrow({ where: { id: userId } })).emailVerifiedAt).toBeNull();
+    const accepted = await f.db.travelAgentInvite.findUniqueOrThrow({ where: { id: invite.id } });
+    expect(accepted).toMatchObject({ acceptedById: userId, email: erasedEmailFor(userId), tokenHash: null });
+    expect(accepted.acceptedAt).toBeInstanceOf(Date);
+    expect(JSON.stringify(accepted)).not.toContain(oldEmail);
+    // Other users' rows are untouched.
+    expect(await f.db.emailVerificationToken.findUniqueOrThrow({ where: { id: other.id } })).toEqual(other);
+    expect((await f.db.travelAgentInvite.findUniqueOrThrow({ where: { id: otherInvite.id } })).email).toBe(f.credentials("userB").email);
+    const audit = await f.db.auditLog.findFirstOrThrow({ where: { action: "DATA_ERASURE", entityId: userId } });
+    expect(audit.metadataJson).toMatchObject({ emailVerificationTokensDeleted: 1, queuedMailDeleted: 1, acceptedInvitesRedacted: 1 });
+    expect(JSON.stringify(audit)).not.toContain(oldEmail);
+  });
+});
+
 describe("reserved placeholder address", () => {
   it("nobody can register or switch to an erased-account address, so erasure cannot be blocked by squatting", async () => {
     const placeholder = erasedEmailFor(f.ids.userA);

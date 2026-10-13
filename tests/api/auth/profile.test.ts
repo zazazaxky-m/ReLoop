@@ -9,12 +9,33 @@ import { prisma } from "@/lib/prisma";
 import * as rateLimit from "@/lib/rate-limit";
 import * as rbac from "@/lib/rbac";
 
+const { deferred } = vi.hoisted(() => ({ deferred: [] as Array<() => unknown> }));
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return { ...actual, after: vi.fn((task: () => unknown) => deferred.push(task)) };
+});
+
 vi.mock("@/lib/prisma", () => {
   const user = { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn() };
+  const travelAgentUser = { updateMany: vi.fn() };
+  const emailVerificationToken = { deleteMany: vi.fn() };
+  const emailOutbox = { create: vi.fn() };
   // runWalletTransaction's client: lockUser's SELECT ... FOR NO KEY UPDATE, then the same user mocks.
-  const tx = { $executeRaw: vi.fn(async () => 0), $queryRaw: vi.fn(async () => [{ id: "u1" }]), user };
-  return { prisma: { user, $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)) } };
+  const tx = {
+    $executeRaw: vi.fn(async () => 0), $queryRaw: vi.fn(async () => [{ id: "u1" }]),
+    user, travelAgentUser, emailVerificationToken, emailOutbox,
+  };
+  return {
+    prisma: {
+      user, travelAgentUser, emailVerificationToken, emailOutbox,
+      $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
+    },
+  };
 });
+vi.mock("@/lib/email-outbox", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/email-outbox")>()),
+  deliverEmailOutboxSafely: vi.fn(),
+}));
 
 vi.mock("@/lib/rbac", () => ({
   requireApiUser: vi.fn(),
@@ -60,6 +81,8 @@ describe("auth profile routes", () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue(sessionUser as never);
     // Re-read under the User lock: the password verified above is still current.
     vi.mocked(prisma.user.findUniqueOrThrow).mockResolvedValue({ passwordHash: "hash" } as never);
+    vi.mocked(prisma.travelAgentUser.updateMany).mockResolvedValue({ count: 0 } as never);
+    vi.mocked(prisma.emailOutbox.create).mockResolvedValue({ id: "outbox-1" } as never);
     vi.mocked(auth.buildSessionPayload).mockImplementation((user) => ({
       sub: user.id,
       email: user.email,
@@ -76,7 +99,8 @@ describe("auth profile routes", () => {
     const res = await GET();
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ user: sessionUser });
+    // A03: additive email verification flag.
+    expect(await res.json()).toEqual({ user: { ...sessionUser, emailVerified: false } });
     expect(auth.setSessionCookie).toHaveBeenCalledWith(expect.objectContaining({ sub: "u1", role: "USER", tokenVersion: 0 }));
   });
 
@@ -99,6 +123,9 @@ describe("auth profile routes", () => {
     const res = await PATCH(req({ name: " New ", phone: " 123 " }));
 
     expect(res.status).toBe(200);
+    // No email change: memberships and verification are untouched (A03).
+    expect(prisma.travelAgentUser.updateMany).not.toHaveBeenCalled();
+    expect(prisma.emailOutbox.create).not.toHaveBeenCalled();
     expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
       data: { name: "New", phone: "123" },
     }));
@@ -190,6 +217,36 @@ describe("auth profile routes", () => {
       data: expect.objectContaining({ email: "new@example.com", passwordHash: "new-hash" }),
     }));
     expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "PROFILE_AND_PASSWORD_UPDATE" }));
+  });
+
+  it("an email change clears the mailbox proof and queues a verification mail after commit (A03)", async () => {
+    deferred.length = 0;
+    vi.mocked(prisma.user.findUnique)
+      .mockResolvedValueOnce(dbUser as never)
+      .mockResolvedValueOnce(null);
+    vi.mocked(auth.verifyPassword).mockResolvedValue(true);
+    vi.mocked(prisma.user.findUniqueOrThrow)
+      .mockResolvedValueOnce({ passwordHash: "hash" } as never)
+      .mockResolvedValueOnce({ emailLookup: "lookup-new", emailVerifiedAt: null } as never);
+    vi.mocked(prisma.user.update).mockResolvedValue({ ...dbUser, email: "new@example.com", tokenVersion: 1 } as never);
+    vi.mocked(prisma.travelAgentUser.updateMany).mockResolvedValue({ count: 1 } as never);
+    vi.mocked(prisma.emailOutbox.create).mockResolvedValue({ id: "outbox-1" } as never);
+
+    const res = await PATCH(req({ email: "new@example.com", currentPassword: "ok" }));
+
+    expect(res.status).toBe(200);
+    expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ email: "new@example.com", emailVerifiedAt: null, tokenVersion: { increment: 1 } }),
+    }));
+    expect(prisma.travelAgentUser.updateMany).toHaveBeenCalledWith({
+      where: { userId: "u1", verifiedAt: { not: null } }, data: { verifiedAt: null },
+    });
+    expect(prisma.emailVerificationToken.deleteMany).toHaveBeenCalledWith({ where: { userId: "u1", consumedAt: null } });
+    expect(prisma.emailOutbox.create).toHaveBeenCalledWith({
+      data: { kind: "EMAIL_VERIFICATION", userId: "u1", emailLookup: "lookup-new" }, select: { id: true },
+    });
+    // Sent only after the response, never on the response path.
+    expect(deferred).toHaveLength(1);
   });
 
   it("a password change discards a pending MFA setup under the User lock", async () => {

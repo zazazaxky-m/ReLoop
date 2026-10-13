@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { z } from "zod";
 
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
@@ -17,6 +18,8 @@ import { accountEmailSchema } from "@/lib/account-email";
 import { lockUser } from "@/lib/db-locks";
 import { PENDING_MFA_CLEARED } from "@/lib/mfa";
 import { runWalletTransaction } from "@/lib/wallet-service";
+import { deliverEmailOutboxSafely } from "@/lib/email-outbox";
+import { clearMailboxProof, queueEmailVerification } from "@/lib/invitations";
 
 /**
  * The only User fields PATCH returns. Never secrets (totpSecret,
@@ -47,6 +50,7 @@ export async function GET() {
         role: true,
         organizationId: true,
         tokenVersion: true,
+        emailVerifiedAt: true,
       },
     });
     if (dbUser) {
@@ -61,7 +65,8 @@ export async function GET() {
         }),
       );
     }
-    return jsonOk({ user });
+    // A03: additive; mobile and web show the verification prompt from it.
+    return jsonOk({ user: { ...user, emailVerified: Boolean(dbUser?.emailVerifiedAt) } });
   } catch (error) {
     return handleApiError(error);
   }
@@ -103,7 +108,7 @@ export async function PATCH(req: Request) {
     // password checked above must still be current; a credential change also
     // discards any pending MFA setup (A02).
     const newPasswordHash = changingPassword ? await hashPassword(data.newPassword!) : undefined;
-    const updated = await runWalletTransaction(async (tx) => {
+    const { updated, outboxId } = await runWalletTransaction(async (tx) => {
       await lockUser(tx, user.id);
       if (changingEmail || changingPassword) {
         const current = await tx.user.findUniqueOrThrow({ where: { id: user.id }, select: { passwordHash: true } });
@@ -111,15 +116,17 @@ export async function PATCH(req: Request) {
           throw new HttpError(409, "Data akun berubah. Muat ulang lalu coba lagi.");
         }
       }
-      return tx.user.update({
+      const row = await tx.user.update({
         where: { id: user.id },
         data: {
           ...(data.name !== undefined ? { name: data.name.trim() } : {}),
           ...(data.phone !== undefined
             ? { phone: data.phone?.trim() || null }
             : {}),
+          // A03: the new address is unproven until its verification link is
+          // used; travel-agent memberships stop granting access (clearMailboxProof).
           ...(changingEmail
-            ? { email: normalizedEmail, tokenVersion: { increment: 1 } }
+            ? { email: normalizedEmail, emailVerifiedAt: null, tokenVersion: { increment: 1 } }
             : {}),
           ...(changingPassword
             ? { passwordHash: newPasswordHash, tokenVersion: { increment: 1 } }
@@ -128,7 +135,11 @@ export async function PATCH(req: Request) {
         },
         select: { ...PROFILE_SELECT, tokenVersion: true },
       });
+      if (!changingEmail) return { updated: row, outboxId: null };
+      await clearMailboxProof(tx, user.id);
+      return { updated: row, outboxId: await queueEmailVerification(tx, user.id) };
     });
+    if (outboxId) after(() => deliverEmailOutboxSafely(outboxId));
 
     await setSessionCookie(buildSessionPayload({
       id: updated.id,

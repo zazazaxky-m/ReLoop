@@ -5,6 +5,7 @@ import { HttpError } from "./rbac";
 import { creditReward } from "./reward-credit";
 import { decideReward, tripRewardMode } from "./reward-policy";
 import type { ComplianceResult } from "./tourism";
+import { VERIFIED_MEMBERSHIP } from "./travel-agent-access";
 import { TRIP_CHANGED, evaluateTripBags, isRewardableCondition } from "./trip";
 import { MAX_RUPIAH } from "./wallet-service";
 
@@ -321,7 +322,11 @@ export async function tripNotificationRecipients(trip: {
   if (!trip.travelAgentId) return [...recipients];
   try {
     const [agentUsers, invited] = await Promise.all([
-      prisma.travelAgentUser.findMany({ where: { travelAgentId: trip.travelAgentId }, select: { userId: true } }),
+      // A03: unverified members (not accepted from the invited mailbox) hear nothing.
+      prisma.travelAgentUser.findMany({
+        where: { travelAgentId: trip.travelAgentId, ...VERIFIED_MEMBERSHIP },
+        select: { userId: true },
+      }),
       prisma.travelAgentOrganization.findMany({
         where: { travelAgentId: trip.travelAgentId, organizationId: trip.campaign.organizationId, status: "INVITED" },
         select: { id: true },

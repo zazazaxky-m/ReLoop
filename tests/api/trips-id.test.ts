@@ -89,6 +89,11 @@ describe('/api/trips/[id]', () => {
 
       const res = await GET(new Request('http://localhost'), makeParams('t1'));
       expect(res.status).toBe(200);
+      // A03: the membership must be verified (accepted from the invited mailbox).
+      expect(prisma.travelAgentUser.findFirst).toHaveBeenCalledWith({
+        where: { userId: 'u1', travelAgentId: 'ta1', verifiedAt: { not: null }, user: { emailVerifiedAt: { not: null } } },
+        select: { id: true },
+      });
     });
 
     it('rejects USER when travel agent org is suspended', async () => {

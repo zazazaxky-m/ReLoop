@@ -64,6 +64,20 @@ function withSecurityHeaders(response: NextResponse, nonce: string) {
   return response;
 }
 
+/**
+ * Pages that read a single-use emailed token (A03). The token travels in the
+ * URL fragment and the page removes it before anything else loads; these
+ * headers also keep the page out of indexes, caches and Referer headers.
+ */
+const TOKEN_PAGES = new Set(["/accept-invitation", "/verify-email"]);
+
+function withTokenPageHeaders(response: NextResponse) {
+  response.headers.set("Referrer-Policy", "no-referrer");
+  response.headers.set("X-Robots-Tag", "noindex, nofollow");
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
 export async function proxy(req: NextRequest) {
   const nonce = randomBytes(16).toString("base64");
   const requestHeaders = new Headers(req.headers);
@@ -98,7 +112,8 @@ export async function proxy(req: NextRequest) {
     response = NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  return withSecurityHeaders(response, nonce);
+  withSecurityHeaders(response, nonce);
+  return TOKEN_PAGES.has(pathname) ? withTokenPageHeaders(response) : response;
 }
 
 export const config = {

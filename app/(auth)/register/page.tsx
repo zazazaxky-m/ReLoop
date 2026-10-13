@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AuthForm } from "@/components/auth/AuthForm";
+import { safeNextPath } from "@/lib/link-token";
 
 export const metadata: Metadata = {
   title: "Daftar Gratis",
@@ -8,7 +9,12 @@ export const metadata: Metadata = {
   alternates: { canonical: "/register" },
 };
 
-export default function RegisterPage() {
+export default async function RegisterPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next } = await searchParams;
   return (
     <div className="space-y-5 sm:space-y-6">
       <div>
@@ -22,7 +28,7 @@ export default function RegisterPage() {
           Satu menit untuk mulai memberi dampak.
         </p>
       </div>
-      <AuthForm mode="register" />
+      <AuthForm mode="register" next={safeNextPath(next)} />
     </div>
   );
 }

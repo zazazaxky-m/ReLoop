@@ -3,6 +3,7 @@ import { handleApiError, jsonOk } from "@/lib/api";
 import { getWalletBalance, getLedgerHistory, countLedgerHistory } from "@/lib/ledger";
 import { CONFIG_KEYS, getConfigInt, getMinRedemption } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
+import { VERIFIED_MEMBERSHIP } from "@/lib/travel-agent-access";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 import { REDEMPTION_PRIVATE_COLUMNS } from "@/lib/payout-destination";
 
@@ -35,7 +36,7 @@ export async function GET(req: Request) {
         omit: REDEMPTION_PRIVATE_COLUMNS,
       }),
       getMinRedemption(),
-      prisma.travelAgentUser.count({ where: { userId: user.id } }),
+      prisma.travelAgentUser.count({ where: { userId: user.id, ...VERIFIED_MEMBERSHIP } }),
       getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
     ]);
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
+import { hashInviteToken } from "@/lib/email-tokens";
 import { getWalletBalance } from "@/lib/ledger";
 import { f } from "../support/audit-fixture";
 import { scanSessionContractV1, scanSessionResponseV1 } from "../support/contracts";
@@ -281,10 +282,15 @@ describe("fixture domain helpers", () => {
   it("creates a pending invite without membership and terminal deposit history without money", async () => {
     const invite = await f.pendingInvite("invited@example.test");
     expect(invite.token.length).toBeGreaterThanOrEqual(32);
-    expect(await f.db.travelAgentInvite.findUniqueOrThrow({ where: { id: invite.id } }))
-      .toMatchObject({ status: "PENDING", email: "invited@example.test", travelAgentId: invite.travelAgentId });
+    const stored = await f.db.travelAgentInvite.findUniqueOrThrow({ where: { id: invite.id } });
+    expect(stored).toMatchObject({ status: "PENDING", email: "invited@example.test", travelAgentId: invite.travelAgentId,
+      tokenHash: hashInviteToken(invite.token), acceptedAt: null, acceptedById: null });
+    // A03: only the hash is persisted; the raw token stays in fixture memory.
+    expect(JSON.stringify(stored)).not.toContain(invite.token);
+    expect(stored.expiresAt!.getTime()).toBeGreaterThan(Date.now());
     expect(await f.db.travelAgentUser.count({ where: { travelAgentId: invite.travelAgentId } })).toBe(0);
-    expect(await f.db.travelAgentOrganization.count({ where: { travelAgentId: invite.travelAgentId } })).toBe(0);
+    expect(await f.db.travelAgentOrganization.findMany({ where: { travelAgentId: invite.travelAgentId },
+      select: { organizationId: true, status: true } })).toEqual([{ organizationId: f.ids.orgA, status: "PENDING" }]);
 
     await f.depositHistory();
     const session = await f.db.depositSession.findFirstOrThrow({ where: { userId: f.ids.userA } });

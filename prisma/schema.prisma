@@ -380,21 +380,27 @@ model User {
   pendingTotpExpiresAt    DateTime?
   /// tokenVersion when the setup started; any later bump voids the setup.
   pendingTotpTokenVersion Int?
+  /// A03: when the current email was proven (an emailed verification or
+  /// invitation token was used by this account). Null for every account
+  /// before A03 and after each email change, until the new address is proven.
+  emailVerifiedAt         DateTime?
   createdAt               DateTime      @default(now())
   updatedAt               DateTime      @updatedAt
 
-  depositSessions       DepositSession[]
-  ledgerEntries         RewardLedger[]
-  rewardCases           RewardReconciliationCase[]
-  payoutAccounts        PayoutAccount[]
-  redemptions           Redemption[]
-  collectorPartnerships OrganizationCollectorPartner[] @relation("CollectorPartnerships")
-  assignedPickups       PickupRequest[]                @relation("AssignedCollector")
-  travelAgentLinks      TravelAgentUser[]
-  trips                 Trip[]
-  notifications         Notification[]
-  deviceTokens          DeviceToken[]
-  passwordResetTokens   PasswordResetToken[]
+  depositSessions         DepositSession[]
+  ledgerEntries           RewardLedger[]
+  rewardCases             RewardReconciliationCase[]
+  payoutAccounts          PayoutAccount[]
+  redemptions             Redemption[]
+  collectorPartnerships   OrganizationCollectorPartner[] @relation("CollectorPartnerships")
+  assignedPickups         PickupRequest[]                @relation("AssignedCollector")
+  travelAgentLinks        TravelAgentUser[]
+  trips                   Trip[]
+  notifications           Notification[]
+  deviceTokens            DeviceToken[]
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  emailOutbox             EmailOutbox[]
 
   @@index([organizationId])
   @@index([role])
@@ -992,11 +998,24 @@ model TravelAgentInvite {
   email          String
   status         TravelAgentInviteStatus @default(PENDING)
   invitedById    String?
+  /// A03: SHA-256 of the single-use token in the emailed link (lib/invitations.ts).
+  /// The raw token is never stored: it is minted when the mail is sent
+  /// (lib/email-outbox.ts), so each delivery replaces the previous token.
+  /// Null until the first delivery.
+  tokenHash      String?                 @unique
+  /// 24 hours after the latest delivery; null until the first delivery.
+  expiresAt      DateTime?
+  /// Set once, by the accepting account (compare-and-set in acceptTravelAgentInvite).
+  acceptedAt     DateTime?
+  acceptedById   String?
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
+  outbox EmailOutbox[]
+
   @@index([email, status])
   @@index([organizationId, status])
+  @@index([acceptedById])
 }
 
 model TravelAgentUser {
@@ -1006,6 +1025,10 @@ model TravelAgentUser {
   userId        String
   user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   roleInAgent   TravelAgentUserRole @default(OWNER)
+  /// A03: set when this account accepted an emailed invitation for the agent.
+  /// Trip access needs it (and a verified account email); null for every
+  /// membership created before A03 and after the account's email changes.
+  verifiedAt    DateTime?
   createdAt     DateTime            @default(now())
 
   @@unique([travelAgentId, userId])
@@ -1267,4 +1290,71 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+/// A03: purpose of an EmailVerificationToken (the hash is separated per purpose).
+enum EmailTokenPurpose {
+  VERIFY_EMAIL
+}
+
+/// A03: single-use proof that the account holder reads `emailLookup`'s mailbox.
+/// Only the SHA-256 of the raw token is stored. The token is valid only while
+/// the account's current emailLookup still equals the snapshot.
+model EmailVerificationToken {
+  id          String            @id @default(cuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose     EmailTokenPurpose @default(VERIFY_EMAIL)
+  /// HMAC blind index of the address the link was sent to (User.emailLookup at send time).
+  emailLookup String
+  tokenHash   String            @unique
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime          @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+enum EmailOutboxKind {
+  TRAVEL_AGENT_INVITE
+  EMAIL_VERIFICATION
+}
+
+enum EmailOutboxStatus {
+  PENDING
+  SENDING
+  SENT
+  CANCELLED
+  FAILED
+}
+
+/// A03: durable delivery of invitation and verification mail
+/// (lib/email-outbox.ts, scripts/process-email-outbox.ts). A row holds no
+/// address and no token: the recipient is read from the invite or user when
+/// the mail is sent, and the token is minted at that moment and only its hash
+/// is written (to the invite or an EmailVerificationToken).
+model EmailOutbox {
+  id            String             @id @default(cuid())
+  kind          EmailOutboxKind
+  inviteId      String?
+  invite        TravelAgentInvite? @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  userId        String?
+  user          User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// EMAIL_VERIFICATION: User.emailLookup when queued; a later email change cancels the row.
+  emailLookup   String?
+  status        EmailOutboxStatus  @default(PENDING)
+  attempts      Int                @default(0)
+  nextAttemptAt DateTime           @default(now())
+  /// SENDING rows whose lease passed are retried (a crashed sender).
+  leaseUntil    DateTime?
+  /// Error class or code only (never a message, address or link).
+  lastError     String?
+  sentAt        DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([inviteId])
+  @@index([userId])
 }

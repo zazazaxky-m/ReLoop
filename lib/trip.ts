@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { ConditionStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { calculateCompliance, type ComplianceResult } from "@/lib/tourism";
+import { VERIFIED_MEMBERSHIP } from "@/lib/travel-agent-access";
 
 /** A trip changed between the caller's read and its write (compare-and-set lost). */
 export const TRIP_CHANGED = "Status trip sudah berubah. Muat ulang halaman lalu coba lagi.";
@@ -204,12 +205,16 @@ export async function getTripTravelAgentGateBlockReason(
   return null;
 }
 
-/** Travel-agent-linked USER may only see trips for orgs where the agent is still INVITED. */
+/**
+ * Travel-agent-linked USER may only see trips for orgs where the agent is
+ * still INVITED, and only through a verified membership (A03: accepted from
+ * the invited mailbox, account email still verified).
+ */
 export async function getInvitedTravelAgentTripFilters(userId: string): Promise<
   Array<{ travelAgentId: string; organizationId: string }>
 > {
   const agentLinks = await prisma.travelAgentUser.findMany({
-    where: { userId },
+    where: { userId, ...VERIFIED_MEMBERSHIP },
     select: { travelAgentId: true },
   });
   const travelAgentIds = agentLinks.map((link) => link.travelAgentId);

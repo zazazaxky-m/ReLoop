@@ -4,6 +4,7 @@ import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { TRIP_CHANGED, canManuallySetTripStatus } from "@/lib/trip";
+import { VERIFIED_MEMBERSHIP } from "@/lib/travel-agent-access";
 
 const patchSchema = z.object({
   status: z.enum(["PLANNED", "ACTIVE", "COMPLETED", "CANCELLED"]),
@@ -22,8 +23,9 @@ async function loadScopedTrip(id: string, role: string, orgId: string | null, us
     if (trip.userId === userId) return trip;
     if (trip.travelAgentId) {
       const [userLink, orgLink] = await Promise.all([
+        // A03: only a membership verified from the invited mailbox counts.
         prisma.travelAgentUser.findFirst({
-          where: { userId, travelAgentId: trip.travelAgentId },
+          where: { userId, travelAgentId: trip.travelAgentId, ...VERIFIED_MEMBERSHIP },
           select: { id: true },
         }),
         prisma.travelAgentOrganization.findUnique({

@@ -2,6 +2,7 @@ import { requirePageUser } from "@/lib/rbac";
 import { getWalletBalance, getLedgerHistory } from "@/lib/ledger";
 import { CONFIG_KEYS, getConfigInt, getMinRedemption } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
+import { VERIFIED_MEMBERSHIP } from "@/lib/travel-agent-access";
 import { formatRewardPoints } from "@/lib/reward-points";
 import {
   Card,
@@ -45,7 +46,7 @@ export default async function UserWalletPage() {
       take: 20,
     }),
     getMinRedemption(),
-    prisma.travelAgentUser.count({ where: { userId: user.id } }),
+    prisma.travelAgentUser.count({ where: { userId: user.id, ...VERIFIED_MEMBERSHIP } }),
     getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
   ]);
 

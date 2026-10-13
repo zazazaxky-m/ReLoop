@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { after, NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, setSessionCookie, buildSessionPayload } from "@/lib/auth";
@@ -8,7 +8,8 @@ import { dashboardPath } from "@/lib/roles";
 import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { passwordSchema } from "@/lib/password-policy";
-import { userWhereEmail } from "@/lib/encryption";
+import { emailLookupHash, userWhereEmail } from "@/lib/encryption";
+import { deliverEmailOutboxSafely, enqueueEmailVerification } from "@/lib/email-outbox";
 import { accountEmailSchema } from "@/lib/account-email";
 
 // Looser than login (legitimate signups are rare per visitor) but still
@@ -42,57 +43,26 @@ export async function POST(req: NextRequest) {
     const existing = await prisma.user.findUnique({ where: userWhereEmail(email) });
     if (existing) return jsonError(409, "Email sudah terdaftar");
 
-    const user = await prisma.$transaction(async (tx) => {
+    // A03: registering with an address proves nothing about its mailbox, so no
+    // invitation is claimed here. The account gets a verification mail; an
+    // invitation is accepted only with the token emailed to the invited address
+    // (POST /api/travel-agent-invitations/accept).
+    const passwordHash = await hashPassword(data.password);
+    const { user, outboxId } = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
         data: {
           name: data.name.trim(),
           email,
           phone: data.phone,
-          passwordHash: await hashPassword(data.password),
+          passwordHash,
           role: "USER",
         },
       });
-
-      const pendingInvites = await tx.travelAgentInvite.findMany({
-        where: { email, status: "PENDING", travelAgentId: { not: null } },
-        select: { travelAgentId: true, organizationId: true },
-      });
-
-      for (const invite of pendingInvites) {
-        const travelAgentId = invite.travelAgentId as string;
-        await tx.travelAgentUser.upsert({
-          where: {
-            travelAgentId_userId: {
-              travelAgentId,
-              userId: created.id,
-            },
-          },
-          update: { roleInAgent: "OWNER" },
-          create: {
-            travelAgentId,
-            userId: created.id,
-            roleInAgent: "OWNER",
-          },
-        });
-        await tx.travelAgentOrganization.updateMany({
-          where: {
-            travelAgentId,
-            organizationId: invite.organizationId,
-            status: "PENDING",
-          },
-          data: { status: "INVITED", approvedAt: new Date() },
-        });
-      }
-
-      if (pendingInvites.length) {
-        await tx.travelAgentInvite.updateMany({
-          where: { email, status: "PENDING" },
-          data: { status: "INVITED" },
-        });
-      }
-
-      return created;
+      const queued = await enqueueEmailVerification(tx, created.id, emailLookupHash(email));
+      return { user: created, outboxId: queued };
     });
+    // Delivered after the response; scripts/process-email-outbox.ts retries.
+    after(() => deliverEmailOutboxSafely(outboxId));
 
     await setSessionCookie(buildSessionPayload({
       id: user.id,
@@ -111,9 +81,10 @@ export async function POST(req: NextRequest) {
     });
 
     return jsonOk({
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, emailVerified: false },
       redirectTo: dashboardPath("USER"),
-    });
+      emailVerificationQueued: true,
+    }, 201);
   } catch (error) {
     return handleApiError(error);
   }

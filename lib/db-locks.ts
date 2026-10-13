@@ -32,6 +32,10 @@ import { HttpError } from "./rbac";
  * DepositSession -> DepositItem; all money is written by lib/reward-credit.ts
  * last. Their machine-event transaction only inserts the MachineEvent row
  * before that (a foreign-key KEY SHARE, which none of these locks conflicts with).
+ * An invitation accept (A03, lib/invitations.ts) locks the accepting User,
+ * then the TravelAgentOrganization link row; no transaction locks a link
+ * before a User. Email verification, an email change and minting a
+ * verification token (lib/email-outbox.ts) lock only the User.
  */
 
 /**

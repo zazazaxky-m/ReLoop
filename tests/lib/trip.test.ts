@@ -266,6 +266,11 @@ describe("trip", () => {
       await expect(getInvitedTravelAgentTripFilters("u1")).resolves.toEqual([
         { travelAgentId: "ta1", organizationId: "org1" },
       ]);
+      // A03: only memberships verified from the invited mailbox, by a verified account email.
+      expect(prisma.travelAgentUser.findMany).toHaveBeenCalledWith({
+        where: { userId: "u1", verifiedAt: { not: null }, user: { emailVerifiedAt: { not: null } } },
+        select: { travelAgentId: true },
+      });
       expect(prisma.travelAgentOrganization.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { travelAgentId: { in: ["ta1", "ta2"] }, status: "INVITED" },

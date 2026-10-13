@@ -30,6 +30,8 @@
     "backfill:email-lookup": "tsx scripts/backfill-email-lookup.ts",
     "reconcile:wallet": "tsx scripts/reconcile-wallet-history.ts",
     "erasure:process": "tsx scripts/process-erasure-jobs.ts",
+    "email:outbox": "tsx scripts/process-email-outbox.ts",
+    "report:travel-agent-access": "tsx scripts/report-travel-agent-access.ts",
     "db:reset": "prisma migrate reset --force"
   },
   "prisma": {

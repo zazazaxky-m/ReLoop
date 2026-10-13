@@ -4,6 +4,7 @@ import { TravelAgentManager, type TravelAgentRow } from "@/components/travel-age
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
+import { inviteSummary } from "@/lib/invitations";
 
 export const metadata: Metadata = { title: "Travel Agent" };
 
@@ -31,7 +32,9 @@ export default async function AdminTravelAgentsPage({
           where: { organizationId: orgId },
           orderBy: { createdAt: "desc" },
           take: 1,
+          select: { createdAt: true, expiresAt: true, acceptedAt: true },
         },
+        users: { select: { verifiedAt: true, user: { select: { emailVerifiedAt: true } } } },
         trips: {
           where: { campaign: { organizationId: orgId } },
           select: { id: true, complianceStatus: true },
@@ -54,6 +57,9 @@ export default async function AdminTravelAgentsPage({
       tripCount: trips.length,
       compliantCount: trips.filter((t) => t.complianceStatus === "COMPLIANT").length,
       nonCompliantCount: trips.filter((t) => t.complianceStatus === "NON_COMPLIANT").length,
+      memberCount: agent.users.length,
+      verifiedMemberCount: agent.users.filter((m) => m.verifiedAt && m.user.emailVerifiedAt).length,
+      inviteState: inviteSummary(agent.invites[0])?.state ?? null,
     };
   });
 

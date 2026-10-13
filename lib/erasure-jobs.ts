@@ -416,9 +416,17 @@ async function anonymizeAccount(
     name: ERASED_USER_NAME, email: erasedEmailFor(userId), phone: null,
     passwordHash: null, totpSecret: null, totpLastUsedStep: null, mfaEnabled: false, status: "INACTIVE",
     pendingTotpSecret: null, pendingTotpExpiresAt: null, pendingTotpTokenVersion: null,
-    tokenVersion: { increment: 1 },
+    emailVerifiedAt: null, tokenVersion: { increment: 1 },
   } });
   const resetTokens = await tx.passwordResetToken.deleteMany({ where: { userId } });
+  // A03: verification links and queued mail for the account go; invitations
+  // it accepted keep their history (who/when) without the address or token.
+  const verificationTokens = await tx.emailVerificationToken.deleteMany({ where: { userId } });
+  const queuedMail = await tx.emailOutbox.deleteMany({ where: { userId } });
+  const acceptedInvites = await tx.travelAgentInvite.updateMany({
+    where: { acceptedById: userId },
+    data: { email: erasedEmailFor(userId), tokenHash: null },
+  });
   const deviceTokens = await tx.deviceToken.deleteMany({ where: { userId } });
   const notifications = await tx.notification.deleteMany({ where: { userId } });
 
@@ -502,6 +510,9 @@ async function anonymizeAccount(
       profileRedacted: true,
       sessionsRevoked: true,
       passwordResetTokensDeleted: resetTokens.count,
+      emailVerificationTokensDeleted: verificationTokens.count,
+      queuedMailDeleted: queuedMail.count,
+      acceptedInvitesRedacted: acceptedInvites.count,
       deviceTokensDeleted: deviceTokens.count,
       notificationsDeleted: notifications.count,
       payoutAccountsDisabled: payoutAccounts.count,

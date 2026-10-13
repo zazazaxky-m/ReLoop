@@ -6,11 +6,20 @@ import * as audit from '@/lib/audit';
 import * as rateLimit from '@/lib/rate-limit';
 import { NextRequest } from 'next/server';
 
+const { deferred } = vi.hoisted(() => ({ deferred: [] as Array<() => unknown> }));
+vi.mock('next/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('next/server')>();
+  return { ...actual, after: vi.fn((task: () => unknown) => deferred.push(task)) };
+});
+
 vi.mock('@/lib/prisma', () => {
+  // A03: registration touches only the user and its verification mail; any
+  // invitation/membership access would hit these spies.
   const mockTx = {
     user: { create: vi.fn() },
+    emailOutbox: { create: vi.fn() },
     travelAgentInvite: { findMany: vi.fn(), updateMany: vi.fn() },
-    travelAgentUser: { upsert: vi.fn() },
+    travelAgentUser: { upsert: vi.fn(), create: vi.fn() },
     travelAgentOrganization: { updateMany: vi.fn() },
   };
   return {
@@ -23,6 +32,11 @@ vi.mock('@/lib/prisma', () => {
     mockTx, // exported for assertions if needed
   };
 });
+
+vi.mock('@/lib/email-outbox', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/email-outbox')>()),
+  deliverEmailOutboxSafely: vi.fn(),
+}));
 
 vi.mock('@/lib/auth', () => ({
   hashPassword: vi.fn(),
@@ -93,38 +107,8 @@ describe('POST /api/auth/register', () => {
     expect(body.error).toBe('Email sudah terdaftar');
   });
 
-  it('registers successfully without invites (200)', async () => {
-    vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
-    vi.mocked(auth.hashPassword).mockResolvedValue('hashed_pwd');
-    
-    // We need to access mockTx that we defined in vi.mock
-    const { mockTx } = await import('@/lib/prisma') as any;
-    mockTx.user.create.mockResolvedValue({
-      id: 'u1',
-      name: 'John Doe',
-      email: 'john@example.com',
-      role: 'USER',
-      tokenVersion: 0,
-    });
-    mockTx.travelAgentInvite.findMany.mockResolvedValue([]);
-    
-    const req = makeReq({ name: 'John Doe', email: 'john@example.com', password: 'password1234', phone: '08123456789' });
-    const res = await POST(req);
-    
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.user.email).toBe('john@example.com');
-    
-    expect(mockTx.user.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ email: 'john@example.com', passwordHash: 'hashed_pwd' })
-    }));
-    
-    expect(auth.setSessionCookie).toHaveBeenCalledWith(expect.objectContaining({ sub: 'u1' }));
-    expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'USER_REGISTER' }));
-    expect(mockTx.travelAgentInvite.updateMany).not.toHaveBeenCalled();
-  });
-
-  it('links pending travel-agent invites during registration (200)', async () => {
+  it('registers with 201, queues a verification mail after the response, and claims no invitation (A03)', async () => {
+    deferred.length = 0;
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
     vi.mocked(auth.hashPassword).mockResolvedValue('hashed_pwd');
 
@@ -136,36 +120,31 @@ describe('POST /api/auth/register', () => {
       role: 'USER',
       tokenVersion: 0,
     });
-    mockTx.travelAgentInvite.findMany.mockResolvedValue([
-      { travelAgentId: 'ta1', organizationId: 'org1' },
-      { travelAgentId: 'ta2', organizationId: 'org2' },
-    ]);
-    mockTx.travelAgentUser.upsert.mockResolvedValue({} as any);
-    mockTx.travelAgentOrganization.updateMany.mockResolvedValue({ count: 1 } as any);
-    mockTx.travelAgentInvite.updateMany.mockResolvedValue({ count: 2 } as any);
+    mockTx.emailOutbox.create.mockResolvedValue({ id: 'outbox-1' });
 
-    const req = makeReq({
-      name: 'Agent Owner',
-      email: 'Owner@Example.com',
-      password: 'password1234',
-      phone: '08123456789',
-    });
+    const req = makeReq({ name: 'Agent Owner', email: 'Owner@Example.com', password: 'password1234', phone: '08123456789' });
     const res = await POST(req);
 
-    expect(res.status).toBe(200);
-    expect(mockTx.travelAgentUser.upsert).toHaveBeenCalledTimes(2);
-    expect(mockTx.travelAgentUser.upsert).toHaveBeenCalledWith({
-      where: { travelAgentId_userId: { travelAgentId: 'ta1', userId: 'u2' } },
-      update: { roleInAgent: 'OWNER' },
-      create: { travelAgentId: 'ta1', userId: 'u2', roleInAgent: 'OWNER' },
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.user).toMatchObject({ id: 'u2', email: 'owner@example.com', role: 'USER', emailVerified: false });
+    expect(body.emailVerificationQueued).toBe(true);
+    expect(mockTx.user.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ email: 'owner@example.com', passwordHash: 'hashed_pwd' })
+    }));
+    expect(mockTx.emailOutbox.create).toHaveBeenCalledWith({
+      data: { kind: 'EMAIL_VERIFICATION', userId: 'u2', emailLookup: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      select: { id: true },
     });
-    expect(mockTx.travelAgentOrganization.updateMany).toHaveBeenCalledWith({
-      where: { travelAgentId: 'ta1', organizationId: 'org1', status: 'PENDING' },
-      data: { status: 'INVITED', approvedAt: expect.any(Date) },
-    });
-    expect(mockTx.travelAgentInvite.updateMany).toHaveBeenCalledWith({
-      where: { email: 'owner@example.com', status: 'PENDING' },
-      data: { status: 'INVITED' },
-    });
+    // No invitation is looked up, consumed or turned into a membership.
+    expect(mockTx.travelAgentInvite.findMany).not.toHaveBeenCalled();
+    expect(mockTx.travelAgentInvite.updateMany).not.toHaveBeenCalled();
+    expect(mockTx.travelAgentUser.upsert).not.toHaveBeenCalled();
+    expect(mockTx.travelAgentUser.create).not.toHaveBeenCalled();
+    expect(mockTx.travelAgentOrganization.updateMany).not.toHaveBeenCalled();
+    expect(auth.setSessionCookie).toHaveBeenCalledWith(expect.objectContaining({ sub: 'u2' }));
+    expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'USER_REGISTER' }));
+    // The mail is sent only after the response.
+    expect(deferred).toHaveLength(1);
   });
 });

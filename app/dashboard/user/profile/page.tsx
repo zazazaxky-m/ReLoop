@@ -1,7 +1,19 @@
 import { requirePageUser } from "@/lib/rbac";
+import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle, PageHeader } from "@/components/ui";
+import { EmailVerificationCard } from "@/components/profile/EmailVerificationCard";
+
 export default async function UserProfilePage() {
   const user = await requirePageUser(["USER"]);
+  const [account, memberships] = await Promise.all([
+    prisma.user.findUnique({ where: { id: user.id }, select: { emailVerifiedAt: true } }),
+    prisma.travelAgentUser.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "asc" },
+      select: { travelAgentId: true, verifiedAt: true, travelAgent: { select: { name: true } } },
+    }),
+  ]);
+  const emailVerified = Boolean(account?.emailVerifiedAt);
 
   return (
     <div className="space-y-6">
@@ -28,6 +40,14 @@ export default async function UserProfilePage() {
           </p>
         </CardContent>
       </Card>
+      <EmailVerificationCard
+        emailVerified={emailVerified}
+        memberships={memberships.map((m) => ({
+          travelAgentId: m.travelAgentId,
+          travelAgentName: m.travelAgent.name,
+          verified: Boolean(m.verifiedAt) && emailVerified,
+        }))}
+      />
     </div>
   );
 }

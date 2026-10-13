@@ -339,6 +339,11 @@ describe("tripNotificationRecipients", () => {
     vi.mocked(prisma.travelAgentUser.findMany).mockResolvedValue([{ userId: "agent-1" }, { userId: "u1" }] as any);
     vi.mocked(prisma.travelAgentOrganization.findMany).mockResolvedValue([{ id: "link" }] as any);
     await expect(tripNotificationRecipients(trip)).resolves.toEqual(["u1", "agent-1"]);
+    // A03: unverified members are never notified.
+    expect(prisma.travelAgentUser.findMany).toHaveBeenCalledWith({
+      where: { travelAgentId: "ta1", verifiedAt: { not: null }, user: { emailVerifiedAt: { not: null } } },
+      select: { userId: true },
+    });
     expect(prisma.travelAgentOrganization.findMany).toHaveBeenCalledWith({
       where: { travelAgentId: "ta1", organizationId: "org1", status: "INVITED" }, select: { id: true } });
   });

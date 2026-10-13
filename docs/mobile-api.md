@@ -17,11 +17,13 @@ Component:
 
 Kelompok endpoint existing yang dipakai:
 
-- Auth: `/api/auth/login`, `/register`, `/me`, `/logout`
+- Auth: `/api/auth/login`, `/register`, `/me`, `/logout`, `/verify-email`,
+  `/verify-email/resend`, `/api/travel-agent-invitations/accept` (A03)
 - User: `/api/user/dashboard`, `/api/scan`, `/api/sessions/:id`,
   `/api/wallet`, `/api/payout-accounts`, `/api/redemptions`, `/api/trips`
 - Trash bag / wisata: `/api/trips`, `/api/trips/:id`, `/api/trash-bags`,
-  `/api/manual-validations`, `/api/travel-agents`, `/api/travel-agents/:id`
+  `/api/manual-validations`, `/api/travel-agents`, `/api/travel-agents/:id`,
+  `/api/travel-agents/:id/invitations`
 - Operasional: `/api/machines`, `/api/pickups`, `/api/partnerships`,
   `/api/campaigns`, `/api/waste-types`, `/api/reward-rates`
 - Superadmin: `/api/organizations`, `/api/users`, `/api/regions`,
@@ -404,6 +406,98 @@ dengan objek status di atas; token salah, terpakai, atau kedaluwarsa = 400).
 `notifications`, `deletionRequests`, dan `payoutDestination` per pencairan
 (nomor dan nama tujuan milik pemilik dalam bentuk teks biasa; ciphertext dan
 `requestHash` tidak pernah dikirim).
+
+## Verifikasi email dan undangan travel agent (A03)
+
+Akses ke trip sebuah travel agent hanya diberikan kepada akun yang membuktikan
+dapat membaca kotak surat yang diundang. Registrasi, perubahan email, atau
+daftar agent di dashboard admin **tidak pernah** lagi membuat keanggotaan
+travel agent (dulu akun dengan email yang cocok langsung menjadi OWNER).
+
+**Registrasi.** `POST /api/auth/register` kini menjawab **201** (sebelumnya
+200; klien yang menerima semua 2xx tetap berfungsi). Field tambahan:
+`user.emailVerified: false` dan `emailVerificationQueued: true`. Email
+verifikasi dikirim setelah respons. `GET /api/auth/me` menambahkan
+`user.emailVerified` (boolean). Respons `PATCH /api/auth/me` tidak berubah.
+
+**Verifikasi email.**
+
+| Endpoint | Peran | Body | Jawaban |
+|---|---|---|---|
+| `POST /api/auth/verify-email` | Semua role, sesi aktif | `{ "token": "…" }` saja | 200 `{ "verified": true }` |
+| `POST /api/auth/verify-email/resend` | Semua role, sesi aktif | kosong | 202 `{ "queued": true, "alreadyVerified": false }` atau 200 `{ "queued": false, "alreadyVerified": true }` |
+
+Kesalahan verifikasi: 400 token tidak dikenal atau milik akun lain, 409 sudah
+dipakai atau email akun sudah berubah sejak tautan dikirim, 410 kedaluwarsa
+(24 jam), 422 body bukan tepat `{ token }`, 429 terlalu sering (10 per 15
+menit; kirim ulang 3 per jam), 503 `NEXT_PUBLIC_BASE_URL` belum dikonfigurasi.
+Tautan terbaru menggantikan tautan sebelumnya.
+
+**Perubahan email.** `PATCH /api/auth/me` dengan email baru mengosongkan
+status email terverifikasi akun, mencabut status terverifikasi semua
+keanggotaan travel agent akun itu, membatalkan tautan verifikasi lama, dan
+mengirim tautan verifikasi ke alamat baru. Memverifikasi alamat baru
+memulihkan status email, tetapi **tidak** memulihkan akses trip: keanggotaan
+harus diverifikasi ulang dengan menerima undangan baru (admin menekan "Kirim
+ulang undangan").
+
+**Undangan travel agent.**
+
+| Endpoint | Peran | Fungsi |
+|---|---|---|
+| `POST /api/travel-agents` | ADMIN, SUPERADMIN | Membuat/memperbarui agent dan mengirim undangan ke email agent. 201 `{ agent, invite, organizationStatus, delivery: "QUEUED" }`. Tidak ada keanggotaan dibuat; `invite.status` selalu `PENDING` dan status organisasi `PENDING` sampai undangan diterima (agent yang sudah `INVITED` tetap `INVITED`). Email `@invalid.reloop` ditolak (422). |
+| `GET /api/travel-agents` | ADMIN, SUPERADMIN | Field tambahan per agent: `memberCount`, `verifiedMemberCount`, `latestInvite` (`null`, atau `{ state, createdAt, expiresAt, acceptedAt }` dengan `state` salah satu dari `NOT_SENT`, `SENT`, `EXPIRED`, `ACCEPTED`). Tidak lagi menautkan akun apa pun. |
+| `POST /api/travel-agents/:id/invitations` | ADMIN, SUPERADMIN (`organizationId` untuk SUPERADMIN) | Kirim ulang undangan ke email agent: 202 `{ invite, delivery: "QUEUED" }`. Tautan lama tidak berlaku lagi. 404 bila agent tidak terhubung ke organisasi, 422 bila agent ditangguhkan/dihapus. |
+| `POST /api/travel-agent-invitations/accept` | USER, sesi aktif | Body tepat `{ "token": "…" }`; email atau field lain ditolak (422). 200 `{ "accepted": true, "travelAgentId", "organizationId" }`. |
+
+Penerimaan undangan memeriksa, di bawah lock User: token terkini, belum
+dipakai, belum kedaluwarsa (24 jam); email akun saat ini sama dengan email
+yang diundang; agent, organisasi, dan relasi agent-organisasi aktif. Lalu
+secara atomik: undangan ditandai terpakai, keanggotaan OWNER dibuat atau
+diverifikasi, relasi `PENDING` menjadi `INVITED`, dan email akun ditandai
+terverifikasi (token membuktikan kotak surat itu). Kesalahan: 400 tautan
+tidak valid, 403 `Undangan ini dikirim ke alamat email lain…` / `Travel agent
+atau organisasi ini sedang tidak aktif…` / bukan role USER, 409 `Undangan
+sudah digunakan`, 410 kedaluwarsa, 429 terlalu sering. Pesan tidak pernah
+memuat token.
+
+**Akses trip.** Keanggotaan travel agent hanya dihitung bila
+`TravelAgentUser.verifiedAt` terisi **dan** email akun terverifikasi. Berlaku
+untuk `GET /api/trips`, `GET /api/trips/:id` (403 untuk anggota yang belum
+terverifikasi), `GET /api/mobile/overview` (`isTravelAgent`,
+`tourismSummary`), `isTravelAgent` pada `GET /api/wallet` dan
+`GET /api/user/dashboard`, halaman web trip pengguna, serta notifikasi trip
+dari `/api/trash-bags` dan `/api/manual-validations`. Akses sebagai penerima
+reward trip (`trip.userId`) tidak berubah.
+
+**Tautan email.** Tautan berbentuk `<NEXT_PUBLIC_BASE_URL>/accept-invitation#token=…`
+dan `/verify-email#token=…`. Token ada di fragmen URL, yang tidak pernah
+dikirim browser ke server atau ke header Referer; halaman web memindahkannya
+dari address bar sebelum script aplikasi berjalan, menyimpannya hanya di
+`sessionStorage` tab itu selama login, dan mengirimnya hanya di body POST.
+Halaman tersebut `noindex`, `Referrer-Policy: no-referrer`, dan `no-store`.
+Aplikasi mobile belum menangani tautan ini (dibuka di browser). Klien yang
+memegang token boleh langsung memanggil endpoint di atas.
+
+**Pengiriman tahan gagal.** Email undangan dan verifikasi masuk ke tabel
+`EmailOutbox` dalam transaksi yang sama dengan perubahannya, dicoba sekali
+setelah respons, lalu dicoba ulang oleh `npm run email:outbox`
+(`scripts/process-email-outbox.ts`; jalankan berkala, mis. tiap 5 menit).
+Baris outbox tidak menyimpan alamat atau token: token dibuat saat pengiriman
+dan hanya hash SHA-256-nya yang disimpan, sehingga percobaan ulang membuat
+token baru. Exit code 3 berarti ada pengiriman gagal (pantau), output hanya
+berisi ID. Email reset password dan konfirmasi hapus akun (A04) masih memakai
+pengiriman setelah respons tanpa outbox (tindak lanjut terpisah).
+
+**Rollout (Z01).** Keanggotaan yang ada sebelum A03 **tidak** diverifikasi
+otomatis, karena dibuat dari email registrasi yang tidak terbukti. Sejak rilis
+ini anggota tersebut kehilangan akses trip sampai menerima undangan baru.
+Sebelum rilis jalankan `npm run report:travel-agent-access` (read-only; daftar
+keanggotaan yang terdampak, alasan, organisasi, dan jumlah trip yang tidak
+lagi terlihat; tanpa email atau nama orang), beri tahu agent terkait, lalu
+admin organisasi menekan "Kirim ulang undangan" pada halaman Travel Agent.
+Status verifikasi terlihat pada kolom "Verifikasi" di halaman itu dan pada
+halaman profil pengguna.
 
 ## Strategi Caching & Offline (Khusus Pengepul)
 

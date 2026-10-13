@@ -145,3 +145,101 @@ export async function sendAccountDeletionVerificationEmail(
     label: "konfirmasi penghapusan akun",
   });
 }
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export interface TravelAgentInviteEmailInput {
+  to: string;
+  /** Link with the single-use token in its fragment (lib/email-tokens.ts). */
+  acceptUrl: string;
+  agentName: string;
+  organizationName: string;
+}
+
+function buildTravelAgentInviteContent(input: TravelAgentInviteEmailInput) {
+  const text = [
+    `${input.organizationName} mengundang alamat email ini untuk mengelola travel agent "${input.agentName}" di ReLoop.`,
+    "",
+    "Masuk atau daftar di ReLoop memakai alamat email ini, lalu buka tautan berikut untuk menerima undangan (berlaku 24 jam, sekali pakai):",
+    input.acceptUrl,
+    "",
+    "Undangan hanya dapat diterima oleh akun yang memakai alamat email ini.",
+    "Jika Anda tidak mengenal undangan ini, abaikan email ini.",
+  ].join("\n");
+
+  const html = `<!DOCTYPE html>
+<html lang="id">
+<body style="font-family:system-ui,sans-serif;line-height:1.5;color:#0f172a">
+  <p>${escapeHtml(input.organizationName)} mengundang alamat email ini untuk mengelola travel agent &quot;${escapeHtml(input.agentName)}&quot; di ReLoop.</p>
+  <p>Masuk atau daftar di ReLoop memakai alamat email ini, lalu buka tautan berikut. Tautan berlaku 24 jam dan hanya dapat dipakai sekali.</p>
+  <p><a href="${escapeHtml(input.acceptUrl)}">Terima undangan travel agent</a></p>
+  <p style="color:#64748b;font-size:14px">Undangan hanya dapat diterima oleh akun yang memakai alamat email ini. Jika Anda tidak mengenal undangan ini, abaikan email ini.</p>
+</body>
+</html>`;
+
+  return { text, html };
+}
+
+/** Invitation for a travel agent (A03); delivered only through lib/email-outbox.ts. */
+export async function sendTravelAgentInviteEmail(
+  input: TravelAgentInviteEmailInput,
+): Promise<SendEmailResult> {
+  const { text, html } = buildTravelAgentInviteContent(input);
+  return deliverEmail({
+    to: input.to,
+    subject: "Undangan travel agent ReLoop",
+    text,
+    html,
+    label: "undangan travel agent",
+  });
+}
+
+export interface EmailVerificationEmailInput {
+  to: string;
+  /** Link with the single-use token in its fragment (lib/email-tokens.ts). */
+  verifyUrl: string;
+}
+
+function buildEmailVerificationContent(verifyUrl: string) {
+  const text = [
+    "Konfirmasi bahwa alamat email ini milik akun ReLoop Anda.",
+    "",
+    "Masuk ke ReLoop, lalu buka tautan berikut (berlaku 24 jam, sekali pakai):",
+    verifyUrl,
+    "",
+    "Jika Anda tidak membuat atau mengubah akun ReLoop, abaikan email ini.",
+  ].join("\n");
+
+  const html = `<!DOCTYPE html>
+<html lang="id">
+<body style="font-family:system-ui,sans-serif;line-height:1.5;color:#0f172a">
+  <p>Konfirmasi bahwa alamat email ini milik akun ReLoop Anda.</p>
+  <p>Masuk ke ReLoop, lalu buka tautan berikut. Tautan berlaku 24 jam dan hanya dapat dipakai sekali.</p>
+  <p><a href="${escapeHtml(verifyUrl)}">Verifikasi email</a></p>
+  <p style="color:#64748b;font-size:14px">Jika Anda tidak membuat atau mengubah akun ReLoop, abaikan email ini.</p>
+</body>
+</html>`;
+
+  return { text, html };
+}
+
+/** Account email verification (A03); delivered only through lib/email-outbox.ts. */
+export async function sendEmailVerificationEmail(
+  input: EmailVerificationEmailInput,
+): Promise<SendEmailResult> {
+  const { text, html } = buildEmailVerificationContent(input.verifyUrl);
+  return deliverEmail({
+    to: input.to,
+    subject: "Verifikasi email ReLoop",
+    text,
+    html,
+    label: "verifikasi email",
+  });
+}

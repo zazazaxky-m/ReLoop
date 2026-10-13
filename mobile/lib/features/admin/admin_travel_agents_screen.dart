@@ -134,17 +134,19 @@ class _AdminTravelAgentsScreenState extends State<AdminTravelAgentsScreen> {
           if (result['notes']?.isNotEmpty ?? false) 'notes': result['notes'],
         },
       );
-      final invite =
-          (res.data as Map<String, dynamic>)['invite'] as Map<String, dynamic>?;
+      // A03: an invitation is mailed; no account is linked until it is
+      // accepted from that mailbox. organizationStatus stays INVITED only for
+      // an agent that was already active here.
+      final data = res.data as Map<String, dynamic>;
       await _load();
       if (!mounted) return;
-      final invited = invite?['status'] == 'INVITED';
+      final alreadyInvited = data['organizationStatus'] == 'INVITED';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            invited
-                ? 'Travel agent sudah punya akun dan langsung berstatus invited.'
-                : 'Travel agent disimpan sebagai pending sampai email tersebut membuat akun.',
+            alreadyInvited
+                ? 'Undangan baru dikirim ke email travel agent. Anggota yang sudah terverifikasi tetap punya akses.'
+                : 'Undangan dikirim ke email travel agent. Status pending sampai undangan diterima dari email tersebut.',
           ),
           backgroundColor: ReLoopColors.success,
         ),

@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import Redis from "ioredis";
 import { buildSessionPayload, hashPassword, SESSION_COOKIE, signSession } from "@/lib/auth";
+import { generateEmailToken, hashInviteToken, INVITE_TOKEN_TTL_MS } from "@/lib/email-tokens";
 import { encrypt } from "@/lib/encryption";
 import { getWalletBalance } from "@/lib/ledger";
 import { prisma } from "@/lib/prisma";
@@ -341,11 +342,20 @@ export async function createAuditFixture(): Promise<AuditFixture> {
       const agent = await prisma.travelAgent.create({
         data: { name: "Agen Audit", email: `agent-${randomUUID()}@${EMAIL_DOMAIN}` },
       });
-      const invite = await prisma.travelAgentInvite.create({
-        data: { travelAgentId: agent.id, organizationId: ids.orgA, email, status: "PENDING", invitedById: ids.adminA },
+      // The rows POST /api/travel-agents creates (A03): a PENDING agent link and
+      // a delivered invitation. Only the token's hash is persisted; the raw
+      // token lives in fixture memory, as it would in the invited mailbox.
+      await prisma.travelAgentOrganization.create({
+        data: { travelAgentId: agent.id, organizationId: ids.orgA, status: "PENDING", invitedById: ids.adminA },
       });
-      // No token column exists until A03; the raw token lives only in fixture memory.
-      return { travelAgentId: agent.id, id: invite.id, token: randomBytes(32).toString("base64url") };
+      const token = generateEmailToken();
+      const invite = await prisma.travelAgentInvite.create({
+        data: {
+          travelAgentId: agent.id, organizationId: ids.orgA, email, status: "PENDING", invitedById: ids.adminA,
+          tokenHash: hashInviteToken(token), expiresAt: new Date(Date.now() + INVITE_TOKEN_TTL_MS),
+        },
+      });
+      return { travelAgentId: agent.id, id: invite.id, token };
     },
     async depositHistory() {
       await prisma.depositSession.create({

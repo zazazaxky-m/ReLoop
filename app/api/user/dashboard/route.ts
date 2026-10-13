@@ -3,6 +3,7 @@ import { handleApiError, jsonOk } from "@/lib/api";
 import { getWalletBalance, getLedgerHistory } from "@/lib/ledger";
 import { CONFIG_KEYS, getConfigInt } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
+import { VERIFIED_MEMBERSHIP } from "@/lib/travel-agent-access";
 import { isCampaignEligible } from "@/lib/campaign";
 
 export async function GET() {
@@ -34,7 +35,7 @@ export async function GET() {
         take: 10,
       }),
       getLedgerHistory(user.id, { take: 5 }),
-      prisma.travelAgentUser.count({ where: { userId: user.id } }),
+      prisma.travelAgentUser.count({ where: { userId: user.id, ...VERIFIED_MEMBERSHIP } }),
       getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
     ]);
 
