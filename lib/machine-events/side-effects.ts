@@ -16,7 +16,7 @@ import {
   resolveFraudDepositItemId,
   resolveOrCreateUnknownWasteType,
 } from "./item";
-import { flagAnomaly, notifyOrgAdmins } from "./fraud";
+import { flagAnomaly, holdItemForFraud, notifyOrgAdmins } from "./fraud";
 import { maybeCreateAutoPickup } from "./pickup";
 import { handleAcceptance } from "./acceptance";
 import type { DepositItemCache } from "./item-cache";
@@ -289,13 +289,7 @@ export async function processEventSideEffects(
     case "ITEM_REJECTED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: {
-          status: "REJECTED",
-          validationReasonCode: (payload.reason as string) ?? "REJECTED",
-        },
-      });
+      // DepositSession before DepositItem (global lock order, lib/db-locks.ts).
       if (input.sessionId) {
         const session = await tx.depositSession.findUnique({
           where: { id: input.sessionId },
@@ -307,6 +301,13 @@ export async function processEventSideEffects(
           });
         }
       }
+      await tx.depositItem.update({
+        where: { id: itemId },
+        data: {
+          status: "REJECTED",
+          validationReasonCode: (payload.reason as string) ?? "REJECTED",
+        },
+      });
       break;
     }
 
@@ -319,30 +320,18 @@ export async function processEventSideEffects(
           : input.depositItemId ?? null;
 
       if (affectedItemId) {
-        await tx.depositItem.update({
-          where: { id: affectedItemId },
-          data: {
-            status: "REVIEW",
-            externalFraudFlag: true,
-            validationReasonCode: reason,
-          },
-        });
-        await tx.rewardLedger.updateMany({
-          where: { depositItemId: affectedItemId, status: "AVAILABLE" },
-          data: { status: "PENDING", reasonCode: reason },
-        });
+        // M04: under User -> DepositSession -> DepositItem locks; holds the
+        // item's earning (or opens a reconciliation case if it was already
+        // paid out) and never reopens a reviewer's final decision.
+        await holdItemForFraud(tx, affectedItemId, reason);
         await tx.machineEvent.update({
           where: { id: eventId },
           data: { depositItemId: affectedItemId },
         });
       }
       if (input.sessionId) {
-        await flagAnomaly(
-          tx,
-          input.sessionId,
-          affectedItemId,
-          reason,
-        );
+        // The item itself was handled by the hold above.
+        await flagAnomaly(tx, input.sessionId, null, reason);
       }
       const notify = () =>
         notifyOrgAdmins(machine.organizationId, {

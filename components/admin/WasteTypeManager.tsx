@@ -31,6 +31,8 @@ export interface WasteTypeRow {
   maxWeightGrams: number | null;
   defaultRewardPerItem: number | null;
   description: string | null;
+  /** Classifier labels that confirm this type at a machine (M04). */
+  aiAcceptedLabels: string[];
   active: boolean;
   organizationId: string | null;
   organizationName: string | null;
@@ -44,6 +46,7 @@ const EMPTY = {
   maxWeightGrams: "",
   defaultRewardPerItem: "",
   description: "",
+  aiAcceptedLabels: "",
   organizationId: "",
 };
 
@@ -85,6 +88,7 @@ export function WasteTypeManager({
       maxWeightGrams: row.maxWeightGrams?.toString() ?? "",
       defaultRewardPerItem: row.defaultRewardPerItem?.toString() ?? "",
       description: row.description ?? "",
+      aiAcceptedLabels: row.aiAcceptedLabels.join(", "),
       organizationId: row.organizationId ?? "",
     });
     setEditId(row.id);
@@ -110,6 +114,10 @@ export function WasteTypeManager({
         maxWeightGrams: num(form.maxWeightGrams),
         defaultRewardPerItem: num(form.defaultRewardPerItem),
         description: form.description || null,
+        aiAcceptedLabels: form.aiAcceptedLabels
+          .split(",")
+          .map((label) => label.trim())
+          .filter(Boolean),
       };
       if (!editId && canManageGlobal) {
         payload.organizationId = form.organizationId || null;
@@ -330,6 +338,18 @@ export function WasteTypeManager({
                   </FormField>
                 ) : null}
               </div>
+              <FormField
+                label="Label AI yang diterima"
+                htmlFor="wt-ai-labels"
+                hint="Pisahkan dengan koma, contoh: bottle_pet, can_aluminium. Kosong berarti jenis ini tidak diverifikasi oleh kamera AI."
+              >
+                <Input
+                  id="wt-ai-labels"
+                  value={form.aiAcceptedLabels}
+                  onChange={(e) => setForm((f) => ({ ...f, aiAcceptedLabels: e.target.value }))}
+                  placeholder="bottle_pet"
+                />
+              </FormField>
               <FormField label="Deskripsi" htmlFor="wt-desc">
                 <Textarea
                   id="wt-desc"

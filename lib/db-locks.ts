@@ -26,6 +26,12 @@ import { HttpError } from "./rbac";
  * An account erasure (lib/erasure-jobs.ts) locks the User, then every
  * PayoutAccount and every Redemption of that user (each class in id order),
  * and re-reads balances and open activity before anonymizing.
+ * Deposit rewards (M04) lock the reward recipient User (immutable
+ * DepositSession.userId) first: a deposit review then takes Machine ->
+ * DepositSession -> DepositItem; machine acceptance and the fraud hold take
+ * DepositSession -> DepositItem; all money is written by lib/reward-credit.ts
+ * last. Their machine-event transaction only inserts the MachineEvent row
+ * before that (a foreign-key KEY SHARE, which none of these locks conflicts with).
  */
 
 /**
@@ -77,4 +83,33 @@ export async function lockTripBags(tx: Prisma.TransactionClient, tripId: string)
   const rows = await tx.$queryRaw<{ id: string }[]>`
     SELECT id FROM "TrashBagAssignment" WHERE "tripId" = ${tripId} ORDER BY id FOR NO KEY UPDATE`;
   return rows.map((row) => row.id);
+}
+
+/**
+ * Locks one machine row (a deposit review takes User -> Machine ->
+ * DepositSession -> DepositItem). FOR NO KEY UPDATE: foreign-key inserts that
+ * only reference the machine (events, sessions) are not blocked by it.
+ */
+export async function lockMachine(tx: Prisma.TransactionClient, machineId: string): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "Machine" WHERE id = ${machineId} FOR NO KEY UPDATE`;
+  if (rows.length !== 1) throw new HttpError(404, "Mesin tidak ditemukan");
+}
+
+/**
+ * Locks one deposit session. Money-moving callers (machine acceptance, fraud
+ * hold, deposit review) already hold `lockUser(tx, session.userId)` (the
+ * immutable DepositSession.userId tells them which User).
+ */
+export async function lockDepositSession(tx: Prisma.TransactionClient, sessionId: string): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "DepositSession" WHERE id = ${sessionId} FOR NO KEY UPDATE`;
+  if (rows.length !== 1) throw new HttpError(404, "Sesi setoran tidak ditemukan");
+}
+
+/** Locks one deposit item, after its session (DepositSession -> DepositItem). */
+export async function lockDepositItem(tx: Prisma.TransactionClient, depositItemId: string): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "DepositItem" WHERE id = ${depositItemId} FOR NO KEY UPDATE`;
+  if (rows.length !== 1) throw new HttpError(404, "Item setoran tidak ditemukan");
 }

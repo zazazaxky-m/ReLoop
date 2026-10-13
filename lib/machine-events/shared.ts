@@ -10,6 +10,14 @@ import type { MachineEventType } from "@prisma/client";
 export const UNKNOWN_WASTE_TYPE_NAME = "Tidak Diketahui (Unknown)";
 export const UNKNOWN_WASTE_TYPE_REASON = "UNKNOWN_WASTE_TYPE";
 
+/** DepositItem.validationReasonCode of a reviewer's final decision (lib/deposit-review.ts). */
+export const REVIEW_APPROVED_REASON = "REVIEW_APPROVED";
+export const REVIEW_REJECTED_REASON = "REVIEW_REJECTED";
+
+export function isReviewDecision(reasonCode: string | null | undefined): boolean {
+  return reasonCode === REVIEW_APPROVED_REASON || reasonCode === REVIEW_REJECTED_REASON;
+}
+
 export interface IngestEventInput {
   machineCode: string;
   localEventId: string;

@@ -12,6 +12,7 @@ vi.mock('@/lib/machine-events/pickup', () => ({
 }));
 vi.mock('@/lib/machine-events/fraud', () => ({
   flagAnomaly: vi.fn(),
+  holdItemForFraud: vi.fn(),
   notifyOrgAdmins: vi.fn(),
 }));
 vi.mock('@/lib/machine-events/item', () => ({
@@ -284,13 +285,18 @@ describe('processEventSideEffects', () => {
     expect(acceptance.handleAcceptance).toHaveBeenCalledWith(mockTx, mockMachine, 's1', 'd1', 'evt1');
   });
 
-  it('handles FRAUD_DETECTED flags anomaly', async () => {
+  it('handles FRAUD_DETECTED through the locked fraud hold, then flags the session (M04)', async () => {
     vi.mocked(item.resolveFraudDepositItemId).mockResolvedValue('d1');
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'FRAUD_DETECTED', sessionId: 's1', payload: { reason: 'test' }, machineCode: 'M1' } as any, 'evt1');
-    
-    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'REVIEW', externalFraudFlag: true }) }));
-    expect(mockTx.rewardLedger.updateMany).toHaveBeenCalled();
-    expect(fraud.flagAnomaly).toHaveBeenCalledWith(mockTx, 's1', 'd1', 'test');
+
+    expect(fraud.holdItemForFraud).toHaveBeenCalledWith(mockTx, 'd1', 'test');
+    // No unlocked ledger or item write from the event handler itself.
+    expect(mockTx.rewardLedger.updateMany).not.toHaveBeenCalled();
+    expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+    expect(mockTx.machineEvent.update).toHaveBeenCalledWith({ where: { id: 'evt1' }, data: { depositItemId: 'd1' } });
+    expect(fraud.flagAnomaly).toHaveBeenCalledWith(mockTx, 's1', null, 'test');
+    expect(vi.mocked(fraud.holdItemForFraud).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(fraud.flagAnomaly).mock.invocationCallOrder[0]);
     expect(fraud.notifyOrgAdmins).toHaveBeenCalled();
   });
 
@@ -509,12 +515,7 @@ describe('processEventSideEffects', () => {
       'evt9',
     );
 
-    expect(mockTx.depositItem.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'd9' },
-        data: expect.objectContaining({ externalFraudFlag: true }),
-      }),
-    );
+    expect(fraud.holdItemForFraud).toHaveBeenCalledWith(mockTx, 'd9', 'DOOR_FORCED');
     expect(fraud.notifyOrgAdmins).toHaveBeenCalledWith(
       'o1',
       expect.objectContaining({ title: 'Indikasi vandalisme terdeteksi' }),
@@ -534,6 +535,7 @@ describe('processEventSideEffects', () => {
       'evt10',
     );
     expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+    expect(fraud.holdItemForFraud).not.toHaveBeenCalled();
     expect(fraud.notifyOrgAdmins).toHaveBeenCalled();
   });
 

@@ -105,6 +105,24 @@ enum CampaignRewardMode {
   COMPLIANCE_ONLY
 }
 
+/// How a machine verifies that an inserted item is the selected waste type
+/// (lib/reward-policy.ts verifyMaterial). A label the classifier did report is
+/// always checked against WasteType.aiAcceptedLabels, whatever the policy.
+enum MaterialVerification {
+  /// The classifier must confirm the item; missing/unavailable AI holds it for review.
+  AI_REQUIRED
+  /// No AI dependency: a barcode must be read and the weight must be in range.
+  BARCODE_WEIGHT
+  /// Weight window only (behaviour before M04; default).
+  WEIGHT_ONLY
+}
+
+/// RewardReconciliationCase lifecycle: OPEN until an operator settles it outside the ledger flow.
+enum RewardReconciliationStatus {
+  OPEN
+  RESOLVED
+}
+
 enum SessionStatus {
   RESERVED
   ACTIVE
@@ -354,6 +372,7 @@ model User {
 
   depositSessions       DepositSession[]
   ledgerEntries         RewardLedger[]
+  rewardCases           RewardReconciliationCase[]
   payoutAccounts        PayoutAccount[]
   redemptions           Redemption[]
   collectorPartnerships OrganizationCollectorPartner[] @relation("CollectorPartnerships")
@@ -369,22 +388,25 @@ model User {
 }
 
 model Organization {
-  id           String    @id @default(cuid())
-  name         String
-  type         OrgType   @default(OTHER)
+  id                String             @id @default(cuid())
+  name              String
+  type              OrgType            @default(OTHER)
   // Region levels stored as soft references (Region.id) for aggregation/reporting.
-  provinceId   String?
-  regencyId    String?
-  districtId   String?
-  villageId    String?
-  regionId     String?
-  region       Region?   @relation(fields: [regionId], references: [id])
-  address      String?
-  contactName  String?
-  contactPhone String?
-  status       OrgStatus @default(ACTIVE)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  provinceId        String?
+  regencyId         String?
+  districtId        String?
+  villageId         String?
+  regionId          String?
+  region            Region?            @relation(fields: [regionId], references: [id])
+  address           String?
+  contactName       String?
+  contactPhone      String?
+  status            OrgStatus          @default(ACTIVE)
+  /// Reward mode of machine deposits made without a campaign (M04). Explicit
+  /// per organization; MONEY_REWARD keeps the behaviour before M04.
+  machineRewardMode CampaignRewardMode @default(MONEY_REWARD)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   users              User[]
   machines           Machine[]
@@ -444,33 +466,35 @@ model OrganizationCollectorPartner {
 // ============================================================
 
 model Machine {
-  id                        String        @id @default(cuid())
+  id                        String               @id @default(cuid())
   organizationId            String
-  organization              Organization  @relation(fields: [organizationId], references: [id])
+  organization              Organization         @relation(fields: [organizationId], references: [id])
   regionId                  String?
-  region                    Region?       @relation(fields: [regionId], references: [id])
-  machineCode               String        @unique
+  region                    Region?              @relation(fields: [regionId], references: [id])
+  machineCode               String               @unique
   qrToken                   String?
   qrTokenExpiresAt          DateTime?
-  qrRotationSeconds         Int           @default(30)
+  qrRotationSeconds         Int                  @default(30)
   // Per-machine secret for HMAC-signed event ingestion (provisioned by superadmin).
   ingestSecret              String?
   name                      String
   description               String?
-  status                    MachineStatus @default(OFFLINE)
-  fillLevelPercent          Int           @default(0)
+  status                    MachineStatus        @default(OFFLINE)
+  fillLevelPercent          Int                  @default(0)
   capacityKg                Float?
-  hasInputChamber           Boolean       @default(true)
-  hasConveyor               Boolean       @default(true)
-  hasCompactor              Boolean       @default(false)
-  hasExternalCamera         Boolean       @default(false)
-  chamberTimeoutSeconds     Int           @default(20)
-  sessionIdleTimeoutMinutes Int           @default(3)
+  hasInputChamber           Boolean              @default(true)
+  hasConveyor               Boolean              @default(true)
+  hasCompactor              Boolean              @default(false)
+  hasExternalCamera         Boolean              @default(false)
+  /// Material verification policy (M04); WEIGHT_ONLY keeps the behaviour before M04.
+  materialVerification      MaterialVerification @default(WEIGHT_ONLY)
+  chamberTimeoutSeconds     Int                  @default(20)
+  sessionIdleTimeoutMinutes Int                  @default(3)
   lastHeartbeatAt           DateTime?
   latitude                  Float?
   longitude                 Float?
-  createdAt                 DateTime      @default(now())
-  updatedAt                 DateTime      @updatedAt
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
 
   wasteTypes     MachineWasteType[]
   sessions       DepositSession[]
@@ -493,6 +517,9 @@ model WasteType {
   defaultRewardPerItem Int?
   description          String?
   active               Boolean   @default(true)
+  /// Classifier labels (normalized, e.g. `bottle_pet`) that confirm this waste
+  /// type (M04). Empty = the type cannot be verified by AI.
+  aiAcceptedLabels     String[]  @default([])
   // null = global (managed by superadmin); set = organization-specific (admin-added)
   organizationId       String?
   createdAt            DateTime  @default(now())
@@ -555,6 +582,9 @@ model Campaign {
   description             String?
   campaignType            CampaignType       @default(MACHINE_DEPOSIT)
   rewardMode              CampaignRewardMode @default(MONEY_REWARD)
+  /// EVENT / SCHOOL_PROGRAM only: the program may run at machines (M04).
+  /// MACHINE_DEPOSIT always may; TRASH_BAG / TOURISM_PROGRAM never do.
+  supportsMachine         Boolean            @default(false)
   visibility              CampaignVisibility @default(PUBLIC)
   allowedEmailDomainsJson Json?
   startAt                 DateTime?
@@ -767,6 +797,37 @@ model RewardLedger {
   @@index([referenceType, referenceId])
 }
 
+/// A money effect the system refused to apply automatically (M04,
+/// lib/reward-credit.ts): a correction that would push a balance that was
+/// already paid out or reserved below zero, or a credit to an account the A04
+/// erasure anonymized. The ledger is never forced; an operator resolves the
+/// case outside the automatic flow. Listed in the reconciliation report.
+model RewardReconciliationCase {
+  id            String                     @id @default(cuid())
+  /// Business key of the refused effect (e.g. `review:<itemId>:decision:v1`, `fraud:<itemId>:hold:v1`).
+  businessKey   String                     @unique
+  userId        String
+  user          User                       @relation(fields: [userId], references: [id])
+  depositItemId String?
+  /// Positive rupiah at stake; reasonCode says whether a debit or a credit was refused.
+  amount        Int
+  /// Ledger entry type of the effect that was not written.
+  entryType     LedgerEntryType
+  /// ANOMALY_ALREADY_PAID_OUT | RECIPIENT_ERASED
+  reasonCode    String
+  referenceType String?
+  referenceId   String?
+  status        RewardReconciliationStatus @default(OPEN)
+  note          String?
+  resolvedAt    DateTime?
+  resolvedById  String?
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+
+  @@index([status, createdAt])
+  @@index([userId])
+}
+
 // ============================================================
 // Payout & redemption
 // ============================================================
@@ -788,22 +849,22 @@ model PayoutAccount {
 }
 
 model Redemption {
-  id                      String             @id @default(cuid())
-  userId                  String
-  user                    User               @relation(fields: [userId], references: [id])
-  provider                PayoutProviderType @default(OTHER)
-  payoutAccountId         String?
-  amount                  Int
-  method                  RedemptionMethod   @default(MANUAL_TRANSFER)
-  status                  RedemptionStatus   @default(REQUESTED)
-  providerReference       String?
-  manualTransferProofUrl  String?
-  note                    String?
-  processedBySuperadminId String?
+  id                          String                   @id @default(cuid())
+  userId                      String
+  user                        User                     @relation(fields: [userId], references: [id])
+  provider                    PayoutProviderType       @default(OTHER)
+  payoutAccountId             String?
+  amount                      Int
+  method                      RedemptionMethod         @default(MANUAL_TRANSFER)
+  status                      RedemptionStatus         @default(REQUESTED)
+  providerReference           String?
+  manualTransferProofUrl      String?
+  note                        String?
+  processedBySuperadminId     String?
   /// Client key for one logical request, unique per user (not globally).
-  idempotencyKey          String
+  idempotencyKey              String
   /// sha256 of the canonical request (amount + payoutAccountId); null on legacy rows.
-  requestHash             String?
+  requestHash                 String?
   /// Immutable payout destination used by the queue, process, success and proof
   /// (never the mutable PayoutAccount). Identifier/name are AES-GCM ciphertext
   /// from lib/encryption; never return them to clients (lib/payout-destination.ts).
@@ -814,11 +875,11 @@ model Redemption {
   payoutDestinationCapturedAt DateTime?
   /// Operator could not confirm the external transfer: the request stays
   /// PROCESSING with its reserve held until the outcome is reconciled.
-  reconciliationRequired      Boolean            @default(false)
+  reconciliationRequired      Boolean                  @default(false)
   reconciliationNote          String?
   reconciliationFlaggedAt     DateTime?
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
 
   @@unique([userId, idempotencyKey])
   @@index([userId, status])
@@ -969,17 +1030,17 @@ model Trip {
 }
 
 model TrashBagAssignment {
-  id           String     @id @default(cuid())
+  id           String           @id @default(cuid())
   tripId       String
-  trip         Trip       @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip         Trip             @relation(fields: [tripId], references: [id], onDelete: Cascade)
   assignedById String?
   wasteTypeId  String?
-  wasteType    WasteType? @relation(fields: [wasteTypeId], references: [id])
-  bagQrCode    String     @unique
-  bagCount     Int        @default(1)
+  wasteType    WasteType?       @relation(fields: [wasteTypeId], references: [id])
+  bagQrCode    String           @unique
+  bagCount     Int              @default(1)
   status       ConditionStatus?
   returnedAt   DateTime?
-  assignedAt   DateTime   @default(now())
+  assignedAt   DateTime         @default(now())
 
   @@index([tripId])
   @@index([wasteTypeId])

@@ -30,6 +30,7 @@ interface MachineInitial {
   hasConveyor: boolean;
   hasCompactor: boolean;
   hasExternalCamera: boolean;
+  materialVerification?: string;
   regionId: string | null;
   wasteTypeIds: string[];
 }

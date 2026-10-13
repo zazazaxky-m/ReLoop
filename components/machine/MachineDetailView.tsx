@@ -36,6 +36,7 @@ interface DetailMachine {
   hasConveyor: boolean;
   hasCompactor: boolean;
   hasExternalCamera: boolean;
+  materialVerification?: string;
   regionId: string | null;
   lastHeartbeatAt: Date | null;
   qrToken: string | null;
@@ -208,6 +209,7 @@ export async function MachineDetailView({
               hasConveyor: machine.hasConveyor,
               hasCompactor: machine.hasCompactor,
               hasExternalCamera: machine.hasExternalCamera,
+              materialVerification: machine.materialVerification,
               regionId: machine.regionId,
               wasteTypeIds: machine.wasteTypes.map((w) => w.wasteTypeId),
             }}

@@ -2,6 +2,8 @@ import type { ConditionStatus, Prisma } from "@prisma/client";
 import { lockTrip, lockTripBags, lockUser } from "./db-locks";
 import { prisma } from "./prisma";
 import { HttpError } from "./rbac";
+import { creditReward } from "./reward-credit";
+import { decideReward, tripRewardMode } from "./reward-policy";
 import type { ComplianceResult } from "./tourism";
 import { TRIP_CHANGED, evaluateTripBags, isRewardableCondition } from "./trip";
 import { MAX_RUPIAH } from "./wallet-service";
@@ -65,7 +67,7 @@ const LOCKED_TRIP_SELECT = {
   groupName: true,
   complianceScore: true,
   complianceStatus: true,
-  campaign: { select: { organizationId: true, rewardMode: true, rewardMultiplier: true, name: true } },
+  campaign: { select: { organizationId: true, campaignType: true, rewardMode: true, rewardMultiplier: true, name: true } },
   bagAssignments: { select: { id: true, bagQrCode: true, status: true }, orderBy: { id: "asc" } },
 } satisfies Prisma.TripSelect;
 
@@ -206,8 +208,9 @@ async function latestCheckoutAppCompleted(tx: Prisma.TransactionClient, tripId: 
  * reward recipient's User row is held).
  *
  * ACTIVE trip, every bag reviewed and `mayClose` -> COMPLETED (compare-and-set)
- * and, for a MONEY_REWARD trip with a recipient, one EARN/AVAILABLE keyed
- * `trip:<tripId>:return`, unless any trip return earning already exists.
+ * and, for a MONEY_REWARD trip program with a recipient, one EARN/AVAILABLE
+ * keyed `trip:<tripId>:return` decided by lib/reward-policy.ts and written by
+ * lib/reward-credit.ts, unless any trip return earning already exists.
  * ACTIVE trip otherwise -> compliance progress only, never money.
  * COMPLETED trip (correction) -> compliance only; the reward is never minted,
  * adjusted or reversed here.
@@ -237,10 +240,19 @@ export async function refreshTripOutcome(
     rewardMultiplier: trip.campaign.rewardMultiplier,
   });
   const { assignedCount, returnedCount, rewardableCount, conditionStatus, compliance } = evaluation;
-  const computedRewardAmount = evaluation.rewardAmount;
-  if (!Number.isSafeInteger(computedRewardAmount) || computedRewardAmount < 0 || computedRewardAmount > MAX_RUPIAH) {
+  if (!Number.isSafeInteger(evaluation.rewardAmount) || evaluation.rewardAmount < 0 || evaluation.rewardAmount > MAX_RUPIAH) {
     throw new HttpError(422, "Nilai reward trip melebihi batas yang diizinkan");
   }
+  // M04: the central policy has the last word (COMPLIANCE_ONLY, or a campaign
+  // that is not a trip program, never pays).
+  const decision = decideReward({
+    mode: tripRewardMode(trip.campaign),
+    baseAmount: evaluation.rewardAmount,
+    weightValid: true,
+    typeMatch: true,
+    hasAnomaly: false,
+  });
+  const computedRewardAmount = decision.amount;
 
   const completedNow =
     trip.status === "ACTIVE" && (options.mayClose ?? true) && evaluation.reviewedCount === assignedCount;
@@ -257,21 +269,21 @@ export async function refreshTripOutcome(
   const rewards = await loadTripRewards(tx, tripId);
   let rewardAmount = 0;
   if (completedNow && trip.userId && computedRewardAmount > 0 && rewards.length === 0) {
-    await tx.rewardLedger.create({
-      data: {
-        userId: trip.userId,
-        organizationId: trip.campaign.organizationId,
-        campaignId: trip.campaignId,
-        entryType: "EARN",
-        amount: computedRewardAmount,
-        status: "AVAILABLE",
-        reasonCode: TRIP_RETURN_REASON,
-        referenceType: "Trip",
-        referenceId: tripId,
-        businessKey: tripReturnKey(tripId),
-      },
+    // Same key, reason and reference as M03 (the enforce index filters on
+    // reasonCode TRASH_BAG_RETURN); lockUser inside creditReward is the lock
+    // this transaction already holds (lockTripAggregate).
+    const entry = await creditReward(tx, {
+      businessKey: tripReturnKey(tripId),
+      userId: trip.userId,
+      organizationId: trip.campaign.organizationId,
+      campaignId: trip.campaignId,
+      amount: computedRewardAmount,
+      status: decision.ledgerStatus,
+      reasonCode: TRIP_RETURN_REASON,
+      referenceType: "Trip",
+      referenceId: tripId,
     });
-    rewardAmount = computedRewardAmount;
+    rewardAmount = entry?.amount ?? 0;
   }
   const paidRewardAmount =
     rewardAmount +

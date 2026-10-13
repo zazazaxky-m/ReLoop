@@ -55,6 +55,7 @@ export function ReviewQueue({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
   const [actionKind, setActionKind] = useState<"approve" | "reject" | null>(null);
   const [wasteTypeId, setWasteTypeId] = useState("");
@@ -83,6 +84,7 @@ export function ReviewQueue({
     }
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch(`/api/deposit-reviews/${id}`, {
         method: "PATCH",
@@ -98,6 +100,15 @@ export function ReviewQueue({
         const d = await res.json().catch(() => ({}));
         setError(d?.error ?? "Gagal memproses peninjauan");
         return;
+      }
+      const result = await res.json().catch(() => null);
+      const reconciliationCase = result?.reconciliationCase as { amount?: number; reasonCode?: string } | null | undefined;
+      if (reconciliationCase) {
+        setNotice(
+          reconciliationCase.reasonCode === "RECIPIENT_ERASED"
+            ? "Keputusan tersimpan. Akun penerima sudah dihapus, jadi reward tidak dikreditkan dan kasus rekonsiliasi dibuka untuk tim keuangan."
+            : `Keputusan tersimpan. Saldo dari setoran ini sudah dicairkan, jadi selisih Rp${(reconciliationCase.amount ?? 0).toLocaleString("id-ID")} tidak dipotong otomatis; kasus rekonsiliasi dibuka untuk tim keuangan.`,
+        );
       }
       closeAction();
       router.refresh();
@@ -173,6 +184,12 @@ export function ReviewQueue({
 
   return (
     <div className="space-y-4">
+      {notice ? (
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/30 dark:bg-amber-950/20 px-3.5 py-2.5 text-sm text-foreground">
+          {notice}
+        </div>
+      ) : null}
+
       {error ? (
         <div className="rounded-xl border border-red-200 bg-red-50 dark:border-red-900/30 dark:bg-red-950/20 px-3.5 py-2.5 text-sm text-status-error">
           {error}

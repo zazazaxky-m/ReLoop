@@ -16,6 +16,13 @@ export interface IngestOptions {
   machine?: IngestMachine;
   /** Reused across events in the same ingest batch to avoid repeated lookups. */
   depositItemCache?: DepositItemCache;
+  /** Test seams injected by the caller's process (never reachable over HTTP). */
+  hooks?: IngestHooks;
+}
+
+export interface IngestHooks {
+  /** Inside the event transaction after every side effect (reward included), before COMMIT. */
+  afterSideEffects?: (tx: Prisma.TransactionClient) => Promise<void>;
 }
 
 /** P2002 (or SQLSTATE 23505 through a raw query): another writer owns the key. */
@@ -28,7 +35,10 @@ function isUniqueViolation(error: unknown): boolean {
  * Idempotent machine event ingestion with acceptance-point reward gating.
  *
  * Resolves only after the event row and every side effect (reward included)
- * committed in one transaction, so callers may report it as accepted. A retry
+ * committed in one transaction, so callers may report it as accepted; any
+ * exception inside it rolls the event and its ledger effects back together. A
+ * money side effect (acceptance, fraud hold) takes the reward recipient's User
+ * lock before any DepositSession/DepositItem lock (lib/db-locks.ts). A retry
  * of a committed localEventId, including one that loses a concurrent
  * unique-insert race, returns `duplicate: true` without running side effects
  * again. Notifications are sent only after commit.
@@ -138,6 +148,7 @@ export async function ingestMachineEvent(
           afterCommit.push(effect);
         },
       );
+      await options?.hooks?.afterSideEffects?.(tx);
       return created;
     });
     eventId = event.id;

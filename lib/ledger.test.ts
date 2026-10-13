@@ -26,6 +26,10 @@ vi.mock('./prisma', () => ({
     },
     redemption: { groupBy: vi.fn() },
     organization: { findMany: vi.fn() },
+    rewardReconciliationCase: {
+      findMany: vi.fn(async () => []),
+      aggregate: vi.fn(async () => ({ _count: { _all: 0 }, _sum: { amount: null } })),
+    },
   }
 }));
 

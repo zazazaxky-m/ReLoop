@@ -247,6 +247,100 @@ ulang halaman lalu coba lagi.`). Antrean lock yang terlalu lama dijawab 503
 `Sistem sedang sibuk. Silakan coba lagi.` tanpa perubahan. Audit dan notifikasi
 dikirim setelah commit.
 
+## Kebijakan reward setoran, peninjauan, dan scan (M04)
+
+Semua jalur yang dapat memberi uang memakai satu kebijakan: `decideReward`
+(`lib/reward-policy.ts`, murni tanpa DB/jaringan) memutuskan status, jumlah, dan
+status ledger; `creditReward` (`lib/reward-credit.ts`) menulisnya di transaksi
+pemanggil setelah lock User penerima, sekali per business key. Jalurnya:
+penerimaan item mesin (`ITEM_ACCEPTED_POINT`), fraud/vandalisme, peninjauan
+setoran, check-out trip, dan scan kantong.
+
+**Mode reward.** Campaign `COMPLIANCE_ONLY` tidak pernah menghasilkan uang di
+jalur mana pun (item tetap diterima/ditinjau, tanpa baris ledger). Sesi mesin
+tanpa campaign memakai `Organization.machineRewardMode` (bawaan
+`MONEY_REWARD`, diatur superadmin lewat `PATCH /api/organizations/{id}`
+`{ "machineRewardMode": "COMPLIANCE_ONLY" }`). Trip hanya dibayar untuk campaign
+`TRASH_BAG`/`TOURISM_PROGRAM` bermode `MONEY_REWARD`.
+
+**Campaign di mesin.** `POST /api/scan` dengan `campaignId` hanya menerima
+campaign `MACHINE_DEPOSIT`, atau `EVENT`/`SCHOOL_PROGRAM` yang
+`supportsMachine: true` (diatur lewat `POST`/`PATCH /api/campaigns`). Campaign
+lain dijawab 422 `Campaign ini tidak berlaku untuk setoran mesin`. Sesi lama
+yang terikat campaign non-mesin tetap diproses, tetapi tanpa uang.
+
+**Verifikasi material.** Setiap mesin punya `materialVerification`
+(`PATCH /api/machines/{id}`):
+
+| Nilai | Item diterima bila | Klasifikasi AI tidak tersedia |
+|---|---|---|
+| `WEIGHT_ONLY` (bawaan, perilaku sebelum M04) | berat dalam rentang | diverifikasi berat saja |
+| `BARCODE_WEIGHT` | berat dalam rentang dan barcode terbaca | barcode + berat; tanpa barcode -> ditinjau (`BARCODE_MISSING`) |
+| `AI_REQUIRED` | AI mengonfirmasi jenis | ditinjau (`AI_UNAVAILABLE`) |
+
+Label AI yang dilaporkan (`IMAGE_CLASSIFIED` dengan confidence > 0) selalu
+dicocokkan dengan `WasteType.aiAcceptedLabels` jenis sampah yang dipilih
+(`POST`/`PATCH /api/waste-types`, label dinormalisasi, misalnya `Bottle PET` ->
+`bottle_pet`). Label lain (kertas, material yang salah dipilih) atau confidence
+di bawah 0,5 menahan item untuk ditinjau (`AI_TYPE_MISMATCH`,
+`AI_LOW_CONFIDENCE`) dengan EARN `PENDING` sebesar 50% reward; berat di luar
+rentang selalu `REJECTED` tanpa uang. Label `unknown` dengan confidence 0
+(kamera mati/tanpa model) berarti AI tidak tersedia. Jenis sampah tanpa label
+tidak dapat diverifikasi AI (`AI_REQUIRED` menahannya dengan
+`AI_TAXONOMY_MISSING`). Migration `20261014013000_reward_policy` mengisi label
+`bottle_pet` (PET/botol), `can_aluminium` (kaleng/aluminium), dan keduanya
+untuk `Anorganik`.
+
+**Tarif.** Tarif berlaku pada jendela UTC setengah terbuka
+`[effectiveFrom, effectiveTo)` dan `active = true`; tarif campaign > organisasi
+> global. Tarif yang `effectiveTo`-nya lewat tidak pernah dipakai walaupun
+masih `active`.
+
+**Peninjauan.** `PATCH /api/deposit-reviews/{id}` (ADMIN/SUPERADMIN, scope
+organisasi mesin):
+
+```json
+{ "action": "approve", "wasteTypeId": "<opsional>", "quantity": 1, "note": "<opsional>" }
+```
+
+Respons 200:
+
+```json
+{ "item": { "...": "..." }, "idempotent": false, "targetAmount": 100,
+  "ledgerEntry": { "entryType": "ADJUST", "amount": 50, "businessKey": "review:<id>:decision:v1" },
+  "reconciliationCase": null }
+```
+
+- Keputusan berjalan sekali di bawah lock User -> Machine -> DepositSession ->
+  DepositItem, membaca ulang item dan ledger-nya, lalu compare-and-set dari
+  `REVIEW`. `approve` membayar target kebijakan (0 untuk `COMPLIANCE_ONLY`),
+  `reject` membayar 0. EARN `PENDING` dilepas ke `AVAILABLE` bila keputusan
+  membayar, selain itu menjadi `REJECTED`. Selisih `target - semua EARN/ADJUST/
+  REVERSE yang sudah tercatat` ditulis satu kali dengan business key
+  `review:<itemId>:decision:v1` (EARN bila item belum punya EARN, ADJUST untuk
+  approve, REVERSE untuk reject).
+- Keputusan yang sama diulang: 200 `idempotent: true`, tanpa tulisan baru.
+  Keputusan berbeda (aksi lawan, atau `quantity`/`wasteTypeId` lain) untuk item
+  yang sudah ditinjau: 409 `Item sudah ditinjau dengan keputusan lain`. Item
+  yang keluar dari `REVIEW` tanpa keputusan peninjau: 409 `Item sudah berstatus
+  <status>, tidak lagi menunggu peninjauan`.
+- Koreksi negatif yang tidak lagi tertutup saldo tersedia (uangnya sudah
+  dicairkan atau sedang dalam pencairan) tidak didebit paksa: keputusan item
+  tetap tersimpan dan `reconciliationCase` (`reasonCode`
+  `ANOMALY_ALREADY_PAID_OUT`) dibuka untuk tim keuangan. Kredit ke akun yang
+  sudah dihapus (A04) juga ditolak menjadi kasus (`RECIPIENT_ERASED`).
+- Event fraud/vandalisme memindahkan EARN item dari `AVAILABLE` ke `PENDING`
+  hanya selama saldo tersedia masih menutupinya; bila tidak, EARN tetap dan
+  kasus `fraud:<itemId>:hold:v1` dibuka. Keputusan peninjau tidak pernah dibuka
+  ulang oleh event mesin.
+- Kasus terbuka tampil di `GET /api/reports/reconciliation`
+  (`report.rewardCases: { open, openAmount, recent[] }`) dan halaman
+  Rekonsiliasi Keuangan superadmin.
+
+Dana/budget reward belum dibatasi: `checkRewardFunding` di
+`lib/reward-credit.ts` adalah titik sambung B01 yang saat ini tidak memeriksa
+apa pun (`NOT_ENFORCED_UNTIL_B01`); rollout uang tetap tertahan di gate Z01.
+
 ## Penghapusan akun (A04)
 
 `DELETE /api/user/data` (role USER, sesi aktif = verifikasi pemilik) selalu

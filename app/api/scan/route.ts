@@ -7,6 +7,9 @@ import { machineAcceptsSessions } from "@/lib/machine-state";
 import { isCampaignEligible } from "@/lib/campaign";
 import { logAudit } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { campaignSupportsMachine } from "@/lib/reward-policy";
+
+const CAMPAIGN_NOT_FOR_MACHINE = "Campaign ini tidak berlaku untuk setoran mesin";
 
 const scanSchema = z.object({
   machineCode: z.string().min(1),
@@ -90,6 +93,11 @@ export async function POST(req: Request) {
       });
       if (!campaign || campaign.organizationId !== machine.organizationId) {
         throw new HttpError(422, "Campaign tidak valid untuk mesin ini");
+      }
+      // M04: only machine programs (MACHINE_DEPOSIT, or EVENT/SCHOOL_PROGRAM
+      // with supportsMachine) can bind a deposit session; trip programs never.
+      if (!campaignSupportsMachine(campaign)) {
+        throw new HttpError(422, CAMPAIGN_NOT_FOR_MACHINE);
       }
       const eligibility = isCampaignEligible(campaign, user.email);
       if (!eligibility.eligible) {

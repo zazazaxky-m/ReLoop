@@ -39,6 +39,7 @@ export default async function SuperadminOrganizationsPage({
     regionName: o.region?.name ?? null,
     machineCount: o._count.machines,
     userCount: o._count.users,
+    machineRewardMode: o.machineRewardMode,
   }));
 
   const pageMeta = buildPaginationMeta(total, pagination);

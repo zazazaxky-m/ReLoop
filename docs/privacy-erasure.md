@@ -154,9 +154,10 @@ npx tsx scripts/process-erasure-jobs.ts --request <requestId>   # jalankan sekar
 
 ## Batas yang diketahui
 
-- Penulis reward dari tinjauan setoran dan event mesin belum memakai lock User
-  (M04); check-out dan scan trip sudah (M03). Reward yang dibuat tepat setelah pemeriksaan
-  penahanan dapat masuk ke akun yang sudah dianonimkan; ledger tetap mencatatnya
-  dan rekonsiliasi menanganinya.
+- Semua penulis reward (event mesin, penahanan fraud, tinjauan setoran sejak
+  M04; check-out dan scan trip sejak M03) memakai lock User yang sama dengan
+  penghapusan, dan `creditReward` (`lib/reward-credit.ts`) menolak kredit ke akun
+  yang sudah dianonimkan: tidak ada baris ledger baru, penolakan dicatat sebagai
+  `RewardReconciliationCase` `RECIPIENT_ERASED` di laporan rekonsiliasi.
 - Setelah selesai, sistem tidak dapat mengirim email konfirmasi (alamat sudah
   dihapus); status akhir ditampilkan di respons aplikasi/halaman konfirmasi.

@@ -14,6 +14,8 @@ const patchSchema = z.object({
   contactName: z.string().max(120).nullable().optional(),
   contactPhone: z.string().max(40).nullable().optional(),
   status: z.enum(["ACTIVE", "INACTIVE", "SUSPENDED"]).optional(),
+  // M04: reward mode of machine deposits made without a campaign.
+  machineRewardMode: z.enum(["MONEY_REWARD", "COMPLIANCE_ONLY"]).optional(),
 });
 
 export async function PATCH(

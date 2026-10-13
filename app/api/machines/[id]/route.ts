@@ -20,6 +20,8 @@ const updateSchema = z.object({
   hasConveyor: z.boolean().optional(),
   hasCompactor: z.boolean().optional(),
   hasExternalCamera: z.boolean().optional(),
+  // M04: how an inserted item is verified (lib/reward-policy.ts verifyMaterial).
+  materialVerification: z.enum(["AI_REQUIRED", "BARCODE_WEIGHT", "WEIGHT_ONLY"]).optional(),
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),
   wasteTypeIds: z.array(z.string()).optional(),

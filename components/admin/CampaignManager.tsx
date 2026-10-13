@@ -40,6 +40,8 @@ export interface CampaignRow {
   description: string | null;
   campaignType: string;
   rewardMode: string;
+  /** EVENT / SCHOOL_PROGRAM may run at machines only with this (M04). */
+  supportsMachine?: boolean;
   visibility: string;
   allowedEmailDomains: string[];
   startAt: string | Date | null;
@@ -61,6 +63,7 @@ const EMPTY = {
   description: "",
   campaignType: "MACHINE_DEPOSIT",
   rewardMode: "MONEY_REWARD",
+  supportsMachine: false,
   visibility: "PUBLIC",
   domains: "",
   startAt: "",
@@ -103,6 +106,7 @@ export function CampaignManager({
       description: row.description ?? "",
       campaignType: row.campaignType,
       rewardMode: row.rewardMode,
+      supportsMachine: row.supportsMachine ?? false,
       visibility: row.visibility,
       domains: row.allowedEmailDomains.join("\n"),
       startAt: toDateInput(row.startAt),
@@ -129,6 +133,8 @@ export function CampaignManager({
         description: form.description || null,
         campaignType: form.campaignType,
         rewardMode: form.rewardMode,
+        supportsMachine:
+          form.campaignType === "EVENT" || form.campaignType === "SCHOOL_PROGRAM" ? form.supportsMachine : false,
         visibility: form.visibility,
         allowedEmailDomains: form.visibility === "PRIVATE" ? domains : [],
         startAt: form.startAt ? new Date(form.startAt).toISOString() : null,
@@ -294,6 +300,17 @@ export function CampaignManager({
                     ))}
                   </Select>
                 </FormField>
+                {form.campaignType === "EVENT" || form.campaignType === "SCHOOL_PROGRAM" ? (
+                  <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm sm:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={form.supportsMachine}
+                      onChange={(e) => setForm((f) => ({ ...f, supportsMachine: e.target.checked }))}
+                      className="h-4 w-4 accent-brand-500"
+                    />
+                    Program ini dapat dipakai untuk setoran di mesin
+                  </label>
+                ) : null}
                 {form.visibility === "PRIVATE" ? (
                   <FormField
                     label="Domain email diizinkan"

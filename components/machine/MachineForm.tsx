@@ -22,11 +22,19 @@ interface MachineInitial {
   hasConveyor: boolean;
   hasCompactor: boolean;
   hasExternalCamera: boolean;
+  materialVerification?: string;
   regionId: string | null;
   wasteTypeIds: string[];
 }
 
 const STATUSES = ["ONLINE", "OFFLINE", "FULL", "MAINTENANCE", "ERROR"];
+
+/** Machine.materialVerification (M04, lib/reward-policy.ts verifyMaterial). */
+const MATERIAL_VERIFICATION: Array<[string, string]> = [
+  ["WEIGHT_ONLY", "Berat saja (tanpa AI wajib)"],
+  ["BARCODE_WEIGHT", "Barcode + berat (tanpa AI)"],
+  ["AI_REQUIRED", "AI wajib mengonfirmasi jenis"],
+];
 
 export function MachineForm({
   mode,
@@ -61,6 +69,7 @@ export function MachineForm({
     hasConveyor: machine?.hasConveyor ?? true,
     hasCompactor: machine?.hasCompactor ?? false,
     hasExternalCamera: machine?.hasExternalCamera ?? false,
+    materialVerification: machine?.materialVerification ?? "WEIGHT_ONLY",
     wasteTypeIds: new Set<string>(machine?.wasteTypeIds ?? []),
   });
 
@@ -91,6 +100,7 @@ export function MachineForm({
         hasConveyor: form.hasConveyor,
         hasCompactor: form.hasCompactor,
         hasExternalCamera: form.hasExternalCamera,
+        materialVerification: form.materialVerification,
         wasteTypeIds: Array.from(form.wasteTypeIds),
       };
       if (mode === "create") {
@@ -239,6 +249,24 @@ export function MachineForm({
           onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
           placeholder="Lokasi & catatan mesin"
         />
+      </FormField>
+
+      <FormField
+        label="Verifikasi material"
+        htmlFor="material-verification"
+        hint="Label yang dilaporkan kamera AI selalu dicocokkan dengan label jenis sampah; item yang tidak cocok ditahan untuk ditinjau."
+      >
+        <Select
+          id="material-verification"
+          value={form.materialVerification}
+          onChange={(e) => setForm((f) => ({ ...f, materialVerification: e.target.value }))}
+        >
+          {MATERIAL_VERIFICATION.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </Select>
       </FormField>
 
       <div>

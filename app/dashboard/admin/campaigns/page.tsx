@@ -36,6 +36,7 @@ export default async function AdminCampaignsPage({
     description: c.description,
     campaignType: c.campaignType,
     rewardMode: c.rewardMode,
+    supportsMachine: c.supportsMachine,
     visibility: c.visibility,
     allowedEmailDomains: (c.allowedEmailDomainsJson as string[] | null) ?? [],
     startAt: c.startAt,

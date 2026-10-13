@@ -33,7 +33,7 @@ interface TripRow {
   groupName: string | null;
   complianceScore: number;
   complianceStatus: string;
-  campaign: { organizationId: string; rewardMode: string; rewardMultiplier: number | null; name: string };
+  campaign: { organizationId: string; campaignType: string; rewardMode: string; rewardMultiplier: number | null; name: string };
   bagAssignments: Bag[];
 }
 
@@ -41,7 +41,7 @@ function tripRow(overrides: Partial<TripRow> = {}): TripRow {
   return {
     id: "t1", status: "ACTIVE", userId: "u1", campaignId: "c1", travelAgentId: null, groupName: null,
     complianceScore: 0, complianceStatus: "CHECKED_IN",
-    campaign: { organizationId: "org1", rewardMode: "MONEY_REWARD", rewardMultiplier: 1, name: "Camp" },
+    campaign: { organizationId: "org1", campaignType: "TRASH_BAG", rewardMode: "MONEY_REWARD", rewardMultiplier: 1, name: "Camp" },
     bagAssignments: [{ id: "b1", bagQrCode: "Q1", status: "GOOD" }, { id: "b2", bagQrCode: "Q2", status: "GOOD" }],
     ...overrides,
   };
@@ -96,11 +96,15 @@ function fakeTx(state: {
     },
     rewardLedger: {
       findMany: vi.fn(async () => state.rewards ?? []),
+      findUnique: vi.fn(async () => null),
       create: vi.fn(async ({ data }: any) => {
         log.push("ledger create");
         return { id: "l1", ...data };
       }),
     },
+    // lib/reward-credit.ts (M04): idempotency and erased-recipient checks.
+    rewardReconciliationCase: { findUnique: vi.fn(async () => null) },
+    user: { findUnique: vi.fn(async () => ({ status: "ACTIVE" })) },
   };
   return { tx: tx as any, raw: tx, log };
 }
@@ -221,7 +225,8 @@ describe("refreshTripOutcome", () => {
       data: { complianceStatus: "NEEDS_REVIEW", complianceScore: 70, status: "COMPLETED", checkOutAt: expect.any(Date) } });
     expect(raw.rewardLedger.create).toHaveBeenCalledWith({ data: {
       userId: "u1", organizationId: "org1", campaignId: "c1", entryType: "EARN", amount: 2_800, status: "AVAILABLE",
-      reasonCode: "TRASH_BAG_RETURN", referenceType: "Trip", referenceId: "t1", businessKey: "trip:t1:return" } });
+      reasonCode: "TRASH_BAG_RETURN", referenceType: "Trip", referenceId: "t1", businessKey: "trip:t1:return",
+      sessionId: null, depositItemId: null, actorId: null } });
     expect(log.indexOf("lock User u1")).toBeLessThan(log.indexOf("ledger create"));
     expect(tripReturnKey("t1")).toBe("trip:t1:return");
   });
@@ -278,14 +283,16 @@ describe("refreshTripOutcome", () => {
   });
 
   it("defaults appCompleted to false when no check-out was recorded", async () => {
-    const { tx } = fakeTx({ trip: tripRow({ campaign: { organizationId: "org1", rewardMode: "COMPLIANCE_ONLY", rewardMultiplier: null, name: "C" } }) });
+    const { tx } = fakeTx({ trip: tripRow({ campaign: { organizationId: "org1", campaignType: "TRASH_BAG", rewardMode: "COMPLIANCE_ONLY", rewardMultiplier: null, name: "C" } }) });
     const outcome = await refreshTripOutcome(tx, "t1");
     expect(outcome.compliance).toEqual({ score: 70, status: "NEEDS_REVIEW" });
   });
 
   it("earns nothing for COMPLIANCE_ONLY trips or trips without a recipient", async () => {
     for (const trip of [
-      tripRow({ campaign: { organizationId: "org1", rewardMode: "COMPLIANCE_ONLY", rewardMultiplier: 1, name: "C" } }),
+      tripRow({ campaign: { organizationId: "org1", campaignType: "TRASH_BAG", rewardMode: "COMPLIANCE_ONLY", rewardMultiplier: 1, name: "C" } }),
+      // M04: a campaign that is not a trip program never pays a trip.
+      tripRow({ campaign: { organizationId: "org1", campaignType: "MACHINE_DEPOSIT", rewardMode: "MONEY_REWARD", rewardMultiplier: 1, name: "C" } }),
       tripRow({ userId: null }),
     ]) {
       const { tx, raw, log } = fakeTx({ trip });
@@ -313,7 +320,7 @@ describe("refreshTripOutcome", () => {
 
   it("refuses a reward that cannot be stored as integer rupiah", async () => {
     const { tx, raw } = fakeTx({ trip: tripRow({
-      campaign: { organizationId: "org1", rewardMode: "MONEY_REWARD", rewardMultiplier: 1e7, name: "C" } }) });
+      campaign: { organizationId: "org1", campaignType: "TRASH_BAG", rewardMode: "MONEY_REWARD", rewardMultiplier: 1e7, name: "C" } }) });
     await expect(refreshTripOutcome(tx, "t1", { appCompleted: true })).rejects.toMatchObject({ status: 422 });
     expect(raw.trip.updateMany).not.toHaveBeenCalled();
   });

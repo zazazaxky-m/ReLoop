@@ -104,6 +104,7 @@ describe("/api/scan", () => {
     vi.mocked(prisma.campaign.findUnique).mockResolvedValue({
       id: "c1",
       organizationId: "org1",
+      campaignType: "MACHINE_DEPOSIT",
     } as any);
     vi.mocked(campaign.isCampaignEligible).mockReturnValue({
       eligible: false,
@@ -227,6 +228,33 @@ describe("/api/scan", () => {
     expect(res.status).toBe(422);
     const data = await res.json();
     expect(data.error).toBe("Campaign tidak valid untuk mesin ini");
+  });
+
+  it("refuses campaigns that do not run at machines (M04)", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
+    vi.mocked(prisma.depositSession.findFirst).mockResolvedValue(null);
+    vi.mocked(campaign.isCampaignEligible).mockReturnValue({ eligible: true });
+    for (const [campaignType, supportsMachine] of [
+      ["TRASH_BAG", true], ["TOURISM_PROGRAM", true], ["EVENT", false], ["SCHOOL_PROGRAM", false],
+    ] as const) {
+      vi.mocked(prisma.campaign.findUnique).mockResolvedValue({
+        id: "c1", organizationId: "org1", campaignType, supportsMachine } as any);
+      const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok", campaignId: "c1" }));
+      expect(res.status, campaignType).toBe(422);
+      expect((await res.json()).error).toBe("Campaign ini tidak berlaku untuk setoran mesin");
+    }
+    expect(prisma.depositSession.create).not.toHaveBeenCalled();
+  });
+
+  it("starts a session for an EVENT campaign that supports machines", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
+    vi.mocked(prisma.depositSession.findFirst).mockResolvedValue(null);
+    vi.mocked(campaign.isCampaignEligible).mockReturnValue({ eligible: true });
+    vi.mocked(prisma.campaign.findUnique).mockResolvedValue({
+      id: "c1", organizationId: "org1", campaignType: "EVENT", supportsMachine: true } as any);
+    vi.mocked(prisma.depositSession.create).mockResolvedValue({ id: "s1", campaignId: "c1" } as any);
+    const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok", campaignId: "c1" }));
+    expect(res.status).toBe(201);
   });
 
   it("returns 422 if campaign not found", async () => {

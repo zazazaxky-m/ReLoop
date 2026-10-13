@@ -142,6 +142,52 @@ export default async function ReconciliationPage() {
         </div>
       </section>
 
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-foreground">
+          Kasus rekonsiliasi reward ({report.rewardCases.open} terbuka, {formatRupiah(report.rewardCases.openAmount)})
+        </h2>
+        <p className="text-sm text-muted">
+          Koreksi yang tidak dipaksakan ke ledger: saldo setoran yang sudah dicairkan, atau reward untuk akun yang
+          sudah dihapus. Selesaikan bersama tim keuangan; ledger tidak pernah didebit paksa.
+        </p>
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-surface-soft text-left text-xs uppercase text-muted">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Kunci</th>
+                <th className="px-4 py-2 font-semibold">Alasan</th>
+                <th className="px-4 py-2 text-right font-semibold">Nominal</th>
+                <th className="px-4 py-2 font-semibold">Dibuka</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {report.rewardCases.recent.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-6 text-center text-muted" colSpan={4}>
+                    Tidak ada kasus terbuka.
+                  </td>
+                </tr>
+              ) : (
+                report.rewardCases.recent.map((rewardCase) => (
+                  <tr key={rewardCase.id}>
+                    <td className="px-4 py-2.5 font-mono text-xs text-foreground">{rewardCase.businessKey}</td>
+                    <td className="px-4 py-2.5 text-foreground">
+                      {rewardCase.reasonCode === "RECIPIENT_ERASED"
+                        ? "Akun penerima sudah dihapus"
+                        : rewardCase.reasonCode === "ANOMALY_ALREADY_PAID_OUT"
+                          ? "Saldo sudah dicairkan"
+                          : rewardCase.reasonCode}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{formatRupiah(rewardCase.amount)}</td>
+                    <td className="px-4 py-2.5 text-muted">{formatDateTime(rewardCase.createdAt)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <p className="text-xs text-muted">
         Dihasilkan {formatDateTime(report.generatedAt)}.
       </p>

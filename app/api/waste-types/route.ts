@@ -4,6 +4,7 @@ import { requireApiUser, assertOrgScope, activePartnerOrgIds, HttpError } from "
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
+import { AI_LABEL_PATTERN, normalizeAiLabels } from "@/lib/reward-policy";
 
 const createSchema = z
   .object({
@@ -13,6 +14,15 @@ const createSchema = z
     maxWeightGrams: z.number().int().min(0).max(100000).nullable().optional(),
     defaultRewardPerItem: z.number().int().min(0).max(10_000_000).nullable().optional(),
     description: z.string().max(500).nullable().optional(),
+  // M04: classifier labels that confirm this waste type (normalized, e.g. "bottle_pet").
+  aiAcceptedLabels: z
+    .array(z.string().max(64))
+    .max(50)
+    .transform(normalizeAiLabels)
+    .refine((labels) => labels.every((label) => AI_LABEL_PATTERN.test(label)), {
+      message: "Label AI hanya boleh berisi huruf, angka, titik dan garis bawah",
+    })
+    .optional(),
     // Superadmin only: null => global, otherwise org-specific.
     organizationId: z.string().nullable().optional(),
   })
@@ -118,6 +128,7 @@ export async function POST(req: Request) {
         maxWeightGrams: data.maxWeightGrams ?? null,
         defaultRewardPerItem: data.defaultRewardPerItem ?? null,
         description: data.description ?? null,
+        aiAcceptedLabels: data.aiAcceptedLabels ?? [],
         organizationId,
         active: true,
       },

@@ -29,6 +29,8 @@ export interface OrgRow {
   regionName: string | null;
   machineCount: number;
   userCount: number;
+  /** Reward mode of machine deposits without a campaign (M04). */
+  machineRewardMode?: string;
 }
 
 const TYPES = [
@@ -94,19 +96,27 @@ export function OrganizationManager({
     }
   }
 
-  async function setStatus(id: string, status: string) {
+  async function patchOrganization(id: string, body: Record<string, string>) {
     setBusy(true);
+    setError(null);
     try {
-      await fetch(`/api/organizations/${id}`, {
+      const res = await fetch(`/api/organizations/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setError(d?.error ?? "Gagal memperbarui organisasi");
+        return;
+      }
       router.refresh();
     } finally {
       setBusy(false);
     }
   }
+
+  const setStatus = (id: string, status: string) => patchOrganization(id, { status });
 
   const columns: Column<OrgRow>[] = [
     {
@@ -124,6 +134,24 @@ export function OrganizationManager({
     },
     { key: "machines", header: "Mesin", render: (r) => r.machineCount },
     { key: "users", header: "User", render: (r) => r.userCount },
+    {
+      key: "machineRewardMode",
+      header: "Reward mesin tanpa campaign",
+      className: "w-[220px]",
+      render: (r) => (
+        <Select
+          value={r.machineRewardMode ?? "MONEY_REWARD"}
+          disabled={busy}
+          onChange={(e) => patchOrganization(r.id, { machineRewardMode: e.target.value })}
+          compact
+          className="min-w-[160px]"
+          aria-label={`Mode reward mesin ${r.name}`}
+        >
+          <option value="MONEY_REWARD">Reward uang</option>
+          <option value="COMPLIANCE_ONLY">Hanya kepatuhan</option>
+        </Select>
+      ),
+    },
     {
       key: "status",
       header: "Status",

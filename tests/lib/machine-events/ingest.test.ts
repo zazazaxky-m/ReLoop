@@ -41,6 +41,25 @@ describe("ingestMachineEvent", () => {
     expect(res.depositItemId).toBe("d1");
   });
 
+  it("runs the afterSideEffects test seam inside the transaction; a throw rolls everything back (M04)", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
+    vi.mocked(prisma.machineEvent.findUnique).mockResolvedValue(null);
+    const tx = { machineEvent: { create: vi.fn().mockResolvedValue({ id: "e1" }) } };
+    vi.mocked(prisma.$transaction).mockImplementation(async (cb) => (cb as any)(tx));
+    const seen: unknown[] = [];
+    await ingestMachineEvent(
+      { machineCode: "RVM-1", localEventId: "ev1", eventType: "HEARTBEAT" },
+      { hooks: { afterSideEffects: async (client) => { seen.push(client); } } },
+    );
+    expect(seen).toEqual([tx]);
+    expect(vi.mocked(sideEffects.processEventSideEffects).mock.invocationCallOrder[0]).toBeGreaterThan(0);
+
+    await expect(ingestMachineEvent(
+      { machineCode: "RVM-1", localEventId: "ev2", eventType: "HEARTBEAT" },
+      { hooks: { afterSideEffects: async () => { throw new Error("SIDE_EFFECT_FAILED"); } } },
+    )).rejects.toThrow("SIDE_EFFECT_FAILED");
+  });
+
   it("clears orphaned sessionId", async () => {
     vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
     vi.mocked(prisma.machineEvent.findUnique).mockResolvedValue(null);

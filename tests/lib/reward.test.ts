@@ -4,8 +4,8 @@ import {
   resolveRewardRate,
   computeRewardAmount,
   computeWeightBasedRewardAmount,
-  evaluateSensorFusion,
 } from '@/lib/reward';
+import { verifyMaterial } from '@/lib/reward-policy';
 import { prisma } from '@/lib/prisma';
 
 vi.mock('@/lib/prisma', () => ({
@@ -100,51 +100,13 @@ describe('reward', () => {
     });
   });
 
-  describe('evaluateSensorFusion', () => {
-    it('invalidates if weight fails', () => {
-      const res = evaluateSensorFusion({ wasteTypeId: 'w1', measuredWeightGrams: 5, minWeightGrams: 10 });
-      expect(res.valid).toBe(false);
-      expect(res.wasteTypeMatch).toBe(false);
-    });
-
-    it('validates if AI matches', () => {
-      const res = evaluateSensorFusion({ 
-        wasteTypeId: 'w1', 
-        measuredWeightGrams: 15, 
-        minWeightGrams: 10,
-        aiDetectedType: 'botol plastik',
-        aiConfidence: 0.9,
-      });
-      expect(res.valid).toBe(true);
-      expect(res.wasteTypeMatch).toBe(true);
-    });
-
-    it('returns false wasteTypeMatch if AI confidence is low', () => {
-      const res = evaluateSensorFusion({ 
-        wasteTypeId: 'w1', 
-        measuredWeightGrams: 15, 
-        aiDetectedType: 'botol',
-        aiConfidence: 0.4,
-      });
-      expect(res.valid).toBe(true);
-      expect(res.wasteTypeMatch).toBe(false);
-    });
-
-    it('returns false wasteTypeMatch if AI keyword does not match', () => {
-      const res = evaluateSensorFusion({ 
-        wasteTypeId: 'w1', 
-        measuredWeightGrams: 15, 
-        aiDetectedType: 'kertas',
-        aiConfidence: 0.9,
-      });
-      expect(res.valid).toBe(true);
-      expect(res.wasteTypeMatch).toBe(false);
-    });
-
-    it('defaults to true if AI not provided', () => {
-      const res = evaluateSensorFusion({ wasteTypeId: 'w1', measuredWeightGrams: 15 });
-      expect(res.valid).toBe(true);
-      expect(res.wasteTypeMatch).toBe(true);
+  describe('material verification replaces the keyword hint matcher (LOG-05)', () => {
+    it('a label that merely contains a hint word is not a match unless the taxonomy lists it', () => {
+      const pet = { policy: 'WEIGHT_ONLY' as const, acceptedLabels: ['bottle_pet'] };
+      expect(verifyMaterial({ ...pet, aiLabel: 'botol plastik', aiConfidence: 0.9 }).typeMatch).toBe(false);
+      expect(verifyMaterial({ ...pet, aiLabel: 'can_aluminium', aiConfidence: 0.9 }).typeMatch).toBe(false);
+      expect(verifyMaterial({ ...pet, aiLabel: 'kertas', aiConfidence: 0.9 }).typeMatch).toBe(false);
+      expect(verifyMaterial({ ...pet, aiLabel: 'bottle_pet', aiConfidence: 0.9 }).typeMatch).toBe(true);
     });
   });
 });

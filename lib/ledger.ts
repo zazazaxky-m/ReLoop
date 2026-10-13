@@ -14,7 +14,22 @@ export function ledgerReasonLabel(
     case "ITEM_ACCEPTED":
       return "Setoran mesin";
     case "ANOMALY_REVIEW":
+    case "TYPE_MISMATCH":
+    case "AI_TYPE_MISMATCH":
+    case "AI_LOW_CONFIDENCE":
+    case "AI_UNAVAILABLE":
+    case "AI_TAXONOMY_MISSING":
+    case "BARCODE_MISSING":
+    case "REWARD_OUT_OF_RANGE":
       return "Setoran ditinjau";
+    case "ACCEPTED":
+      return "Setoran mesin";
+    case "REVIEW_APPROVED":
+      return "Setoran disetujui";
+    case "REVIEW_ADJUSTMENT":
+      return "Penyesuaian setoran";
+    case "REVIEW_REJECTED":
+      return "Setoran ditolak";
     case "TOURISM_COMPLIANCE_BONUS":
       return "Bonus kepatuhan wisata";
     case "REDEMPTION_SUCCESS":
@@ -142,6 +157,11 @@ export interface CreateEarnParams {
  * Append-only EARN entry, at most one per deposit item (business key
  * `deposit-item:<id>:earn`; a partial unique index is the database backstop).
  * Never updates existing rows.
+ *
+ * @deprecated M04: no production caller. Every money path writes through
+ * `creditReward` (lib/reward-credit.ts), which takes the User lock, applies the
+ * erased-account refusal and never forces a debit. Kept for the wallet
+ * inventory tests.
  */
 export async function createEarnEntry(
   params: CreateEarnParams,
@@ -368,6 +388,27 @@ export interface ReconciliationReport {
   reservedDiscrepancy: number;
   /** True when either discrepancy is non-zero (needs manual investigation). */
   hasDiscrepancy: boolean;
+  /**
+   * Reward effects the system refused to force into the ledger (M04,
+   * lib/reward-credit.ts): corrections of balances already paid out and
+   * credits to erased accounts. An operator settles each OPEN case.
+   */
+  rewardCases: {
+    open: number;
+    /** Positive rupiah at stake across OPEN cases. */
+    openAmount: number;
+    /** Newest OPEN cases (at most 50). */
+    recent: Array<{
+      id: string;
+      businessKey: string;
+      userId: string;
+      depositItemId: string | null;
+      amount: number;
+      entryType: LedgerEntryType;
+      reasonCode: string;
+      createdAt: Date;
+    }>;
+  };
   generatedAt: string;
 }
 
@@ -380,7 +421,7 @@ export interface ReconciliationReport {
  *    reconciled globally rather than per-org.
  */
 export async function getReconciliationReport(): Promise<ReconciliationReport> {
-  const [earnGroups, adjustGroups, redeemGroups, redemptionGroups, orgs] =
+  const [earnGroups, adjustGroups, redeemGroups, redemptionGroups, orgs, openCases, openCaseTotals] =
     await Promise.all([
       prisma.rewardLedger.groupBy({
         by: ["organizationId", "status"],
@@ -402,6 +443,20 @@ export async function getReconciliationReport(): Promise<ReconciliationReport> {
         _sum: { amount: true },
       }),
       prisma.organization.findMany({ select: { id: true, name: true } }),
+      prisma.rewardReconciliationCase.findMany({
+        where: { status: "OPEN" },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        select: {
+          id: true, businessKey: true, userId: true, depositItemId: true,
+          amount: true, entryType: true, reasonCode: true, createdAt: true,
+        },
+      }),
+      prisma.rewardReconciliationCase.aggregate({
+        where: { status: "OPEN" },
+        _count: { _all: true },
+        _sum: { amount: true },
+      }),
     ]);
 
   const orgNames = new Map(orgs.map((o) => [o.id, o.name]));
@@ -483,6 +538,11 @@ export async function getReconciliationReport(): Promise<ReconciliationReport> {
     redeemedDiscrepancy,
     reservedDiscrepancy,
     hasDiscrepancy: redeemedDiscrepancy !== 0 || reservedDiscrepancy !== 0,
+    rewardCases: {
+      open: openCaseTotals?._count?._all ?? 0,
+      openAmount: openCaseTotals?._sum?.amount ?? 0,
+      recent: openCases ?? [],
+    },
     generatedAt: new Date().toISOString(),
   };
 }

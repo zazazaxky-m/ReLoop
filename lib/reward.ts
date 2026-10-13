@@ -36,22 +36,44 @@ function ratePriority(
   return 99;
 }
 
-const activeRateWindow = (now: Date): Prisma.RewardRateWhereInput => ({
+/**
+ * Rates apply in the half-open UTC window [effectiveFrom, effectiveTo): a rate
+ * ending at T and its successor starting at T never overlap.
+ */
+export const activeRateWindow = (now: Date): Prisma.RewardRateWhereInput => ({
   active: true,
   effectiveFrom: { lte: now },
-  OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+  OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
 });
 
-/** Resolves the active reward rate for a machine deposit (campaign > org > global). */
+function inRateWindow(rate: NonNullable<RewardRateRow>, now: Date): boolean {
+  return (
+    rate.active !== false &&
+    rate.effectiveFrom.getTime() <= now.getTime() &&
+    (rate.effectiveTo == null || rate.effectiveTo.getTime() > now.getTime())
+  );
+}
+
+/**
+ * Resolves the active reward rate for a machine deposit (campaign > org >
+ * global; the newest effectiveFrom wins inside one scope).
+ *
+ * EX-03: the window and the scope are both `OR` conditions, so they are
+ * combined with `AND` instead of spread into one object (the scope's `OR`
+ * used to replace the window's and selected expired rates). Candidates are
+ * re-checked against the window in memory as well.
+ */
 export async function resolveRewardRate(
   params: {
     organizationId: string;
     campaignId?: string | null;
     wasteTypeId: string;
+    /** Evaluation instant (UTC); defaults to now. */
+    now?: Date;
   },
   tx?: Prisma.TransactionClient,
 ) {
-  const now = new Date();
+  const now = params.now ?? new Date();
   const { organizationId, campaignId, wasteTypeId } = params;
   const db = tx ?? prisma;
 
@@ -60,17 +82,15 @@ export async function resolveRewardRate(
     { organizationId: null, campaignId: null },
   ];
   if (campaignId) {
-    scopeOr.unshift({ campaignId, wasteTypeId });
+    scopeOr.unshift({ campaignId });
   }
 
-  const candidates = await db.rewardRate.findMany({
-    where: {
-      wasteTypeId,
-      ...activeRateWindow(now),
-      OR: scopeOr,
-    },
-    orderBy: { effectiveFrom: "desc" },
-  });
+  const candidates = (
+    await db.rewardRate.findMany({
+      where: { wasteTypeId, AND: [activeRateWindow(now), { OR: scopeOr }] },
+      orderBy: { effectiveFrom: "desc" },
+    })
+  ).filter((rate) => inRateWindow(rate, now));
 
   if (candidates.length === 0) return null;
 
@@ -109,39 +129,4 @@ export function computeWeightBasedRewardAmount(
 ): number {
   const grams = measuredWeightGrams ?? 0;
   return Math.floor((grams / 1000) * ratePerKg * multiplier);
-}
-
-export interface FusionInput {
-  wasteTypeId: string;
-  aiDetectedType?: string | null;
-  aiConfidence?: number | null;
-  barcodeValue?: string | null;
-  measuredWeightGrams?: number | null;
-  minWeightGrams?: number | null;
-  maxWeightGrams?: number | null;
-}
-
-/** Lightweight sensor fusion: weight threshold + optional AI/barcode hints. */
-export function evaluateSensorFusion(input: FusionInput): WeightValidation & {
-  wasteTypeMatch: boolean;
-} {
-  const weight = validateWeight(
-    input.measuredWeightGrams,
-    input.minWeightGrams,
-    input.maxWeightGrams,
-  );
-  if (!weight.valid) {
-    return { ...weight, wasteTypeMatch: false };
-  }
-
-  let wasteTypeMatch = true;
-  if (input.aiDetectedType && input.aiConfidence != null) {
-    const normalized = input.aiDetectedType.toLowerCase();
-    const hints = ["botol", "bottle", "pet", "kaleng", "can", "aluminium"];
-    wasteTypeMatch =
-      input.aiConfidence >= 0.5 &&
-      hints.some((h) => normalized.includes(h));
-  }
-
-  return { valid: true, wasteTypeMatch };
 }
