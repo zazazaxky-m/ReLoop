@@ -93,7 +93,7 @@ class RvmRemoteMixin:
             if not self.try_open_input_gate("remote-open-gate"):
                 raise ValueError("Gate tidak dapat dibuka: interlock keselamatan aktif")
         elif command == "CLOSE_GATE":
-            self.hardware.set_input_gate(False)
+            self._close_output(lambda: self.hardware.set_input_gate(False))
         elif command == "RESET_ALERT":
             unsafe = self._unsafe_conditions(self.hardware.read())
             if unsafe:
@@ -108,6 +108,11 @@ class RvmRemoteMixin:
         elif command == "RESUME_OPERATION":
             if self.db.get_json("safe_reason") or self._active_alert:
                 raise ValueError("Reset alert sebelum melanjutkan operasi")
+            # Leave maintenance only with every output confirmed stopped.
+            if not self._safe_all_stop():
+                raise RuntimeError(
+                    "Output tidak dapat dimatikan, mesin dikunci di safe state"
+                )
             if self.db.active_lease():
                 self.set_state(MachineState.SESSION_ACTIVE, "remote-resume")
                 self.try_open_input_gate("remote-resume")

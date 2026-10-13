@@ -56,9 +56,20 @@ keselamatan lokal aktif. Kontraknya:
   `reset-safe-state` (maintenance) menolak reset selama kondisi belum aman.
   Akhir sesi, pembaruan lease, sesi baru, dan lease kedaluwarsa dari server
   tidak mengubah `SAFE_STATE`/`MAINTENANCE`/`FULL` menjadi `IDLE`, tidak
-  menghapus alert keselamatan, dan tidak membuka output.
+  menghapus alert keselamatan, dan tidak membuka output. Selama `safe_reason`
+  tersimpan, `SAFE_STATE` hanya dapat ditinggalkan lewat reset operator
+  (transisi lain ditolak dan dicatat sebagai `STATE_CHANGE_SUPPRESSED`; masuk
+  `MAINTENANCE` tetap boleh dan latch tetap aktif), alert `CRITICAL` tidak
+  pernah ditimpa alert peringatan (fraud, kamera blur), dan heartbeat
+  melaporkan status `ERROR` selama latch aktif.
 - **Menutup/menghentikan selalu boleh.** `CLOSE_GATE`, `STOP_ALL`, dan perintah
-  maintenance yang menutup/mematikan output tidak melewati guard.
+  maintenance yang menutup/mematikan output tidak melewati guard. Jika menutup
+  atau menghentikan satu output gagal (`CLOSE_GATE`, perintah maintenance
+  tutup/stop, maupun penutupan di dalam proses item), mesin ter-latch di
+  `SAFE_STATE` (`OUTPUT_STOP_FAILED`), seluruh output dihentikan dan dicoba
+  ulang setiap tick, lalu error dilaporkan ke pemanggil. `RESUME_OPERATION`
+  hanya keluar dari maintenance setelah `all_stop()` berhasil; jika gagal,
+  perintah ditolak dan mesin ter-latch.
 - **Tidak menunggu jaringan.** `STOP_ALL` dan masuk safe-state langsung
   mematikan output tanpa menunggu lock, lalu sekali lagi di bawah lock.
   `SYNC_NOW`, `CAPTURE_SNAPSHOT` dan polling sesi server berjalan di luar
@@ -80,23 +91,27 @@ keselamatan lokal aktif. Kontraknya:
   `start()` memanggil `all_stop()`, dan sesi yang dipulihkan setelah restart
   tidak membuka gate secara otomatis. `all_stop()` GPIO tetap mematikan output
   lain walaupun salah satu output gagal ditulis.
-- **Stop yang gagal selalu me-latch.** Setiap jalur yang mematikan output
-  (safe state, tick saat ter-latch, bin penuh, lease kedaluwarsa, akhir sesi
-  server, penolakan guard, fraud, reset, `STOP_ALL`, `ENTER_MAINTENANCE`, start
-  dan stop runtime) memakai stop yang sama: jika `all_stop()` gagal, mesin
-  langsung ter-latch di `SAFE_STATE` dengan alasan `OUTPUT_STOP_FAILED` (event
+- **Stop yang gagal selalu me-latch.** Setiap jalur yang mematikan seluruh
+  output (safe state, tick saat ter-latch, bin penuh, lease kedaluwarsa, akhir
+  sesi server, penolakan guard, fraud, reset, `STOP_ALL`, `ENTER_MAINTENANCE`,
+  `RESUME_OPERATION`, start dan stop runtime) memakai stop yang sama, dan
+  penutupan satu output me-latch dengan cara yang sama (lihat di atas). Jika
+  `all_stop()` gagal, mesin langsung ter-latch di `SAFE_STATE` dengan alasan `OUTPUT_STOP_FAILED` (event
   `ERROR`, dan `SAFE_STATE_ENTERED` melaporkan `stopFailed: true` serta
   `outputsDisabled: []`), juga bila stop gagal saat masuk safe state karena
   alasan lain. Mesin tidak pernah dibiarkan
-  `FULL`/`SYNC_PENDING`/`IDLE` dan dapat digerakkan. Selama gangguan belum
+  `FULL`/`SYNC_PENDING`/`IDLE`/`SESSION_ACTIVE` dan dapat digerakkan, dan
+  status `FULL` tidak dilaporkan bila stop-nya gagal. Selama gangguan belum
   teratasi, setiap tick mencoba stop lagi sampai berhasil, semua aktuasi
   (termasuk `activate_lease`) ditolak, dan `RESET_ALERT`/`reset-safe-state`
   ditolak (`output gagal dimatikan`). Setelah stop berhasil, latch tetap ada
-  sampai reset operator yang tervalidasi. `STOP_ALL` dan `ENTER_MAINTENANCE`
-  yang stop-nya gagal dilaporkan gagal ke superadmin.
+  sampai reset operator yang tervalidasi. `STOP_ALL`, `ENTER_MAINTENANCE` dan
+  `RESUME_OPERATION` yang stop-nya gagal dilaporkan gagal ke superadmin.
 - **Error tidak mematikan loop.** Loop kontrol dan loop sesi mencatat error di
-  log lalu berlanjut dengan backoff (kontrol ≤ 1 s, sesi ≤ 30 s); error pada
-  tick kontrol juga me-latch `SAFE_STATE` (`CONTROL_LOOP_ERROR`).
+  log lalu berlanjut dengan backoff (kontrol ≤ 1 s, sesi ≤ 30 s). Error pada
+  tick kontrol me-latch `SAFE_STATE` (`CONTROL_LOOP_ERROR`); bila mesin sudah
+  ter-latch, alasan latch awal dipertahankan dan seluruh output dihentikan
+  lagi.
 - Audit lokal mencatat `INPUT_GATE_OPENED` dan `ACTUATION_BLOCKED` beserta
   alasannya.
 

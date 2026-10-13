@@ -26,6 +26,11 @@ class RvmFraudMixin:
         severity: str,
         payload: dict[str, Any],
     ) -> None:
+        current = self._active_alert
+        if severity != "CRITICAL" and current and current.get("severity") == "CRITICAL":
+            # A warning (fraud, blurry camera) never replaces an active safety
+            # alert; its own event is still emitted by the caller.
+            return
         alert = {
             "category": category,
             "reason": reason,

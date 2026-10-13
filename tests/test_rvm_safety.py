@@ -222,9 +222,12 @@ class InterlockGuardTest(SafetyAssertions):
                     controller.actuation_block_reason(controller.hardware.read()),
                     "SAFETY_LATCH_ACTIVE",
                 )
-                # Even if the runtime state is rewritten by an unrelated path, the
-                # persisted latch (safe_reason + critical alert) still blocks.
+                # An unrelated state transition cannot leave the latched state...
                 controller.set_state(MachineState.IDLE, "test-unrelated-write")
+                self.assert_latched(controller, "HIGH_IMPACT_DETECTED")
+                # ...and even if the in-memory state were corrupted, the
+                # persisted latch (safe_reason + critical alert) still blocks.
+                controller.state = MachineState.IDLE
                 self.assertFalse(controller.activate_lease(signed_lease()))
                 self.assertFalse(controller.try_open_input_gate("test"))
                 self.assert_outputs_off(controller)
@@ -993,6 +996,233 @@ class OutputStopFailureLatchTest(SafetyAssertions):
                     self.assertTrue(payload["stopFailed"])
                 # The output fault outranks the original reason at once.
                 self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+            finally:
+                controller.db.close()
+
+
+def fail_next_write(hardware, method: str, value) -> None:
+    """Makes the next `hardware.<method>(value)` call raise once."""
+    real = getattr(hardware, method)
+    armed = {"armed": True}
+
+    def write(arg):
+        if armed["armed"] and arg == value:
+            armed["armed"] = False
+            raise OSError(f"{method} write failed")
+        real(arg)
+
+    setattr(hardware, method, write)
+
+
+def fail_next_all_stop(hardware) -> None:
+    real = hardware.all_stop
+    armed = {"armed": True}
+
+    def all_stop():
+        if armed["armed"]:
+            armed["armed"] = False
+            raise OSError("gpio write failed")
+        real()
+
+    hardware.all_stop = all_stop
+
+
+class SingleOutputCloseFailureTest(SafetyAssertions):
+    """A failed close/stop of one output latches SAFE_STATE (OUTPUT_STOP_FAILED),
+    is reported to the caller, blocks every lease, and is cleared only by the
+    operator reset (no wedge afterwards)."""
+
+    def assert_latched_until_operator_reset(self, controller: RvmController) -> None:
+        for _tick in range(3):
+            controller._tick()
+        self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+        self.assert_outputs_off(controller)
+        self.assertIsNotNone(controller.actuation_block_reason(controller.hardware.read()))
+        self.assertFalse(controller.activate_lease(signed_lease("session-blocked")))
+        controller.execute_remote_command("RESET_ALERT", {})
+        self.assertEqual(controller.state, MachineState.IDLE)
+        self.assertTrue(controller.activate_lease(signed_lease("session-after-reset")))
+
+    def test_p1_maintenance_compactor_stop_failure_latches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                controller.maintenance_command("compactor", {"active": True})
+                self.assertTrue(controller.hardware.compactor)
+                fail_next_write(controller.hardware, "set_compactor", False)
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    with self.assertRaises(OSError):
+                        controller.maintenance_command("compactor", {"active": False})
+                    self.assert_latched_until_operator_reset(controller)
+            finally:
+                controller.db.close()
+
+    def test_p1b_maintenance_conveyor_stop_failure_blocks_resume(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                controller.execute_remote_command("ENTER_MAINTENANCE", {})
+                controller.maintenance_command("conveyor", {"direction": "FORWARD"})
+                fail_next_write(controller.hardware, "set_conveyor", "STOPPED")
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    with self.assertRaises(OSError):
+                        controller.maintenance_command("conveyor", {"direction": "STOPPED"})
+                    self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+                    with self.assertRaisesRegex(ValueError, "Reset alert"):
+                        controller.execute_remote_command("RESUME_OPERATION", {})
+                    self.assert_latched_until_operator_reset(controller)
+            finally:
+                controller.db.close()
+
+    def test_resume_operation_requires_a_successful_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                # The technician leaves the conveyor running: resuming stops it.
+                controller.execute_remote_command("ENTER_MAINTENANCE", {})
+                controller.maintenance_command("conveyor", {"direction": "FORWARD"})
+                controller.execute_remote_command("RESUME_OPERATION", {})
+                self.assertEqual(controller.state, MachineState.IDLE)
+                self.assert_outputs_off(controller)
+
+                # If that stop fails, resuming is refused and the machine latches.
+                controller.execute_remote_command("ENTER_MAINTENANCE", {})
+                controller.maintenance_command("conveyor", {"direction": "FORWARD"})
+                fail_next_all_stop(controller.hardware)
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    with self.assertRaisesRegex(RuntimeError, "Output tidak dapat dimatikan"):
+                        controller.execute_remote_command("RESUME_OPERATION", {})
+                    self.assert_latched_until_operator_reset(controller)
+            finally:
+                controller.db.close()
+
+    def test_in_tick_close_failure_latches_and_loop_survives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            loop = threading.Thread(target=controller._run, name="control-loop", daemon=True)
+            try:
+                self.assertTrue(controller.activate_lease(signed_lease()))
+                fail_next_write(controller.hardware, "set_input_gate", False)
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    controller.running = True
+                    loop.start()
+                    # Item detected: closing the gate fails inside the control tick.
+                    controller.hardware.patch(item_present=True)
+                    self.assertTrue(OutputStopFailureLatchTest.wait_for(
+                        lambda: controller.state == MachineState.SAFE_STATE
+                    ))
+                    time.sleep(0.5)  # several further ticks, including the error backoff
+                    self.assertTrue(loop.is_alive())
+                    # The loop's error handler keeps the root-cause latch reason.
+                    self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+                    self.assert_outputs_off(controller)
+                    self.assertFalse(controller.activate_lease(signed_lease("session-blocked")))
+                    # The aborted tick's sensor edges are not processed twice.
+                    self.assertEqual(events_of(controller, "FRAUD_DETECTED"), [])
+            finally:
+                controller.running = False
+                if loop.ident is not None:
+                    loop.join(2)
+                controller.db.close()
+
+    def test_p2_remote_close_gate_failure_latches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                controller.maintenance_command("gate", {"open": True})
+                self.assertTrue(controller.hardware.input_gate_open)
+                fail_next_write(controller.hardware, "set_input_gate", False)
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    with self.assertRaises(OSError):
+                        controller.execute_remote_command("CLOSE_GATE", {})
+                    self.assert_latched_until_operator_reset(controller)
+            finally:
+                controller.db.close()
+
+
+class LatchedStateVisibilityTest(SafetyAssertions):
+    """A stop failure latched during item processing stays visible: the state
+    is not overwritten, the CRITICAL alert is not downgraded by the fraud
+    warning, the heartbeat reports ERROR, and a server session end does not
+    turn it into a healthy-looking IDLE."""
+
+    def item_in_processing(self, tmp: str) -> RvmController:
+        controller = make_controller(tmp)
+        self.assertTrue(controller.activate_lease(signed_lease()))
+        controller.hardware.patch(chamber_open=True)
+        sensor_pass(controller)
+        controller.hardware.patch(item_present=True)
+        sensor_pass(controller)
+        self.assertEqual(controller.state, MachineState.PROCESSING)
+        return controller
+
+    def assert_visibly_latched(self, controller: RvmController) -> None:
+        self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+        self.assertEqual(controller.heartbeat_payload()["status"], "ERROR")
+        self.assertFalse(controller.activate_lease(signed_lease("session-blocked")))
+        # The server ends the session: still latched, still reported as ERROR.
+        controller.sync.fetch_machine_session = lambda: {"lease": None, "session": None}
+        controller.sync.fetch_display = lambda: None
+        controller._poll_server_session()
+        self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+        self.assertEqual(controller.heartbeat_payload()["status"], "ERROR")
+        self.assertFalse(controller.activate_lease(signed_lease("session-blocked")))
+
+    def test_p3_processing_timeout_with_failed_stop_stays_latched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = self.item_in_processing(tmp)
+            try:
+                controller._processing_started_at = (
+                    time.time() - controller.config.chamber_timeout_seconds - 1
+                )
+                fail_next_all_stop(controller.hardware)
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    controller._tick()
+                self.assertTrue(events_of(controller, "FRAUD_DETECTED"))
+                self.assert_visibly_latched(controller)
+            finally:
+                controller.db.close()
+
+    def test_p4_abnormal_weight_with_failed_stop_stays_latched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = self.item_in_processing(tmp)
+            try:
+                fail_next_all_stop(controller.hardware)
+                controller.hardware.patch(item_present=False, weight_grams=900.0, weight_stable=True)
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    sensor_pass(controller)
+                self.assertTrue(events_of(controller, "FRAUD_DETECTED"))
+                self.assertFalse(controller.hardware.input_gate_open)
+                self.assert_visibly_latched(controller)
+            finally:
+                controller.db.close()
+
+    def test_heartbeat_reports_latch_in_maintenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                controller.enter_safe_state("HIGH_IMPACT_DETECTED", {"vibrationG": 4.8})
+                controller.execute_remote_command("ENTER_MAINTENANCE", {})
+                self.assertEqual(controller.state, MachineState.MAINTENANCE)
+                self.assertEqual(controller.heartbeat_payload()["status"], "ERROR")
+            finally:
+                controller.db.close()
+
+    def test_s3_full_transition_with_failed_stop_does_not_report_full(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                self.assertTrue(controller.activate_lease(signed_lease()))
+                fail_next_all_stop(controller.hardware)
+                controller.hardware.patch(fill_percent=96)
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    sensor_pass(controller)
+                self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+                self.assertEqual(
+                    [e for e in events_of(controller, "STATUS_CHANGED")
+                     if e["payload"].get("status") == "FULL"],
+                    [],
+                )
             finally:
                 controller.db.close()
 

@@ -161,12 +161,17 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 if errors == 1:
                     logger.error("control loop tick failed", exc_info=True)
                 try:
-                    self.enter_safe_state(
-                        "CONTROL_LOOP_ERROR",
-                        {"error": str(exc)},
-                        category="SYSTEM",
-                        event_type="ERROR",
-                    )
+                    if self._safety_latch_active():
+                        # Already latched (e.g. a failed output close in this
+                        # tick): keep the root-cause reason, stop everything.
+                        self._safe_all_stop()
+                    else:
+                        self.enter_safe_state(
+                            "CONTROL_LOOP_ERROR",
+                            {"error": str(exc)},
+                            category="SYSTEM",
+                            event_type="ERROR",
+                        )
                 except Exception:
                     # The loop itself must keep running to retry the latch.
                     logger.exception("control loop could not latch SAFE_STATE")
@@ -179,8 +184,12 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         before the write or the state after it."""
         with self._lock:
             snapshot = self.hardware.read()
-            self._process_sensors(snapshot)
-            self._last = snapshot
+            try:
+                self._process_sensors(snapshot)
+            finally:
+                # Each sensor edge is processed at most once, even when the
+                # pass aborts (e.g. a failed output close that latched).
+                self._last = snapshot
             self._expire_lease()
             if (
                 self.state == MachineState.PROCESSING
@@ -194,7 +203,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 self._sensor_sequence = []
                 self._reset_waste_type_selection()
                 self.set_state(MachineState.SESSION_ACTIVE, "item-timeout")
-                self.hardware.set_conveyor("STOPPED")
+                self._close_output(lambda: self.hardware.set_conveyor("STOPPED"))
             if time.time() - self._last_heartbeat >= self.config.heartbeat_seconds:
                 self.emit("HEARTBEAT", self.heartbeat_payload(snapshot))
                 self._last_heartbeat = time.time()
@@ -318,8 +327,8 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             MachineState.SAFE_STATE,  # the safety latch outranks capacity state
         }:
             self.set_state(MachineState.FULL, "capacity")
-            self._safe_all_stop()
-            self.emit("STATUS_CHANGED", {"status": "FULL"})
+            if self._safe_all_stop():  # a failed stop latched SAFE_STATE instead
+                self.emit("STATUS_CHANGED", {"status": "FULL"})
         if current.item_present and not self._last.item_present:
             if self.state != MachineState.SESSION_ACTIVE:
                 self.report_fraud("ITEM_WITHOUT_ACTIVE_SESSION", {})
@@ -330,7 +339,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 self._sensor_sequence.append("ITEM_PRESENT")
                 self._processing_started_at = time.time()
                 self._weight_reported = False
-                self.hardware.set_input_gate(False)
+                self._close_output(lambda: self.hardware.set_input_gate(False))
                 item_payload: dict[str, Any] = {"inputBeam": True}
                 if self._selected_waste_type_id:
                     item_payload["wasteTypeId"] = self._selected_waste_type_id
@@ -402,14 +411,14 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                     self.emit("SENSOR_SEQUENCE", {"steps": self._sensor_sequence}, self.session_id())
                     self.emit("CONVEYOR_STARTED", {"direction": "FORWARD"}, self.session_id())
                     self.emit("ITEM_ACCEPTED_POINT", {"acceptanceBeam": True}, self.session_id())
-                    self.hardware.set_conveyor("STOPPED")
+                    self._close_output(lambda: self.hardware.set_conveyor("STOPPED"))
                     if (
                         self.config.compactor_enabled
                         and self._guarded_output(lambda: self.hardware.set_compactor(True)) is None
                     ):
                         self.emit("COMPACTION_STARTED", {}, self.session_id())
                         time.sleep(0.15)
-                        self.hardware.set_compactor(False)
+                        self._close_output(lambda: self.hardware.set_compactor(False))
                         self.emit("COMPACTION_COMPLETED", {}, self.session_id())
                 self._processing_started_at = None
                 self._sensor_sequence = []
@@ -441,7 +450,10 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
 
     def heartbeat_payload(self, snapshot: SensorSnapshot | None = None) -> dict:
         sensor = snapshot or self.hardware.read()
-        server_status = "ERROR" if self.state in {MachineState.ERROR, MachineState.SAFE_STATE} else (
+        # A latched safety fault is reported as ERROR in every runtime state
+        # (e.g. MAINTENANCE entered while latched).
+        latched = self._safety_latch_active()
+        server_status = "ERROR" if latched or self.state == MachineState.ERROR else (
             "FULL" if self.state == MachineState.FULL else "ONLINE"
         )
         return {
@@ -467,6 +479,19 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
     def set_state(self, state: MachineState, reason: str) -> None:
         with self._lock:
             previous = self.state
+            if (
+                previous == MachineState.SAFE_STATE
+                and state not in {MachineState.SAFE_STATE, MachineState.MAINTENANCE}
+                and self.db.get_json("safe_reason")
+            ):
+                # A latched SAFE_STATE is left only through the validated
+                # operator reset, which clears safe_reason first; processing,
+                # session and capacity transitions never mask it.
+                self.db.audit(
+                    "STATE_CHANGE_SUPPRESSED",
+                    {"from": previous, "to": state, "reason": reason},
+                )
+                return
             self.state = state
             self.db.set_json("machine_state", state)
             self.db.audit("STATE_CHANGED", {"from": previous, "to": state, "reason": reason})
@@ -666,11 +691,12 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         return True
 
     def _safe_all_stop(self) -> bool:
-        """Stop used by every path that turns outputs off. It never raises,
-        and an unsuccessful stop always latches SAFE_STATE (OUTPUT_STOP_FAILED,
-        reported as an ERROR event): the machine is never left unlatched and
-        actuatable. While latched every tick retries the stop until it
-        succeeds; the latch then stays until a validated operator reset."""
+        """Stop used by every path that turns all outputs off. It never
+        raises, and an unsuccessful stop always latches SAFE_STATE
+        (OUTPUT_STOP_FAILED, reported as an ERROR event). While latched every
+        tick retries the stop until it succeeds; the latch then stays until a
+        validated operator reset. Closing a single output goes through
+        _close_output, which latches the same way on a failed write."""
         if self._stop_outputs():
             return True
         self.enter_safe_state(
@@ -680,6 +706,25 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             event_type="ERROR",
         )
         return False
+
+    def _close_output(self, write: Callable[[], None]) -> None:
+        """Closes or stops a single output (always allowed, no interlock).
+        A failed write latches SAFE_STATE (OUTPUT_STOP_FAILED), which stops
+        every output and retries the stop each tick until it succeeds; the
+        error is then re-raised to the caller."""
+        with self._lock:
+            try:
+                write()
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                logger.error("output close failed: %s", error)
+                self.enter_safe_state(
+                    "OUTPUT_STOP_FAILED",
+                    {"error": error},
+                    category="SYSTEM",
+                    event_type="ERROR",
+                )
+                raise
 
     def try_open_input_gate(self, reason: str) -> bool:
         blocked = self._guarded_output(lambda: self.hardware.set_input_gate(True))
@@ -768,18 +813,18 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             if data.get("open"):
                 self._maintenance_output(lambda: hardware.set_input_gate(True))
             else:
-                hardware.set_input_gate(False)
+                self._close_output(lambda: hardware.set_input_gate(False))
         elif command == "conveyor":
             direction = str(data.get("direction", "STOPPED"))
             if direction in {"FORWARD", "REVERSE"}:
                 self._maintenance_output(lambda: hardware.set_conveyor(direction))
             else:
-                hardware.set_conveyor("STOPPED")
+                self._close_output(lambda: hardware.set_conveyor("STOPPED"))
         elif command == "compactor":
             if data.get("active"):
                 self._maintenance_output(lambda: hardware.set_compactor(True))
             else:
-                hardware.set_compactor(False)
+                self._close_output(lambda: hardware.set_compactor(False))
         elif command == "flush":
             self.sync.flush_once()
         elif command == "mock-sensors" and isinstance(hardware, MockHardware):
