@@ -632,7 +632,9 @@ class OperatorViewTest(unittest.TestCase):
                 restarted.db.close()
 
 
-class AuthorizedRetryTest(unittest.TestCase):
+class KioskApiCase(unittest.TestCase):
+    """Controller plus the real local kiosk API on an ephemeral port."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.c = controller_in(self.tmp.name)
@@ -670,6 +672,8 @@ class AuthorizedRetryTest(unittest.TestCase):
         conn.close()
         return response.status, json.loads(data or b"{}")
 
+
+class AuthorizedRetryTest(KioskApiCase):
     def historical(self):
         row = outbox(self.c.db)[E4]
         return {column: row[column] for column in HISTORICAL_COLUMNS}
@@ -706,6 +710,136 @@ class AuthorizedRetryTest(unittest.TestCase):
             self.assertTrue(self.c.sync.flush_once())
         self.assertEqual(server.calls[0]["body"]["events"], [EVENTS[E4]])
         self.assertEqual(outbox(self.c.db)[E4]["delivery_status"], "sent")
+
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 1 (review I1/C1): the sync thread survives truncated or malformed
+# responses, and dead-letter retry ids are validated.
+# --------------------------------------------------------------------------- #
+class TruncatedResp(Resp):
+    """The connection drops mid-body: http.client raises IncompleteRead."""
+
+    def read(self):
+        raise http.client.IncompleteRead(b'{"protocolVersion":2,"rece', 120)
+
+
+def wait_until(predicate, timeout=6.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return predicate()
+
+
+class ResilientFlushTest(WorkerCase):
+    def test_truncated_body_keeps_rows_pending_and_next_flush_works(self):
+        enqueue_fixture(self.db, {E1, E2})
+        self.assertFalse(self.flush(FakeEventsServer(lambda _body: TruncatedResp(200))))
+        rows = outbox(self.db)
+        self.assertEqual({r["delivery_status"] for r in rows.values()}, {"pending"})
+        self.assertEqual({r["attempts"] for r in rows.values()}, {1})
+        self.assertFalse(self.worker.online)
+        self.assertIsNotNone(self.worker.last_error)
+        make_due(self.db)
+        self.assertTrue(self.flush(FakeEventsServer(lambda body: v2(*(ok(e["localEventId"]) for e in body["events"])))))
+        self.assertEqual(self.db.queue_depth(), 0)
+
+    def test_non_string_status_or_id_is_malformed_not_fatal(self):
+        enqueue_fixture(self.db, {E1, E2, E3, E4})
+        payload = v2(
+            {"localEventId": E1, "status": ["accepted"], "eventId": "srv-1"},
+            {"localEventId": E2, "status": {"accepted": True}},
+            {"localEventId": ["not", "a", "string"], "status": "accepted"},
+            ok(E4),
+        )
+        self.assertFalse(self.worker.apply_event_results(self.db.pending(20), payload))
+        rows = outbox(self.db)
+        self.assertEqual(outcome(self.db), {"acked": [E4], "pending": sorted([E1, E2, E3]), "deadLetter": []})
+        self.assertEqual(rows[E1]["last_error"], "MALFORMED_RESULT")
+        self.assertEqual(rows[E2]["last_error"], "MALFORMED_RESULT")
+        self.assertEqual(rows[E3]["last_error"], "MISSING_RESULT")
+        # A non-string status never ACKs, even when it "contains" accepted.
+        self.assertEqual({rows[i]["attempts"] for i in (E1, E2, E3)}, {1})
+
+
+class SyncThreadSurvivalTest(WorkerCase):
+    """Each case: the first answer is bad, later answers are good. The daemon
+    thread must survive, keep the rows pending, and deliver them afterwards."""
+
+    def run_loop(self, first_answer):
+        enqueue_fixture(self.db, {E1, E2})
+        self.worker.config.sync_interval_seconds = 0.02
+        self.worker._last_media_sync = time.time() + 3600  # keep media sync out of the loop
+        state = {"bad": True, "after_bad": None}
+
+        def respond(body):
+            if state["bad"]:
+                state["bad"] = False
+                return first_answer(body)
+            if state["after_bad"] is None:
+                # Outbox as the bad answer left it (read from the loop thread).
+                state["after_bad"] = outbox(self.db)
+            return v2(*(ok(e["localEventId"]) for e in body["events"]))
+
+        server = FakeEventsServer(respond)
+        with mock.patch("rvm.sync.urllib.request.urlopen", server):
+            self.worker.start()
+            try:
+                self.assertTrue(wait_until(lambda: len(server.calls) >= 2),
+                                "the loop stopped after the bad answer")
+                self.assertTrue(self.worker._thread.is_alive(), "rvm-sync thread died")
+                self.assertTrue(wait_until(lambda: self.db.queue_depth() == 0),
+                                "the loop never delivered the pending rows")
+                self.assertTrue(self.worker._thread.is_alive())
+            finally:
+                self.worker.stop()
+        resent = {i for call in range(1, len(server.calls)) for i in server.sent_ids(call)}
+        self.assertEqual(resent, {E1, E2})
+        self.assertEqual(outcome(self.db)["acked"], sorted([E1, E2]))
+        return state["after_bad"]
+
+    def test_truncated_body(self):
+        after_bad = self.run_loop(lambda _body: TruncatedResp(200))
+        self.assertEqual({r["delivery_status"] for r in after_bad.values()}, {"pending"})
+        self.assertEqual({r["attempts"] for r in after_bad.values()}, {1})
+
+    def test_unhashable_status(self):
+        after_bad = self.run_loop(lambda body: v2(*(
+            {"localEventId": e["localEventId"], "status": ["accepted"]} for e in body["events"])))
+        self.assertEqual({r["delivery_status"] for r in after_bad.values()}, {"pending"})
+        self.assertEqual({r["last_error"] for r in after_bad.values()}, {"MALFORMED_RESULT"})
+
+    def test_unexpected_exception_is_logged_and_the_loop_continues(self):
+        with self.assertLogs("rvm.sync", level="ERROR") as logs:
+            after_bad = self.run_loop(lambda _body: (_ for _ in ()).throw(ValueError("unexpected")))
+        self.assertEqual({r["delivery_status"] for r in after_bad.values()}, {"pending"})
+        self.assertTrue(any("ValueError" in line for line in logs.output))
+
+
+class DeadLetterRetryValidationTest(KioskApiCase):
+    def test_invalid_ids_get_an_indonesian_422_and_change_nothing(self):
+        enqueue_fixture(self.c.db, {E3, E4})
+        self.c.sync.apply_event_results(
+            self.c.db.pending(20),
+            v2(failed(E3, "INVALID_EVENT", False), failed(E4, "INVALID_EVENT", False)),
+        )
+        status, body = self.post("/api/maintenance/login", {"pin": "2468"})
+        auth = {"Authorization": f"Bearer {body['token']}"}
+        for ids in ([None], [{}], [[1]], [True], [1.5], ["1"], [0], [-3], "1", {"id": 1}, None):
+            with self.subTest(ids=ids):
+                status, body = self.post("/api/maintenance/command",
+                                         {"command": "retry-dead-letter", "ids": ids}, auth)
+                self.assertEqual(status, 422)
+                self.assertEqual(body["error"], "ID event tidak valid: kirim daftar ID event berupa angka positif")
+                self.assertEqual(self.c.db.dead_letter_depth(), 2)
+
+        e3_id = outbox(self.c.db)[E3]["id"]
+        status, body = self.post("/api/maintenance/command",
+                                 {"command": "retry-dead-letter", "ids": [e3_id]}, auth)
+        self.assertEqual(status, 200)
+        self.assertEqual(outcome(self.c.db), {"acked": [], "pending": [E3], "deadLetter": [E4]})
 
 
 if __name__ == "__main__":

@@ -30,6 +30,8 @@ from .sync import LAST_SUCCESS_KEY, SyncWorker
 
 logger = logging.getLogger(__name__)
 
+INVALID_DEAD_LETTER_IDS = "ID event tidak valid: kirim daftar ID event berupa angka positif"
+
 
 class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
     # States worth resuming as-is after an unclean shutdown (power loss) or
@@ -852,11 +854,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         elif command == "retry-dead-letter":
             # Authorized by the maintenance token (rvm/api.py). Requeues with
             # the same localEventId and payload; history is kept.
-            raw_ids = data.get("ids")
-            if raw_ids is not None and not isinstance(raw_ids, list):
-                raise ValueError("ids harus berupa daftar")
-            ids = None if raw_ids is None else [int(value) for value in raw_ids]
-            requeued = self.db.retry_dead_letters(ids)
+            requeued = self.db.retry_dead_letters(self._dead_letter_ids(data))
             self.db.audit("OUTBOX_DEAD_LETTER_RETRY", {"count": len(requeued), "ids": requeued})
         elif command == "mock-sensors" and isinstance(hardware, MockHardware):
             hardware.patch(**dict(data.get("values", {})))
@@ -866,6 +864,18 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             raise ValueError("Command maintenance tidak dikenal")
         self.db.audit("MAINTENANCE_COMMAND", {"command": command, "data": data})
         return self.public_state()
+
+    @staticmethod
+    def _dead_letter_ids(data: dict[str, Any]) -> list[int] | None:
+        """No `ids` key: every dead letter. Otherwise a list of positive
+        integer outbox ids; anything else is refused (HTTP 422 from the local
+        API) before any row changes."""
+        if "ids" not in data:
+            return None
+        ids = data["ids"]
+        if not isinstance(ids, list) or not all(type(value) is int and value > 0 for value in ids):
+            raise ValueError(INVALID_DEAD_LETTER_IDS)
+        return ids
 
     def public_state(self) -> dict[str, Any]:
         sensor = self.hardware.read()

@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import http.client
 import json
+import logging
 import re
 import threading
 import time
@@ -15,6 +17,8 @@ from typing import Any
 
 from .config import RvmConfig
 from .database import EdgeDatabase
+
+logger = logging.getLogger(__name__)
 
 # POST /api/machine-events protocol v2 (tests/fixtures/contracts/machine-events.v2.json).
 PROTOCOL_VERSION = 2
@@ -57,11 +61,22 @@ class SyncWorker:
 
     def _run(self) -> None:
         while self.running:
-            self.flush_once()
-            self.flush_captures()
+            self._guarded("events", self.flush_once)
+            self._guarded("captures", self.flush_captures)
             if time.time() - self._last_media_sync >= self.config.media_sync_seconds:
-                self.sync_media()
+                self._guarded("media", self.sync_media)
             time.sleep(self.config.sync_interval_seconds)
+
+    def _guarded(self, step: str, action) -> None:
+        """A failing step never ends the daemon thread: unsent rows stay
+        pending and every step runs again on the next iteration."""
+        try:
+            action()
+        except Exception as exc:  # noqa: BLE001 - the sync loop must survive anything
+            self.last_error = f"SYNC_LOOP_ERROR({step}): {type(exc).__name__}"
+            logger.exception(
+                "rvm-sync %s step failed (%s); retrying next iteration", step, type(exc).__name__
+            )
 
     def flush_once(self) -> bool:
         """Sends one batch (one HTTP request, bounded by its 5 s timeout) and
@@ -101,9 +116,10 @@ class SyncWorker:
         except urllib.error.HTTPError as exc:
             status, answer = exc.code, b""
             exc.close()
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            # Includes a response lost after the server committed: the retry
-            # reuses the localEventId and is answered as duplicate.
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as exc:
+            # Includes a response lost or truncated (IncompleteRead) after the
+            # server committed: the retry reuses the localEventId and is
+            # answered as duplicate.
             self.online = False
             self.last_error = str(exc)
             self.db.mark_failed(ids, self.last_error)
@@ -136,8 +152,9 @@ class SyncWorker:
     def _protocol_results(payload: Any, sent: dict[str, int]) -> list[dict] | None:
         """The v2 results, or None when the response as a whole cannot be
         trusted (not v2, wrong shape, a foreign or repeated localEventId).
-        Items without a usable localEventId are skipped: their events count as
-        unanswered and stay pending."""
+        Items without a string localEventId are skipped (their events count as
+        unanswered); items whose status is not a string are kept as malformed
+        (status None). Both stay pending."""
         if not isinstance(payload, dict):
             return None
         version, received, results = (
@@ -156,7 +173,7 @@ class SyncWorker:
             if local_id not in sent or local_id in seen:
                 return None
             seen.add(local_id)
-            valid.append(item)
+            valid.append(item if isinstance(item.get("status"), str) else {"localEventId": local_id, "status": None})
         return valid
 
     def apply_event_results(self, rows: list[dict], payload: dict) -> bool:

@@ -178,11 +178,17 @@ dan dikirim batch ke `POST /api/machine-events` (HMAC). Respons protokol v2
   event tanpa sesi tetap berjalan; event yang di-dead-letter tidak menahan sesi.
 - **Batas waktu tetap.** Satu `flush_once` tetap satu request HTTP dengan
   timeout 5 s, sehingga angka latensi `STOP_ALL` di atas tidak berubah.
+- **Loop sinkronisasi tidak pernah berhenti.** Body respons yang terpotong
+  (`IncompleteRead`) diperlakukan seperti respons hilang, item dengan `status`
+  bukan string dianggap rusak (tetap `pending`), dan setiap langkah loop
+  (event, bukti kamera, media) dijaga: error tak terduga dicatat di log dan
+  `lastError`, lalu dicoba lagi pada iterasi berikutnya.
 
 **Tampilan operator.** Panel maintenance kiosk (PIN) menampilkan jumlah event
 menunggu, yang ditolak permanen (jenis, alasan, jumlah percobaan) dan waktu
 sinkron terakhir yang berhasil; tombol **Kirim ulang event ditolak**
-(`retry-dead-letter`, wajib token maintenance) mengembalikan event ke antrean
+(`retry-dead-letter`, wajib token maintenance; tanpa `ids` = semua, atau
+`ids` berupa daftar ID outbox positif, selain itu ditolak 422) mengembalikan event ke antrean
 dengan `localEventId` dan payload yang sama, menyimpan riwayat `attempts` dan
 `last_error`, dan mencatat audit `OUTBOX_DEAD_LETTER_RETRY`. Heartbeat
 membawa `queueDepth`, `deadLetterDepth` dan `lastSyncSuccessAt`, yang tampil di
