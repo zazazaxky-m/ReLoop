@@ -13,13 +13,20 @@
  *   duplicateEarnPerDepositItem    more than one EARN row for one deposit item   (blocks enforce)
  *   duplicateReservePerRedemption  more than one reserve row for one redemption  (blocks enforce)
  *   duplicateTripEarn              more than one live trip return earning for one trip
- *                                  (referenceType Trip, or a legacy ManualValidation
- *                                  reference with reasonCode TRASH_BAG_RETURN resolved
- *                                  to its trip)                                   (blocks enforce)
+ *                                  (EARN with reasonCode TRASH_BAG_RETURN referencing the
+ *                                  trip, or a legacy ManualValidation of it; other EARN
+ *                                  rows referencing a trip are not return earnings)
+ *                                                                                 (blocks enforce)
  *   legacyBagUnits                 trash-bag rows whose bagCount is not 1, per trip. Rewards
  *                                  count one unit per verified bag row and never multiply
  *                                  by bagCount; review each trip before any bagCount
  *                                  constraint (informational, does not block)
+ *   unclosedReviewedTrips          ACTIVE MONEY_REWARD trips with a recipient whose bags all
+ *                                  have a status but that have no trip return earning: the
+ *                                  EX-02 legacy state (old scans decided on stale aggregates).
+ *                                  Statuses may predate bag ownership checks (LOG-03), so no
+ *                                  scan closes or pays them; recomputedRewardAmount sizes the
+ *                                  exposure with and without the app score (informational)
  *   reservesWithoutRequest         REDEEM rows not backed by a matching request
  *                                  (no/unknown reference, other owner, other amount)
  *   requestsWithoutMatchingReserve in-flight/paid requests whose reserve is missing
@@ -51,9 +58,15 @@
  * bagCount N is one QR, not automatically N units. Record per trip whether it
  * stays one unit (the current rule) or is reissued as separate rows by an
  * operator, in the case log; this script never normalizes it.
+ *
+ * unclosedReviewedTrips also needs an operator decision per trip, recorded in
+ * the case log: verify the bags physically/with the group, then close the trip
+ * with an explicit bulk check-out listing every bag ID (POST
+ * /api/manual-validations, CHECK_OUT), which pays at most once; or cancel it.
  */
-import type { Prisma } from "@prisma/client";
+import type { ConditionStatus, Prisma } from "@prisma/client";
 import { computeBalance, type LedgerGroup } from "../lib/ledger";
+import { evaluateTripBags } from "../lib/trip";
 
 type RawReader = Pick<Prisma.TransactionClient, "$queryRaw">;
 
@@ -76,6 +89,11 @@ export interface WalletInventory {
   legacyBagUnits: {
     tripId: string; tripStatus: string; bagIds: string[]; bagRows: number; bagCountTotal: number;
     tripReturnEarnings: number;
+  }[];
+  unclosedReviewedTrips: {
+    tripId: string; userId: string; campaignId: string; bagRows: number; returnedCount: number;
+    rewardableCount: number; conditionStatus: ConditionStatus | null;
+    recomputedRewardAmount: { appCompleted: number; appNotCompleted: number };
   }[];
   reservesWithoutRequest: {
     ledgerId: string; userId: string; amount: number; status: string;
@@ -145,9 +163,9 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
              COALESCE(CASE WHEN l."referenceType" = 'Trip' THEN l."referenceId" END, v."tripId") AS trip_id
       FROM "RewardLedger" l
       LEFT JOIN "ManualValidation" v ON l."referenceType" = 'ManualValidation' AND v.id = l."referenceId"
-      WHERE l."entryType" = 'EARN' AND l.status <> 'REVERSED'
+      WHERE l."entryType" = 'EARN' AND l.status <> 'REVERSED' AND l."reasonCode" = 'TRASH_BAG_RETURN'
         AND ((l."referenceType" = 'Trip' AND l."referenceId" IS NOT NULL)
-          OR (l."referenceType" = 'ManualValidation' AND l."reasonCode" = 'TRASH_BAG_RETURN' AND v."tripId" IS NOT NULL))
+          OR (l."referenceType" = 'ManualValidation' AND v."tripId" IS NOT NULL))
     ) e
     GROUP BY e.trip_id HAVING count(*) > 1 ORDER BY e.trip_id`);
 
@@ -157,12 +175,51 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
   }[]>`
     SELECT b."tripId", t.status::text AS "tripStatus", array_agg(b.id ORDER BY b.id) AS "bagIds",
            count(*)::int AS "bagRows", SUM(b."bagCount")::bigint AS "bagCountTotal",
+           -- Live trip return earnings, duplicateTripEarn's predicate.
            (SELECT count(*)::int FROM "RewardLedger" l
-             WHERE l."entryType" = 'EARN' AND l."referenceType" = 'Trip' AND l."referenceId" = b."tripId") AS "tripReturnEarnings"
+             LEFT JOIN "ManualValidation" v ON l."referenceType" = 'ManualValidation' AND v.id = l."referenceId"
+             WHERE l."entryType" = 'EARN' AND l.status <> 'REVERSED' AND l."reasonCode" = 'TRASH_BAG_RETURN'
+               AND ((l."referenceType" = 'Trip' AND l."referenceId" = b."tripId")
+                 OR (l."referenceType" = 'ManualValidation' AND v."tripId" = b."tripId"))) AS "tripReturnEarnings"
     FROM "TrashBagAssignment" b
     JOIN "Trip" t ON t.id = b."tripId"
     WHERE b."bagCount" <> 1
     GROUP BY b."tripId", t.status ORDER BY b."tripId"`).map((row) => ({ ...row, bagCountTotal: toNumber(row.bagCountTotal) }));
+
+  // "No trip return earning" in any status, as lib/trip-validation.ts decides
+  // whether a check-out would pay (keyed row, or legacy Trip/ManualValidation row).
+  const unclosedReviewedTrips = (await db.$queryRaw<{
+    tripId: string; userId: string; campaignId: string; rewardMultiplier: number | null; statuses: ConditionStatus[];
+  }[]>`
+    SELECT t.id AS "tripId", t."userId", t."campaignId", c."rewardMultiplier",
+           array_agg(b.status::text ORDER BY b.id) AS statuses
+    FROM "Trip" t
+    JOIN "Campaign" c ON c.id = t."campaignId"
+    JOIN "TrashBagAssignment" b ON b."tripId" = t.id
+    WHERE t.status = 'ACTIVE' AND t."userId" IS NOT NULL AND c."rewardMode" = 'MONEY_REWARD'
+      AND NOT EXISTS (
+        SELECT 1 FROM "RewardLedger" l
+        LEFT JOIN "ManualValidation" v ON l."referenceType" = 'ManualValidation' AND v.id = l."referenceId"
+        WHERE l."entryType" = 'EARN'
+          AND (l."businessKey" = 'trip:' || t.id || ':return'
+            OR (l."reasonCode" = 'TRASH_BAG_RETURN'
+              AND ((l."referenceType" = 'Trip' AND l."referenceId" = t.id)
+                OR (l."referenceType" = 'ManualValidation' AND v."tripId" = t.id)))))
+    GROUP BY t.id, t."userId", t."campaignId", c."rewardMultiplier"
+    HAVING bool_and(b.status IS NOT NULL)
+    ORDER BY t.id`).map(({ statuses, rewardMultiplier, ...trip }) => {
+    const price = (appCompleted: boolean) => evaluateTripBags({
+      statuses, appCompleted, rewardMode: "MONEY_REWARD", hasRecipient: true, rewardMultiplier });
+    const withApp = price(true);
+    return {
+      ...trip,
+      bagRows: withApp.assignedCount,
+      returnedCount: withApp.returnedCount,
+      rewardableCount: withApp.rewardableCount,
+      conditionStatus: withApp.conditionStatus,
+      recomputedRewardAmount: { appCompleted: withApp.rewardAmount, appNotCompleted: price(false).rewardAmount },
+    };
+  });
 
   const reservesWithoutRequest = (await db.$queryRaw<{
     ledgerId: string; userId: string; amount: number; status: string;
@@ -206,6 +263,7 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
     duplicateReservePerRedemption: duplicateReservePerRedemption.length,
     duplicateTripEarn: duplicateTripEarn.length,
     legacyBagUnits: legacyBagUnits.length,
+    unclosedReviewedTrips: unclosedReviewedTrips.length,
     reservesWithoutRequest: reservesWithoutRequest.length,
     requestsWithoutMatchingReserve: requestsWithoutMatchingReserve.length,
     blocksEnforcement:
@@ -219,6 +277,7 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
     duplicateReservePerRedemption,
     duplicateTripEarn,
     legacyBagUnits,
+    unclosedReviewedTrips,
     reservesWithoutRequest,
     requestsWithoutMatchingReserve,
     summary,

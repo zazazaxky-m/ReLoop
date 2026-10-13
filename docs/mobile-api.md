@@ -218,8 +218,9 @@ SUPERADMIN):
 
 | Keadaan | Hasil |
 | --- | --- |
-| Trip ACTIVE, status berubah | 200, kantong diperbarui, skor dihitung ulang dari semua kantong. Scan yang membuat seluruh kantong sudah berstatus menutup trip (COMPLETED), mencatat satu validasi CHECK_OUT, dan mengkreditkan reward sekali. |
-| Trip ACTIVE, status sama | 200 `idempotent: true`, tidak ada perubahan kantong maupun audit. |
+| Trip ACTIVE, status berubah | 200, kantong diperbarui, skor dihitung ulang dari semua kantong. Hanya scan yang memberi status pada kantong terakhir yang belum berstatus menutup trip (COMPLETED), mencatat satu validasi CHECK_OUT, dan mengkreditkan reward sekali. |
+| Trip ACTIVE, status sama | 200 `idempotent: true`. Tidak ada yang ditulis: kantong, skor, status trip, reward, dan audit tidak berubah. |
+| Trip ACTIVE yang seluruh kantongnya sudah berstatus sebelum scan (data lama) | Scan, baik status sama maupun berbeda, tidak pernah menutup trip atau mengkreditkan reward. Trip seperti ini dilaporkan `npm run reconcile:wallet` (`unclosedReviewedTrips`, beserta perkiraan reward) dan hanya ditutup lewat check-out massal yang menyertakan ID setiap kantong, setelah operator memeriksanya. |
 | Trip COMPLETED, status sama | 200 `idempotent: true`, tidak ada yang ditulis (retry aman bila respons scan penutup hilang). |
 | Trip COMPLETED, status berbeda tanpa `correctionReason` | 422 `Trip sudah selesai. Perubahan kondisi kantong setelah check-out harus dicatat sebagai koreksi beserta alasannya.` |
 | Trip COMPLETED, status berbeda dengan `correctionReason` | 200 `correction: { previousStatus, paidRewardAmount, recomputedRewardAmount }`. Kantong dan skor compliance diperbarui, audit `TRASH_BAG_CORRECTION` mencatat alasan serta selisih reward. Saldo tidak berubah: tidak ada reward kedua, penyesuaian, atau pembalikan otomatis; selisih ditindaklanjuti tim keuangan. |
@@ -235,8 +236,10 @@ atau scan yang bersamaan dengan check-out massal, menghasilkan tepat satu
 penutupan trip dan satu reward; permintaan yang kalah melihat trip sudah
 selesai (`Trip sudah selesai; validasi gerbang tidak dapat diulang` untuk
 check-out kedua). Reward trip ditulis sekali dengan business key
-`trip:<tripId>:return`; reward lama tanpa key (referensi Trip atau
-ManualValidation) dihormati sehingga trip lama tidak dibayar dua kali.
+`trip:<tripId>:return`; reward lama tanpa key (alasan `TRASH_BAG_RETURN` dengan
+referensi Trip atau ManualValidation) dihormati sehingga trip lama tidak dibayar
+dua kali. EARN lain yang mereferensikan trip (misalnya bonus kepatuhan) bukan
+reward pengembalian dan tidak menghalanginya.
 Penerbitan kantong ke trip yang baru ditutup ditolak 422, dan
 `PATCH /api/trips/{id}` (batal/buka ulang) memakai compare-and-set sehingga
 tidak menimpa trip yang sudah selesai (409 `Status trip sudah berubah. Muat

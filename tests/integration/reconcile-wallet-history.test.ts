@@ -50,6 +50,14 @@ function tripEarn(tripId: string, campaignId: string, status: "AVAILABLE" | "REV
     reasonCode: "TRASH_BAG_RETURN", referenceType: "Trip", referenceId: tripId };
 }
 
+/**
+ * A non-return EARN that also references a trip (prisma/seed.ts writes these
+ * for travel-agent users). Credited to a user no balance assertion looks at.
+ */
+function tripBonus(tripId: string, campaignId: string) {
+  return { ...tripEarn(tripId, campaignId), userId: f.ids.collectorB, amount: 7_800, reasonCode: "TOURISM_COMPLIANCE_BONUS" };
+}
+
 function runCli() {
   const result = spawnSync(path.join(ROOT, "node_modules/.bin/tsx"), ["scripts/reconcile-wallet-history.ts"], {
     cwd: ROOT, env: process.env, encoding: "utf8", timeout: 60_000,
@@ -118,6 +126,7 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
       ids.trip = trip.id;
       for (let i = 0; i < 2; i += 1) await tx.rewardLedger.create({ data: tripEarn(trip.id, campaign.id) });
       await tx.rewardLedger.create({ data: tripEarn(trip.id, campaign.id, "REVERSED") }); // neutralized: not counted
+      await tx.rewardLedger.create({ data: tripBonus(trip.id, campaign.id) }); // not a return earning: not counted
 
       // Earliest code paid once per CHECK_OUT validation (referenceType ManualValidation).
       const legacyTrip = await tx.trip.create({ data: { campaignId: campaign.id, userId: f.ids.userA, status: "COMPLETED" } });
@@ -134,6 +143,31 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
       const multi = await tx.trashBagAssignment.create({ data: { tripId: bagTrip.id, bagQrCode: `LEGACY-${randomUUID()}`, bagCount: 3 } });
       ids.multiBag = multi.id;
       await tx.trashBagAssignment.create({ data: { tripId: bagTrip.id, bagQrCode: `LEGACY-${randomUUID()}`, bagCount: 1 } });
+      // tripReturnEarnings uses the duplicateTripEarn predicate: live, return reason, either reference.
+      await tx.rewardLedger.create({ data: tripEarn(bagTrip.id, campaign.id, "REVERSED") });
+      await tx.rewardLedger.create({ data: tripBonus(bagTrip.id, campaign.id) });
+      const bagTripCheckout = await tx.manualValidation.create({ data: { tripId: bagTrip.id, validationStage: "CHECK_OUT" } });
+      await tx.rewardLedger.create({ data: { ...tripEarn(bagTrip.id, campaign.id),
+        referenceType: "ManualValidation", referenceId: bagTripCheckout.id } });
+
+      // EX-02 victims: ACTIVE reward trips whose bags are all reviewed, never closed or paid.
+      const reviewedTrip = async (input: { campaignId: string; userId: string | null; statuses: Array<"GOOD" | "POOR" | null> }) => {
+        const created = await tx.trip.create({ data: { campaignId: input.campaignId, userId: input.userId, status: "ACTIVE" } });
+        for (const status of input.statuses) {
+          await tx.trashBagAssignment.create({ data: { tripId: created.id, bagQrCode: `LEGACY-${randomUUID()}`, status } });
+        }
+        return created.id;
+      };
+      ids.stuckTrip = await reviewedTrip({ campaignId: campaign.id, userId: f.ids.userA, statuses: ["GOOD", "POOR"] });
+      ids.bonusOnlyTrip = await reviewedTrip({ campaignId: campaign.id, userId: f.ids.userA, statuses: ["GOOD"] });
+      await tx.rewardLedger.create({ data: tripBonus(ids.bonusOnlyTrip, campaign.id) });
+      const paidTrip = await reviewedTrip({ campaignId: campaign.id, userId: f.ids.userA, statuses: ["GOOD"] });
+      await tx.rewardLedger.create({ data: tripEarn(paidTrip, campaign.id) });
+      await reviewedTrip({ campaignId: campaign.id, userId: f.ids.userA, statuses: ["GOOD", null] }); // not fully reviewed
+      await reviewedTrip({ campaignId: campaign.id, userId: null, statuses: ["GOOD"] }); // no recipient
+      const complianceOnly = await tx.campaign.create({ data: { organizationId: f.ids.orgA, name: "Program Kepatuhan Audit",
+        campaignType: "TRASH_BAG", rewardMode: "COMPLIANCE_ONLY", status: "ACTIVE" } });
+      await reviewedTrip({ campaignId: complianceOnly.id, userId: f.ids.userA, statuses: ["GOOD"] });
 
       inventory = await collectWalletInventory(tx);
       // A raised guard aborts the transaction: run the trip guard inside a savepoint.
@@ -154,7 +188,17 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
     expect(inventory!.duplicateTripEarn.map((group) => [group.key, group.rows, group.amount, group.ledgerIds.length]).sort())
       .toEqual([[ids.legacyTrip, 2, 4_000, 2], [ids.trip, 2, 4_000, 2]].sort());
     expect(inventory!.legacyBagUnits).toEqual([{
-      tripId: ids.bagTrip, tripStatus: "ACTIVE", bagIds: [ids.multiBag], bagRows: 1, bagCountTotal: 3, tripReturnEarnings: 0 }]);
+      tripId: ids.bagTrip, tripStatus: "ACTIVE", bagIds: [ids.multiBag], bagRows: 1, bagCountTotal: 3, tripReturnEarnings: 1 }]);
+    const byTrip = <T extends { tripId: string }>(rows: T[]) => [...rows].sort((a, b) => a.tripId.localeCompare(b.tripId));
+    expect(byTrip(inventory!.unclosedReviewedTrips)).toEqual(byTrip([
+      // app 30 + all returned 40 + POOR 0 = 70: 1 rewardable x 2.000 x 70%; without the app 40%.
+      { tripId: ids.stuckTrip, userId: f.ids.userA, campaignId: expect.any(String), bagRows: 2, returnedCount: 2,
+        rewardableCount: 1, conditionStatus: "POOR", recomputedRewardAmount: { appCompleted: 1_400, appNotCompleted: 800 } },
+      // A bonus row referencing the trip is not its return earning.
+      { tripId: ids.bonusOnlyTrip, userId: f.ids.userA, campaignId: expect.any(String), bagRows: 1, returnedCount: 1,
+        rewardableCount: 1, conditionStatus: "GOOD", recomputedRewardAmount: { appCompleted: 2_000, appNotCompleted: 1_400 } },
+    ]));
+    expect(inventory!.summary.unclosedReviewedTrips).toBe(2);
     expect(inventory!.reservesWithoutRequest.map((r) => [r.referenceId, r.problem, r.userId]).sort()).toEqual([
       [ids.mismatched, "AMOUNT_MISMATCH", f.ids.userA],
       ["missing-redemption", "REQUEST_NOT_FOUND", f.ids.userB],
@@ -206,6 +250,8 @@ describe("wallet enforce indexes (database backstop)", () => {
       db.$transaction(write).then(() => null, (error: { code?: string }) => error.code);
     const trip = await f.trip({ bagCount: 1 });
     const { campaignId } = await f.db.trip.findUniqueOrThrow({ where: { id: trip.id } });
+    // Only the return reason takes the trip's slot: a bonus referencing the trip does not.
+    expect(await rejects((tx) => tx.rewardLedger.create({ data: tripBonus(trip.id, campaignId) }))).toBeNull();
     expect(await rejects((tx) => tx.rewardLedger.create({ data: tripEarn(trip.id, campaignId) }))).toBeNull();
     expect(await rejects((tx) => tx.rewardLedger.create({ data: tripEarn(trip.id, campaignId) }))).toBe("P2002");
     expect(await rejects((tx) => tx.rewardLedger.create({ data: tripEarn(trip.id, campaignId, "REVERSED") }))).toBeNull();

@@ -2,14 +2,8 @@ import type { ConditionStatus, Prisma } from "@prisma/client";
 import { lockTrip, lockTripBags, lockUser } from "./db-locks";
 import { prisma } from "./prisma";
 import { HttpError } from "./rbac";
-import { calculateCompliance, type ComplianceResult } from "./tourism";
-import {
-  TRASH_BAG_REWARD_PER_BAG,
-  TRIP_CHANGED,
-  aggregateBagCondition,
-  computeTrashBagRewardAmount,
-  isRewardableCondition,
-} from "./trip";
+import type { ComplianceResult } from "./tourism";
+import { TRIP_CHANGED, evaluateTripBags, isRewardableCondition } from "./trip";
 import { MAX_RUPIAH } from "./wallet-service";
 
 /**
@@ -173,7 +167,13 @@ export interface TripOutcome {
   conditionStatus: ConditionStatus | null;
 }
 
-/** Trip return earnings already recorded: keyed rows and legacy rows without a key. */
+/**
+ * Trip return earnings already recorded, in any status: keyed rows and legacy
+ * rows without a key. Only the return reason counts; another EARN that
+ * references the trip (e.g. a TOURISM_COMPLIANCE_BONUS) is not its return
+ * earning. Same reason/reference predicate as the enforce index and guard
+ * (20261013151919_trip_reward_keys_enforce) and the inventory.
+ */
 async function loadTripRewards(tx: Prisma.TransactionClient, tripId: string) {
   const validations = await tx.manualValidation.findMany({ where: { tripId }, select: { id: true } });
   return tx.rewardLedger.findMany({
@@ -181,7 +181,7 @@ async function loadTripRewards(tx: Prisma.TransactionClient, tripId: string) {
       entryType: "EARN",
       OR: [
         { businessKey: tripReturnKey(tripId) },
-        { referenceType: "Trip", referenceId: tripId },
+        { referenceType: "Trip", referenceId: tripId, reasonCode: TRIP_RETURN_REASON },
         ...(validations.length > 0
           ? [{ referenceType: "ManualValidation", referenceId: { in: validations.map((v) => v.id) }, reasonCode: TRIP_RETURN_REASON }]
           : []),
@@ -205,54 +205,45 @@ async function latestCheckoutAppCompleted(tx: Prisma.TransactionClient, tripId: 
  * (taken again here, re-entrantly, so the earning is always written while the
  * reward recipient's User row is held).
  *
- * ACTIVE trip, every bag reviewed -> COMPLETED (compare-and-set) and, for a
- * MONEY_REWARD trip with a recipient, one EARN/AVAILABLE keyed
+ * ACTIVE trip, every bag reviewed and `mayClose` -> COMPLETED (compare-and-set)
+ * and, for a MONEY_REWARD trip with a recipient, one EARN/AVAILABLE keyed
  * `trip:<tripId>:return`, unless any trip return earning already exists.
- * ACTIVE trip with unreviewed bags -> compliance progress only.
+ * ACTIVE trip otherwise -> compliance progress only, never money.
  * COMPLETED trip (correction) -> compliance only; the reward is never minted,
  * adjusted or reversed here.
  *
  * `appCompleted` defaults to what the closing CHECK_OUT validation recorded.
+ * `mayClose` (default true) is false for a scan that did not review a
+ * previously unreviewed bag: an ACTIVE trip whose bags were all reviewed
+ * before the scan is legacy state (EX-02) and closes only through an explicit
+ * bulk check-out listing every bag.
  */
 export async function refreshTripOutcome(
   tx: Prisma.TransactionClient,
   tripId: string,
-  options: { appCompleted?: boolean } = {},
+  options: { appCompleted?: boolean; mayClose?: boolean } = {},
 ): Promise<TripOutcome> {
   const trip = await lockTripAggregate(tx, tripId);
   if (trip.status !== "ACTIVE" && trip.status !== "COMPLETED") {
     throw new HttpError(422, "Kondisi kantong hanya dapat dicatat untuk trip ACTIVE atau yang sudah selesai");
   }
 
-  const statuses = trip.bagAssignments.map((bag) => bag.status);
-  const known = statuses.filter((status): status is ConditionStatus => status !== null);
-  const assignedCount = statuses.length;
-  const returnedCount = known.filter((status) => status !== "NOT_RETURNED").length;
-  const rewardableCount = known.filter((status) => isRewardableCondition(status)).length;
-  const conditionStatus = aggregateBagCondition(known);
   const appCompleted = options.appCompleted ?? (await latestCheckoutAppCompleted(tx, tripId));
-  const compliance = calculateCompliance({
-    stage: "CHECK_OUT",
+  const evaluation = evaluateTripBags({
+    statuses: trip.bagAssignments.map((bag) => bag.status),
     appCompleted,
-    assignedBagCount: assignedCount,
-    returnedBagCount: returnedCount,
-    conditionStatus,
+    rewardMode: trip.campaign.rewardMode,
+    hasRecipient: trip.userId !== null,
+    rewardMultiplier: trip.campaign.rewardMultiplier,
   });
-
-  const computedRewardAmount =
-    trip.campaign.rewardMode === "MONEY_REWARD" && trip.userId
-      ? computeTrashBagRewardAmount({
-          rewardableBagCount: rewardableCount,
-          complianceScore: compliance.score,
-          rewardMultiplier: trip.campaign.rewardMultiplier,
-          rewardPerBag: TRASH_BAG_REWARD_PER_BAG,
-        })
-      : 0;
+  const { assignedCount, returnedCount, rewardableCount, conditionStatus, compliance } = evaluation;
+  const computedRewardAmount = evaluation.rewardAmount;
   if (!Number.isSafeInteger(computedRewardAmount) || computedRewardAmount < 0 || computedRewardAmount > MAX_RUPIAH) {
     throw new HttpError(422, "Nilai reward trip melebihi batas yang diizinkan");
   }
 
-  const completedNow = trip.status === "ACTIVE" && known.length === assignedCount;
+  const completedNow =
+    trip.status === "ACTIVE" && (options.mayClose ?? true) && evaluation.reviewedCount === assignedCount;
   const { count } = await tx.trip.updateMany({
     where: { id: tripId, status: trip.status },
     data: {

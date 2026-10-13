@@ -760,7 +760,7 @@ model RewardLedger {
   // `prisma migrate diff/dev` generates:
   //   RewardLedger_one_earn_per_deposit_item   ("depositItemId") WHERE EARN AND status <> 'REVERSED'
   //   RewardLedger_one_reserve_per_redemption  ("referenceId") WHERE REDEEM/Redemption AND status <> 'REJECTED'
-  //   RewardLedger_one_earn_per_trip           ("referenceId") WHERE EARN/Trip AND status <> 'REVERSED'
+  //   RewardLedger_one_earn_per_trip           ("referenceId") WHERE EARN/TRASH_BAG_RETURN/Trip AND status <> 'REVERSED'
   @@index([userId, status])
   @@index([sessionId])
   @@index([depositItemId])

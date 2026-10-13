@@ -1,10 +1,16 @@
 -- M03 enforce step: at most one live trip return earning per trip.
 --
+-- A trip return earning is an EARN with reasonCode 'TRASH_BAG_RETURN' that
+-- references the trip (referenceType 'Trip') or, in the earliest code, one of
+-- its ManualValidation rows. Other EARN rows that reference a trip (e.g.
+-- TOURISM_COMPLIANCE_BONUS from prisma/seed.ts) are not return earnings and are
+-- neither counted nor constrained. The same predicate is used by
+-- lib/trip-validation.ts and scripts/reconcile-wallet-history.ts.
+--
 -- Legacy duplicates are never deleted or deduplicated here. Before any DDL the
 -- guard below counts trips with more than one live (status <> 'REVERSED') trip
--- return earning, resolving legacy rows that reference a ManualValidation
--- (reasonCode 'TRASH_BAG_RETURN') to that validation's trip, and aborts with
--- the count. Procedure (also in the header of scripts/reconcile-wallet-history.ts):
+-- return earning, resolving ManualValidation references to their trip, and
+-- aborts with the count. Procedure (also in the header of scripts/reconcile-wallet-history.ts):
 --   1. npx tsx scripts/reconcile-wallet-history.ts   (read-only inventory,
 --      section duplicateTripEarn; ledgerIds are ordered, keep the first)
 --   2. Resolve each trip through a tracked case: keep the earliest row and
@@ -30,9 +36,9 @@ BEGIN
     FROM "RewardLedger" l
     LEFT JOIN "ManualValidation" v
       ON l."referenceType" = 'ManualValidation' AND v."id" = l."referenceId"
-    WHERE l."entryType" = 'EARN' AND l."status" <> 'REVERSED'
+    WHERE l."entryType" = 'EARN' AND l."status" <> 'REVERSED' AND l."reasonCode" = 'TRASH_BAG_RETURN'
       AND ((l."referenceType" = 'Trip' AND l."referenceId" IS NOT NULL)
-        OR (l."referenceType" = 'ManualValidation' AND l."reasonCode" = 'TRASH_BAG_RETURN' AND v."tripId" IS NOT NULL))
+        OR (l."referenceType" = 'ManualValidation' AND v."tripId" IS NOT NULL))
     GROUP BY 1 HAVING count(*) > 1
   ) duplicates;
 
@@ -45,5 +51,5 @@ END $$;
 -- CreateIndex
 CREATE UNIQUE INDEX "RewardLedger_one_earn_per_trip"
   ON "RewardLedger"("referenceId")
-  WHERE "entryType" = 'EARN' AND "referenceType" = 'Trip'
+  WHERE "entryType" = 'EARN' AND "reasonCode" = 'TRASH_BAG_RETURN' AND "referenceType" = 'Trip'
     AND "referenceId" IS NOT NULL AND "status" <> 'REVERSED';

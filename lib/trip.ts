@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { ConditionStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { calculateCompliance, type ComplianceResult } from "@/lib/tourism";
 
 /** A trip changed between the caller's read and its write (compare-and-set lost). */
 export const TRIP_CHANGED = "Status trip sudah berubah. Muat ulang halaman lalu coba lagi.";
@@ -70,6 +71,60 @@ export function computeTrashBagRewardAmount(input: {
   const base = input.rewardableBagCount * perBag * campaignMult;
   const complianceMult = Math.max(0, Math.min(100, input.complianceScore)) / 100;
   return Math.floor(base * complianceMult);
+}
+
+export interface TripBagEvaluation {
+  assignedCount: number;
+  reviewedCount: number;
+  returnedCount: number;
+  rewardableCount: number;
+  conditionStatus: ConditionStatus | null;
+  compliance: ComplianceResult;
+  rewardAmount: number;
+}
+
+/**
+ * Check-out score and reward of a trip from its bag rows only (one row = one
+ * unit; null = not reviewed). Pure: used by refreshTripOutcome
+ * (lib/trip-validation.ts) and by the read-only inventory, so both price a
+ * trip the same way. A reward needs a MONEY_REWARD campaign and a recipient.
+ */
+export function evaluateTripBags(input: {
+  statuses: ReadonlyArray<ConditionStatus | null>;
+  appCompleted: boolean;
+  rewardMode: string;
+  hasRecipient: boolean;
+  rewardMultiplier?: number | null;
+}): TripBagEvaluation {
+  const known = input.statuses.filter((status): status is ConditionStatus => status !== null);
+  const returnedCount = known.filter((status) => status !== "NOT_RETURNED").length;
+  const rewardableCount = known.filter((status) => isRewardableCondition(status)).length;
+  const conditionStatus = aggregateBagCondition(known);
+  const compliance = calculateCompliance({
+    stage: "CHECK_OUT",
+    appCompleted: input.appCompleted,
+    assignedBagCount: input.statuses.length,
+    returnedBagCount: returnedCount,
+    conditionStatus,
+  });
+  const rewardAmount =
+    input.rewardMode === "MONEY_REWARD" && input.hasRecipient
+      ? computeTrashBagRewardAmount({
+          rewardableBagCount: rewardableCount,
+          complianceScore: compliance.score,
+          rewardMultiplier: input.rewardMultiplier,
+          rewardPerBag: TRASH_BAG_REWARD_PER_BAG,
+        })
+      : 0;
+  return {
+    assignedCount: input.statuses.length,
+    reviewedCount: known.length,
+    returnedCount,
+    rewardableCount,
+    conditionStatus,
+    compliance,
+    rewardAmount,
+  };
 }
 
 /** Manual PATCH may only cancel (or reopen a cancelled trip). Lifecycle otherwise follows gate validations. */

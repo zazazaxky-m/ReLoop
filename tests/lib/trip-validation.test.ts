@@ -237,9 +237,18 @@ describe("refreshTripOutcome", () => {
     expect(raw.rewardLedger.findMany).toHaveBeenCalledWith({
       where: { entryType: "EARN", OR: [
         { businessKey: "trip:t1:return" },
-        { referenceType: "Trip", referenceId: "t1" },
+        { referenceType: "Trip", referenceId: "t1", reasonCode: "TRASH_BAG_RETURN" },
         { referenceType: "ManualValidation", referenceId: { in: ["v-legacy"] }, reasonCode: "TRASH_BAG_RETURN" }] },
       select: { id: true, amount: true, status: true } });
+  });
+
+  it("never closes or pays when the caller may not close, even if every bag is reviewed (legacy re-scan)", async () => {
+    const { tx, raw } = fakeTx({ trip: tripRow() });
+    const outcome = await refreshTripOutcome(tx, "t1", { appCompleted: true, mayClose: false });
+    expect(outcome).toMatchObject({ completed: false, completedNow: false, rewardAmount: 0, computedRewardAmount: 4_000 });
+    expect(raw.trip.updateMany).toHaveBeenCalledWith({
+      where: { id: "t1", status: "ACTIVE" }, data: { complianceStatus: "COMPLIANT", complianceScore: 100 } });
+    expect(raw.rewardLedger.create).not.toHaveBeenCalled();
   });
 
   it("only records progress while some bag is still unreviewed", async () => {

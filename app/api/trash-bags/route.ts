@@ -196,10 +196,12 @@ export async function POST(req: Request) {
  * row (lib/trip-validation.ts), so the last two bags scanned in parallel
  * still close the trip exactly once and earn exactly once.
  *
- * - ACTIVE trip: the bag is updated (a repeated identical scan changes
- *   nothing and answers `idempotent: true`); when every bag is reviewed the
- *   trip is COMPLETED, a CHECK_OUT validation is recorded and the return
- *   earning `trip:<tripId>:return` is written once.
+ * - ACTIVE trip: the bag is updated; a repeated identical scan writes
+ *   nothing and answers `idempotent: true`. Only the scan that reviews the
+ *   last unreviewed bag closes the trip (COMPLETED, one CHECK_OUT validation,
+ *   the return earning `trip:<tripId>:return` written once). An ACTIVE trip
+ *   whose bags were all reviewed before the scan is legacy state (EX-02): no
+ *   scan closes or pays it; that needs an explicit bulk check-out with IDs.
  * - COMPLETED trip: an identical scan is an idempotent replay. A different
  *   status needs `correctionReason`; the correction updates the bag and the
  *   trip compliance, is audited with the paid and recomputed reward, and never
@@ -262,10 +264,21 @@ export async function PATCH(req: Request) {
         { travelAgentId: trip.travelAgentId, organizationId: trip.campaign.organizationId }, tx);
       if (agentBlock) throw new HttpError(422, agentBlock);
 
+      if (unchanged) {
+        // Idempotent replay: nothing is written, and a legacy fully-reviewed
+        // trip is never closed or paid by it.
+        return {
+          trip, bag: await loadBag(), validation: null, rewardAmount: 0, idempotent: true, completedNow: false,
+          compliance: { score: trip.complianceScore, status: trip.complianceStatus }, correction: null,
+        };
+      }
       await validateTripBags(tx, trip.id, [{ id: found.id, status: data.status }]);
-      // Always recompute: a re-scan also closes a legacy trip whose bags are
-      // all reviewed but that an old stale aggregate left ACTIVE.
-      const outcome = await refreshTripOutcome(tx, trip.id, { appCompleted: data.appCompleted });
+      // Only reviewing a previously unreviewed bag may close the trip; changing
+      // an already-reviewed bag never closes it (legacy trips need a bulk check-out).
+      const outcome = await refreshTripOutcome(tx, trip.id, {
+        appCompleted: data.appCompleted,
+        mayClose: before.status === null,
+      });
 
       // Avoid noisy per-bag CHECK_OUT rows: only the scan that closes the trip records the gate validation.
       const validation = outcome.completedNow
@@ -288,7 +301,7 @@ export async function PATCH(req: Request) {
         : null;
       return {
         trip, bag: await loadBag(), validation, rewardAmount: outcome.rewardAmount,
-        idempotent: unchanged && !outcome.completedNow, completedNow: outcome.completedNow,
+        idempotent: false, completedNow: outcome.completedNow,
         compliance: outcome.compliance, correction: null,
       };
     });

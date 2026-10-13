@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
+import { collectWalletInventory } from "@/scripts/reconcile-wallet-history";
 import { f, type ActorKey } from "../support/audit-fixture";
 import { deferred, isStillPending, waitForBlockedBy } from "../support/race-probe";
 
@@ -40,6 +41,13 @@ async function tripState(tripId: string) {
     checkouts: validations.filter((v) => v.validationStage === "CHECK_OUT").length,
     validations: validations.length, earnings,
   };
+}
+
+async function readOnlyInventory() {
+  return f.db.$transaction(async (tx) => {
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    return collectWalletInventory(tx);
+  }, { isolationLevel: "RepeatableRead" });
 }
 
 async function setRewardMode(tripId: string, rewardMode: "MONEY_REWARD" | "COMPLIANCE_ONLY") {
@@ -230,6 +238,25 @@ describe("POST /api/manual-validations check-out validates owned bags (LOG-03)",
   });
 });
 
+describe("trip return earning is recognised only by its reason (C1)", () => {
+  it("a non-return EARN referencing the trip neither blocks nor collides with the recipient's return earning", async () => {
+    const trip = await f.trip({ bagCount: 1 });
+    const { campaignId } = await f.db.trip.findUniqueOrThrow({ where: { id: trip.id } });
+    // Seed-style bonus for a travel-agent user (prisma/seed.ts writes these with referenceType "Trip").
+    await f.db.rewardLedger.create({ data: { userId: f.ids.userB, campaignId, entryType: "EARN", amount: 7_800,
+      status: "AVAILABLE", reasonCode: "TOURISM_COMPLIANCE_BONUS", referenceType: "Trip", referenceId: trip.id } });
+
+    const res = await checkout("adminA", trip.id, { bags: good(trip.bagIds[0]) });
+    expect(res.status).toBe(201);
+    expect(res.body.rewardAmount).toBe(2_000);
+    const rows = await f.db.rewardLedger.findMany({ where: { referenceType: "Trip", referenceId: trip.id }, orderBy: { createdAt: "asc" } });
+    expect(rows.map((row) => [row.userId, row.reasonCode, row.amount, row.businessKey])).toEqual([
+      [f.ids.userB, "TOURISM_COMPLIANCE_BONUS", 7_800, null],
+      [f.ids.userA, "TRASH_BAG_RETURN", 2_000, returnKey(trip.id)],
+    ]);
+  });
+});
+
 describe("trip aggregate is serialized under User -> Trip -> bag locks (EX-02)", () => {
   it("last two bags scanned in parallel: all reviewed, trip COMPLETED, exactly one earning", async () => {
     const trip = await f.trip({ bagCount: 2 });
@@ -386,6 +413,44 @@ describe("authorization, idempotency and corrections", () => {
     const state = await tripState(trip.id);
     expect(state).toMatchObject({ status: "COMPLETED", checkouts: 1 });
     expect(state.earnings.map((row) => row.amount)).toEqual([4_000]);
+  });
+
+  it("a re-scan never closes or pays a legacy fully-reviewed ACTIVE trip; only a bulk check-out with IDs does (I1)", async () => {
+    const trip = await f.trip({ bagCount: 2 });
+    // Pre-fix state (EX-02): old scans reviewed every bag on stale aggregates, the trip stayed ACTIVE, nobody was paid.
+    await f.db.trashBagAssignment.updateMany({ where: { tripId: trip.id }, data: { status: "GOOD", returnedAt: new Date() } });
+
+    const identical = await scan("adminA", trip.bagIds[0], "GOOD");
+    expect(identical.status).toBe(200);
+    expect(identical.body).toMatchObject({ idempotent: true, rewardAmount: 0, validation: null });
+    expect(await tripState(trip.id)).toMatchObject({ status: "ACTIVE", checkouts: 0, earnings: [] });
+    expect(await f.db.auditLog.count({ where: { action: "TRASH_BAG_SCAN_UPDATE" } })).toBe(0);
+
+    const changed = await scan("adminA", trip.bagIds[0], "PARTIAL");
+    expect(changed.status).toBe(200);
+    expect(changed.body).toMatchObject({ idempotent: false, rewardAmount: 0, validation: null });
+    let state = await tripState(trip.id);
+    expect(state).toMatchObject({ status: "ACTIVE", checkouts: 0, earnings: [] });
+    expect(state.bags.find((bag) => bag.id === trip.bagIds[0])!.status).toBe("PARTIAL");
+
+    // The read-only inventory sizes the exposure before anyone closes it.
+    const listed = (await readOnlyInventory()).unclosedReviewedTrips;
+    expect(listed).toEqual([{
+      tripId: trip.id, userId: f.ids.userA, campaignId: expect.any(String), bagRows: 2, returnedCount: 2, rewardableCount: 2,
+      conditionStatus: "PARTIAL",
+      // app 30 + all returned 40 + PARTIAL 20 = 90 -> 2 x 2.000 x 90%; without the app: 60%.
+      recomputedRewardAmount: { appCompleted: 3_600, appNotCompleted: 2_400 },
+    }]);
+
+    // Closing a legacy trip is an explicit operator check-out listing every bag.
+    const closed = await checkout("adminA", trip.id, { bags: [
+      { id: trip.bagIds[0], status: "PARTIAL" }, { id: trip.bagIds[1], status: "GOOD" }] });
+    expect(closed.status).toBe(201);
+    expect(closed.body.rewardAmount).toBe(3_600);
+    state = await tripState(trip.id);
+    expect(state).toMatchObject({ status: "COMPLETED", checkouts: 1 });
+    expect(state.earnings.map((row) => [row.amount, row.businessKey])).toEqual([[3_600, returnKey(trip.id)]]);
+    expect((await readOnlyInventory()).unclosedReviewedTrips).toEqual([]);
   });
 
   it("a change after close needs a recorded correction and never mints a second reward", async () => {

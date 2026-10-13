@@ -260,7 +260,8 @@ describe('/api/trash-bags', () => {
       expect(calls.slice(0, 5)).toEqual(['begin', 'lock', 'validateBags', 'refresh', 'commit']);
       expect(tripValidation.lockTripAggregate).toHaveBeenCalledWith(tx, 't1');
       expect(tripValidation.validateTripBags).toHaveBeenCalledWith(tx, 't1', [{ id: 'b1', status: 'GOOD' }]);
-      expect(tripValidation.refreshTripOutcome).toHaveBeenCalledWith(tx, 't1', { appCompleted: true });
+      // b1 was unreviewed: reviewing it may close the trip.
+      expect(tripValidation.refreshTripOutcome).toHaveBeenCalledWith(tx, 't1', { appCompleted: true, mayClose: true });
       expect(tx.manualValidation.create).not.toHaveBeenCalled();
       expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'TRASH_BAG_SCAN_UPDATE', entityId: 'b1' }));
       expect(createNotification).not.toHaveBeenCalled();
@@ -292,13 +293,37 @@ describe('/api/trash-bags', () => {
       expect(createNotification).not.toHaveBeenCalledWith(expect.objectContaining({ userId: 'agent-user-1', type: 'TRASH_BAG_REWARD' }));
     });
 
-    it('answers a repeated identical scan on an ACTIVE trip as idempotent without an audit row', async () => {
+    it('answers a repeated identical scan on an ACTIVE trip as idempotent without writing anything', async () => {
       vi.mocked(tripValidation.lockTripAggregate).mockResolvedValueOnce(
         lockedTrip({ bagAssignments: [{ id: 'b1', bagQrCode: 'QR1', status: 'GOOD' }, { id: 'b2', bagQrCode: 'QR2', status: null }] }) as any);
       const res = await patch({ id: 'b1', status: 'GOOD' });
       expect(res.status).toBe(200);
-      expect((await res.json()).idempotent).toBe(true);
+      expect(await res.json()).toMatchObject({
+        idempotent: true, rewardAmount: 0, validation: null, compliance: { score: 50, status: 'NEEDS_REVIEW' } });
+      expect(tripValidation.validateTripBags).not.toHaveBeenCalled();
+      expect(tripValidation.refreshTripOutcome).not.toHaveBeenCalled();
       expect(logAudit).not.toHaveBeenCalled();
+    });
+
+    it('never closes or pays a legacy fully-reviewed ACTIVE trip on an identical re-scan', async () => {
+      vi.mocked(tripValidation.lockTripAggregate).mockResolvedValueOnce(
+        lockedTrip({ bagAssignments: [{ id: 'b1', bagQrCode: 'QR1', status: 'GOOD' }, { id: 'b2', bagQrCode: 'QR2', status: 'GOOD' }] }) as any);
+      const res = await patch({ id: 'b1', status: 'GOOD' });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ idempotent: true, rewardAmount: 0, validation: null });
+      expect(tripValidation.refreshTripOutcome).not.toHaveBeenCalled();
+      expect(createNotification).not.toHaveBeenCalled();
+    });
+
+    it('a changed scan of an already-reviewed bag may not close the trip (legacy trips close by bulk check-out)', async () => {
+      vi.mocked(tripValidation.lockTripAggregate).mockResolvedValueOnce(
+        lockedTrip({ bagAssignments: [{ id: 'b1', bagQrCode: 'QR1', status: 'GOOD' }, { id: 'b2', bagQrCode: 'QR2', status: 'GOOD' }] }) as any);
+      const res = await patch({ id: 'b1', status: 'PARTIAL', appCompleted: true });
+      expect(res.status).toBe(200);
+      expect((await res.json()).idempotent).toBe(false);
+      expect(tripValidation.validateTripBags).toHaveBeenCalledWith(tx, 't1', [{ id: 'b1', status: 'PARTIAL' }]);
+      expect(tripValidation.refreshTripOutcome).toHaveBeenCalledWith(tx, 't1', { appCompleted: true, mayClose: false });
+      expect(tx.manualValidation.create).not.toHaveBeenCalled();
     });
 
     it('replays an identical scan on a COMPLETED trip without writing anything', async () => {
