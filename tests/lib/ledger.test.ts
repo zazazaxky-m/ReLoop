@@ -88,7 +88,9 @@ describe('ledger', () => {
       vi.mocked(prisma.rewardLedger.create).mockResolvedValue({ id: '2' } as any);
       const res = await createEarnEntry({ userId: 'u1', depositItemId: 'd1', amount: 10, status: 'AVAILABLE' });
       expect(res.id).toBe('2');
-      expect(prisma.rewardLedger.create).toHaveBeenCalled();
+      expect(prisma.rewardLedger.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ entryType: 'EARN', depositItemId: 'd1', businessKey: 'deposit-item:d1:earn' }),
+      });
     });
   });
 
@@ -105,9 +107,24 @@ describe('ledger', () => {
       await createRedeemReserve({ userId: 'u1', amount: 100, redemptionId: 'red1' });
       expect(prisma.rewardLedger.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ entryType: 'REDEEM', amount: -100, status: 'PENDING', referenceType: 'Redemption', referenceId: 'red1' })
+          data: expect.objectContaining({ entryType: 'REDEEM', amount: -100, status: 'PENDING', referenceType: 'Redemption', referenceId: 'red1', businessKey: 'redemption:red1:reserve' })
         })
       );
+    });
+
+    it('writes through the transaction it is given', async () => {
+      const tx = {
+        rewardLedger: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({ id: 'res-tx' }),
+        },
+      };
+      const res = await createRedeemReserve({ userId: 'u1', amount: 100, redemptionId: 'red1' }, tx as any);
+      expect(res).toEqual({ id: 'res-tx' });
+      expect(tx.rewardLedger.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ userId: 'u1', amount: -100, businessKey: 'redemption:red1:reserve' }),
+      });
+      expect(prisma.rewardLedger.create).not.toHaveBeenCalled();
     });
   });
 

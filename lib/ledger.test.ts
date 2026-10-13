@@ -9,6 +9,8 @@ import {
   ledgerReasonLabel,
   getReconciliationReport,
   getLedgerHistory,
+  depositItemEarnKey,
+  redemptionReserveKey,
   type LedgerGroup 
 } from './ledger';
 import { prisma } from './prisma';
@@ -144,6 +146,30 @@ describe('lib/ledger', () => {
       const bal = await getWalletBalance('user1');
       expect(bal.available).toBe(0);
     });
+
+    it('reads through the given transaction client instead of the global client', async () => {
+      const tx = {
+        rewardLedger: {
+          groupBy: vi.fn().mockResolvedValue([
+            { entryType: 'EARN', status: 'AVAILABLE', _sum: { amount: 500 } },
+            { entryType: 'REDEEM', status: 'PENDING', _sum: { amount: -200 } },
+          ]),
+        },
+      };
+      const bal = await getWalletBalance('user1', tx as any);
+      expect(bal).toMatchObject({ available: 300, reserved: 200 });
+      expect(tx.rewardLedger.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: 'user1' } }),
+      );
+      expect(prisma.rewardLedger.groupBy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('business keys', () => {
+    it('formats one key per financial effect', () => {
+      expect(redemptionReserveKey('r1')).toBe('redemption:r1:reserve');
+      expect(depositItemEarnKey('di1')).toBe('deposit-item:di1:earn');
+    });
   });
 
   describe('getLedgerHistory', () => {
@@ -190,6 +216,7 @@ describe('lib/ledger', () => {
           entryType: 'EARN',
           referenceType: 'DepositItem',
           referenceId: 'di1',
+          businessKey: 'deposit-item:di1:earn',
         })
       });
     });
@@ -214,6 +241,7 @@ describe('lib/ledger', () => {
           status: 'PENDING',
           referenceType: 'Redemption',
           referenceId: 'r1',
+          businessKey: 'redemption:r1:reserve',
         })
       });
     });

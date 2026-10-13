@@ -93,9 +93,16 @@ export function computeBalance(groups: LedgerGroup[]): WalletBalance {
   return { available, pending, redeemed, reserved, totalEarned };
 }
 
-/** Aggregate wallet balance from append-only ledger rows. */
-export async function getWalletBalance(userId: string): Promise<WalletBalance> {
-  const rows = await prisma.rewardLedger.groupBy({
+/**
+ * Aggregate wallet balance from append-only ledger rows. Pass the transaction
+ * that holds `lockUser(tx, userId)` when the result decides a balance mutation.
+ */
+export async function getWalletBalance(
+  userId: string,
+  tx?: Prisma.TransactionClient,
+): Promise<WalletBalance> {
+  const db = tx ?? prisma;
+  const rows = await db.rewardLedger.groupBy({
     by: ["status", "entryType"],
     where: { userId },
     _sum: { amount: true },
@@ -109,6 +116,16 @@ export async function getWalletBalance(userId: string): Promise<WalletBalance> {
   );
 }
 
+/** Business key of the single EARN row a deposit item may produce. */
+export function depositItemEarnKey(depositItemId: string): string {
+  return `deposit-item:${depositItemId}:earn`;
+}
+
+/** Business key of the reserve (REDEEM) row backing one redemption request. */
+export function redemptionReserveKey(redemptionId: string): string {
+  return `redemption:${redemptionId}:reserve`;
+}
+
 export interface CreateEarnParams {
   userId: string;
   organizationId?: string | null;
@@ -120,7 +137,11 @@ export interface CreateEarnParams {
   reasonCode?: string;
 }
 
-/** Append-only EARN entry. Never updates existing rows. */
+/**
+ * Append-only EARN entry, at most one per deposit item (business key
+ * `deposit-item:<id>:earn`; a partial unique index is the database backstop).
+ * Never updates existing rows.
+ */
 export async function createEarnEntry(
   params: CreateEarnParams,
   tx?: Prisma.TransactionClient,
@@ -147,11 +168,16 @@ export async function createEarnEntry(
       reasonCode: params.reasonCode ?? "ITEM_ACCEPTED",
       referenceType: "DepositItem",
       referenceId: params.depositItemId,
+      businessKey: depositItemEarnKey(params.depositItemId),
     },
   });
 }
 
-/** Creates the REDEEM/PENDING reserve entry that backs a redemption request. */
+/**
+ * Creates the REDEEM/PENDING reserve entry that backs a redemption request,
+ * keyed `redemption:<id>:reserve`. Callers must hold `lockUser` on the same
+ * `tx` and have checked the balance through it (see lib/wallet-service.ts).
+ */
 export async function createRedeemReserve(
   params: {
     userId: string;
@@ -176,6 +202,7 @@ export async function createRedeemReserve(
       reasonCode: "REDEMPTION_RESERVE",
       referenceType: "Redemption",
       referenceId: params.redemptionId,
+      businessKey: redemptionReserveKey(params.redemptionId),
     },
   });
 }

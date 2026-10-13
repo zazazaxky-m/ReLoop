@@ -61,6 +61,32 @@ export async function waitForLockWait(
   throw new Error(`backend ${waiterPid} was not blocked by ${holderPid} within ${timeoutMs}ms`);
 }
 
+/**
+ * Finds the backend that `holderPid` is blocking when the waiter's PID is not
+ * known to the test (e.g. a request served by the Next child). Polls pg_stat_activity
+ * through an independent connection; rejects after `timeoutMs`.
+ */
+export async function waitForBlockedBy(
+  observer: PrismaClient,
+  { holderPid, timeoutMs = 5_000 }: { holderPid: number; timeoutMs?: number },
+): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const [waiterPid] = await backendsBlockedBy(observer, holderPid);
+    if (waiterPid !== undefined) return waiterPid;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`no backend was blocked by ${holderPid} within ${timeoutMs}ms`);
+}
+
+/** Backends currently blocked by `holderPid` (empty when nothing waits on its locks). */
+export async function backendsBlockedBy(observer: PrismaClient, holderPid: number): Promise<number[]> {
+  const rows = await observer.$queryRaw<{ pid: number }[]>`
+    SELECT pid FROM pg_stat_activity
+    WHERE pid <> pg_backend_pid() AND ${holderPid}::int = ANY(pg_blocking_pids(pid))`;
+  return rows.map((row) => row.pid);
+}
+
 export class InjectedFault extends Error {
   constructor(message = "INJECTED_LOST_RESPONSE") {
     super(message);

@@ -40,6 +40,45 @@ dan Flutter mem-parse file yang sama dengan model `fromJson` asli di
 `POST /api/scan` (201, dibaca `ScanResult.fromJson`). Penambahan field boleh;
 menghapus, mengganti nama, atau mengubah tipe field wajib membuat versi baru.
 
+## Pengajuan pencairan dan idempotency (M01)
+
+`POST /api/redemptions` (role USER) menerima:
+
+```json
+{ "amount": 50000, "payoutAccountId": "<id akun pencairan>", "idempotencyKey": "<kunci unik per pengajuan>" }
+```
+
+- `amount` adalah rupiah bulat positif, maksimal 2.147.483.647. Pecahan, nol,
+  negatif, string, dan nilai di luar batas ditolak 422 `Validasi gagal`
+  (dengan `issues[].path = "amount"`) sebelum transaksi saldo dimulai.
+- `idempotencyKey` berisi 1-80 karakter ASCII terlihat (tanpa spasi), misalnya
+  UUID. Buat satu kunci untuk satu pengajuan yang dikonfirmasi pengguna,
+  simpan, dan kirim ulang kunci yang sama pada setiap retry (timeout, respons
+  hilang, ketukan ganda). Ubah jumlah atau akun berarti pengajuan baru dengan
+  kunci baru.
+- Kunci berlaku per pengguna. Kunci yang sama milik pengguna lain tidak pernah
+  mengembalikan data mereka.
+- Klien lama boleh sementara tidak mengirim `idempotencyKey`; server membuat
+  kunci dan mengembalikannya agar retry tetap aman. Klien baru wajib mengirimnya.
+
+Respons:
+
+| Status | Arti |
+| --- | --- |
+| 201 | Pengajuan baru: `{ redemption, idempotent: false, idempotencyKey }` |
+| 200 | Retry dengan kunci dan isi yang sama: pengajuan lama, `{ redemption, idempotent: true, idempotencyKey }` (tidak ada potongan saldo kedua) |
+| 409 | Kunci sama tetapi jumlah/akun berbeda, atau akun pencairan dinonaktifkan |
+| 404 | Akun pencairan tidak ditemukan atau bukan milik pengguna |
+| 422 | Validasi gagal, di bawah minimum (`min_redemption`, bawaan Rp10.000), atau `Saldo tersedia tidak mencukupi` |
+| 503 | Antrean saldo sibuk; tidak ada yang tersimpan, ulangi dengan kunci yang sama |
+
+`idempotent` dan `idempotencyKey` adalah field tambahan; field `redemption`
+tidak berubah. Saldo diperiksa dan dipotong (reserve `REDEEM/PENDING` dengan
+business key `redemption:<id>:reserve`) dalam satu transaksi di bawah lock baris
+pengguna, sehingga pengajuan paralel tidak dapat memakai saldo yang sama. Status
+akun pencairan dibaca ulang di dalam transaksi tersebut. Audit ditulis setelah
+commit; kegagalannya tidak mengubah respons pengajuan yang sudah tersimpan.
+
 ## Strategi Caching & Offline (Khusus Pengepul)
 
 Mengingat **Pengepul** sering beroperasi di area dengan konektivitas rendah saat melakukan pengambilan (*pickup*) dari mesin RVM atau tempat wisata, aplikasi seluler dirancang untuk mendukung *Offline Tolerance* secara terbatas:

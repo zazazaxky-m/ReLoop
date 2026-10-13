@@ -28,6 +28,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "backfill:payout-encryption": "tsx scripts/backfill-payout-encryption.ts",
     "backfill:email-lookup": "tsx scripts/backfill-email-lookup.ts",
+    "reconcile:wallet": "tsx scripts/reconcile-wallet-history.ts",
     "db:reset": "prisma migrate reset --force"
   },
   "prisma": {

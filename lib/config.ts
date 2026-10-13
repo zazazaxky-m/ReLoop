@@ -1,4 +1,8 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
+
+/** Reads through a transaction when the value decides a write made in it. */
+type ConfigReader = Pick<Prisma.TransactionClient, "systemConfig">;
 
 export const CONFIG_KEYS = {
   MIN_REDEMPTION: "min_redemption",
@@ -14,13 +18,13 @@ export const CONFIG_DEFAULTS: Record<string, string> = {
   [CONFIG_KEYS.POINTS_TO_RUPIAH]: "1",
 };
 
-export async function getConfig(key: string): Promise<string> {
-  const row = await prisma.systemConfig.findUnique({ where: { key } });
+export async function getConfig(key: string, db: ConfigReader = prisma): Promise<string> {
+  const row = await db.systemConfig.findUnique({ where: { key } });
   return row?.value ?? CONFIG_DEFAULTS[key] ?? "";
 }
 
-export async function getConfigInt(key: string): Promise<number> {
-  const value = await getConfig(key);
+export async function getConfigInt(key: string, db: ConfigReader = prisma): Promise<number> {
+  const value = await getConfig(key, db);
   const n = parseInt(value, 10);
   return Number.isNaN(n) ? 0 : n;
 }
@@ -33,8 +37,8 @@ export async function setConfig(key: string, value: string) {
   });
 }
 
-export async function getMinRedemption(): Promise<number> {
-  return getConfigInt(CONFIG_KEYS.MIN_REDEMPTION);
+export async function getMinRedemption(db: ConfigReader = prisma): Promise<number> {
+  return getConfigInt(CONFIG_KEYS.MIN_REDEMPTION, db);
 }
 
 /** Returns all known config keys merged with stored overrides. */

@@ -737,9 +737,16 @@ model RewardLedger {
   referenceType  String?
   referenceId    String?
   actorId        String?
+  /// Unique key of the financial effect this row records (e.g. `redemption:<id>:reserve`,
+  /// `deposit-item:<id>:earn`). Required for every new write; null only on legacy rows.
+  businessKey    String?         @unique
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
+  // Partial unique indexes Prisma 6 cannot express (migration 20261013122400_wallet_keys_enforce);
+  // remove any DROP INDEX for them that `prisma migrate diff/dev` generates:
+  //   RewardLedger_one_earn_per_deposit_item   ("depositItemId") WHERE EARN AND status <> 'REVERSED'
+  //   RewardLedger_one_reserve_per_redemption  ("referenceId") WHERE REDEEM/Redemption AND status <> 'REJECTED'
   @@index([userId, status])
   @@index([sessionId])
   @@index([depositItemId])
@@ -778,10 +785,14 @@ model Redemption {
   manualTransferProofUrl  String?
   note                    String?
   processedBySuperadminId String?
-  idempotencyKey          String             @unique
+  /// Client key for one logical request, unique per user (not globally).
+  idempotencyKey          String
+  /// sha256 of the canonical request (amount + payoutAccountId); null on legacy rows.
+  requestHash             String?
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
 
+  @@unique([userId, idempotencyKey])
   @@index([userId, status])
   @@index([status])
 }
