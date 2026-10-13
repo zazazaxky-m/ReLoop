@@ -1,10 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { handleAcceptance } from '@/lib/machine-events/acceptance';
+import { handleAcceptance, handleItemRejected } from '@/lib/machine-events/acceptance';
 import * as locks from '@/lib/db-locks';
 import * as credit from '@/lib/reward-credit';
 import * as machineState from '@/lib/machine-state';
 import * as reward from '@/lib/reward';
-import { UNKNOWN_WASTE_TYPE_REASON } from '@/lib/machine-events/shared';
+import { UNKNOWN_WASTE_TYPE_NAME, UNKNOWN_WASTE_TYPE_REASON } from '@/lib/machine-events/shared';
 
 vi.mock('@/lib/db-locks', () => ({
   lockUser: vi.fn(),
@@ -30,6 +30,7 @@ const mockTx = {
   depositSession: { findUnique: vi.fn(), update: vi.fn() },
   depositItem: { findUnique: vi.fn(), updateMany: vi.fn() },
   machine: { findUnique: vi.fn() },
+  rewardLedger: { count: vi.fn() },
 } as any;
 const machine = { id: 'm1', organizationId: 'o1', hasCompactor: false };
 
@@ -171,13 +172,34 @@ describe('handleAcceptance', () => {
     expect(mockTx.depositSession.update).not.toHaveBeenCalled();
   });
 
-  it('keeps the unknown-waste-type fallback in review with no reward and no rate lookup', async () => {
+  it('hard-zeroes an unknown-type item and keeps it in review, whatever the fallback type is worth (C3)', async () => {
+    // The fallback type is worth something (an admin set a default reward): still 0.
     mockTx.depositItem.findUnique.mockResolvedValue(item({ status: 'REVIEW', validationReasonCode: UNKNOWN_WASTE_TYPE_REASON,
-      wasteType: { unit: 'ITEM', defaultRewardPerItem: null, aiAcceptedLabels: [] } }));
-    vi.mocked(reward.computeRewardAmount).mockReturnValue(0);
+      wasteType: { unit: 'ITEM', defaultRewardPerItem: 500, aiAcceptedLabels: [] } }));
+    vi.mocked(reward.computeRewardAmount).mockReturnValue(500);
     await run();
     expect(reward.resolveRewardRate).not.toHaveBeenCalled();
-    expect(itemUpdate().data).toMatchObject({ status: 'REVIEW', validationReasonCode: UNKNOWN_WASTE_TYPE_REASON, rewardAmount: 0, complianceMultiplier: 0 });
+    expect(itemUpdate().data).toMatchObject({ status: 'REVIEW', validationReasonCode: UNKNOWN_WASTE_TYPE_REASON,
+      rewardAmount: 0, baseRewardAmount: 0, complianceMultiplier: 0 });
+    expect(credited()).toMatchObject({ amount: 0 });
+  });
+
+  it('routes an unknown-type item to review even without a valid weight (C3)', async () => {
+    mockTx.depositItem.findUnique.mockResolvedValue(item({ status: 'REVIEW', measuredWeightGrams: null,
+      validationReasonCode: 'REVERSE_MOTION', // reason overwritten earlier: the fallback type still identifies it
+      wasteType: { name: UNKNOWN_WASTE_TYPE_NAME, organizationId: null, unit: 'ITEM', defaultRewardPerItem: 500,
+        minWeightGrams: 10, maxWeightGrams: 20, aiAcceptedLabels: [] } }));
+    vi.mocked(reward.computeRewardAmount).mockReturnValue(500);
+    await run();
+    expect(itemUpdate().data).toMatchObject({ status: 'REVIEW', validationReasonCode: UNKNOWN_WASTE_TYPE_REASON, rewardAmount: 0 });
+    expect(credited()).toMatchObject({ amount: 0 });
+  });
+
+  it('fails closed when the machine configuration cannot be read (C4)', async () => {
+    mockTx.machine.findUnique.mockResolvedValue(null);
+    await run();
+    // AI_REQUIRED without a classification -> review; COMPLIANCE_ONLY -> no money.
+    expect(itemUpdate().data).toMatchObject({ status: 'REVIEW', validationReasonCode: 'AI_UNAVAILABLE', rewardAmount: 0 });
     expect(credited()).toMatchObject({ amount: 0 });
   });
 
@@ -201,3 +223,58 @@ describe('handleAcceptance', () => {
     expect(credit.creditReward).not.toHaveBeenCalled();
   });
 });
+
+describe('handleItemRejected (M04 fix round 1, C2)', () => {
+  const pendingItem = (extra: Record<string, unknown> = {}) => ({
+    sessionId: 's1', status: 'PENDING', acceptanceEventId: null, validationReasonCode: null, session: { userId: 'u1' }, ...extra,
+  });
+  const reject = (sessionId: string | null = 's1') =>
+    handleItemRejected(mockTx, { sessionId, depositItemId: 'd1', reason: 'ABNORMAL_ITEM_WEIGHT' });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTx.depositItem.findUnique.mockResolvedValue(pendingItem());
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'PROCESSING_ITEM' });
+    mockTx.depositItem.updateMany.mockResolvedValue({ count: 1 });
+    mockTx.rewardLedger.count.mockResolvedValue(0);
+    vi.mocked(machineState.transitionSession).mockReturnValue('ACTIVE' as any);
+  });
+
+  it('locks User -> DepositSession -> DepositItem, then rejects a pending item by compare-and-set', async () => {
+    await reject();
+    const order = [locks.lockUser, locks.lockDepositSession, locks.lockDepositItem]
+      .map((fn) => vi.mocked(fn).mock.invocationCallOrder[0]);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(locks.lockUser).toHaveBeenCalledWith(mockTx, 'u1');
+    expect(mockTx.depositItem.findUnique.mock.invocationCallOrder.at(-1)).toBeGreaterThan(order[2]);
+    expect(mockTx.depositSession.update).toHaveBeenCalledWith({ where: { id: 's1' }, data: { status: 'ACTIVE' } });
+    expect(mockTx.depositItem.updateMany).toHaveBeenCalledWith({
+      where: { id: 'd1', status: { in: ['PENDING', 'REVIEW'] }, acceptanceEventId: null },
+      data: { status: 'REJECTED', validationReasonCode: 'ABNORMAL_ITEM_WEIGHT' },
+    });
+  });
+
+  it('never flips an accepted, rejected, reviewed or already priced item, nor one with money', async () => {
+    for (const extra of [
+      { status: 'ACCEPTED' }, { status: 'REJECTED' }, { status: 'REVIEW', acceptanceEventId: 'evt0' },
+      { status: 'ACCEPTED', validationReasonCode: 'REVIEW_APPROVED' },
+    ]) {
+      mockTx.depositItem.findUnique.mockResolvedValue(pendingItem(extra));
+      await reject();
+    }
+    mockTx.depositItem.findUnique.mockResolvedValue(pendingItem({ status: 'REVIEW' }));
+    mockTx.rewardLedger.count.mockResolvedValue(1);
+    await reject();
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for an unknown item and skips the session step without a sessionId', async () => {
+    mockTx.depositItem.findUnique.mockResolvedValueOnce(null);
+    await reject();
+    expect(locks.lockUser).not.toHaveBeenCalled();
+    await reject(null);
+    expect(mockTx.depositSession.update).not.toHaveBeenCalled();
+    expect(mockTx.depositItem.updateMany).toHaveBeenCalledTimes(1);
+  });
+});
+

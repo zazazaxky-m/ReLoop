@@ -41,6 +41,7 @@ describe('fraud', () => {
   describe('flagAnomaly', () => {
     it('updates deposit item if ID is provided', async () => {
       mockTx.depositSession.findUnique.mockResolvedValue(null);
+      mockTx.depositItem.findUnique.mockResolvedValue({ status: 'PENDING', acceptanceEventId: null, validationReasonCode: null });
       await flagAnomaly(mockTx, 's1', 'd1', 'TEST_REASON');
       expect(mockTx.depositItem.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 'd1' }, data: { status: 'REVIEW', validationReasonCode: 'TEST_REASON' } })
@@ -65,8 +66,25 @@ describe('fraud', () => {
       );
     });
 
+    it('never reopens a decided item or erases a decisive reason (M04 fix round 1, I1)', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(null);
+      for (const decided of [
+        { status: 'REJECTED', acceptanceEventId: null, validationReasonCode: 'ABNORMAL_ITEM_WEIGHT' },
+        { status: 'ACCEPTED', acceptanceEventId: 'e1', validationReasonCode: 'ACCEPTED' },
+        { status: 'REVIEW', acceptanceEventId: 'e1', validationReasonCode: 'AI_TYPE_MISMATCH' },
+      ]) {
+        mockTx.depositItem.findUnique.mockResolvedValue(decided);
+        await flagAnomaly(mockTx, 's1', 'd1', 'REVERSE_MOTION');
+      }
+      expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+      mockTx.depositItem.findUnique.mockResolvedValue({ status: 'REVIEW', acceptanceEventId: null, validationReasonCode: 'UNKNOWN_WASTE_TYPE' });
+      await flagAnomaly(mockTx, 's1', 'd1', 'REVERSE_MOTION');
+      expect(mockTx.depositItem.update).toHaveBeenCalledWith({ where: { id: 'd1' }, data: { status: 'REVIEW' } });
+    });
+
     it('writes the session before the item (DepositSession -> DepositItem)', async () => {
       mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+      mockTx.depositItem.findUnique.mockResolvedValue({ status: 'PENDING', acceptanceEventId: null, validationReasonCode: null });
       await flagAnomaly(mockTx, 's1', 'd1', 'TEST_REASON');
       expect(mockTx.depositSession.update.mock.invocationCallOrder[0])
         .toBeLessThan(mockTx.depositItem.update.mock.invocationCallOrder[0]);
@@ -82,7 +100,7 @@ describe('fraud', () => {
   describe('holdItemForFraud (M04)', () => {
     const ref = { sessionId: 's1', session: { userId: 'u1' } };
     beforeEach(() => {
-      mockTx.depositItem.findUnique.mockResolvedValueOnce(ref).mockResolvedValueOnce({ validationReasonCode: 'ACCEPTED' });
+      mockTx.depositItem.findUnique.mockResolvedValueOnce(ref).mockResolvedValueOnce({ status: 'ACCEPTED', acceptanceEventId: 'e1', validationReasonCode: 'ACCEPTED' });
       mockTx.rewardLedger.findMany.mockResolvedValue([{ id: 'e1', amount: 100 }]);
       mockTx.rewardLedger.updateMany.mockResolvedValue({ count: 1 });
       vi.mocked(ledger.getWalletBalance).mockResolvedValue({ available: 100 } as any);
@@ -102,7 +120,7 @@ describe('fraud', () => {
       expect(ledger.getWalletBalance).toHaveBeenCalledWith('u1', mockTx);
       expect(mockTx.rewardLedger.updateMany).toHaveBeenCalledWith({ where: { id: 'e1', status: 'AVAILABLE' }, data: { status: 'PENDING' } });
       expect(credit.openRewardReconciliationCase).not.toHaveBeenCalled();
-      expect(result).toEqual({ sessionId: 's1', reviewFinal: false, heldAmount: 100, reconciliationCaseId: null });
+      expect(result).toEqual({ sessionId: 's1', decided: false, heldAmount: 100, reconciliationCaseId: null });
     });
 
     it('opens a reconciliation case instead of pushing the balance below zero', async () => {
@@ -115,13 +133,31 @@ describe('fraud', () => {
       expect(fraudHoldKey('d1')).toBe('fraud:d1:hold:v1');
     });
 
-    it("keeps a reviewer's final decision and only records the fraud flag", async () => {
+    it("keeps a reviewer's final decision and a REJECTED item, only recording the fraud flag (I1)", async () => {
+      for (const decided of [
+        { status: 'ACCEPTED', acceptanceEventId: 'e1', validationReasonCode: 'REVIEW_APPROVED' },
+        { status: 'REJECTED', acceptanceEventId: null, validationReasonCode: 'REVIEW_REJECTED' },
+        { status: 'REJECTED', acceptanceEventId: 'e1', validationReasonCode: 'WEIGHT_BELOW_MIN' },
+        { status: 'REJECTED', acceptanceEventId: null, validationReasonCode: 'ABNORMAL_ITEM_WEIGHT' },
+      ]) {
+        vi.clearAllMocks();
+        mockTx.depositItem.findUnique.mockReset();
+        mockTx.depositItem.findUnique.mockResolvedValueOnce(ref).mockResolvedValueOnce(decided);
+        const result = await holdItemForFraud(mockTx, 'd1', 'STRING_PULL');
+        expect(mockTx.depositItem.update).toHaveBeenCalledTimes(1);
+        expect(mockTx.depositItem.update).toHaveBeenCalledWith({ where: { id: 'd1' }, data: { externalFraudFlag: true } });
+        expect(mockTx.rewardLedger.findMany).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ decided: true, heldAmount: 0 });
+      }
+    });
+
+    it('keeps the decisive reason of an item already in review, but still holds its money (I1)', async () => {
       mockTx.depositItem.findUnique.mockReset();
-      mockTx.depositItem.findUnique.mockResolvedValueOnce(ref).mockResolvedValueOnce({ validationReasonCode: 'REVIEW_APPROVED' });
-      const result = await holdItemForFraud(mockTx, 'd1', 'STRING_PULL');
-      expect(mockTx.depositItem.update).toHaveBeenCalledWith({ where: { id: 'd1' }, data: { externalFraudFlag: true } });
-      expect(mockTx.rewardLedger.findMany).not.toHaveBeenCalled();
-      expect(result).toMatchObject({ reviewFinal: true, heldAmount: 0 });
+      mockTx.depositItem.findUnique.mockResolvedValueOnce(ref)
+        .mockResolvedValueOnce({ status: 'REVIEW', acceptanceEventId: null, validationReasonCode: 'UNKNOWN_WASTE_TYPE' });
+      await holdItemForFraud(mockTx, 'd1', 'STRING_PULL');
+      expect(mockTx.depositItem.update).toHaveBeenCalledWith({ where: { id: 'd1' }, data: { status: 'REVIEW', externalFraudFlag: true } });
+      expect(mockTx.rewardLedger.findMany).toHaveBeenCalled();
     });
 
     it('does nothing for an unknown item', async () => {

@@ -217,6 +217,12 @@ describe('lib/reward', () => {
       expect(verifyMaterial({ policy, ...pet, ...input })).toEqual({ typeMatch, reason });
     });
 
+    it('an unknown policy value fails closed as AI_REQUIRED (C4)', () => {
+      expect(verifyMaterial({ policy: 'BOGUS' as any, ...pet })).toEqual({ typeMatch: false, reason: 'AI_UNAVAILABLE' });
+      expect(verifyMaterial({ policy: undefined as any, ...pet, barcodeValue: '899' })).toEqual({ typeMatch: false, reason: 'AI_UNAVAILABLE' });
+      expect(verifyMaterial({ policy: 'BOGUS' as any, ...pet, aiLabel: 'bottle_pet', aiConfidence: 0.9 })).toEqual({ typeMatch: true, reason: 'AI_MATCH' });
+    });
+
     it('a waste type without a taxonomy cannot be verified by AI: AI_REQUIRED holds it, other policies decide explicitly', () => {
       expect(verifyMaterial({ policy: 'AI_REQUIRED', acceptedLabels: [], aiLabel: 'bottle_pet', aiConfidence: 0.9 }))
         .toEqual({ typeMatch: false, reason: 'AI_TAXONOMY_MISSING' });

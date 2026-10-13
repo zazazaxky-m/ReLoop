@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { getWalletBalance } from "@/lib/ledger";
 import { signMachinePayload } from "@/lib/machine-auth";
 import { ingestMachineEvent } from "@/lib/machine-events/ingest";
+import { UNKNOWN_WASTE_TYPE_NAME } from "@/lib/machine-events/shared";
 import { resolveRewardRate } from "@/lib/reward";
 import { f, type ActorKey } from "../support/audit-fixture";
 import { InjectedFault, deferred, isStillPending, waitForBlockedBy } from "../support/race-probe";
@@ -490,5 +491,163 @@ describe("fraud holds and erased recipients never force the ledger", () => {
     expect(replay.status).toBe(200);
     expect(replay.body.idempotent).toBe(true);
     expect(await f.db.rewardReconciliationCase.count()).toBe(1);
+  });
+});
+
+describe("decided items stay decided (M04 fix round 1)", () => {
+  /** ITEM_DETECTED (+ optional weight) without an acceptance point: the item stays PENDING. */
+  async function detectOnly(options: { weightGrams?: number | null; unknownType?: boolean } = {}) {
+    const session = await f.db.depositSession.create({
+      data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
+    const detected = options.unknownType
+      ? edgeEvent(session.id, "ITEM_DETECTED", { quantity: 1, inputBeam: true })
+      : edgeEvent(session.id, "ITEM_DETECTED", { wasteTypeId: await fixtureWasteTypeId(), quantity: 1, inputBeam: true });
+    const events = [detected];
+    if (options.weightGrams !== null) {
+      events.push(edgeEvent(session.id, "WEIGHT_MEASURED", { weightGrams: options.weightGrams ?? 25, stable: true }));
+    }
+    const res = await postBatch(events);
+    expect(res.body.results.map((r: Json) => r.status)).toEqual(events.map(() => "accepted"));
+    const item = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: session.id } });
+    return { session, item };
+  }
+  const machineEvent = async (sessionId: string, eventType: string, payload: Record<string, unknown>, depositItemId?: string) => {
+    const event = edgeEvent(sessionId, eventType, payload);
+    if (depositItemId) event.depositItemId = depositItemId;
+    const res = await postBatch([event]);
+    expect(res.status).toBe(200);
+    return res.body.results[0] as Json;
+  };
+  const itemOf = (id: string) => f.db.depositItem.findUniqueOrThrow({ where: { id } });
+  const review = (id: string, body: Record<string, unknown>) => call("adminA", "PATCH", `/api/deposit-reviews/${id}`, body);
+  const weightWindow = () =>
+    f.db.rewardRate.updateMany({ where: { organizationId: f.ids.orgA }, data: { minWeightGrams: 10, maxWeightGrams: 100 } });
+
+  it("I1: a fraud event never reopens a REJECTED item or erases its weight reason; approving it is 409", async () => {
+    await warmUp();
+    await weightWindow();
+    const rejected = await deposit({ weightGrams: 500 });
+    expect(rejected.item).toMatchObject({ status: "REJECTED", validationReasonCode: "WEIGHT_ABOVE_MAX" });
+
+    // Session-only fraud event: the server picks the latest item of the session.
+    expect((await machineEvent(rejected.session.id, "FRAUD_DETECTED", { reason: "STRING_PULL" })).status).toBe("accepted");
+    expect(await itemOf(rejected.item.id)).toMatchObject({
+      status: "REJECTED", validationReasonCode: "WEIGHT_ABOVE_MAX", externalFraudFlag: true });
+    const approve = await review(rejected.item.id, { action: "approve" });
+    expect(approve.status).toBe(409);
+    expect(await f.db.rewardLedger.count({ where: { userId: f.ids.userA } })).toBe(0);
+
+    // The same holds for an item the machine itself rejected, and for a sensor anomaly naming it.
+    const machineRejected = await detectOnly();
+    await machineEvent(machineRejected.session.id, "ITEM_REJECTED", { reason: "ABNORMAL_ITEM_WEIGHT" });
+    await machineEvent(machineRejected.session.id, "VANDALISM_DETECTED", { reason: "DOOR_FORCED" }, machineRejected.item.id);
+    await machineEvent(machineRejected.session.id, "SENSOR_SEQUENCE",
+      { steps: ["ITEM_PRESENT", "CHAMBER_OPEN"], reverseMotion: true }, machineRejected.item.id);
+    expect(await itemOf(machineRejected.item.id)).toMatchObject({ status: "REJECTED", validationReasonCode: "ABNORMAL_ITEM_WEIGHT" });
+    expect((await review(machineRejected.item.id, { action: "approve" })).status).toBe(409);
+  });
+
+  it("I1: a fraud event keeps an unknown-type item's reason, so approving still requires a waste type", async () => {
+    await warmUp();
+    const unknown = await detectOnly({ unknownType: true });
+    expect(unknown.item).toMatchObject({ status: "REVIEW", validationReasonCode: "UNKNOWN_WASTE_TYPE" });
+    await machineEvent(unknown.session.id, "FRAUD_DETECTED", { reason: "STRING_PULL" });
+    await machineEvent(unknown.session.id, "SENSOR_SEQUENCE", { steps: ["ITEM_PRESENT"], reverseMotion: true }, unknown.item.id);
+    expect(await itemOf(unknown.item.id)).toMatchObject({
+      status: "REVIEW", validationReasonCode: "UNKNOWN_WASTE_TYPE", externalFraudFlag: true });
+    const approve = await review(unknown.item.id, { action: "approve" });
+    expect(approve.status).toBe(422);
+    expect(approve.body.error).toBe("wasteTypeId wajib diisi untuk item tanpa jenis sampah");
+  });
+
+  it("C1: machine reasons can never forge a reviewer's decision", async () => {
+    await warmUp();
+    // A held item: the machine claims it was "REVIEW_REJECTED".
+    const held = await deposit({ anomaly: true });
+    expect(held.ledger).toEqual([expect.objectContaining({ status: "PENDING", amount: 50 })]);
+    await machineEvent(held.session.id, "ITEM_REJECTED", { reason: "REVIEW_REJECTED" }, held.item.id);
+    expect((await itemOf(held.item.id)).status).toBe("REVIEW");
+    const rejected = await review(held.item.id, { action: "reject" });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.idempotent).toBe(false);
+    expect(await f.db.rewardLedger.findMany({ where: { depositItemId: held.item.id } }))
+      .toEqual([expect.objectContaining({ entryType: "EARN", status: "REJECTED", amount: 50 })]);
+    expect((await getWalletBalance(f.ids.userA)).pending).toBe(0);
+
+    // A pending item rejected by the machine with a forged code is namespaced, never "reviewed".
+    const pending = await detectOnly();
+    await machineEvent(pending.session.id, "ITEM_REJECTED", { reason: "REVIEW_REJECTED" }, pending.item.id);
+    expect(await itemOf(pending.item.id)).toMatchObject({ status: "REJECTED", validationReasonCode: "MACHINE_REVIEW_REJECTED" });
+    const replay = await review(pending.item.id, { action: "reject" });
+    expect(replay.status).toBe(409);
+    expect(replay.body.error).toBe("Item sudah berstatus REJECTED, tidak lagi menunggu peninjauan");
+
+    // A fraud reason claiming approval still leaves the item for a real review.
+    const paid = await deposit();
+    await machineEvent(paid.session.id, "FRAUD_DETECTED", { reason: "REVIEW_APPROVED" }, paid.item.id);
+    expect(await itemOf(paid.item.id)).toMatchObject({ status: "REVIEW", validationReasonCode: "MACHINE_REVIEW_APPROVED" });
+    const approved = await review(paid.item.id, { action: "approve" });
+    expect(approved.status).toBe(200);
+    expect(approved.body.idempotent).toBe(false);
+  });
+
+  it("C2: ITEM_REJECTED never flips an accepted, held or reviewed item", async () => {
+    await warmUp();
+    const paid = await deposit();
+    await machineEvent(paid.session.id, "ITEM_REJECTED", { reason: "ACTUATION_BLOCKED" }, paid.item.id);
+    expect(await itemOf(paid.item.id)).toMatchObject({ status: "ACCEPTED", validationReasonCode: "ACCEPTED" });
+    expect(await f.db.rewardLedger.findMany({ where: { depositItemId: paid.item.id } }))
+      .toEqual([expect.objectContaining({ status: "AVAILABLE", amount: 100 })]);
+
+    const reviewed = await deposit({ anomaly: true });
+    expect((await review(reviewed.item.id, { action: "approve" })).status).toBe(200);
+    await machineEvent(reviewed.session.id, "ITEM_REJECTED", { reason: "ACTUATION_BLOCKED" }, reviewed.item.id);
+    expect(await itemOf(reviewed.item.id)).toMatchObject({ status: "ACCEPTED", validationReasonCode: "REVIEW_APPROVED" });
+
+    // A pending item is still rejected normally, and a late acceptance point never pays it.
+    const pending = await detectOnly();
+    await machineEvent(pending.session.id, "ITEM_REJECTED", { reason: "ABNORMAL_ITEM_WEIGHT" }, pending.item.id);
+    expect(await itemOf(pending.item.id)).toMatchObject({ status: "REJECTED", validationReasonCode: "ABNORMAL_ITEM_WEIGHT" });
+    await machineEvent(pending.session.id, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }, pending.item.id);
+    expect(await f.db.rewardLedger.count({ where: { depositItemId: pending.item.id } })).toBe(0);
+    expect((await getWalletBalance(f.ids.userA)).available).toBe(200);
+  });
+
+  it("C2: ITEM_REJECTED takes the recipient's User lock before the session and item", async () => {
+    await warmUp();
+    const pending = await detectOnly();
+    const rejectEvent = edgeEvent(pending.session.id, "ITEM_REJECTED", { reason: "ABNORMAL_ITEM_WEIGHT" });
+    rejectEvent.depositItemId = pending.item.id;
+    const observer = await f.connection();
+    const holder = await holdLock((tx) => tx.$queryRaw`SELECT id FROM "User" WHERE id = ${f.ids.userA} FOR NO KEY UPDATE`);
+    let sent: Promise<{ status: number; body: Json }> | undefined;
+    try {
+      sent = postBatch([rejectEvent]);
+      sent.catch(() => {});
+      await waitForBlockedBy(observer, { holderPid: holder.pid, timeoutMs: 15_000 });
+      expect(await isStillPending(sent, 200)).toBe(true);
+      expect(await rowLockFree(observer, "DepositSession", pending.session.id)).toBe(true);
+      expect(await rowLockFree(observer, "DepositItem", pending.item.id)).toBe(true);
+    } finally {
+      await holder.release();
+    }
+    expect((await sent!).body.results[0].status).toBe("accepted");
+    expect((await itemOf(pending.item.id)).status).toBe("REJECTED");
+  });
+
+  it("C3: an unknown-type item is held for review with no money, whatever the fallback type or weight", async () => {
+    await warmUp();
+    // An admin gave the shared fallback type a default reward: it must still never pay.
+    await f.db.wasteType.create({
+      data: { name: UNKNOWN_WASTE_TYPE_NAME, unit: "ITEM", active: false, defaultRewardPerItem: 500 } });
+    for (const weightGrams of [25, null]) {
+      const unknown = await detectOnly({ unknownType: true, weightGrams });
+      expect((await machineEvent(unknown.session.id, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }, unknown.item.id)).status)
+        .toBe("accepted");
+      expect(await itemOf(unknown.item.id)).toMatchObject({
+        status: "REVIEW", validationReasonCode: "UNKNOWN_WASTE_TYPE", rewardAmount: 0, baseRewardAmount: 0 });
+      expect(await f.db.rewardLedger.count({ where: { depositItemId: unknown.item.id } })).toBe(0);
+    }
+    expect(await getWalletBalance(f.ids.userA)).toMatchObject({ available: 0, pending: 0 });
   });
 });

@@ -20,7 +20,7 @@ vi.mock('@/lib/machine-events/item', () => ({
   resolveFraudDepositItemId: vi.fn(),
   resolveOrCreateUnknownWasteType: vi.fn(),
 }));
-vi.mock('@/lib/machine-events/acceptance', () => ({ handleAcceptance: vi.fn() }));
+vi.mock('@/lib/machine-events/acceptance', () => ({ handleAcceptance: vi.fn(), handleItemRejected: vi.fn() }));
 vi.mock('@/lib/machine-state', () => ({
   transitionSession: vi.fn(),
   validateSensorSequence: vi.fn(),
@@ -176,32 +176,22 @@ describe('processEventSideEffects', () => {
     expect(fraud.flagAnomaly).not.toHaveBeenCalled();
   });
 
-  it('handles ITEM_REJECTED', async () => {
+  it('delegates ITEM_REJECTED to the gated, locked handler (M04 fix round 1, C2)', async () => {
     vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'PROCESSING_ITEM' });
-    vi.mocked(machineState.transitionSession).mockReturnValue('ITEM_DONE' as any);
-    
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_REJECTED', sessionId: 's1', payload: { reason: 'TOO_LIGHT' } } as any, 'evt1');
-    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'REJECTED', validationReasonCode: 'TOO_LIGHT' } }));
-    expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ITEM_DONE' } }));
+    expect(acceptance.handleItemRejected).toHaveBeenCalledWith(mockTx, { sessionId: 's1', depositItemId: 'd1', reason: 'TOO_LIGHT' });
+    // No unlocked writes from the event handler itself.
+    expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+    expect(mockTx.depositSession.update).not.toHaveBeenCalled();
   });
 
-  it('ITEM_REJECTED defaults reason and skips session transition when not PROCESSING_ITEM', async () => {
+  it('ITEM_REJECTED defaults the reason and namespaces a forged review code (C1)', async () => {
     vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
-
-    await processEventSideEffects(
-      mockTx,
-      mockMachine,
-      { eventType: 'ITEM_REJECTED', sessionId: 's1', payload: {} } as any,
-      'evt1',
-    );
-    expect(mockTx.depositItem.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ validationReasonCode: 'REJECTED' }),
-      }),
-    );
-    expect(mockTx.depositSession.update).not.toHaveBeenCalled();
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_REJECTED', sessionId: 's1', payload: {} } as any, 'evt1');
+    expect(acceptance.handleItemRejected).toHaveBeenLastCalledWith(mockTx, { sessionId: 's1', depositItemId: 'd1', reason: 'REJECTED' });
+    await processEventSideEffects(mockTx, mockMachine,
+      { eventType: 'ITEM_REJECTED', depositItemId: 'd1', payload: { reason: 'REVIEW_REJECTED' } } as any, 'evt2');
+    expect(acceptance.handleItemRejected).toHaveBeenLastCalledWith(mockTx, { sessionId: null, depositItemId: 'd1', reason: 'MACHINE_REVIEW_REJECTED' });
   });
 
   it('ITEM_ACCEPTED_POINT and ITEM_REJECTED break when item cannot be resolved', async () => {
@@ -219,6 +209,7 @@ describe('processEventSideEffects', () => {
       'evt1',
     );
     expect(acceptance.handleAcceptance).not.toHaveBeenCalled();
+    expect(acceptance.handleItemRejected).not.toHaveBeenCalled();
     expect(mockTx.depositItem.update).not.toHaveBeenCalled();
   });
 
@@ -298,6 +289,13 @@ describe('processEventSideEffects', () => {
     expect(vi.mocked(fraud.holdItemForFraud).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(fraud.flagAnomaly).mock.invocationCallOrder[0]);
     expect(fraud.notifyOrgAdmins).toHaveBeenCalled();
+  });
+
+  it('namespaces a fraud reason that claims a review decision (C1)', async () => {
+    vi.mocked(item.resolveFraudDepositItemId).mockResolvedValue('d1');
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'FRAUD_DETECTED', sessionId: 's1', payload: { reason: 'REVIEW_APPROVED' }, machineCode: 'M1' } as any, 'evt1');
+    expect(fraud.holdItemForFraud).toHaveBeenCalledWith(mockTx, 'd1', 'MACHINE_REVIEW_APPROVED');
+    expect(fraud.flagAnomaly).toHaveBeenCalledWith(mockTx, 's1', null, 'MACHINE_REVIEW_APPROVED');
   });
 
   it('handles SAFE_STATE_ENTERED updates machine and session', async () => {

@@ -4,8 +4,8 @@ import { lockDepositItem, lockDepositSession, lockMachine, lockUser } from "./db
 import {
   REVIEW_APPROVED_REASON,
   REVIEW_REJECTED_REASON,
-  UNKNOWN_WASTE_TYPE_REASON,
-  isReviewDecision,
+  isReviewFinal,
+  isUnknownWasteTypeItem,
 } from "./machine-events/shared";
 import { prisma } from "./prisma";
 import { HttpError, assertOrgScope, type CurrentUser } from "./rbac";
@@ -156,7 +156,7 @@ function sameDecision(item: LockedItem, input: ReviewInput): boolean {
 
 async function approvalTarget(tx: Prisma.TransactionClient, item: LockedItem, input: ReviewInput) {
   const organizationId = item.session.machine.organizationId;
-  if (item.validationReasonCode === UNKNOWN_WASTE_TYPE_REASON && !input.wasteTypeId) {
+  if (isUnknownWasteTypeItem(item) && !input.wasteTypeId) {
     throw new HttpError(422, "wasteTypeId wajib diisi untuk item tanpa jenis sampah");
   }
   let wasteType = item.wasteType;
@@ -248,7 +248,7 @@ export async function decideDepositReview(
     const businessKey = reviewDecisionKey(itemId);
 
     if (item.status !== "REVIEW") {
-      if (!isReviewDecision(item.validationReasonCode)) {
+      if (!isReviewFinal(item)) {
         throw new HttpError(409, `Item sudah berstatus ${item.status}, tidak lagi menunggu peninjauan`);
       }
       if (!sameDecision(item, input)) throw new HttpError(409, REVIEW_DECIDED_DIFFERENTLY);

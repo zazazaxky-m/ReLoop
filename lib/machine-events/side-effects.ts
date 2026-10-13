@@ -7,6 +7,7 @@ import {
 import { AUTO_PICKUP_FILL_THRESHOLD } from "../pickup";
 import {
   UNKNOWN_WASTE_TYPE_REASON,
+  machineReasonCode,
   payloadStr,
   type IngestEventInput,
   type MachineContext,
@@ -18,7 +19,7 @@ import {
 } from "./item";
 import { flagAnomaly, holdItemForFraud, notifyOrgAdmins } from "./fraud";
 import { maybeCreateAutoPickup } from "./pickup";
-import { handleAcceptance } from "./acceptance";
+import { handleAcceptance, handleItemRejected } from "./acceptance";
 import type { DepositItemCache } from "./item-cache";
 
 /** Work that must run only after the event transaction commits (notifications, pushes). */
@@ -289,31 +290,20 @@ export async function processEventSideEffects(
     case "ITEM_REJECTED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      // DepositSession before DepositItem (global lock order, lib/db-locks.ts).
-      if (input.sessionId) {
-        const session = await tx.depositSession.findUnique({
-          where: { id: input.sessionId },
-        });
-        if (session?.status === "PROCESSING_ITEM") {
-          await tx.depositSession.update({
-            where: { id: session.id },
-            data: { status: transitionSession(session.status, "ITEM_DONE") },
-          });
-        }
-      }
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: {
-          status: "REJECTED",
-          validationReasonCode: (payload.reason as string) ?? "REJECTED",
-        },
+      // M04: same gate and User -> DepositSession -> DepositItem locks as the
+      // acceptance point; never flips an accepted, priced or reviewed item.
+      await handleItemRejected(tx, {
+        sessionId: input.sessionId ?? null,
+        depositItemId: itemId,
+        reason: machineReasonCode(payload.reason, "REJECTED"),
       });
       break;
     }
 
     case "FRAUD_DETECTED":
     case "VANDALISM_DETECTED": {
-      const reason = String(payload.reason ?? input.eventType);
+      // Machine-namespaced: a payload can never claim a reviewer's decision.
+      const reason = machineReasonCode(payload.reason, input.eventType);
       const affectedItemId =
         input.eventType === "FRAUD_DETECTED"
           ? await resolveFraudDepositItemId(tx, input)

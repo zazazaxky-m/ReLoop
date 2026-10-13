@@ -139,7 +139,11 @@ function classifierReported(input: MaterialInput): boolean {
   );
 }
 
-export function verifyMaterial(input: MaterialInput): { typeMatch: boolean; reason: MaterialReason } {
+const MATERIAL_POLICIES: readonly MaterialVerificationPolicy[] = ["AI_REQUIRED", "BARCODE_WEIGHT", "WEIGHT_ONLY"];
+
+export function verifyMaterial(raw: MaterialInput): { typeMatch: boolean; reason: MaterialReason } {
+  // Fail closed: an unknown or missing policy is treated as the strictest one.
+  const input: MaterialInput = MATERIAL_POLICIES.includes(raw.policy) ? raw : { ...raw, policy: "AI_REQUIRED" };
   const accepted = new Set(input.acceptedLabels.map(normalizeAiLabel).filter(Boolean));
   let aiConfirmed = false;
   if (classifierReported(input)) {

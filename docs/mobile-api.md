@@ -331,8 +331,18 @@ Respons 200:
   sudah dihapus (A04) juga ditolak menjadi kasus (`RECIPIENT_ERASED`).
 - Event fraud/vandalisme memindahkan EARN item dari `AVAILABLE` ke `PENDING`
   hanya selama saldo tersedia masih menutupinya; bila tidak, EARN tetap dan
-  kasus `fraud:<itemId>:hold:v1` dibuka. Keputusan peninjau tidak pernah dibuka
-  ulang oleh event mesin.
+  kasus `fraud:<itemId>:hold:v1` dibuka. Event mesin (fraud, vandalisme,
+  `SENSOR_SEQUENCE`, `ITEM_REJECTED`) tidak pernah membuka ulang item yang sudah
+  diputuskan: item `REJECTED` dan keputusan peninjau hanya mendapat tanda fraud,
+  item yang sedang ditinjau mempertahankan alasannya (misalnya
+  `UNKNOWN_WASTE_TYPE`), dan `ITEM_REJECTED` hanya menolak item yang belum
+  melewati titik penerimaan dan belum punya baris ledger, di bawah lock User ->
+  DepositSession -> DepositItem yang sama. Alasan dari payload mesin yang
+  berawalan `REVIEW_` disimpan sebagai `MACHINE_REVIEW_...`, sehingga mesin tidak
+  dapat memalsukan keputusan peninjau.
+- Item dengan jenis sampah tidak dikenal selalu masuk `REVIEW` dengan reward 0
+  di titik penerimaan, apa pun berat atau reward bawaan jenis cadangannya;
+  menyetujuinya wajib memilih `wasteTypeId`.
 - Kasus terbuka tampil di `GET /api/reports/reconciliation`
   (`report.rewardCases: { open, openAmount, recent[] }`) dan halaman
   Rekonsiliasi Keuangan superadmin.

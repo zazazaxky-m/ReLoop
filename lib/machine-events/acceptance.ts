@@ -21,7 +21,7 @@ import {
   verifyMaterial,
   type MaterialVerificationPolicy,
 } from "../reward-policy";
-import { UNKNOWN_WASTE_TYPE_REASON } from "./shared";
+import { UNKNOWN_WASTE_TYPE_REASON, isUnknownWasteTypeItem } from "./shared";
 
 /** Largest rupiah value a ledger row can hold (PostgreSQL `integer`). */
 const MAX_RUPIAH = 2_147_483_647;
@@ -84,15 +84,20 @@ export async function handleAcceptance(
 
   const campaign = session.campaign;
   const machineCampaign = campaign && campaignSupportsMachine(campaign) ? campaign : null;
+  // Money paths fail closed: an unreadable configuration pays nothing and
+  // demands AI confirmation (in practice the event row's foreign key
+  // guarantees the machine exists).
   const mode = machineRewardMode({
     campaign,
-    organizationMode: config?.organization.machineRewardMode ?? "MONEY_REWARD",
+    organizationMode: config?.organization.machineRewardMode ?? "COMPLIANCE_ONLY",
   });
 
-  // Items created via the unknown-waste-type fallback have no real rate to
-  // resolve against; keep them in review with zero reward until a reviewer
-  // reclassifies the item (see lib/deposit-review.ts).
-  const unknownWasteType = item.validationReasonCode === UNKNOWN_WASTE_TYPE_REASON;
+  // Items created via the unknown-waste-type fallback (recognized by the
+  // fallback type, not only by a reason a later event could overwrite) have
+  // no real rate or weight window: they always stay in REVIEW with reward 0
+  // until a reviewer reclassifies them (lib/deposit-review.ts requires a
+  // wasteTypeId), whatever the fallback type's default reward or the weight.
+  const unknownWasteType = isUnknownWasteTypeItem(item);
 
   const rate = unknownWasteType
     ? null
@@ -113,7 +118,7 @@ export async function handleAcceptance(
   const material = unknownWasteType
     ? null
     : verifyMaterial({
-        policy: (config?.materialVerification ?? "WEIGHT_ONLY") as MaterialVerificationPolicy,
+        policy: (config?.materialVerification ?? "AI_REQUIRED") as MaterialVerificationPolicy,
         acceptedLabels: item.wasteType.aiAcceptedLabels ?? [],
         aiLabel: item.aiDetectedType,
         aiConfidence: item.aiConfidence,
@@ -130,8 +135,8 @@ export async function handleAcceptance(
     unit === "KG"
       ? computeWeightBasedRewardAmount(points, item.measuredWeightGrams, multiplier)
       : computeRewardAmount(points, item.quantity, multiplier);
-  const outOfRange = !Number.isSafeInteger(computed) || computed < 0 || computed > MAX_RUPIAH;
-  const baseAmount = outOfRange ? 0 : computed;
+  const outOfRange = !unknownWasteType && (!Number.isSafeInteger(computed) || computed < 0 || computed > MAX_RUPIAH);
+  const baseAmount = unknownWasteType || outOfRange ? 0 : computed;
 
   const hasAnomaly = Boolean(
     sensorAnomaly || item.externalFraudFlag || session.status === "REVIEW" || outOfRange,
@@ -139,7 +144,8 @@ export async function handleAcceptance(
   const decision = decideReward({
     mode,
     baseAmount,
-    weightValid: weight.valid,
+    // The fallback type's weight window is meaningless: the reviewer decides.
+    weightValid: unknownWasteType || weight.valid,
     typeMatch: !unknownWasteType && (material?.typeMatch ?? false),
     hasAnomaly,
   });
@@ -199,4 +205,51 @@ export async function handleAcceptance(
       },
     });
   }
+}
+
+/**
+ * ITEM_REJECTED: the machine returned an item (abnormal weight, blocked
+ * actuation). Same gate and locks as the acceptance point (M04 fix round 1):
+ * reads the immutable relations, locks the recipient User -> DepositSession ->
+ * DepositItem, advances a PROCESSING_ITEM session, and rejects the item only
+ * while it is undecided: PENDING or REVIEW, no acceptance point yet, and no
+ * ledger row for it. An accepted, priced, held or reviewed item is never
+ * flipped (its money and the reviewer's decision stay consistent); the event
+ * itself is still recorded. `reason` is already machine-namespaced
+ * (`machineReasonCode`), so it can never claim a reviewer's decision.
+ */
+export async function handleItemRejected(
+  tx: Prisma.TransactionClient,
+  input: { sessionId: string | null; depositItemId: string; reason: string },
+) {
+  const ref = await tx.depositItem.findUnique({
+    where: { id: input.depositItemId },
+    select: { sessionId: true, session: { select: { userId: true } } },
+  });
+  if (!ref) return;
+  await lockUser(tx, ref.session.userId);
+  await lockDepositSession(tx, ref.sessionId);
+  await lockDepositItem(tx, input.depositItemId);
+
+  if (input.sessionId) {
+    const session = await tx.depositSession.findUnique({ where: { id: input.sessionId } });
+    if (session?.status === "PROCESSING_ITEM") {
+      await tx.depositSession.update({
+        where: { id: session.id },
+        data: { status: transitionSession(session.status, "ITEM_DONE") },
+      });
+    }
+  }
+
+  const item = await tx.depositItem.findUnique({
+    where: { id: input.depositItemId },
+    select: { status: true, acceptanceEventId: true },
+  });
+  if (!item || item.acceptanceEventId !== null || (item.status !== "PENDING" && item.status !== "REVIEW")) return;
+  if ((await tx.rewardLedger.count({ where: { depositItemId: input.depositItemId } })) > 0) return;
+
+  await tx.depositItem.updateMany({
+    where: { id: input.depositItemId, status: { in: ["PENDING", "REVIEW"] }, acceptanceEventId: null },
+    data: { status: "REJECTED", validationReasonCode: input.reason },
+  });
 }

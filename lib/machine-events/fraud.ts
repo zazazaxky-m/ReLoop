@@ -4,11 +4,15 @@ import { getWalletBalance } from "../ledger";
 import { prisma } from "../prisma";
 import { sendPushToUsersBestEffort } from "../notifications";
 import { CASE_ALREADY_PAID_OUT, openRewardReconciliationCase } from "../reward-credit";
-import { isReviewDecision } from "./shared";
+import { isReviewFinal } from "./shared";
 
 /**
  * Marks the session (then the item: DepositSession before DepositItem, the
  * global lock order) as under review after an anomaly.
+ *
+ * The item is only put in review while it is still undecided (PENDING or
+ * REVIEW, no acceptance point yet); a decided item is never reopened, and an
+ * existing reason (e.g. UNKNOWN_WASTE_TYPE) is never overwritten.
  */
 export async function flagAnomaly(
   tx: Prisma.TransactionClient,
@@ -31,10 +35,17 @@ export async function flagAnomaly(
     });
   }
   if (depositItemId) {
-    await tx.depositItem.update({
+    const item = await tx.depositItem.findUnique({
       where: { id: depositItemId },
-      data: { status: "REVIEW", validationReasonCode: reason },
+      select: { status: true, acceptanceEventId: true, validationReasonCode: true },
     });
+    const undecided = item && item.acceptanceEventId === null && (item.status === "PENDING" || item.status === "REVIEW");
+    if (undecided) {
+      await tx.depositItem.update({
+        where: { id: depositItemId },
+        data: { status: "REVIEW", ...(item.validationReasonCode === null ? { validationReasonCode: reason } : {}) },
+      });
+    }
   }
 }
 
@@ -45,8 +56,8 @@ export function fraudHoldKey(depositItemId: string): string {
 
 export interface FraudHoldResult {
   sessionId: string;
-  /** The item carries a reviewer's final decision, which a later machine signal never reopens. */
-  reviewFinal: boolean;
+  /** The item was already decided (REJECTED, or a reviewer's final decision): only the flag was recorded. */
+  decided: boolean;
   /** Rupiah moved from AVAILABLE to PENDING by this hold. */
   heldAmount: number;
   /** Case opened instead of a hold that would have made the balance negative. */
@@ -57,13 +68,20 @@ export interface FraudHoldResult {
  * FRAUD_DETECTED / VANDALISM_DETECTED for one item (task M04).
  *
  * Locks the reward recipient User -> DepositSession -> DepositItem (learned
- * from the immutable relations), then puts the item back in review and moves
- * its AVAILABLE earning to PENDING, but only while the recipient's available
- * balance (read under the User lock, reserves included) still covers it. An
- * earning that was already paid out or reserved stays AVAILABLE and an OPEN
- * reconciliation case `fraud:<itemId>:hold:v1` records it: the balance is
- * never pushed below zero. A reviewer's final decision is kept; the item only
- * gets the fraud flag.
+ * from the immutable relations) and re-reads the item's status, acceptance and
+ * reason under those locks:
+ *
+ * - REJECTED (by the machine, the weight check or a reviewer) or a reviewer's
+ *   final decision: only `externalFraudFlag` is recorded. The item is never
+ *   reopened, so a fraud signal can never turn a refused deposit into a
+ *   payable one.
+ * - PENDING / ACCEPTED: back to REVIEW with the (machine-namespaced) fraud
+ *   reason. REVIEW: stays in review and keeps its decisive reason (e.g.
+ *   UNKNOWN_WASTE_TYPE, which still forces a reclassification on approval).
+ * - For those, each AVAILABLE earning moves to PENDING only while the
+ *   recipient's available balance (read under the User lock, reserves
+ *   included) still covers it; otherwise it stays AVAILABLE and an OPEN
+ *   reconciliation case `fraud:<itemId>:hold:v1` records it.
  */
 export async function holdItemForFraud(
   tx: Prisma.TransactionClient,
@@ -82,17 +100,22 @@ export async function holdItemForFraud(
 
   const item = await tx.depositItem.findUnique({
     where: { id: depositItemId },
-    select: { validationReasonCode: true },
+    select: { status: true, acceptanceEventId: true, validationReasonCode: true },
   });
   if (!item) return null;
-  if (isReviewDecision(item.validationReasonCode)) {
+  if (item.status === "REJECTED" || isReviewFinal(item)) {
     await tx.depositItem.update({ where: { id: depositItemId }, data: { externalFraudFlag: true } });
-    return { sessionId: ref.sessionId, reviewFinal: true, heldAmount: 0, reconciliationCaseId: null };
+    return { sessionId: ref.sessionId, decided: true, heldAmount: 0, reconciliationCaseId: null };
   }
 
   await tx.depositItem.update({
     where: { id: depositItemId },
-    data: { status: "REVIEW", externalFraudFlag: true, validationReasonCode: reason },
+    data: {
+      status: "REVIEW",
+      externalFraudFlag: true,
+      // An item already in review keeps its decisive reason.
+      ...(item.status === "PENDING" || item.status === "ACCEPTED" ? { validationReasonCode: reason } : {}),
+    },
   });
 
   let heldAmount = 0;
@@ -125,7 +148,7 @@ export async function holdItemForFraud(
       reconciliationCaseId = opened.id;
     }
   }
-  return { sessionId: ref.sessionId, reviewFinal: false, heldAmount, reconciliationCaseId };
+  return { sessionId: ref.sessionId, decided: false, heldAmount, reconciliationCaseId };
 }
 
 /** Best-effort fan-out to every ACTIVE admin of an organization. Used for
