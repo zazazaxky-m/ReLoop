@@ -390,7 +390,7 @@
       "chain": "lint",
       "previousVersion": "3.0.3",
       "evidence": "No patched release exists (advisory range is every version through 3.0.3, which is the latest). Reached only via eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch while ESLint resolves its own fixed glob patterns. Not in npm audit --omit=dev.",
-      "mitigation": "ESLint runs only on developer machines and the CI quality job, never in a production image or the db-migrate container command; glob patterns come from the repository ESLint config, not from requests or uploads; the CI quality job has no deployment secrets. The weekly security-scan gate fails this row on 2026-12-31 and whenever braces publishes a fix, forcing a re-triage."
+      "mitigation": "ESLint runs only on developer machines and in two CI jobs, `quality` (ci.yml) and `compliance-scan` (compliance-check.yml), never in a production image or the db-migrate container command; glob patterns come from the repository ESLint config, not from requests or uploads; neither lint step has deployment secrets (compliance-check.yml passes ENCRYPTION_KEY only to its test step). Re-triage is forced by the gate: the exception is valid through 2026-12-31 and the gate fails from 2027-01-01, and it fails as soon as npm audit reports an available fix for braces (fixAvailable true, a non-breaking upgrade, or an upgrade of braces itself) until the fix is applied or recorded in reviewedFix."
     },
     {
       "package": "browserslist",

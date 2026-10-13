@@ -25,11 +25,22 @@
 //     build scopes are not ignored: they need the same owner, mitigation and date.
 //   - with --runtime, an advisory that `npm audit --omit=dev` also reports must
 //     carry scope "production"; it cannot be relabelled dev/build.
+//   - an exception is blocked as soon as npm audit reports an available fix for
+//     the advisory (fixAvailable true, a non-breaking upgrade, or any upgrade of
+//     the vulnerable package itself). The owner either applies the fix or records
+//     the exact fix string in the row's `reviewedFix` after re-triaging; a
+//     different fix blocks again. A breaking change to some other package (for
+//     example a major downgrade of a parent) is not treated as an available fix.
 // Moderate/low advisories are listed in the summary count but do not gate.
+//
+// Severity labels are trimmed and lower-cased, then must be one of info, low,
+// moderate, high, critical. Any other label, a missing severity, or an entry
+// that is not an object is an input error (exit 2), never a silent pass.
 
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
+export const SEVERITIES = new Set(["info", "low", "moderate", "high", "critical"]);
 export const GATED_SEVERITIES = new Set(["high", "critical"]);
 export const SCOPES = new Set(["production", "build", "dev"]);
 export const DECISIONS = new Set(["patched", "exception"]);
@@ -125,9 +136,40 @@ function normalizeAdvisoryRef(value) {
   return ghsa ? ghsa[0].toUpperCase() : text.toUpperCase();
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeSeverity(value, where) {
+  if (typeof value !== "string") {
+    throw new InputError(`${where}: severity is missing or not a string`);
+  }
+  const label = value.trim().toLowerCase();
+  if (!SEVERITIES.has(label)) {
+    throw new InputError(`${where}: unknown severity "${value}" (expected ${[...SEVERITIES].join(", ")})`);
+  }
+  return label;
+}
+
+/**
+ * The fix npm audit offers for a vulnerable package, as a string the owner can
+ * record in `reviewedFix`, or null when none counts. A breaking change to a
+ * different package (npm's usual "downgrade the parent" suggestion) is not a
+ * fix of this package. An object without a boolean isSemVerMajor is treated as
+ * a fix, so unfamiliar shapes err toward blocking.
+ */
+export function describeFix(fixAvailable, packageName) {
+  if (fixAvailable === true) return "npm-audit-fix";
+  if (isPlainObject(fixAvailable) && typeof fixAvailable.name === "string" && typeof fixAvailable.version === "string") {
+    if (fixAvailable.isSemVerMajor === true && fixAvailable.name !== packageName) return null;
+    return `${fixAvailable.name}@${fixAvailable.version}`;
+  }
+  return null;
+}
+
 /** Flatten an npm audit report into advisories, plus entries that cite none. */
 export function collectAdvisories(report, label = "npm audit report") {
-  if (report === null || typeof report !== "object" || Array.isArray(report)) {
+  if (!isPlainObject(report)) {
     throw new InputError(`${label} is not a JSON object`);
   }
   if (report.error) {
@@ -138,39 +180,55 @@ export function collectAdvisories(report, label = "npm audit report") {
     throw new InputError(`${label} has auditReportVersion ${String(report.auditReportVersion)}; expected 2`);
   }
   const vulnerabilities = report.vulnerabilities;
-  if (vulnerabilities === null || typeof vulnerabilities !== "object" || Array.isArray(vulnerabilities)) {
+  if (!isPlainObject(vulnerabilities)) {
     throw new InputError(`${label} has no vulnerabilities object`);
   }
 
   const advisories = new Map();
   const unattributed = [];
   for (const [key, entry] of Object.entries(vulnerabilities)) {
-    const via = Array.isArray(entry?.via) ? entry.via : [];
-    const objects = via.filter((item) => item !== null && typeof item === "object");
-    const references = via.filter((item) => typeof item === "string");
+    const where = `${label}, vulnerability "${key}"`;
+    if (!isPlainObject(entry)) {
+      throw new InputError(`${where}: entry is not an object`);
+    }
+    if (!Array.isArray(entry.via)) {
+      throw new InputError(`${where}: "via" is missing or not an array`);
+    }
+    if (entry.fixAvailable !== undefined && typeof entry.fixAvailable !== "boolean" && !isPlainObject(entry.fixAvailable)) {
+      throw new InputError(`${where}: "fixAvailable" must be a boolean or an object`);
+    }
+    const severity = normalizeSeverity(entry.severity, where);
+    const objects = [];
+    const references = [];
+    for (const item of entry.via) {
+      if (typeof item === "string") references.push(item);
+      else if (isPlainObject(item)) objects.push(item);
+      else throw new InputError(`${where}: "via" holds an item that is neither a package name nor an advisory object`);
+    }
     for (const item of objects) {
       const name = item.name ?? entry.name ?? key;
       const id = advisoryId(item.url, item.source);
+      const advisorySeverity = normalizeSeverity(item.severity, `${where}, advisory ${id}`);
       const mapKey = `${name}|${id}`;
       if (!advisories.has(mapKey)) {
         advisories.set(mapKey, {
           package: name,
           id,
-          severity: String(item.severity ?? "unknown").toLowerCase(),
+          severity: advisorySeverity,
           title: item.title ?? "",
           url: item.url ?? "",
           range: item.range ?? "",
+          fix: describeFix(entry.fixAvailable, name),
         });
       }
     }
-    const severity = String(entry?.severity ?? "").toLowerCase();
     const danglingReference = references.some((name) => !Object.hasOwn(vulnerabilities, name));
     if (
       GATED_SEVERITIES.has(severity) &&
       objects.length === 0 &&
       (references.length === 0 || danglingReference)
     ) {
-      unattributed.push({ package: entry?.name ?? key, severity });
+      unattributed.push({ package: entry.name ?? key, severity });
     }
   }
   return { advisories: [...advisories.values()], unattributed };
@@ -222,6 +280,11 @@ function exceptionProblems(row, advisory, today, runtimeKeys) {
   }
   if (runtimeKeys && runtimeKeys.has(`${advisory.package}|${advisory.id}`) && row.scope !== "production") {
     problems.push(`npm audit --omit=dev reports it, so scope must be production (row says ${row.scope})`);
+  }
+  if (advisory.fix && String(row.reviewedFix ?? "").trim() !== advisory.fix) {
+    problems.push(
+      `a fix is now available (${advisory.fix}); apply it, or re-triage and set reviewedFix to "${advisory.fix}" if it must be deferred`,
+    );
   }
   if (!nonEmptyString(row.owner)) problems.push("no owner");
   if (!nonEmptyString(row.mitigation)) problems.push("no mitigation recorded");
@@ -296,7 +359,8 @@ function formatResult({ advisory, row, status, reasons }) {
   if (status === "block") {
     return `${head}${title}\n        -> ${reasons.join("; ")}`;
   }
-  return `${head}${title}\n        -> exception until ${row.expiresAt}, scope ${row.scope}, owner ${row.owner}`;
+  const reviewed = advisory.fix ? `; available fix ${advisory.fix} reviewed and deferred` : "";
+  return `${head}${title}\n        -> exception until ${row.expiresAt}, scope ${row.scope}, owner ${row.owner}${reviewed}`;
 }
 
 export function main(argv, io = { out: console.log, err: console.error }) {

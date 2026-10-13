@@ -58,7 +58,7 @@ function audit(...entries) {
       effects: [],
       range: "<9.9.9",
       nodes: [`node_modules/${entry.name}`],
-      fixAvailable: true,
+      fixAvailable: entry.fixAvailable ?? false,
     };
   }
   return { auditReportVersion: 2, vulnerabilities, metadata: {} };
@@ -339,6 +339,140 @@ describe("dependency advisory gate: decisions", () => {
     const stale = gate(writeJson("audit", audit()), writeJson("triage", { rows: [row()] }));
     assert.equal(stale.status, 0, stale.output);
     assert.match(stale.output, /WARN.*no longer needed/);
+  });
+});
+
+describe("dependency advisory gate: malformed audit entries fail closed", () => {
+  const emptyTriage = () => writeJson("triage", { rows: [] });
+  const report = (vulnerabilities) => ({ auditReportVersion: 2, vulnerabilities, metadata: {} });
+  const entry = (overrides = {}) => ({
+    name: "shape-lib",
+    severity: "high",
+    isDirect: false,
+    via: [advisory({ name: "shape-lib", ghsa: "GHSA-fake-high-0010" })],
+    effects: [],
+    range: "<9.9.9",
+    nodes: ["node_modules/shape-lib"],
+    fixAvailable: false,
+    ...overrides,
+  });
+
+  it("exits 2 for a vulnerability entry that is null, a string or an array", () => {
+    for (const bad of [null, "critical", ["critical"], 7]) {
+      const result = gate(writeJson("audit", report({ "shape-lib": bad })), emptyTriage());
+      assert.equal(result.status, 2, `entry=${JSON.stringify(bad)}\n${result.output}`);
+      assert.match(result.output, /shape-lib/);
+    }
+  });
+
+  it("exits 2 for an advisory object with no severity or a non-string severity", () => {
+    for (const severity of [undefined, null, 7, ""]) {
+      const via = [{ ...advisory({ name: "shape-lib", ghsa: "GHSA-fake-high-0010" }), severity }];
+      const result = gate(writeJson("audit", report({ "shape-lib": entry({ via }) })), emptyTriage());
+      assert.equal(result.status, 2, `severity=${String(severity)}\n${result.output}`);
+    }
+  });
+
+  it("exits 2 for a severity label outside info, low, moderate, high and critical", () => {
+    for (const severity of ["severe", "urgent", "none", "unknown"]) {
+      const via = [{ ...advisory({ name: "shape-lib", ghsa: "GHSA-fake-high-0010" }), severity }];
+      const result = gate(writeJson("audit", report({ "shape-lib": entry({ via }) })), emptyTriage());
+      assert.equal(result.status, 2, `severity=${severity}\n${result.output}`);
+      assert.match(result.output, /severity/i);
+    }
+  });
+
+  it("exits 2 for an entry whose own severity is missing or not a known label", () => {
+    for (const severity of [undefined, null, "severe"]) {
+      const result = gate(
+        writeJson("audit", report({ "shape-lib": entry({ severity }) })),
+        emptyTriage(),
+      );
+      assert.equal(result.status, 2, `entry severity=${String(severity)}\n${result.output}`);
+    }
+  });
+
+  it("exits 2 when via is not an array or holds an item that is neither a name nor an object", () => {
+    for (const via of [undefined, null, "other-lib", [null], [7], [["other-lib"]]]) {
+      const result = gate(writeJson("audit", report({ "shape-lib": entry({ via }) })), emptyTriage());
+      assert.equal(result.status, 2, `via=${JSON.stringify(via)}\n${result.output}`);
+    }
+  });
+
+  it("normalises severity case and whitespace, then gates it", () => {
+    for (const severity of ["Critical ", " HIGH", "high\n"]) {
+      const via = [{ ...advisory({ name: "shape-lib", ghsa: "GHSA-fake-high-0010" }), severity }];
+      const result = gate(
+        writeJson("audit", report({ "shape-lib": entry({ severity, via }) })),
+        emptyTriage(),
+      );
+      assert.equal(result.status, 1, `severity=${JSON.stringify(severity)}\n${result.output}`);
+      assert.match(result.output, /untriaged/i);
+    }
+  });
+
+  it("applies the same validation to the runtime audit", () => {
+    const good = writeJson("audit", audit());
+    const bad = writeJson("runtime", report({ "shape-lib": null }));
+    const result = gate(good, emptyTriage(), ["--runtime", bad]);
+    assert.equal(result.status, 2, result.output);
+  });
+});
+
+describe("dependency advisory gate: an available fix forces re-triage of an exception", () => {
+  const exceptionOver = (fixAvailable, patch = {}) =>
+    gate(
+      writeJson("audit", audit({ ...devHigh, fixAvailable })),
+      writeJson("triage", { rows: [row(patch)] }),
+    );
+
+  it("blocks when npm audit reports a non-breaking fix (fixAvailable: true)", () => {
+    const result = exceptionOver(true);
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, /fix is (now )?available/i);
+  });
+
+  it("blocks when the fix is a non-major upgrade of some package", () => {
+    const result = exceptionOver({ name: "parent-lib", version: "1.4.2", isSemVerMajor: false });
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, /parent-lib@1\.4\.2/);
+  });
+
+  it("blocks when the fix is a major upgrade of the vulnerable package itself", () => {
+    const result = exceptionOver({ name: "dev-tool", version: "2.0.0", isSemVerMajor: true });
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, /dev-tool@2\.0\.0/);
+  });
+
+  it("does not trigger on a breaking change to a different package (today's braces shape)", () => {
+    const result = exceptionOver({ name: "eslint-config-next", version: "14.2.35", isSemVerMajor: true });
+    assert.equal(result.status, 0, result.output);
+  });
+
+  it("does not trigger when npm audit reports no fix", () => {
+    const result = exceptionOver(false);
+    assert.equal(result.status, 0, result.output);
+  });
+
+  it("lets the owner record that this exact fix was reviewed and deferred", () => {
+    const reviewed = exceptionOver(
+      { name: "dev-tool", version: "2.0.0", isSemVerMajor: true },
+      { reviewedFix: "dev-tool@2.0.0" },
+    );
+    assert.equal(reviewed.status, 0, reviewed.output);
+    assert.match(reviewed.output, /reviewed/i);
+
+    const reviewedTrue = exceptionOver(true, { reviewedFix: "npm-audit-fix" });
+    assert.equal(reviewedTrue.status, 0, reviewedTrue.output);
+  });
+
+  it("blocks again when the available fix differs from the one that was reviewed", () => {
+    const result = exceptionOver(
+      { name: "dev-tool", version: "2.1.0", isSemVerMajor: true },
+      { reviewedFix: "dev-tool@2.0.0" },
+    );
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, /dev-tool@2\.1\.0/);
   });
 });
 
