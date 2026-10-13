@@ -794,13 +794,13 @@ class OutputFaultTest(SafetyAssertions):
                 with self.assertLogs("rvm.controller", level="ERROR"):
                     for _tick in range(3):
                         sensor_pass(controller)
-                self.assert_latched(controller, "SERVICE_PANEL_FORCED_OPEN")
+                self.assert_latched(controller, "OUTPUT_STOP_FAILED")
                 # Surfaced once per fault episode, not on every tick.
                 self.assertEqual(len(self.stop_fault_events(controller)), 1)
                 fault["active"] = False
                 sensor_pass(controller)
                 self.assert_outputs_off(controller)
-                self.assert_latched(controller, "SERVICE_PANEL_FORCED_OPEN")
+                self.assert_latched(controller, "OUTPUT_STOP_FAILED")
             finally:
                 controller.db.close()
 
@@ -820,7 +820,7 @@ class OutputFaultTest(SafetyAssertions):
                         time.sleep(0.02)
                     time.sleep(0.2)  # several ticks while the output fault persists
                     self.assertTrue(loop.is_alive(), "control loop died on an output fault")
-                    self.assert_latched(controller, "SERVICE_PANEL_FORCED_OPEN")
+                    self.assert_latched(controller, "OUTPUT_STOP_FAILED")
 
                     fault["active"] = False
                     deadline = time.time() + 2
@@ -828,7 +828,7 @@ class OutputFaultTest(SafetyAssertions):
                         time.sleep(0.02)
                     self.assertTrue(loop.is_alive())
                     self.assert_outputs_off(controller)
-                    self.assert_latched(controller, "SERVICE_PANEL_FORCED_OPEN")
+                    self.assert_latched(controller, "OUTPUT_STOP_FAILED")
             finally:
                 controller.running = False
                 if loop.ident is not None:
@@ -862,9 +862,138 @@ class OutputFaultTest(SafetyAssertions):
                     controller._lease_loop()
                 self.assertEqual(len(polls), 3)
                 self.assertIsNone(controller.db.active_lease())
-                self.assertEqual(controller.state, MachineState.IDLE)
+                # The refusal's failed stop latches the machine instead of leaving it IDLE.
+                self.assert_latched(controller, "OUTPUT_STOP_FAILED")
             finally:
                 controller.running = False
+                controller.db.close()
+
+
+class OutputStopFailureLatchTest(SafetyAssertions):
+    """A failed all_stop on any path ends latched in SAFE_STATE with the stop
+    retried every tick until it succeeds; no lease activates meanwhile and
+    only the validated operator reset clears the latch."""
+
+    @staticmethod
+    def wait_for(predicate, timeout: float = 2.0) -> bool:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.02)
+        return predicate()
+
+    @staticmethod
+    def trigger_full(controller, lease):
+        controller.hardware.patch(fill_percent=96)
+
+    @staticmethod
+    def trigger_lease_expiry(controller, lease):
+        controller.db.save_lease({**lease, "expiresAt": time.time() - 1, "status": "ACTIVE"})
+
+    @staticmethod
+    def trigger_session_end(controller, lease):
+        controller.sync.fetch_machine_session = lambda: {"lease": None, "session": None}
+        controller.sync.fetch_display = lambda: None
+        controller._poll_server_session()
+
+    def test_failed_stop_latches_and_retries_until_outputs_are_off(self):
+        triggers = {
+            "full": self.trigger_full,
+            "lease-expiry": self.trigger_lease_expiry,
+            "session-end": self.trigger_session_end,
+        }
+        for name, trigger in triggers.items():
+            for persistent in (False, True):
+                with self.subTest(trigger=name, persistent=persistent):
+                    self.run_failed_stop_scenario(trigger, persistent)
+
+    def run_failed_stop_scenario(self, trigger, persistent: bool) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            loop = threading.Thread(target=controller._run, name="control-loop", daemon=True)
+            try:
+                lease = signed_lease()
+                self.assertTrue(controller.activate_lease(lease))
+                hardware = controller.hardware
+                self.assertTrue(hardware.input_gate_open)
+                real_all_stop = hardware.all_stop
+                attempts: list = []
+                fault = {"failures_left": float("inf") if persistent else 1}
+
+                def all_stop():
+                    attempts.append(time.time())
+                    if fault["failures_left"] > 0:
+                        fault["failures_left"] -= 1
+                        raise OSError("gpio write failed")
+                    real_all_stop()
+
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    controller.running = True
+                    loop.start()
+                    hardware.all_stop = all_stop
+                    trigger(controller, lease)
+                    self.assertTrue(
+                        self.wait_for(lambda: controller.state == MachineState.SAFE_STATE),
+                        f"not latched after a failed stop: {controller.state}",
+                    )
+                    self.assertEqual(controller.db.get_json("safe_reason"), "OUTPUT_STOP_FAILED")
+                    self.assertFalse(controller.activate_lease(signed_lease("session-new")))
+
+                    if persistent:
+                        # The failing stop really left the gate open; it is
+                        # retried on every tick and blocks every actuation.
+                        self.assertTrue(hardware.input_gate_open)
+                        before = len(attempts)
+                        time.sleep(0.3)
+                        self.assertGreater(len(attempts), before + 3, "stop not retried every tick")
+                        self.assertEqual(
+                            controller.actuation_block_reason(hardware.read()), "OUTPUT_STOP_FAILED"
+                        )
+                        self.assertFalse(controller.activate_lease(signed_lease("session-new")))
+                        with self.assertRaisesRegex(ValueError, "output gagal dimatikan"):
+                            controller.execute_remote_command("RESET_ALERT", {})
+                        fault["failures_left"] = 0
+
+                    self.assertTrue(
+                        self.wait_for(lambda: not hardware.input_gate_open), "stop never succeeded"
+                    )
+                    self.assert_outputs_off(controller)
+                    self.assertTrue(loop.is_alive())
+                    # Outputs are off again, but only an operator reset clears the latch.
+                    time.sleep(0.1)
+                    self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+                    self.assertFalse(controller.activate_lease(signed_lease("session-new")))
+                    controller.execute_remote_command("RESET_ALERT", {})
+                    self.assertNotEqual(controller.state, MachineState.SAFE_STATE)
+                    self.assertIsNone(controller.actuation_block_reason(hardware.read()))
+            finally:
+                controller.running = False
+                if loop.ident is not None:
+                    loop.join(2)
+                controller.db.close()
+
+    def test_safe_state_entered_reports_a_failed_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                def all_stop():
+                    raise OSError("gpio write failed")
+
+                controller.hardware.all_stop = all_stop
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    controller.enter_safe_state("SERVICE_PANEL_FORCED_OPEN", {})
+                entered = [e["payload"] for e in events_of(controller, "SAFE_STATE_ENTERED")]
+                self.assertEqual(
+                    [e["reason"] for e in entered],
+                    ["SERVICE_PANEL_FORCED_OPEN", "OUTPUT_STOP_FAILED"],
+                )
+                for payload in entered:
+                    self.assertEqual(payload["outputsDisabled"], [])
+                    self.assertTrue(payload["stopFailed"])
+                # The output fault outranks the original reason at once.
+                self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+            finally:
                 controller.db.close()
 
 

@@ -57,6 +57,7 @@ INTERLOCK_MESSAGES = {
     "MAINTENANCE_MODE": "mesin dalam mode maintenance",
     "SAFETY_LATCH_ACTIVE": "alert keselamatan belum direset",
     "SENSOR_READ_FAILED": "sensor tidak dapat dibaca",
+    "OUTPUT_STOP_FAILED": "output gagal dimatikan",
 }
 
 

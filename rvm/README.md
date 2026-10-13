@@ -36,7 +36,8 @@ keselamatan lokal aktif. Kontraknya:
   conveyor di titik penerimaan, mesin mengirim `ITEM_REJECTED`
   (`reason: ACTUATION_BLOCKED`, `blockedBy: <alasan>`) dan tidak pernah
   mengirim `ITEM_ACCEPTED_POINT` maupun menjalankan compactor untuk item itu.
-- **Kondisi yang memblokir:** service panel atau pintu kolektor terbuka,
+- **Kondisi yang memblokir:** gangguan output yang belum teratasi (stop
+  terakhir gagal), service panel atau pintu kolektor terbuka,
   suhu ≥ `max_temperature_c`, getaran ≥ `vibration_threshold_g`, kamera
   tidak memenuhi syarat (kamera aktif harus online dan tidak tertutup; hanya
   `MockHardware` yang mensimulasikan sinyal kamera), state `SAFE_STATE`,
@@ -79,12 +80,23 @@ keselamatan lokal aktif. Kontraknya:
   `start()` memanggil `all_stop()`, dan sesi yang dipulihkan setelah restart
   tidak membuka gate secara otomatis. `all_stop()` GPIO tetap mematikan output
   lain walaupun salah satu output gagal ditulis.
-- **Gangguan output tidak mematikan loop.** Kegagalan `all_stop()` di jalur
-  keselamatan tidak pernah mencegah latch tersimpan dan tidak menghentikan
-  loop kontrol atau loop sesi; kegagalan itu dicatat di log, dilaporkan sekali
-  per kejadian sebagai event `ERROR` (`OUTPUT_STOP_FAILED`), dan setiap tick
-  mencoba mematikan output lagi. Error loop lain dicatat di log dan loop
-  berlanjut dengan backoff (kontrol ≤ 1 s, sesi ≤ 30 s).
+- **Stop yang gagal selalu me-latch.** Setiap jalur yang mematikan output
+  (safe state, tick saat ter-latch, bin penuh, lease kedaluwarsa, akhir sesi
+  server, penolakan guard, fraud, reset, `STOP_ALL`, `ENTER_MAINTENANCE`, start
+  dan stop runtime) memakai stop yang sama: jika `all_stop()` gagal, mesin
+  langsung ter-latch di `SAFE_STATE` dengan alasan `OUTPUT_STOP_FAILED` (event
+  `ERROR`, dan `SAFE_STATE_ENTERED` melaporkan `stopFailed: true` serta
+  `outputsDisabled: []`), juga bila stop gagal saat masuk safe state karena
+  alasan lain. Mesin tidak pernah dibiarkan
+  `FULL`/`SYNC_PENDING`/`IDLE` dan dapat digerakkan. Selama gangguan belum
+  teratasi, setiap tick mencoba stop lagi sampai berhasil, semua aktuasi
+  (termasuk `activate_lease`) ditolak, dan `RESET_ALERT`/`reset-safe-state`
+  ditolak (`output gagal dimatikan`). Setelah stop berhasil, latch tetap ada
+  sampai reset operator yang tervalidasi. `STOP_ALL` dan `ENTER_MAINTENANCE`
+  yang stop-nya gagal dilaporkan gagal ke superadmin.
+- **Error tidak mematikan loop.** Loop kontrol dan loop sesi mencatat error di
+  log lalu berlanjut dengan backoff (kontrol ≤ 1 s, sesi ≤ 30 s); error pada
+  tick kontrol juga me-latch `SAFE_STATE` (`CONTROL_LOOP_ERROR`).
 - Audit lokal mencatat `INPUT_GATE_OPENED` dan `ACTUATION_BLOCKED` beserta
   alasannya.
 

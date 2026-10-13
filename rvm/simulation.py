@@ -29,7 +29,7 @@ class RvmSimulationMixin:
         is clear on a fresh sensor read; on MockHardware the simulated
         sensors are first returned to their idle values."""
         with self._lock:
-            self.hardware.all_stop()
+            self._safe_all_stop()
             if isinstance(self.hardware, MockHardware):
                 self.hardware.patch(
                     chamber_open=False,

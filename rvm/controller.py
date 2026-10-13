@@ -98,7 +98,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
 
     def start(self) -> None:
         self.running = True
-        self.hardware.all_stop()
+        self._safe_all_stop()
         self.sync.start()
         self.camera.start()
         self._recover_state_after_restart()
@@ -116,7 +116,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
 
     def stop(self) -> None:
         self.running = False
-        self.hardware.all_stop()
+        self._safe_all_stop()
         self.camera.stop()
         self.sync.stop()
         if self._loop:
@@ -231,7 +231,6 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                     self.activate_lease(lease)
                 elif not lease and local_lease:
                     self.db.deactivate_leases()
-                    self._safe_all_stop()
                     self._processing_started_at = None
                     self._reset_waste_type_selection()
                     if self._active_alert and self._active_alert.get("category") == "FRAUD":
@@ -240,6 +239,8 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                     # server session; only a validated operator reset ends it.
                     if self.state not in LOCKED_STATE_BLOCK_REASONS:
                         self.set_state(MachineState.IDLE, "server-session-ended")
+                    # After the state change, so a failed stop's latch wins.
+                    self._safe_all_stop()
 
         if self.state == MachineState.IDLE and time.time() - self._last_display_poll >= 5:
             self._last_display_poll = time.time()
@@ -480,10 +481,12 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
     ) -> None:
         # Outputs off immediately, without waiting for the controller lock,
         # and again under it so an in-flight guarded write cannot survive.
-        # An output fault is reported but never prevents the latch below.
-        self._safe_all_stop()
+        # An output fault never prevents the latch below; it escalates the
+        # latch to OUTPUT_STOP_FAILED and the control tick keeps retrying the
+        # stop while latched.
+        self._stop_outputs()
         with self._lock:
-            self._safe_all_stop()
+            stopped = self._stop_outputs()
             if self.state == MachineState.SAFE_STATE and reason == self.db.get_json("safe_reason"):
                 return
             self._set_alert(category, reason, "CRITICAL", payload)
@@ -497,10 +500,19 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 {
                     "reason": reason,
                     "category": category,
-                    "outputsDisabled": ["input_gate", "conveyor", "compactor"],
+                    "outputsDisabled": ["input_gate", "conveyor", "compactor"] if stopped else [],
+                    "stopFailed": not stopped,
                 },
                 self.session_id(),
             )
+            if not stopped and reason != "OUTPUT_STOP_FAILED":
+                # The unresolved output fault outranks the original reason.
+                self.enter_safe_state(
+                    "OUTPUT_STOP_FAILED",
+                    {"error": self._output_fault},
+                    category="SYSTEM",
+                    event_type="ERROR",
+                )
 
     def verify_lease(self, lease: dict[str, Any]) -> bool:
         required = {"id", "sessionId", "issuedAt", "expiresAt", "signature"}
@@ -545,8 +557,12 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         return True
 
     def _physical_hazards(self, snapshot: SensorSnapshot) -> list[str]:
-        """Conditions under which no actuator may move at all."""
+        """Conditions under which no actuator may move at all. An unresolved
+        output-stop fault counts: until a stop has succeeded again nothing may
+        be opened, every tick retries the stop and no reset is accepted."""
         reasons = []
+        if self._output_fault is not None:
+            reasons.append("OUTPUT_STOP_FAILED")
         if snapshot.service_panel_open:
             reasons.append("SERVICE_PANEL_OPEN")
         if snapshot.collection_door_open:
@@ -631,25 +647,39 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             write()
             return None
 
-    def _safe_all_stop(self) -> bool:
-        """all_stop() for safety paths: an output fault never propagates, so
-        it cannot prevent latching or kill a control/session loop. The fault
-        is logged and reported once per episode (ERROR event
-        OUTPUT_STOP_FAILED); every later call retries the stop."""
+    def _stop_outputs(self) -> bool:
+        """One all_stop() attempt that never raises. Tracks the output fault:
+        set (and logged once per distinct error) while the stop fails, cleared
+        once a stop succeeds again. Does not latch; see _safe_all_stop."""
         try:
             self.hardware.all_stop()
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             if self._output_fault != error:
-                self._output_fault = error
                 logger.error("all_stop failed: %s", error)
-                self.emit("ERROR", {"reason": "OUTPUT_STOP_FAILED", "error": error}, self.session_id())
+            self._output_fault = error
             return False
         if self._output_fault is not None:
             logger.info("all_stop recovered after: %s", self._output_fault)
             self.db.audit("OUTPUT_STOP_RECOVERED", {"error": self._output_fault})
             self._output_fault = None
         return True
+
+    def _safe_all_stop(self) -> bool:
+        """Stop used by every path that turns outputs off. It never raises,
+        and an unsuccessful stop always latches SAFE_STATE (OUTPUT_STOP_FAILED,
+        reported as an ERROR event): the machine is never left unlatched and
+        actuatable. While latched every tick retries the stop until it
+        succeeds; the latch then stays until a validated operator reset."""
+        if self._stop_outputs():
+            return True
+        self.enter_safe_state(
+            "OUTPUT_STOP_FAILED",
+            {"error": self._output_fault},
+            category="SYSTEM",
+            event_type="ERROR",
+        )
+        return False
 
     def try_open_input_gate(self, reason: str) -> bool:
         blocked = self._guarded_output(lambda: self.hardware.set_input_gate(True))
@@ -668,8 +698,9 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         if self.state not in {MachineState.SESSION_ACTIVE, MachineState.PROCESSING}:
             return
         if not self.db.active_lease():
-            self._safe_all_stop()
             self.set_state(MachineState.SYNC_PENDING, "lease-expired")
+            # After the state change, so a failed stop's latch wins.
+            self._safe_all_stop()
 
     def session_id(self) -> str | None:
         lease = self.db.active_lease()

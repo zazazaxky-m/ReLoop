@@ -45,10 +45,14 @@ class RvmRemoteMixin:
         if command == "STOP_ALL":
             # Outputs off at once, never behind the controller lock; then once
             # more under it so a guarded write already in flight cannot leave
-            # an output running after STOP_ALL returns.
-            self.hardware.all_stop()
+            # an output running after STOP_ALL returns. A failed stop latches
+            # SAFE_STATE and is reported back as a failed command.
+            self._safe_all_stop()
             with self._lock:
-                self.hardware.all_stop()
+                if not self._safe_all_stop():
+                    raise RuntimeError(
+                        "STOP_ALL gagal: output tidak dapat dimatikan, mesin dikunci di safe state"
+                    )
         elif command in {"CAPTURE_SNAPSHOT", "SYNC_NOW"}:
             # Camera and network I/O: run outside the safety critical section
             # so a slow or hanging server never delays the sensor loop,
@@ -96,7 +100,10 @@ class RvmRemoteMixin:
                 raise ValueError("Reset ditolak: " + describe_interlocks(unsafe))
             self._reset_mock_state(deactivate_lease=False)
         elif command == "ENTER_MAINTENANCE":
-            self.hardware.all_stop()
+            if not self._safe_all_stop():
+                raise RuntimeError(
+                    "Output tidak dapat dimatikan, mesin dikunci di safe state"
+                )
             self.set_state(MachineState.MAINTENANCE, "remote-superadmin")
         elif command == "RESUME_OPERATION":
             if self.db.get_json("safe_reason") or self._active_alert:
