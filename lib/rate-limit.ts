@@ -2,6 +2,7 @@ export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
   resetAt: number;
+  unavailable?: boolean;
 }
 
 interface RateLimitStore {
@@ -13,7 +14,7 @@ function isProduction(): boolean {
 }
 
 function denyResult(windowMs: number): RateLimitResult {
-  return { allowed: false, remaining: 0, resetAt: Date.now() + windowMs };
+  return { allowed: false, remaining: 0, resetAt: Date.now() + windowMs, unavailable: true };
 }
 
 /**
@@ -62,17 +63,19 @@ class MissingRedisRateLimitStore implements RateLimitStore {
  */
 class RedisRateLimitStore implements RateLimitStore {
   private client: unknown = null;
-  private unavailable = false;
   private connecting: Promise<unknown> | null = null;
   private readonly devFallback = new MemoryRateLimitStore();
 
   constructor(private readonly url: string) {}
 
   private async getClient(): Promise<any | null> {
-    if (this.unavailable) return null;
     if (this.client) return this.client;
     if (!this.connecting) this.connecting = this.connect();
-    return this.connecting;
+    try {
+      return await this.connecting;
+    } finally {
+      this.connecting = null;
+    }
   }
 
   private async connect(): Promise<any | null> {
@@ -84,14 +87,12 @@ class RedisRateLimitStore implements RateLimitStore {
       const client = new RedisCtor(this.url, { maxRetriesPerRequest: 1, lazyConnect: false });
       client.on("error", (err: unknown) => {
         console.error("[rate-limit] Redis error:", err);
-        this.unavailable = true;
-        this.client = null;
+        // ioredis reconnects automatically; keep the client available for recovery.
       });
       this.client = client;
       return client;
     } catch (err) {
       console.error("[rate-limit] Failed to connect to Redis:", err);
-      this.unavailable = true;
       return null;
     }
   }

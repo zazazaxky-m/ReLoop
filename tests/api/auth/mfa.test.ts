@@ -28,6 +28,8 @@ vi.mock("@/lib/rbac", () => ({
 }));
 
 vi.mock("@/lib/mfa", () => ({
+  MfaChallengeStoreUnavailable: class extends Error {},
+  consumeMfaChallenge: vi.fn(),
   beginMfaSetup: vi.fn(),
   disableMfa: vi.fn(),
   enableMfa: vi.fn(),
@@ -58,6 +60,7 @@ function req(body: unknown, ip = "127.0.0.1") {
 describe("MFA API routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(mfa.consumeMfaChallenge).mockResolvedValue(true);
     vi.mocked(rbac.requireApiUser).mockResolvedValue(admin as never);
   });
 
@@ -136,7 +139,7 @@ describe("MFA API routes", () => {
 
     expect((await verifyMfaPost(req({ challengeToken: "token", code: "123456" }))).status).toBe(401);
 
-    vi.mocked(mfa.verifyMfaChallenge).mockResolvedValueOnce({ userId: "admin-1" });
+    vi.mocked(mfa.verifyMfaChallenge).mockResolvedValueOnce({ userId: "admin-1", tokenVersion: 0, challengeId: "challenge-id", expiresAt: 2000000000 });
     vi.mocked(mfa.verifyMfaLoginCode).mockResolvedValue(false);
 
     expect((await verifyMfaPost(req({ challengeToken: "token", code: "123456" }))).status).toBe(401);
@@ -145,7 +148,7 @@ describe("MFA API routes", () => {
 
   it("verifies MFA and creates a session for active users", async () => {
     vi.mocked(rateLimit.checkRateLimit).mockResolvedValue({ allowed: true } as never);
-    vi.mocked(mfa.verifyMfaChallenge).mockResolvedValue({ userId: "admin-1" });
+    vi.mocked(mfa.verifyMfaChallenge).mockResolvedValue({ userId: "admin-1", tokenVersion: 0, challengeId: "challenge-id", expiresAt: 2000000000 });
     vi.mocked(mfa.verifyMfaLoginCode).mockResolvedValue(true);
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
       id: "admin-1",
@@ -154,6 +157,7 @@ describe("MFA API routes", () => {
       role: "ADMIN",
       organizationId: "org-1",
       tokenVersion: 0,
+      mfaEnabled: true,
       status: "ACTIVE",
     } as never);
 
@@ -167,7 +171,7 @@ describe("MFA API routes", () => {
 
   it("rejects MFA verification for inactive accounts", async () => {
     vi.mocked(rateLimit.checkRateLimit).mockResolvedValue({ allowed: true } as never);
-    vi.mocked(mfa.verifyMfaChallenge).mockResolvedValue({ userId: "admin-1" });
+    vi.mocked(mfa.verifyMfaChallenge).mockResolvedValue({ userId: "admin-1", tokenVersion: 0, challengeId: "challenge-id", expiresAt: 2000000000 });
     vi.mocked(mfa.verifyMfaLoginCode).mockResolvedValue(true);
     vi.mocked(prisma.user.findUnique).mockResolvedValue({ status: "SUSPENDED" } as never);
 

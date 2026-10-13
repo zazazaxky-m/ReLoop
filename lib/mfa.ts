@@ -1,4 +1,8 @@
 import { SignJWT, jwtVerify } from "jose";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { getJwtSecret, tokenClaims } from "./auth-tokens";
+export { consumeMfaChallenge, MfaChallengeStoreUnavailable } from "./mfa-challenge-store";
 import { prisma } from "./prisma";
 import { decrypt, encrypt, isEncrypted } from "./encryption";
 import {
@@ -10,17 +14,6 @@ import type { AppRole } from "./roles";
 
 const MFA_CHALLENGE_TTL = "5m";
 const PRIVILEGED_ROLES = new Set<AppRole>(["ADMIN", "SUPERADMIN"]);
-
-function getJwtSecret(): Uint8Array {
-  const s = process.env.AUTH_JWT_SECRET;
-  if (!s || s === "dev-insecure-secret-change-me") {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("AUTH_JWT_SECRET must be set in production");
-    }
-    return new TextEncoder().encode("dev-insecure-secret-change-me");
-  }
-  return new TextEncoder().encode(s);
-}
 
 export function isPrivilegedRole(role: AppRole): boolean {
   return PRIVILEGED_ROLES.has(role);
@@ -105,21 +98,34 @@ export async function verifyMfaLoginCode(
   return verifyTotpCode(secret, code);
 }
 
-export async function signMfaChallenge(userId: string): Promise<string> {
-  return new SignJWT({ purpose: "mfa", sub: userId })
+export async function signMfaChallenge(userId: string, tokenVersion: number): Promise<string> {
+  return new SignJWT({ purpose: "mfa", sub: userId, tokenVersion })
+    .setIssuer("reloop")
+    .setAudience("reloop-mfa")
+    .setJti(randomUUID())
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(MFA_CHALLENGE_TTL)
     .sign(getJwtSecret());
 }
 
-export async function verifyMfaChallenge(
-  token: string,
-): Promise<{ userId: string } | null> {
+const challengeClaims = tokenClaims.extend({
+  purpose: z.literal("mfa"),
+  jti: z.string().uuid(),
+  exp: z.number().int().safe(),
+});
+
+export async function verifyMfaChallenge(token: string): Promise<{
+  userId: string; tokenVersion: number; challengeId: string; expiresAt: number;
+} | null> {
   try {
-    const { payload } = await jwtVerify(token, getJwtSecret());
-    if (payload.purpose !== "mfa" || !payload.sub) return null;
-    return { userId: String(payload.sub) };
+    const { payload } = await jwtVerify(token, getJwtSecret(), {
+      algorithms: ["HS256"], issuer: "reloop", audience: "reloop-mfa",
+    });
+    const parsed = challengeClaims.safeParse(payload);
+    if (!parsed.success) return null;
+    return { userId: parsed.data.sub, tokenVersion: parsed.data.tokenVersion,
+      challengeId: parsed.data.jti, expiresAt: parsed.data.exp };
   } catch {
     return null;
   }

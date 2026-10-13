@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 const port = Number(process.env.REALTIME_PORT || 3001);
@@ -21,15 +21,6 @@ const ADMIN_ROLES = new Set(["ADMIN", "SUPERADMIN"]);
 // receive everything, including security-alert topics.
 const clients = new Map();
 
-function jwtSecretBytes() {
-  const secret = process.env.AUTH_JWT_SECRET;
-  if (!secret || secret === "dev-insecure-secret-change-me") {
-    if (process.env.NODE_ENV === "production") return null;
-    return new TextEncoder().encode("dev-insecure-secret-change-me");
-  }
-  return new TextEncoder().encode(secret);
-}
-
 function parseCookies(header) {
   const out = {};
   if (!header) return out;
@@ -48,60 +39,7 @@ function parseCookies(header) {
   return out;
 }
 
-/**
- * Minimal dependency-free HS256 JWT verification (this gateway intentionally
- * ships without node_modules, see Dockerfile.realtime). Mirrors the token
- * shape produced by lib/auth.ts's `signSession` (jose SignJWT, alg HS256).
- */
-function verifyHs256Jwt(token, secretBytes) {
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [headerB64, payloadB64, signatureB64] = parts;
-
-  let header;
-  try {
-    header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf8"));
-  } catch {
-    return null;
-  }
-  if (header.alg !== "HS256") return null;
-
-  const expectedSig = createHmac("sha256", secretBytes)
-    .update(`${headerB64}.${payloadB64}`)
-    .digest();
-  let actualSig;
-  try {
-    actualSig = Buffer.from(signatureB64, "base64url");
-  } catch {
-    return null;
-  }
-  if (expectedSig.length !== actualSig.length || !timingSafeEqual(expectedSig, actualSig)) {
-    return null;
-  }
-
-  let payload;
-  try {
-    payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
-  } catch {
-    return null;
-  }
-  if (typeof payload.exp === "number" && Date.now() / 1000 >= payload.exp) {
-    return null;
-  }
-  return payload;
-}
-
-function resolveSocketRoleFromJwt(req) {
-  const secretBytes = jwtSecretBytes();
-  if (!secretBytes) return null;
-  const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-  if (!token) return null;
-  const payload = verifyHs256Jwt(token, secretBytes);
-  if (!payload) return null;
-  return typeof payload.role === "string" ? payload.role : null;
-}
-
-/** Resolves socket role from live DB when configured; JWT-only fallback in dev. */
+/** Private roles always require the live web verifier; no JWT-only fallback. */
 async function resolveSocketRole(req) {
   const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
   if (!token) return null;
@@ -125,7 +63,7 @@ async function resolveSocketRole(req) {
     }
   }
 
-  return resolveSocketRoleFromJwt(req);
+  return null;
 }
 
 function frame(text) {

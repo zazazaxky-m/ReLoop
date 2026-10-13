@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
+import { signMfaChallenge } from "@/lib/mfa";
+import { SignJWT } from "jose";
 import { proxy } from "@/proxy";
 import { buildSessionPayload, signSession, SESSION_COOKIE } from "@/lib/auth";
 
@@ -23,6 +25,19 @@ async function authedRequest(
 }
 
 describe("proxy", () => {
+  it.each(["/api/auth/me", "/api/users", "/dashboard/admin"])("rejects MFA cookies at %s", async (path) => {
+    const req = new NextRequest(`http://localhost${path}`);
+    req.cookies.set(SESSION_COOKIE, await signMfaChallenge("admin-1", 0));
+    expect((await proxy(req)).status).toBe(path.startsWith("/api") ? 401 : 307);
+  });
+  it("rejects legacy sessions", async () => {
+    const token = await new SignJWT({ sub: "admin-1", role: "ADMIN", tokenVersion: 0 })
+      .setProtectedHeader({ alg: "HS256" }).setIssuedAt().setExpirationTime("1h")
+      .sign(new TextEncoder().encode(process.env.AUTH_JWT_SECRET || "dev-insecure-secret-change-me"));
+    const req = new NextRequest("http://localhost/api/users");
+    req.cookies.set(SESSION_COOKIE, token);
+    expect((await proxy(req)).status).toBe(401);
+  });
   it("rejects cross-site unsafe API requests even with a valid session", async () => {
     const req = await authedRequest("http://localhost/api/wallet", {
       method: "POST",

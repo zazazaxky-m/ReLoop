@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (requiresMfaAtLogin(user.role as AppRole, user.mfaEnabled)) {
-      const challengeToken = await signMfaChallenge(user.id);
+      const challengeToken = await signMfaChallenge(user.id, user.tokenVersion);
       await logAudit({
         actorId: user.id,
         action: "MFA_CHALLENGE_ISSUED",

@@ -42,7 +42,11 @@ export async function POST(req: NextRequest) {
     if (!user || user.status !== "ACTIVE") {
       return jsonOk({ role: null });
     }
-    if ((payload.tokenVersion ?? 0) !== (user.tokenVersion ?? 0)) {
+    if (
+      !Number.isSafeInteger(payload.tokenVersion) ||
+      !Number.isSafeInteger(user.tokenVersion) ||
+      payload.tokenVersion !== user.tokenVersion
+    ) {
       return jsonOk({ role: null });
     }
 

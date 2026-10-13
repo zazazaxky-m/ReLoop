@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
-import { jwtVerify } from "jose";
+import { verifySessionToken } from "@/lib/auth-tokens";
 import { buildSecurityHeaders, NONCE_HEADER } from "@/lib/security-headers";
 
 const SESSION_COOKIE = "reloop_session";
@@ -43,26 +43,9 @@ function isSameOriginUnsafeRequest(req: NextRequest): boolean {
   return site !== "cross-site";
 }
 
-function getJwtSecret(): Uint8Array {
-  const secret = process.env.AUTH_JWT_SECRET;
-  if (!secret || secret === "dev-insecure-secret-change-me") {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("AUTH_JWT_SECRET must be set in production");
-    }
-    return new TextEncoder().encode("dev-insecure-secret-change-me");
-  }
-  return new TextEncoder().encode(secret);
-}
-
 async function hasValidSession(req: NextRequest): Promise<boolean> {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
-  if (!token) return false;
-  try {
-    await jwtVerify(token, getJwtSecret());
-    return true;
-  } catch {
-    return false;
-  }
+  return token ? (await verifySessionToken(token)) !== null : false;
 }
 
 function withSecurityHeaders(response: NextResponse, nonce: string) {

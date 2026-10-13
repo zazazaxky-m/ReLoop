@@ -105,7 +105,7 @@ describe("POST /api/internal/ws-session", () => {
     expect(data.role).toBe("ADMIN");
   });
 
-  it("treats missing tokenVersion on payload and user as 0", async () => {
+  it("rejects missing tokenVersion on payload and user", async () => {
     vi.mocked(auth.verifySessionToken).mockResolvedValue({
       sub: "user-1",
       email: "a@b.c",
@@ -120,7 +120,7 @@ describe("POST /api/internal/ws-session", () => {
     } as never);
 
     const res = await POST(makeRequest({ token: "jwt" }));
-    expect((await res.json()).role).toBe("USER");
+    expect((await res.json()).role).toBeNull();
   });
 
   it("rejects when REALTIME_INTERNAL_SECRET is unset", async () => {

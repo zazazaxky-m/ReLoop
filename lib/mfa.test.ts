@@ -18,6 +18,35 @@ describe("lib/mfa", () => {
     vi.clearAllMocks();
   });
 
+
+  it("creates distinct challenge IDs and rejects sessions as challenges", async () => {
+    const { signSession } = await import("./auth");
+    const first = await mfa.verifyMfaChallenge(await mfa.signMfaChallenge("u1", 3));
+    const second = await mfa.verifyMfaChallenge(await mfa.signMfaChallenge("u1", 3));
+    expect(first?.challengeId).not.toBe(second?.challengeId);
+    expect(first?.tokenVersion).toBe(3);
+    expect(first?.expiresAt).toBeGreaterThan(Date.now() / 1000);
+    expect(await mfa.verifyMfaChallenge(await signSession({ sub: "u1", email: "a@b.c", name: "A",
+      role: "ADMIN", organizationId: null, tokenVersion: 3 }))).toBeNull();
+  });
+
+  it.each([
+    ["legacy", { iss: undefined, aud: undefined, tokenVersion: undefined, jti: undefined }],
+    ["wrong audience", { aud: "reloop-session" }], ["wrong issuer", { iss: "other" }],
+    ["missing version", { tokenVersion: undefined }], ["string version", { tokenVersion: "0" }],
+    ["missing ID", { jti: undefined }], ["invalid ID", { jti: "" }],
+    ["missing issued time", { iat: undefined }], ["missing expiry", { exp: undefined }],
+    ["expired", { exp: 1 }], ["missing subject", { sub: undefined }],
+  ])("rejects %s MFA claims", async (_label, overrides) => {
+    const { SignJWT } = await import("jose");
+    const token = await new SignJWT({ purpose: "mfa", sub: "u1", tokenVersion: 0,
+      jti: "c62e78bf-dd8c-4a96-ae50-e8e50eebfa80", iss: "reloop", aud: "reloop-mfa",
+      iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 60, ...overrides })
+      .setProtectedHeader({ alg: "HS256" })
+      .sign(new TextEncoder().encode(process.env.AUTH_JWT_SECRET || "dev-insecure-secret-change-me"));
+    expect(await mfa.verifyMfaChallenge(token)).toBeNull();
+  });
+
   it("detects privileged roles", () => {
     expect(mfa.isPrivilegedRole("ADMIN")).toBe(true);
     expect(mfa.isPrivilegedRole("SUPERADMIN")).toBe(true);
@@ -31,9 +60,9 @@ describe("lib/mfa", () => {
   });
 
   it("issues and verifies MFA challenge tokens", async () => {
-    const token = await mfa.signMfaChallenge("user-1");
+    const token = await mfa.signMfaChallenge("user-1", 0);
     const verified = await mfa.verifyMfaChallenge(token);
-    expect(verified).toEqual({ userId: "user-1" });
+    expect(verified).toMatchObject({ userId: "user-1", tokenVersion: 0, challengeId: expect.any(String), expiresAt: expect.any(Number) });
   });
 
   it("verifies login MFA codes against stored secret", async () => {
@@ -199,7 +228,7 @@ describe("lib/mfa", () => {
     process.env.AUTH_JWT_SECRET = "dev-insecure-secret-change-me";
     (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     try {
-      await expect(mfa.signMfaChallenge("u1")).rejects.toThrow(
+      await expect(mfa.signMfaChallenge("u1", 0)).rejects.toThrow(
         "AUTH_JWT_SECRET must be set in production",
       );
     } finally {
@@ -212,9 +241,9 @@ describe("lib/mfa", () => {
     const prev = process.env.AUTH_JWT_SECRET;
     process.env.AUTH_JWT_SECRET = "configured-mfa-secret";
     try {
-      const token = await mfa.signMfaChallenge("user-x");
+      const token = await mfa.signMfaChallenge("user-x", 0);
       const verified = await mfa.verifyMfaChallenge(token);
-      expect(verified).toEqual({ userId: "user-x" });
+      expect(verified).toMatchObject({ userId: "user-x", tokenVersion: 0, challengeId: expect.any(String), expiresAt: expect.any(Number) });
     } finally {
       process.env.AUTH_JWT_SECRET = prev;
     }
