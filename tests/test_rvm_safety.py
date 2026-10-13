@@ -426,6 +426,9 @@ class ActuatorPathTest(SafetyAssertions):
         with tempfile.TemporaryDirectory() as tmp:
             controller = make_controller(tmp)
             try:
+                # Jogs are only accepted in MAINTENANCE (J1a); there, a
+                # physical hazard still refuses them.
+                controller.execute_remote_command("ENTER_MAINTENANCE", {})
                 controller.hardware.patch(service_panel_open=True)
                 for command, data in (
                     ("gate", {"open": True}),
@@ -440,7 +443,6 @@ class ActuatorPathTest(SafetyAssertions):
                 # With every condition clear a technician may jog outputs in
                 # maintenance mode.
                 controller.hardware.patch(service_panel_open=False)
-                controller.execute_remote_command("ENTER_MAINTENANCE", {})
                 controller.maintenance_command("gate", {"open": True})
                 self.assertTrue(controller.hardware.input_gate_open)
                 controller.maintenance_command("conveyor", {"direction": "FORWARD"})
@@ -481,6 +483,156 @@ class ActuatorPathTest(SafetyAssertions):
                 self.assert_outputs_off(controller)
             finally:
                 controller.db.close()
+
+
+# --------------------------------------------------------------------------- #
+# J1: jogs only in MAINTENANCE; a session only starts from a stopped machine
+# --------------------------------------------------------------------------- #
+class SessionStartFromStoppedMachineTest(SafetyAssertions):
+    JOGS = (
+        ("gate", {"open": True}),
+        ("conveyor", {"direction": "FORWARD"}),
+        ("conveyor", {"direction": "REVERSE"}),
+        ("compactor", {"active": True}),
+    )
+
+    @staticmethod
+    def drive_output_on(controller: RvmController, output: str) -> None:
+        """The reviewer's probe jogged the output from the maintenance API in
+        IDLE, which J1(a) now refuses; a relay driven on behind the
+        controller's back (stuck relay, foreign writer) is the same hazard."""
+        if output == "compactor":
+            controller.hardware.set_compactor(True)
+        else:
+            controller.hardware.set_conveyor("FORWARD")
+
+    def assert_session_open_with_only_the_gate(self, controller: RvmController) -> None:
+        self.assertEqual(controller.state, MachineState.SESSION_ACTIVE)
+        self.assertTrue(controller.hardware.input_gate_open)
+        self.assertEqual(controller.hardware.conveyor, "STOPPED")
+        self.assertFalse(controller.hardware.compactor, "compactor must be off")
+
+    def test_maintenance_jog_requires_maintenance_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                # The reviewer's probe: a PIN-authorised jog in IDLE.
+                for command, data in self.JOGS:
+                    with self.subTest(state="IDLE", command=command, data=data):
+                        with self.assertRaisesRegex(ValueError, "mode maintenance"):
+                            controller.maintenance_command(command, data)
+                        self.assert_outputs_off(controller)
+                        self.assertEqual(controller.state, MachineState.IDLE)
+                # A refused jog does not disturb a user's session.
+                self.assertTrue(controller.activate_lease(signed_lease()))
+                with self.assertRaisesRegex(ValueError, "mode maintenance"):
+                    controller.maintenance_command("compactor", {"active": True})
+                self.assert_session_open_with_only_the_gate(controller)
+                # Latched: refused for the mode, and in MAINTENANCE by the latch.
+                controller.enter_safe_state("HIGH_IMPACT_DETECTED", {"vibrationG": 4.8})
+                with self.assertRaisesRegex(ValueError, "mode maintenance"):
+                    controller.maintenance_command("conveyor", {"direction": "FORWARD"})
+                controller.execute_remote_command("ENTER_MAINTENANCE", {})
+                with self.assertRaisesRegex(ValueError, "alert keselamatan belum direset"):
+                    controller.maintenance_command("conveyor", {"direction": "FORWARD"})
+                self.assert_outputs_off(controller)
+                # MAINTENANCE may be entered while latched; the latch persists.
+                self.assertEqual(controller.state, MachineState.MAINTENANCE)
+                self.assertEqual(controller.db.get_json("safe_reason"), "HIGH_IMPACT_DETECTED")
+                self.assertEqual(controller._active_alert["severity"], "CRITICAL")
+                self.assertTrue(controller._safety_latch_active())
+            finally:
+                controller.db.close()
+        # Positive control: in MAINTENANCE every jog is accepted.
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                controller.execute_remote_command("ENTER_MAINTENANCE", {})
+                for command, data in self.JOGS:
+                    controller.maintenance_command(command, data)
+                self.assertTrue(controller.hardware.input_gate_open)
+                self.assertEqual(controller.hardware.conveyor, "REVERSE")
+                self.assertTrue(controller.hardware.compactor)
+            finally:
+                controller.db.close()
+
+    def test_lease_stops_running_outputs_before_opening_the_gate(self):
+        for output in ("compactor", "conveyor"):
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as tmp:
+                controller = make_controller(tmp)
+                try:
+                    hardware = controller.hardware
+                    self.drive_output_on(controller, output)
+                    writes: list = []
+                    real_all_stop, real_gate = hardware.all_stop, hardware.set_input_gate
+                    hardware.all_stop = lambda: (writes.append("all_stop"), real_all_stop())
+                    hardware.set_input_gate = lambda o: (writes.append(("gate", o)), real_gate(o))
+
+                    self.assertTrue(controller.activate_lease(signed_lease()))
+                    self.assert_session_open_with_only_the_gate(controller)
+                    # Every output was stopped before the gate opened to the user.
+                    self.assertIn("all_stop", writes)
+                    self.assertLess(writes.index("all_stop"), writes.index(("gate", True)))
+                finally:
+                    controller.db.close()
+
+    def test_jog_left_running_in_maintenance_is_stopped_before_the_next_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                controller.execute_remote_command("ENTER_MAINTENANCE", {})
+                controller.maintenance_command("compactor", {"active": True})
+                controller.maintenance_command("conveyor", {"direction": "FORWARD"})
+                controller.execute_remote_command("RESUME_OPERATION", {})
+                self.assertEqual(controller.state, MachineState.IDLE)
+                self.assert_outputs_off(controller)
+                self.assertTrue(controller.activate_lease(signed_lease()))
+                self.assert_session_open_with_only_the_gate(controller)
+            finally:
+                controller.db.close()
+
+    def test_failed_stop_at_session_start_latches_and_refuses_the_lease(self):
+        for persistent in (False, True):
+            with self.subTest(persistent=persistent), tempfile.TemporaryDirectory() as tmp:
+                controller = make_controller(tmp)
+                try:
+                    hardware = controller.hardware
+                    self.drive_output_on(controller, "compactor")
+                    if persistent:
+                        fault = OutputFaultTest.break_all_stop(controller)
+                    else:
+                        fail_next_all_stop(hardware)
+                    with self.assertLogs("rvm.controller", level="ERROR"):
+                        self.assertFalse(controller.activate_lease(signed_lease()))
+                    # Nothing saved, the gate never opened, and the machine is latched.
+                    self.assertIsNone(controller.db.active_lease())
+                    self.assertFalse(hardware.input_gate_open)
+                    self.assertEqual(events_of(controller, "CHAMBER_OPENED"), [])
+                    self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+                    self.assertFalse(controller.activate_lease(signed_lease("session-retry")))
+                    if persistent:
+                        # The compactor really is still running: every
+                        # actuation and reset is refused until a stop succeeds.
+                        self.assertTrue(hardware.compactor)
+                        self.assertEqual(
+                            controller.actuation_block_reason(hardware.read()), "OUTPUT_STOP_FAILED"
+                        )
+                        with self.assertRaisesRegex(ValueError, "output gagal dimatikan"):
+                            controller.execute_remote_command("RESET_ALERT", {})
+                        fault["active"] = False
+                    # The latched tick retries the stop; the latch outlives it.
+                    for _tick in range(3):
+                        controller._tick()
+                    self.assert_outputs_off(controller)
+                    self.assert_latched(controller, "OUTPUT_STOP_FAILED")
+                    self.assertFalse(controller.activate_lease(signed_lease("session-retry")))
+                    # No wedge: the operator reset clears it and a session starts.
+                    controller.execute_remote_command("RESET_ALERT", {})
+                    self.assertEqual(controller.state, MachineState.IDLE)
+                    self.assertTrue(controller.activate_lease(signed_lease("session-after-reset")))
+                    self.assert_session_open_with_only_the_gate(controller)
+                finally:
+                    controller.db.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -1047,6 +1199,7 @@ class SingleOutputCloseFailureTest(SafetyAssertions):
         with tempfile.TemporaryDirectory() as tmp:
             controller = make_controller(tmp)
             try:
+                controller.execute_remote_command("ENTER_MAINTENANCE", {})
                 controller.maintenance_command("compactor", {"active": True})
                 self.assertTrue(controller.hardware.compactor)
                 fail_next_write(controller.hardware, "set_compactor", False)
@@ -1129,6 +1282,7 @@ class SingleOutputCloseFailureTest(SafetyAssertions):
         with tempfile.TemporaryDirectory() as tmp:
             controller = make_controller(tmp)
             try:
+                controller.execute_remote_command("ENTER_MAINTENANCE", {})
                 controller.maintenance_command("gate", {"open": True})
                 self.assertTrue(controller.hardware.input_gate_open)
                 fail_next_write(controller.hardware, "set_input_gate", False)

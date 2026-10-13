@@ -572,10 +572,18 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             self.set_state(MachineState.SESSION_ACTIVE, "lease-activated")
             self.hardware.set_input_gate(True)
 
-        # Local interlocks outrank a backend lease: on refusal nothing is
-        # saved and the state/latch stay exactly as they were.
-        if self._guarded_output(start_session) is not None:
-            return False
+        with self._lock:
+            # A session starts only from a stopped machine: every output is
+            # stopped in the same lock section as the interlock check and the
+            # gate opening, so nothing left running (a jog, a stuck relay) can
+            # move while the gate is open to a user. A failed stop latches
+            # OUTPUT_STOP_FAILED (_safe_all_stop) and the lease is refused.
+            if not self._safe_all_stop():
+                return False
+            # Local interlocks outrank a backend lease: on refusal nothing is
+            # saved and the state/latch stay exactly as they were.
+            if self._guarded_output(start_session) is not None:
+                return False
         self.emit("CHAMBER_OPENED", {"leaseActivated": True}, lease["sessionId"])
         if self.config.camera_capture_session_start:
             self._capture_camera_evidence("SESSION_START", "SESSION_ACTIVATED", lease["sessionId"])
@@ -641,7 +649,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
     def _maintenance_block_reason(self, snapshot: SensorSnapshot) -> str | None:
         """Interlock for a PIN-authorised technician jogging one output: any
         physical hazard or an active safety latch blocks it, maintenance mode
-        does not."""
+        does not (it is required; see _maintenance_output)."""
         hazards = self._physical_hazards(snapshot)
         if hazards:
             return hazards[0]
@@ -735,7 +743,17 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         return blocked is None
 
     def _maintenance_output(self, write: Callable[[], None]) -> None:
-        blocked = self._guarded_output(write, self._maintenance_block_reason)
+        """A technician jog (gate open, conveyor run, compactor on). Accepted
+        only in MAINTENANCE; the mode check and the guarded write share one
+        lock section, so leaving maintenance cannot interleave with the jog.
+        Outside MAINTENANCE the jog is refused without touching any output,
+        so a user's session is never disturbed by it."""
+        with self._lock:
+            if self.state != MachineState.MAINTENANCE:
+                raise ValueError(
+                    f"Aktuator ditolak: {describe_interlocks(['MAINTENANCE_REQUIRED'])}"
+                )
+            blocked = self._guarded_output(write, self._maintenance_block_reason)
         if blocked:
             raise ValueError(f"Aktuator ditolak: {describe_interlocks([blocked])}")
 

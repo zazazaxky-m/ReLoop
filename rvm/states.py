@@ -55,6 +55,7 @@ INTERLOCK_MESSAGES = {
     "CAMERA_OCCLUDED": "kamera masih tertutup",
     "MACHINE_FULL": "kapasitas mesin penuh",
     "MAINTENANCE_MODE": "mesin dalam mode maintenance",
+    "MAINTENANCE_REQUIRED": "mesin belum dalam mode maintenance",
     "SAFETY_LATCH_ACTIVE": "alert keselamatan belum direset",
     "SENSOR_READ_FAILED": "sensor tidak dapat dibaca",
     "OUTPUT_STOP_FAILED": "output gagal dimatikan",

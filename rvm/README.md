@@ -45,9 +45,20 @@ keselamatan lokal aktif. Kontraknya:
   aktif (`safe_reason` tersimpan atau alert `CRITICAL`). Jika diblokir, semua
   output dimatikan dan `activate_lease` mengembalikan `False` tanpa menyimpan
   lease atau mengubah state/latch.
-- **Jog maintenance** (PIN) tetap boleh di mode `MAINTENANCE`, tetapi
-  ditolak (`Aktuator ditolak: …`) selama ada bahaya fisik (panel/pintu
-  terbuka, suhu, getaran) atau latch aktif.
+- **Sesi dimulai dari mesin yang berhenti.** `activate_lease` memanggil
+  `all_stop()` di critical section yang sama dengan pemeriksaan interlock dan
+  pembukaan gate, sehingga output yang masih berjalan (jog yang tertinggal,
+  relay yang menyangkut, penulis asing) berhenti sebelum gate terbuka untuk
+  pengguna. Jika stop itu gagal, mesin ter-latch `OUTPUT_STOP_FAILED` (lihat
+  bawah) dan lease ditolak tanpa disimpan.
+- **Jog maintenance** (PIN: buka gate, jalankan conveyor, nyalakan compactor)
+  hanya diterima saat state `MAINTENANCE` (masuk lewat `ENTER_MAINTENANCE`
+  superadmin). Di state lain jog ditolak (`Aktuator ditolak: mesin belum dalam
+  mode maintenance`) tanpa mengubah output atau sesi yang sedang berjalan. Di
+  `MAINTENANCE` jog tetap ditolak (`Aktuator ditolak: …`) selama ada bahaya
+  fisik (panel/pintu terbuka, suhu, getaran) atau latch aktif. Perintah
+  tutup/stop tidak memerlukan `MAINTENANCE` (lihat "Menutup/menghentikan
+  selalu boleh").
 - **Level-triggered.** Panel/pintu yang terbuka me-latch `SAFE_STATE` pada
   setiap tick selama mesin belum ter-latch, bukan hanya saat transisi
   tertutup→terbuka. Selama `SAFE_STATE` atau selama ada bahaya fisik, setiap

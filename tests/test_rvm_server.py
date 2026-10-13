@@ -421,6 +421,8 @@ class ControllerExtraTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             c = controller_in(tmp)
             c.maintenance_command("reset-safe-state", {})
+            # Jogs are only accepted in MAINTENANCE.
+            c.execute_remote_command("ENTER_MAINTENANCE", {})
             c.maintenance_command("gate", {"open": True})
             self.assertTrue(c.hardware.input_gate_open)
             c.maintenance_command("conveyor", {"direction": "FORWARD"})
@@ -1011,9 +1013,21 @@ class ApiTest(unittest.TestCase):
         status, body = self.post("/api/maintenance/login", {"pin": "2468"})
         self.assertEqual(status, 200)
         token = json.loads(body)["token"]
+        # A jog is refused outside MAINTENANCE and accepted inside it; closing
+        # is always allowed.
+        status, body = self.post("/api/maintenance/command", {"command": "gate", "open": True},
+                                  {"Authorization": f"Bearer {token}"})
+        self.assertEqual(status, 422)
+        self.assertIn("mode maintenance", json.loads(body)["error"])
+        self.c.execute_remote_command("ENTER_MAINTENANCE", {})
         status, _ = self.post("/api/maintenance/command", {"command": "gate", "open": True},
                                {"Authorization": f"Bearer {token}"})
         self.assertEqual(status, 200)
+        self.assertTrue(self.c.hardware.input_gate_open)
+        status, _ = self.post("/api/maintenance/command", {"command": "gate", "open": False},
+                               {"Authorization": f"Bearer {token}"})
+        self.assertEqual(status, 200)
+        self.c.execute_remote_command("RESUME_OPERATION", {})
         status, _ = self.post("/api/maintenance/command", {"command": "bogus"},
                                {"Authorization": f"Bearer {token}"})
         self.assertEqual(status, 422)
