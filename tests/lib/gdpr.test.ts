@@ -16,7 +16,7 @@ vi.mock('@/lib/prisma', () => ({
     depositSession: { updateMany: vi.fn(), findMany: vi.fn() },
     payoutAccount: { deleteMany: vi.fn() },
     rewardLedger: { updateMany: vi.fn(), findMany: vi.fn() },
-    redemption: { findMany: vi.fn() },
+    redemption: { findMany: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
   },
 }));
 
@@ -66,6 +66,8 @@ describe('gdpr', () => {
 
     it('anonymizes user data and logs audit', async () => {
       vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'u1' } as any);
+      vi.mocked(prisma.redemption.updateMany).mockResolvedValue({ count: 0 } as any);
+      vi.mocked(prisma.redemption.count).mockResolvedValue(0);
       
       const log = await processErasureRequest('u1');
       
@@ -78,7 +80,48 @@ describe('gdpr', () => {
       expect(audit.logAudit).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'DATA_ERASURE', entityId: 'u1' })
       );
-      expect(log.steps).toHaveLength(4);
+      expect(log.steps).toHaveLength(5);
+    });
+
+    it('erases the payout destination of finished redemptions and logs what was kept for settlement', async () => {
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'u1' } as any);
+      vi.mocked(prisma.redemption.updateMany).mockResolvedValue({ count: 3 } as any);
+      vi.mocked(prisma.redemption.count).mockResolvedValue(1);
+
+      const log = await processErasureRequest('u1');
+
+      expect(prisma.redemption.updateMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'u1',
+          status: { in: ['SUCCESS', 'FAILED', 'REVERSED'] },
+          OR: [{ payoutDestinationIdentifier: { not: null } }, { payoutDestinationName: { not: null } }],
+        },
+        data: { payoutDestinationIdentifier: null, payoutDestinationName: null },
+      });
+      // Unsettled requests keep the snapshot: it is still needed to pay or reconcile them.
+      expect(prisma.redemption.count).toHaveBeenCalledWith({
+        where: {
+          userId: 'u1',
+          status: { notIn: ['SUCCESS', 'FAILED', 'REVERSED'] },
+          OR: [{ payoutDestinationIdentifier: { not: null } }, { payoutDestinationName: { not: null } }],
+        },
+      });
+      expect(log.steps).toEqual([
+        'profile_redacted', 'sessions_anonymized', 'payout_accounts_deleted',
+        'redemption_destinations_erased', 'redemption_destinations_retained_for_settlement', 'ledger_anonymized',
+      ]);
+      expect(log.redemptionDestinations).toEqual({ erased: 3, retainedForSettlement: 1 });
+      expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'DATA_ERASURE', metadata: expect.objectContaining({ redemptionDestinations: { erased: 3, retainedForSettlement: 1 } }) }));
+    });
+
+    it('does not claim a retained destination when nothing is unsettled', async () => {
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'u1' } as any);
+      vi.mocked(prisma.redemption.updateMany).mockResolvedValue({ count: 0 } as any);
+      vi.mocked(prisma.redemption.count).mockResolvedValue(0);
+      const log = await processErasureRequest('u1');
+      expect(log.steps).not.toContain('redemption_destinations_retained_for_settlement');
+      expect(log.redemptionDestinations).toEqual({ erased: 0, retainedForSettlement: 0 });
     });
   });
 

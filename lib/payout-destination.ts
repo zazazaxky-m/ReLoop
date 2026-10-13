@@ -1,4 +1,4 @@
-import type { PayoutDestinationSource, PayoutProviderType, Redemption } from "@prisma/client";
+import type { PayoutDestinationSource, PayoutProviderType, Redemption, RedemptionStatus } from "@prisma/client";
 import { decrypt, encrypt } from "./encryption";
 
 /**
@@ -10,7 +10,26 @@ import { decrypt, encrypt } from "./encryption";
  * queue, process, success and proof upload use this copy, never the mutable
  * account. Ciphertext never leaves the server: use `publicRedemption` for
  * responses and `describePayoutDestination` for an authorized view.
+ *
+ * A data-erasure request (lib/gdpr.ts) nulls the identifier and name on the
+ * owner's settled requests and keeps provider/source/capturedAt, so the queue
+ * shows the destination as erased. Unsettled requests keep the snapshot: it is
+ * still needed to pay or reconcile them.
  */
+
+/** Statuses after which a payout is settled and its destination no longer needed. */
+export const SETTLED_REDEMPTION_STATUSES = ["SUCCESS", "FAILED", "REVERSED"] as const satisfies readonly RedemptionStatus[];
+
+/** A request still carrying any destination PII. */
+export const HAS_DESTINATION_PII = {
+  OR: [{ payoutDestinationIdentifier: { not: null } }, { payoutDestinationName: { not: null } }],
+};
+
+/** Columns written when a data-erasure request removes a settled destination. */
+export const ERASED_DESTINATION_DATA = {
+  payoutDestinationIdentifier: null,
+  payoutDestinationName: null,
+};
 
 export interface PayoutDestinationView {
   /** REQUEST_SNAPSHOT, a recorded legacy fallback, or a legacy live view (capturedAt null). */
@@ -20,6 +39,8 @@ export interface PayoutDestinationView {
   accountName: string | null;
   /** When the destination was recorded on the request; null = legacy, not recorded yet. */
   capturedAt: Date | null;
+  /** The number and name were removed by the owner's data-erasure request. */
+  erased: boolean;
 }
 
 type DestinationColumns = Pick<
@@ -89,6 +110,10 @@ export function describePayoutDestination(
       accountIdentifier: reveal(redemption.payoutDestinationIdentifier),
       accountName: reveal(redemption.payoutDestinationName),
       capturedAt: redemption.payoutDestinationCapturedAt,
+      // A recorded account always has an identifier; only erasure removes it.
+      erased:
+        redemption.payoutDestinationSource !== "LEGACY_UNAVAILABLE" &&
+        redemption.payoutDestinationIdentifier === null,
     };
   }
   if (currentAccount) {
@@ -98,9 +123,17 @@ export function describePayoutDestination(
       accountIdentifier: currentAccount.accountIdentifier,
       accountName: currentAccount.accountName,
       capturedAt: null,
+      erased: false,
     };
   }
-  return { source: "LEGACY_UNAVAILABLE", provider: null, accountIdentifier: null, accountName: null, capturedAt: null };
+  return {
+    source: "LEGACY_UNAVAILABLE",
+    provider: null,
+    accountIdentifier: null,
+    accountName: null,
+    capturedAt: null,
+    erased: false,
+  };
 }
 
 /** Prisma `omit` for columns that must never be serialized to a client. */

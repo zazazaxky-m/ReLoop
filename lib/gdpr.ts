@@ -1,6 +1,11 @@
 import { prisma } from "./prisma";
 import { logAudit } from "./audit";
-import { REDEMPTION_PRIVATE_COLUMNS } from "./payout-destination";
+import {
+  ERASED_DESTINATION_DATA,
+  HAS_DESTINATION_PII,
+  REDEMPTION_PRIVATE_COLUMNS,
+  SETTLED_REDEMPTION_STATUSES,
+} from "./payout-destination";
 
 export const CONSENT_TYPES = [
   "marketing_emails",
@@ -81,6 +86,23 @@ export async function processErasureRequest(userId: string) {
 
   await prisma.payoutAccount.deleteMany({ where: { userId } });
   steps.push("payout_accounts_deleted");
+
+  // M02 copies the account number and holder name onto each redemption.
+  // Settled requests no longer need them; unsettled ones keep the copy until
+  // they are paid or reconciled (A04 gates erasure on open obligations).
+  const erasedDestinations = await prisma.redemption.updateMany({
+    where: { userId, status: { in: [...SETTLED_REDEMPTION_STATUSES] }, ...HAS_DESTINATION_PII },
+    data: ERASED_DESTINATION_DATA,
+  });
+  steps.push("redemption_destinations_erased");
+  const retainedDestinations = await prisma.redemption.count({
+    where: { userId, status: { notIn: [...SETTLED_REDEMPTION_STATUSES] }, ...HAS_DESTINATION_PII },
+  });
+  if (retainedDestinations > 0) steps.push("redemption_destinations_retained_for_settlement");
+  erasureLog.redemptionDestinations = {
+    erased: erasedDestinations.count,
+    retainedForSettlement: retainedDestinations,
+  };
 
   await prisma.rewardLedger.updateMany({
     where: { userId },

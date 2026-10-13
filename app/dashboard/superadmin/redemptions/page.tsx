@@ -62,6 +62,7 @@ export default async function SuperadminRedemptionsPage({
       accountName: destination.accountName,
       destinationSource: destination.source,
       destinationRecorded: destination.capturedAt !== null,
+      destinationErased: destination.erased,
       status: r.status,
       note: r.note,
       manualTransferProofUrl: r.manualTransferProofUrl,

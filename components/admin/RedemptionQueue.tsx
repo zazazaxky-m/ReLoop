@@ -27,6 +27,8 @@ export interface RedemptionAdminRow {
   destinationSource?: string;
   /** False for a legacy request whose destination is shown from the current account. */
   destinationRecorded?: boolean;
+  /** The number and name were removed by the owner's data-erasure request. */
+  destinationErased?: boolean;
   status: string;
   note: string | null;
   manualTransferProofUrl?: string | null;
@@ -44,6 +46,7 @@ const ACTION_TITLES: Record<ActionKind, string> = {
 };
 
 function destinationLabel(r: RedemptionAdminRow): string | null {
+  if (r.destinationErased) return "Tujuan dihapus atas permintaan hapus data pengguna";
   if (r.destinationSource === "LEGACY_UNAVAILABLE") return "Tujuan lama tidak tersedia";
   if (r.destinationSource === "LEGACY_ACCOUNT_FALLBACK") {
     return r.destinationRecorded ? "Data lama: akun saat diproses" : "Data lama: akun saat ini";

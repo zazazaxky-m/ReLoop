@@ -221,9 +221,10 @@ describe("PATCH /api/redemptions/[id] transitions (real PostgreSQL)", () => {
     expect(first.body.idempotent).toBe(false);
     expect(first.body.redemption).not.toHaveProperty("requestHash");
     expect(first.body.redemption).not.toHaveProperty("payoutDestinationIdentifier");
+    // Only an identical retry is a replay: same reference, or none at all.
     const replays = await Promise.all([
       patch("superadmin", paid, { action: "success", providerReference: "REF-1" }),
-      patch("superadmin", paid, { action: "success", providerReference: "REF-2" }),
+      patch("superadmin", paid, { action: "success" }),
     ]);
     for (const replay of replays) {
       expect(replay.status).toBe(200);
@@ -234,6 +235,7 @@ describe("PATCH /api/redemptions/[id] transitions (real PostgreSQL)", () => {
     expect((await patch("superadmin", failed, { action: "fail", note: "ditolak" })).body.idempotent).toBe(false);
     const failReplay = await patch("superadmin", failed, { action: "fail", note: "ditolak" });
     expect(failReplay).toMatchObject({ status: 200, body: { idempotent: true, redemption: { status: "FAILED" } } });
+    expect(await patch("superadmin", failed, { action: "fail" })).toMatchObject({ status: 200, body: { idempotent: true } });
 
     for (const [id, ledgerStatus, action, status] of [
       [paid, "REDEEMED", "SUCCESS", "SUCCESS"], [failed, "REVERSED", "FAIL", "FAILED"]] as const) {
@@ -243,6 +245,29 @@ describe("PATCH /api/redemptions/[id] transitions (real PostgreSQL)", () => {
       expect(await f.db.auditLog.count({ where: { entityId: id, action: `REDEMPTION_${action}` } })).toBe(1);
     }
     expect(await getWalletBalance(f.ids.userA)).toMatchObject({ redeemed: 20_000, reserved: 0 });
+  });
+
+  it("refuses a replay that carries a different transfer reference or note instead of dropping it", async () => {
+    const paid = await f.processingRedemption(20_000);
+    expect((await patch("superadmin", paid, { action: "success", providerReference: "REF-1", note: "Sudah ditransfer" })).status).toBe(200);
+    const before = await snapshotOf(paid);
+    // A second reference may mean a second transfer happened: never a silent 200.
+    const otherRef = await patch("superadmin", paid, { action: "success", providerReference: "REF-2" });
+    expect(otherRef.status).toBe(409);
+    expect(otherRef.body.error).toBe(
+      "Pencairan ini sudah dicatat dengan nomor referensi lain. Periksa kemungkinan transfer ganda sebelum melanjutkan.");
+    const otherNote = await patch("superadmin", paid, { action: "success", providerReference: "REF-1", note: "Transfer kedua" });
+    expect(otherNote.status).toBe(409);
+    expect(otherNote.body.error).toBe("Pencairan ini sudah dicatat dengan catatan berbeda. Muat ulang untuk melihat data terbaru.");
+    expect(await snapshotOf(paid)).toEqual(before);
+    expect((await f.db.redemption.findUniqueOrThrow({ where: { id: paid } })).providerReference).toBe("REF-1");
+
+    const failed = await f.processingRedemption(10_000);
+    expect((await patch("superadmin", failed, { action: "fail", note: "Rekening ditutup" })).status).toBe(200);
+    const failedBefore = await snapshotOf(failed);
+    expect((await patch("superadmin", failed, { action: "fail", note: "Alasan lain" })).status).toBe(409);
+    expect((await patch("superadmin", failed, { action: "fail", note: "Rekening ditutup", providerReference: "X" })).status).toBe(409);
+    expect(await snapshotOf(failed)).toEqual(failedBefore);
   });
 
   it("answers the opposite terminal action with 409 instead of a successful no-op", async () => {
@@ -387,7 +412,13 @@ describe("PATCH /api/redemptions/[id] transitions (real PostgreSQL)", () => {
       redemption: { status: "PROCESSING", reconciliationRequired: true, reconciliationNote: "Bank belum mengonfirmasi transfer" } });
     expect((await reserveOf(id)).status).toBe("PENDING");
     expect(await getWalletBalance(f.ids.userA)).toMatchObject({ available: 0, reserved: 20_000 });
-    expect((await patch("superadmin", id, { action: "flag_reconciliation", note: "ulang" })).body.idempotent).toBe(true);
+    const sameFlag = await patch("superadmin", id, { action: "flag_reconciliation", note: "Bank belum mengonfirmasi transfer" });
+    expect(sameFlag).toMatchObject({ status: 200, body: { idempotent: true } });
+    const otherFlag = await patch("superadmin", id, { action: "flag_reconciliation", note: "Catatan lain" });
+    expect(otherFlag.status).toBe(409);
+    expect(otherFlag.body.error).toBe(
+      "Pengajuan ini sudah ditandai untuk rekonsiliasi dengan catatan lain. Muat ulang untuk melihat catatan yang tersimpan.");
+    expect((await f.db.redemption.findUniqueOrThrow({ where: { id } })).reconciliationNote).toBe("Bank belum mengonfirmasi transfer");
     expect(await f.db.auditLog.count({ where: { entityId: id, action: "REDEMPTION_FLAG_RECONCILIATION" } })).toBe(1);
 
     // Releasing the money of a flagged request needs the reconciliation outcome written down.
@@ -429,7 +460,7 @@ describe("payout destination snapshot", () => {
     }
     const queue = (await (await f.json("superadmin", "GET", "/api/redemptions?queue=1")).json()) as Json;
     const row = queue.redemptions.find((r: Json) => r.id === id);
-    expect(row.payoutDestination).toEqual({ source: "REQUEST_SNAPSHOT", provider: "DANA",
+    expect(row.payoutDestination).toEqual({ source: "REQUEST_SNAPSHOT", provider: "DANA", erased: false,
       accountIdentifier: account.accountIdentifier, accountName: account.accountName, capturedAt: expect.any(String) });
     expect(row).not.toHaveProperty("payoutDestinationIdentifier");
     expect(row).not.toHaveProperty("payoutDestinationName");
@@ -464,6 +495,48 @@ describe("payout destination snapshot", () => {
     expect(await snapshotOf(id)).toEqual(before);
     expect((await patch("superadmin", id, { action: "fail", note: "akun hilang" })).status).toBe(200);
     expect((await reserveOf(id)).status).toBe("REVERSED");
+  });
+});
+
+describe("GDPR erasure of the payout destination snapshot", () => {
+  it("erases the destination of finished requests, keeps it for unsettled ones, and logs both", async () => {
+    await f.seedBalance(80_000);
+    const paid = await f.redeemAndSettle(20_000);
+    const failed = await f.processingRedemption(15_000);
+    expect((await patch("superadmin", failed, { action: "fail", note: "ditolak bank" })).status).toBe(200);
+    const created = await f.json("userA", "POST", "/api/redemptions", {
+      amount: 10_000, payoutAccountId: f.ids.payoutAccountA, idempotencyKey: `erase-cancel-${randomUUID()}` });
+    const cancelled = ((await created.json()) as Json).redemption.id as string;
+    expect((await patch("userA", cancelled, { action: "cancel" })).status).toBe(200);
+    const open = await f.processingRedemption(12_000);
+    const account = await f.db.payoutAccount.findUniqueOrThrow({ where: { id: f.ids.payoutAccountA } });
+
+    const erased = await f.json("userA", "DELETE", "/api/user/data");
+    expect(erased.status).toBe(200);
+
+    for (const id of [paid, failed, cancelled]) {
+      expect(await f.db.redemption.findUniqueOrThrow({ where: { id } })).toMatchObject({
+        payoutDestinationIdentifier: null, payoutDestinationName: null,
+        payoutDestinationSource: "REQUEST_SNAPSHOT", payoutDestinationProvider: "DANA" });
+    }
+    // An unsettled request still needs its destination to be paid or reconciled.
+    const kept = await f.db.redemption.findUniqueOrThrow({ where: { id: open } });
+    expect(decrypt(kept.payoutDestinationIdentifier!)).toBe(account.accountIdentifier);
+
+    const audit = await f.db.auditLog.findFirstOrThrow({ where: { action: "DATA_ERASURE", entityId: f.ids.userA } });
+    expect(audit.metadataJson).toMatchObject({
+      steps: expect.arrayContaining(["payout_accounts_deleted", "redemption_destinations_erased",
+        "redemption_destinations_retained_for_settlement"]),
+      redemptionDestinations: { erased: 3, retainedForSettlement: 1 },
+    });
+
+    const queue = (await (await f.json("superadmin", "GET", "/api/redemptions")).json()) as Json;
+    const byId = new Map<string, Json>(queue.redemptions.map((r: Json) => [r.id, r]));
+    for (const id of [paid, failed, cancelled]) {
+      expect(byId.get(id)!.payoutDestination).toEqual({ source: "REQUEST_SNAPSHOT", provider: "DANA", erased: true,
+        accountIdentifier: null, accountName: null, capturedAt: expect.any(String) });
+    }
+    expect(byId.get(open)!.payoutDestination).toMatchObject({ erased: false, accountIdentifier: account.accountIdentifier });
   });
 });
 

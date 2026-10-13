@@ -27,6 +27,8 @@ vi.mock('./prisma', () => ({
     },
     redemption: {
       findMany: vi.fn(),
+      updateMany: vi.fn(),
+      count: vi.fn(),
     },
   },
 }));
@@ -102,6 +104,8 @@ describe('lib/gdpr', () => {
 
     it('processes erasure correctly for existing user', async () => {
       vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'user_1' } as any);
+      vi.mocked(prisma.redemption.updateMany).mockResolvedValue({ count: 2 } as any);
+      vi.mocked(prisma.redemption.count).mockResolvedValue(0);
       
       const result = await gdpr.processErasureRequest('user_1');
       
@@ -141,6 +145,10 @@ describe('lib/gdpr', () => {
       expect(result.steps).toContain('sessions_anonymized');
       expect(result.steps).toContain('payout_accounts_deleted');
       expect(result.steps).toContain('ledger_anonymized');
+      // Destination copies on finished redemptions are erased too (M02 snapshot).
+      expect(result.steps).toContain('redemption_destinations_erased');
+      expect(prisma.redemption.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: { payoutDestinationIdentifier: null, payoutDestinationName: null } }));
     });
   });
 

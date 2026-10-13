@@ -113,16 +113,17 @@ commit; kegagalannya tidak mengubah respons pengajuan yang sudah tersimpan.
   `reconciliationRequired=true` + `reconciliationNote` dicatat. Setelah hasilnya
   pasti, operator menandai `success`, atau `fail` dengan `note` wajib berisi
   hasil pengecekan (tanpa catatan: 422). Status gagal tidak pernah dipakai
-  untuk transfer yang belum pasti.
+  untuk transfer yang belum pasti. Mengulang `flag_reconciliation` dengan
+  catatan yang sama bersifat idempotent; catatan berbeda ditolak 409.
 
 Respons:
 
 | Status | Arti |
 | --- | --- |
-| 200 | `{ redemption, idempotent: false }` untuk perubahan baru; `{ redemption, idempotent: true }` bila aksi yang sama diulang dan ledger sudah sesuai (tanpa settlement, audit, atau notifikasi kedua) |
+| 200 | `{ redemption, idempotent: false }` untuk perubahan baru; `{ redemption, idempotent: true }` bila aksi yang sama diulang, ledger sudah sesuai, dan `providerReference`/`note` yang dikirim kosong atau sama dengan yang tersimpan (tanpa settlement, audit, atau notifikasi kedua) |
 | 403 | Peran tidak boleh menjalankan aksi ini, atau USER membatalkan pengajuan orang lain |
 | 404 | Pengajuan tidak ditemukan |
-| 409 | `Status pencairan sudah berubah` (pengajuan sudah diputuskan lain), `Transisi status pencairan tidak valid`, reserve hilang/jumlah atau pemilik tidak sesuai (perlu rekonsiliasi tim keuangan), pemilik pengajuan berubah, atau tujuan transfer data lama tidak tersedia. Tidak ada perubahan yang tersimpan. |
+| 409 | `Status pencairan sudah berubah` (pengajuan sudah diputuskan lain), `Transisi status pencairan tidak valid`, reserve hilang/jumlah atau pemilik tidak sesuai (perlu rekonsiliasi tim keuangan), pemilik pengajuan berubah, tujuan transfer data lama tidak tersedia, atau pengulangan aksi dengan nomor referensi/catatan berbeda dari yang tersimpan (referensi lain bisa berarti transfer ganda; periksa dulu). Tidak ada perubahan yang tersimpan. |
 | 422 | Validasi gagal, sukses tanpa referensi/bukti, atau gagal pada pengajuan yang sedang direkonsiliasi tanpa catatan |
 | 503 | Antrean saldo sibuk; tidak ada yang tersimpan, ulangi aksi yang sama |
 
@@ -140,8 +141,14 @@ mungkin diubah atau dinonaktifkan pengguna sesudahnya. `GET /api/redemptions`
 mengembalikan `payoutDestination`:
 
 ```json
-{ "source": "REQUEST_SNAPSHOT", "provider": "DANA", "accountIdentifier": "08…", "accountName": "…", "capturedAt": "2026-10-13T…" }
+{ "source": "REQUEST_SNAPSHOT", "provider": "DANA", "accountIdentifier": "08…", "accountName": "…", "capturedAt": "2026-10-13T…", "erased": false }
 ```
+
+`erased: true` (dengan `accountIdentifier` dan `accountName` bernilai `null`)
+berarti nomor dan nama tujuan sudah dihapus karena pemiliknya mengajukan hapus
+data (`DELETE /api/user/data`). Penghapusan ini hanya berlaku untuk pengajuan
+yang sudah selesai (SUCCESS, FAILED, REVERSED); pengajuan yang belum selesai
+tetap menyimpan tujuannya agar bisa dibayar atau direkonsiliasi.
 
 `source` bernilai `REQUEST_SNAPSHOT` (disalin saat pengajuan),
 `LEGACY_ACCOUNT_FALLBACK` (pengajuan lama tanpa salinan: akun pemilik dicatat

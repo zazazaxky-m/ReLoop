@@ -14,7 +14,11 @@ import {
   type RedeemOutcome,
 } from "./ledger";
 import { createNotification } from "./notifications";
-import { destinationSnapshotData, unavailableDestinationData } from "./payout-destination";
+import {
+  SETTLED_REDEMPTION_STATUSES,
+  destinationSnapshotData,
+  unavailableDestinationData,
+} from "./payout-destination";
 import { prisma } from "./prisma";
 import { HttpError, type CurrentUser } from "./rbac";
 
@@ -304,7 +308,7 @@ const TRANSITIONS: Record<RedemptionAction, TransitionRule> = {
   cancel: { from: ["REQUESTED"], to: "REVERSED", reserve: "failed", destination: "none" },
 };
 
-const TERMINAL_STATUSES: readonly RedemptionStatus[] = ["SUCCESS", "FAILED", "REVERSED"];
+const TERMINAL_STATUSES: readonly RedemptionStatus[] = SETTLED_REDEMPTION_STATUSES;
 
 const STATUS_MESSAGES: Partial<Record<RedemptionAction, string>> = {
   approve: "Pengajuan pencairan Anda telah disetujui dan akan segera diproses.",
@@ -324,6 +328,12 @@ export const REDEMPTION_DESTINATION_UNAVAILABLE =
 export const REDEMPTION_RECONCILIATION_NOTE_REQUIRED =
   "Pengajuan ini sedang direkonsiliasi. Isi catatan hasil pengecekan transfer sebelum menandai gagal.";
 export const REDEMPTION_PROOF_CLOSED = "Pengajuan pencairan sudah selesai, bukti baru tidak dapat diunggah";
+export const REDEMPTION_REPLAY_REFERENCE_CONFLICT =
+  "Pencairan ini sudah dicatat dengan nomor referensi lain. Periksa kemungkinan transfer ganda sebelum melanjutkan.";
+export const REDEMPTION_REPLAY_NOTE_CONFLICT =
+  "Pencairan ini sudah dicatat dengan catatan berbeda. Muat ulang untuk melihat data terbaru.";
+export const REDEMPTION_RECONCILIATION_NOTE_CONFLICT =
+  "Pengajuan ini sudah ditandai untuk rekonsiliasi dengan catatan lain. Muat ulang untuk melihat catatan yang tersimpan.";
 
 function assertMayTransition(actor: CurrentUser, action: RedemptionAction) {
   if (actor.role === "SUPERADMIN") return;
@@ -390,6 +400,20 @@ async function destinationForChange(
   return unavailableDestinationData();
 }
 
+/**
+ * A repeat of the outcome a request already has is a replay only when it
+ * carries nothing new: a different transfer reference may mean a second
+ * transfer happened, so it is refused instead of silently dropped.
+ */
+function assertIdenticalReplay(current: Redemption, input: { note?: string; providerReference?: string }) {
+  if (input.providerReference !== undefined && input.providerReference !== current.providerReference) {
+    throw new HttpError(409, REDEMPTION_REPLAY_REFERENCE_CONFLICT);
+  }
+  if (input.note !== undefined && input.note !== current.note) {
+    throw new HttpError(409, REDEMPTION_REPLAY_NOTE_CONFLICT);
+  }
+}
+
 /** A stored proof only counts for the request it was uploaded to. */
 function hasOwnProof(redemption: Redemption): boolean {
   return Boolean(redemption.manualTransferProofUrl?.startsWith(`${redemption.id}/`));
@@ -422,7 +446,8 @@ interface TransitionOutcome {
  * - The status change is a compare-and-set on the status read under the lock;
  *   the reserve change is conditional on PENDING (settleRedeemLedger).
  * - Repeating the outcome the request already has is idempotent (200,
- *   `idempotent: true`) only when the reserve already matches it.
+ *   `idempotent: true`) only when the reserve already matches it and the
+ *   repeat carries no different providerReference or note (else 409).
  * - Any other status, the opposite outcome, a missing/mismatching reserve or a
  *   changed owner is 409 and nothing is written.
  * - Audit and notification run after COMMIT and never undo or repeat it.
@@ -445,6 +470,7 @@ export async function transitionRedemption(
     if (current.status === rule.to) {
       // Same outcome again: a replay, but only if the ledger already agrees.
       if (reserve.status !== expectedReserveStatus(current.status)) throw new HttpError(409, RESERVE_MISMATCH);
+      assertIdenticalReplay(current, input);
       return { redemption: current, idempotent: true, from: current.status, resolvedReconciliation: false };
     }
     if (!rule.from.includes(current.status)) throw notFrom(current.status);
@@ -524,7 +550,8 @@ export async function transitionRedemption(
  * The operator cannot confirm whether the manual transfer went out. The
  * request stays PROCESSING with its reserve held and is flagged for
  * reconciliation; it is never failed (which would hand the money back while it
- * may already have been paid). Repeating the flag is idempotent.
+ * may already have been paid). Repeating the flag with the same note is
+ * idempotent; a different note is 409.
  */
 export async function flagRedemptionForReconciliation(
   actor: CurrentUser,
@@ -541,7 +568,11 @@ export async function flagRedemptionForReconciliation(
     const reserve = await loadRedeemReserve(tx, current);
     if (current.status !== "PROCESSING") throw notFrom(current.status);
     if (reserve.status !== "PENDING") throw new HttpError(409, RESERVE_MISMATCH);
-    if (current.reconciliationRequired) return { redemption: current, idempotent: true };
+    if (current.reconciliationRequired) {
+      // Idempotent only for the same note; another note is not silently dropped.
+      if (current.reconciliationNote !== note) throw new HttpError(409, REDEMPTION_RECONCILIATION_NOTE_CONFLICT);
+      return { redemption: current, idempotent: true };
+    }
 
     const destination = await destinationForChange(tx, current, "record");
     await compareAndSet(tx, id, { status: "PROCESSING", reconciliationRequired: false }, {

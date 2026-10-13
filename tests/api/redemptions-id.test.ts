@@ -56,7 +56,7 @@ function reserveRow(overrides: Row = {}): Row {
   };
 }
 
-function useDb(redemption: Row | null, reserve: Row | null = reserveRow(), account: Row | null = null): FakeDb {
+function withDb(redemption: Row | null, reserve: Row | null = reserveRow(), account: Row | null = null): FakeDb {
   const db: FakeDb = { redemption, reserve, account, calls: [], tx: null };
   const matches = (row: Row, where: Row) =>
     Object.entries(where).every(([key, value]) => row[key] === value);
@@ -142,7 +142,7 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('rejects success skipped straight from REQUESTED (409)', async () => {
-    const db = useDb(redemptionRow({ status: 'REQUESTED' }));
+    const db = withDb(redemptionRow({ status: 'REQUESTED' }));
     const res = await patch({ action: 'success', providerReference: 'REF1' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('Transisi status pencairan tidak valid');
@@ -151,12 +151,12 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('rejects success skipped straight from APPROVED (409)', async () => {
-    useDb(redemptionRow({ status: 'APPROVED' }));
+    withDb(redemptionRow({ status: 'APPROVED' }));
     expect((await patch({ action: 'success', providerReference: 'REF1' })).status).toBe(409);
   });
 
   it('rejects success from PROCESSING without proof or reference (422)', async () => {
-    const db = useDb(redemptionRow());
+    const db = withDb(redemptionRow());
     const res = await patch({ action: 'success' });
     expect(res.status).toBe(422);
     expect(res.body.error).toContain('referensi transfer atau unggah bukti');
@@ -164,12 +164,12 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('does not accept a proof stored for another request as proof for this one (422)', async () => {
-    useDb(redemptionRow({ manualTransferProofUrl: 'r_other/proof.jpg' }));
+    withDb(redemptionRow({ manualTransferProofUrl: 'r_other/proof.jpg' }));
     expect((await patch({ action: 'success' })).status).toBe(422);
   });
 
   it('settles success under User -> Redemption locks with CAS, then audits and notifies after commit', async () => {
-    const db = useDb(redemptionRow());
+    const db = withDb(redemptionRow());
     const res = await patch({ action: 'success', providerReference: 'REF1' });
 
     expect(res.status).toBe(200);
@@ -198,7 +198,7 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('never returns the request hash or destination ciphertext', async () => {
-    useDb(redemptionRow());
+    withDb(redemptionRow());
     const res = await patch({ action: 'success', providerReference: 'REF1' });
     expect(res.body.redemption).not.toHaveProperty('requestHash');
     expect(res.body.redemption).not.toHaveProperty('payoutDestinationIdentifier');
@@ -207,12 +207,12 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('accepts success from PROCESSING when this request has its own proof (200)', async () => {
-    useDb(redemptionRow({ manualTransferProofUrl: 'r1/proof.jpg' }));
+    withDb(redemptionRow({ manualTransferProofUrl: 'r1/proof.jpg' }));
     expect((await patch({ action: 'success' })).status).toBe(200);
   });
 
   it('still allows approve from REQUESTED and keeps the reserve held', async () => {
-    const db = useDb(redemptionRow({ status: 'REQUESTED' }));
+    const db = withDb(redemptionRow({ status: 'REQUESTED' }));
     const res = await patch({ action: 'approve' });
     expect(res.status).toBe(200);
     expect(db.redemption!.status).toBe('APPROVED');
@@ -222,13 +222,13 @@ describe('PATCH /api/redemptions/[id]', () => {
 
   it('a USER cannot force success on their own redemption (403)', async () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'USER' } as any);
-    useDb(redemptionRow());
+    withDb(redemptionRow());
     expect((await patch({ action: 'success', providerReference: 'REF1' })).status).toBe(403);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('returns idempotent when status already matches target and the reserve agrees', async () => {
-    const db = useDb(redemptionRow({ status: 'APPROVED' }));
+    const db = withDb(redemptionRow({ status: 'APPROVED' }));
     const res = await patch({ action: 'approve' });
     expect(res.status).toBe(200);
     expect(res.body.idempotent).toBe(true);
@@ -238,18 +238,42 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('repeats a terminal success idempotently only when the reserve is already REDEEMED', async () => {
-    useDb(redemptionRow({ status: 'SUCCESS' }), reserveRow({ status: 'REDEEMED' }));
+    withDb(redemptionRow({ status: 'SUCCESS', providerReference: 'REF1' }), reserveRow({ status: 'REDEEMED' }));
     expect(await patch({ action: 'success', providerReference: 'REF1' })).toMatchObject({ status: 200, body: { idempotent: true } });
 
-    const diverged = useDb(redemptionRow({ status: 'SUCCESS' }), reserveRow({ status: 'PENDING' }));
+    const diverged = withDb(redemptionRow({ status: 'SUCCESS', providerReference: 'REF1' }), reserveRow({ status: 'PENDING' }));
     const res = await patch({ action: 'success', providerReference: 'REF1' });
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/tidak sesuai/);
     expect(diverged.calls).not.toContain('cas:RewardLedger');
   });
 
+  it('refuses a terminal replay with a different reference or note (409) and changes nothing', async () => {
+    const stored = { status: 'SUCCESS', providerReference: 'REF-1', note: 'Sudah ditransfer' };
+    for (const body of [
+      { action: 'success', providerReference: 'REF-2' },
+      { action: 'success', providerReference: 'REF-1', note: 'Transfer kedua' },
+    ]) {
+      const db = withDb(redemptionRow(stored), reserveRow({ status: 'REDEEMED' }));
+      const res = await patch(body);
+      expect(res.status).toBe(409);
+      expect(db.redemption).toMatchObject(stored);
+      expect(db.calls).not.toContain('cas:Redemption');
+    }
+    withDb(redemptionRow(stored), reserveRow({ status: 'REDEEMED' }));
+    expect((await patch({ action: 'success', providerReference: 'REF-2' })).body.error).toBe(
+      'Pencairan ini sudah dicatat dengan nomor referensi lain. Periksa kemungkinan transfer ganda sebelum melanjutkan.');
+    expect((await patch({ action: 'success', note: 'lain' })).body.error).toBe(
+      'Pencairan ini sudah dicatat dengan catatan berbeda. Muat ulang untuk melihat data terbaru.');
+    // Identical or bare retries stay idempotent.
+    for (const body of [{ action: 'success' }, { action: 'success', providerReference: 'REF-1', note: 'Sudah ditransfer' }]) {
+      expect(await patch(body)).toMatchObject({ status: 200, body: { idempotent: true } });
+    }
+    expect(logAudit).not.toHaveBeenCalled();
+  });
+
   it('answers the opposite terminal outcome with 409, never a successful no-op', async () => {
-    const db = useDb(redemptionRow({ status: 'SUCCESS' }), reserveRow({ status: 'REDEEMED' }));
+    const db = withDb(redemptionRow({ status: 'SUCCESS' }), reserveRow({ status: 'REDEEMED' }));
     const res = await patch({ action: 'fail' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('Status pencairan sudah berubah');
@@ -257,7 +281,7 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('settles ledger as failed on fail action', async () => {
-    const db = useDb(redemptionRow());
+    const db = withDb(redemptionRow());
     const res = await patch({ action: 'fail', note: 'rejected' });
     expect(res.status).toBe(200);
     expect(db.redemption).toMatchObject({ status: 'FAILED', note: 'rejected' });
@@ -266,7 +290,7 @@ describe('PATCH /api/redemptions/[id]', () => {
 
   it('settles ledger as failed on user cancel without a self-notification', async () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'USER' } as any);
-    const db = useDb(redemptionRow({ status: 'REQUESTED' }));
+    const db = withDb(redemptionRow({ status: 'REQUESTED' }));
     const res = await patch({ action: 'cancel' });
     expect(res.status).toBe(200);
     expect(db.redemption!.status).toBe('REVERSED');
@@ -276,7 +300,7 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('returns 404 when redemption is missing', async () => {
-    useDb(null);
+    withDb(null);
     const res = await patch({ action: 'approve' }, 'missing');
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('Pengajuan pencairan tidak ditemukan');
@@ -284,7 +308,7 @@ describe('PATCH /api/redemptions/[id]', () => {
 
   it('rejects USER cancelling another users redemption before locking their wallet', async () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u2', role: 'USER' } as any);
-    const db = useDb(redemptionRow({ status: 'REQUESTED' }));
+    const db = withDb(redemptionRow({ status: 'REQUESTED' }));
     expect((await patch({ action: 'cancel' })).status).toBe(403);
     expect(db.calls).not.toContain('lock:User');
     expect(db.redemption!.status).toBe('REQUESTED');
@@ -296,7 +320,7 @@ describe('PATCH /api/redemptions/[id]', () => {
     ['owned by another user', reserveRow({ userId: 'u2' }), /tidak sesuai/],
     ['already released', reserveRow({ status: 'REVERSED' }), /tidak sesuai/],
   ])('refuses with 409 and writes nothing when the reserve is %s', async (_label, reserve, message) => {
-    const db = useDb(redemptionRow(), reserve as Row | null);
+    const db = withDb(redemptionRow(), reserve as Row | null);
     const res = await patch({ action: 'fail', note: 'x' });
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(message);
@@ -306,7 +330,7 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('refuses when the status changed between the locked read and the compare-and-set', async () => {
-    const db = useDb(redemptionRow());
+    const db = withDb(redemptionRow());
     const cas = db.tx.redemption.updateMany;
     // A writer that bypassed the lock changes the status right before our CAS.
     db.tx.redemption.updateMany = vi.fn(async (args: any) => {
@@ -321,7 +345,7 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('keeps a committed transition successful when the notification fails after commit', async () => {
-    const db = useDb(redemptionRow());
+    const db = withDb(redemptionRow());
     vi.mocked(createNotification).mockRejectedValue(new Error('push down'));
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = await patch({ action: 'success', providerReference: 'REF1' });
@@ -332,7 +356,7 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('records a legacy request destination from the current account when processing', async () => {
-    const db = useDb(
+    const db = withDb(
       redemptionRow({ status: 'APPROVED', payoutDestinationSource: null, payoutDestinationProvider: null,
         payoutDestinationIdentifier: null, payoutDestinationName: null, payoutDestinationCapturedAt: null }),
       reserveRow(),
@@ -348,7 +372,7 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('refuses to process a legacy request whose account is gone, without guessing', async () => {
-    const db = useDb(
+    const db = withDb(
       redemptionRow({ status: 'APPROVED', payoutDestinationSource: null, payoutDestinationIdentifier: null }),
       reserveRow(),
       null,
@@ -360,7 +384,7 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('never rewrites the request-time destination snapshot', async () => {
-    const db = useDb(redemptionRow({ status: 'APPROVED' }), reserveRow(), {
+    const db = withDb(redemptionRow({ status: 'APPROVED' }), reserveRow(), {
       provider: 'OVO', accountIdentifier: '0899', accountName: 'Nama Baru' });
     expect((await patch({ action: 'process' })).status).toBe(200);
     expect(db.redemption!.payoutDestinationIdentifier).toBe('ciphertext-id');
@@ -369,14 +393,14 @@ describe('PATCH /api/redemptions/[id]', () => {
 
   describe('flag_reconciliation', () => {
     it('requires a note (422)', async () => {
-      useDb(redemptionRow());
+      withDb(redemptionRow());
       const res = await patch({ action: 'flag_reconciliation' });
       expect(res.status).toBe(422);
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('keeps the request PROCESSING with the reserve held and flags it once', async () => {
-      const db = useDb(redemptionRow());
+      const db = withDb(redemptionRow());
       const res = await patch({ action: 'flag_reconciliation', note: 'Bank belum konfirmasi' });
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({ idempotent: false,
@@ -385,13 +409,17 @@ describe('PATCH /api/redemptions/[id]', () => {
       expect(db.calls).not.toContain('cas:RewardLedger');
       expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'REDEMPTION_FLAG_RECONCILIATION' }));
 
-      const again = await patch({ action: 'flag_reconciliation', note: 'lagi' });
+      const again = await patch({ action: 'flag_reconciliation', note: 'Bank belum konfirmasi' });
       expect(again.body.idempotent).toBe(true);
+      const other = await patch({ action: 'flag_reconciliation', note: 'lagi' });
+      expect(other.status).toBe(409);
+      expect(other.body.error).toBe(
+        'Pengajuan ini sudah ditandai untuk rekonsiliasi dengan catatan lain. Muat ulang untuk melihat catatan yang tersimpan.');
       expect(db.redemption!.reconciliationNote).toBe('Bank belum konfirmasi');
     });
 
     it('requires a note before a flagged request may be failed, then clears the flag', async () => {
-      const db = useDb(redemptionRow({ reconciliationRequired: true, reconciliationNote: 'cek bank' }));
+      const db = withDb(redemptionRow({ reconciliationRequired: true, reconciliationNote: 'cek bank' }));
       expect((await patch({ action: 'fail' })).status).toBe(422);
       expect(db.reserve!.status).toBe('PENDING');
       const res = await patch({ action: 'fail', note: 'Mutasi: tidak terkirim' });
@@ -402,7 +430,7 @@ describe('PATCH /api/redemptions/[id]', () => {
     });
 
     it('is refused outside PROCESSING and for non-superadmins', async () => {
-      useDb(redemptionRow({ status: 'APPROVED' }));
+      withDb(redemptionRow({ status: 'APPROVED' }));
       expect((await patch({ action: 'flag_reconciliation', note: 'x' })).status).toBe(409);
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'USER' } as any);
       expect((await patch({ action: 'flag_reconciliation', note: 'x' })).status).toBe(403);
@@ -410,7 +438,7 @@ describe('PATCH /api/redemptions/[id]', () => {
   });
 
   it('rejects unknown actions and oversized fields with 422', async () => {
-    useDb(redemptionRow());
+    withDb(redemptionRow());
     expect((await patch({ action: 'refund' })).status).toBe(422);
     expect((await patch({ action: 'fail', note: 'x'.repeat(501) })).status).toBe(422);
     expect((await patch({ action: 'success', providerReference: 'x'.repeat(121) })).status).toBe(422);

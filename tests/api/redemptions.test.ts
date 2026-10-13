@@ -103,7 +103,27 @@ describe('Redemptions API - GET', () => {
     // The destination is the request-time snapshot, not the renamed account.
     expect(row.payoutDestination).toEqual({
       source: 'REQUEST_SNAPSHOT', provider: 'DANA', accountIdentifier: '081234567890',
-      accountName: 'Nama Saat Pengajuan', capturedAt: '2026-10-13T00:00:00.000Z',
+      accountName: 'Nama Saat Pengajuan', capturedAt: '2026-10-13T00:00:00.000Z', erased: false,
+    });
+  });
+
+  it('shows a destination erased on a data deletion request as erased, not as unavailable', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin_1', role: 'SUPERADMIN' } as any);
+    vi.mocked(prisma.redemption.count).mockResolvedValue(1);
+    vi.mocked(prisma.redemption.findMany).mockResolvedValue([
+      {
+        id: 'r_erased', userId: 'user_1', amount: 50000, status: 'SUCCESS', payoutAccountId: 'acc_1',
+        payoutDestinationSource: 'REQUEST_SNAPSHOT', payoutDestinationProvider: 'DANA',
+        payoutDestinationIdentifier: null, payoutDestinationName: null,
+        payoutDestinationCapturedAt: new Date('2026-10-13T00:00:00Z'),
+      } as any,
+    ]);
+    vi.mocked(prisma.payoutAccount.findMany).mockResolvedValue([]);
+
+    const body = await (await GET(new Request('http://localhost/api/redemptions'))).json();
+    expect(body.redemptions[0].payoutDestination).toEqual({
+      source: 'REQUEST_SNAPSHOT', provider: 'DANA', accountIdentifier: null, accountName: null,
+      capturedAt: '2026-10-13T00:00:00.000Z', erased: true,
     });
   });
 
@@ -121,10 +141,12 @@ describe('Redemptions API - GET', () => {
     const body = await (await GET(new Request('http://localhost/api/redemptions'))).json();
     expect(body.redemptions[0].payoutDestination).toEqual({
       source: 'LEGACY_ACCOUNT_FALLBACK', provider: 'OVO', accountIdentifier: '0811', accountName: 'Pemilik', capturedAt: null,
+      erased: false,
     });
     // Never borrow another user's account as a legacy destination.
     expect(body.redemptions[1].payoutDestination).toEqual({
       source: 'LEGACY_UNAVAILABLE', provider: null, accountIdentifier: null, accountName: null, capturedAt: null,
+      erased: false,
     });
   });
 
