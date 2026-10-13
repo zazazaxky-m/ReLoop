@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { jsonError, jsonOk } from "@/lib/api";
 import { verifyMachineRequest } from "@/lib/machine-auth";
 import { prisma } from "@/lib/prisma";
@@ -41,14 +42,23 @@ export async function GET(
   });
 
   const command = await prisma.$transaction(async (tx) => {
-    const pending = await tx.machineRemoteCommand.findFirst({
-      where: {
-        machineId: machine.id,
-        status: { in: ["QUEUED", "DISPATCHED"] },
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { createdAt: "asc" },
-    });
+    const pendingWhere = {
+      machineId: machine.id,
+      status: { in: ["QUEUED", "DISPATCHED"] },
+      expiresAt: { gt: new Date() },
+    } satisfies Prisma.MachineRemoteCommandWhereInput;
+    // A pending STOP_ALL is handed out before any other pending command,
+    // even one already DISPATCHED (e.g. a slow SYNC_NOW still running on the
+    // machine). Otherwise commands are handed out oldest first.
+    const pending =
+      (await tx.machineRemoteCommand.findFirst({
+        where: { ...pendingWhere, command: "STOP_ALL" },
+        orderBy: { createdAt: "asc" },
+      })) ??
+      (await tx.machineRemoteCommand.findFirst({
+        where: pendingWhere,
+        orderBy: { createdAt: "asc" },
+      }));
     if (!pending) return null;
     if (pending.status === "DISPATCHED") return pending;
     return tx.machineRemoteCommand.update({

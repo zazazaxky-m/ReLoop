@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import threading
 import time
@@ -25,6 +26,8 @@ from .states import (
     iso_now,
 )
 from .sync import SyncWorker
+
+logger = logging.getLogger(__name__)
 
 
 class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
@@ -73,6 +76,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         self._server_session: dict[str, Any] | None = None
         self._idle_timeout_minutes: int | None = None
         self._active_alert: dict[str, Any] | None = self.db.get_json("active_alert")
+        self._output_fault: str | None = None
         self.camera = CameraWorker(
             config.camera_enabled,
             config.camera_index,
@@ -140,18 +144,33 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         else:
             self.set_state(MachineState.IDLE, "startup")
 
+    @staticmethod
+    def _retry_delay(errors: int, base: float, cap: float) -> float:
+        """Normal loop cadence, or a capped exponential backoff while the
+        loop keeps failing."""
+        return min(cap, base * 2 ** min(errors, 16))
+
     def _run(self) -> None:
+        errors = 0
         while self.running:
             try:
                 self._tick()
+                errors = 0
             except Exception as exc:
-                self.enter_safe_state(
-                    "CONTROL_LOOP_ERROR",
-                    {"error": str(exc)},
-                    category="SYSTEM",
-                    event_type="ERROR",
-                )
-            time.sleep(0.05)
+                errors += 1
+                if errors == 1:
+                    logger.error("control loop tick failed", exc_info=True)
+                try:
+                    self.enter_safe_state(
+                        "CONTROL_LOOP_ERROR",
+                        {"error": str(exc)},
+                        category="SYSTEM",
+                        event_type="ERROR",
+                    )
+                except Exception:
+                    # The loop itself must keep running to retry the latch.
+                    logger.exception("control loop could not latch SAFE_STATE")
+            time.sleep(self._retry_delay(errors, base=0.05, cap=1.0))
 
     def _tick(self) -> None:
         """One control-loop pass. The whole pass holds the controller lock, so a
@@ -181,9 +200,15 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 self._last_heartbeat = time.time()
 
     def _lease_loop(self) -> None:
+        errors = 0
         while self.running:
-            self._poll_server_session()
-            time.sleep(2)
+            try:
+                self._poll_server_session()
+                errors = 0
+            except Exception:
+                errors += 1
+                logger.warning("server session poll failed (%d in a row)", errors, exc_info=True)
+            time.sleep(self._retry_delay(errors, base=2.0, cap=30.0))
 
     def _poll_server_session(self) -> None:
         """One session-bridge poll. Network calls run outside the controller
@@ -206,7 +231,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                     self.activate_lease(lease)
                 elif not lease and local_lease:
                     self.db.deactivate_leases()
-                    self.hardware.all_stop()
+                    self._safe_all_stop()
                     self._processing_started_at = None
                     self._reset_waste_type_selection()
                     if self._active_alert and self._active_alert.get("category") == "FRAUD":
@@ -292,7 +317,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             MachineState.SAFE_STATE,  # the safety latch outranks capacity state
         }:
             self.set_state(MachineState.FULL, "capacity")
-            self.hardware.all_stop()
+            self._safe_all_stop()
             self.emit("STATUS_CHANGED", {"status": "FULL"})
         if current.item_present and not self._last.item_present:
             if self.state != MachineState.SESSION_ACTIVE:
@@ -362,29 +387,41 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             if self.state != MachineState.PROCESSING:
                 self.report_fraud("IMPOSSIBLE_ACCEPTANCE_SEQUENCE", {})
             else:
-                self._sensor_sequence.extend(["CONVEYOR_FORWARD", "ACCEPTANCE_POINT"])
-                self.emit("SENSOR_SEQUENCE", {"steps": self._sensor_sequence}, self.session_id())
-                if self._guarded_output(lambda: self.hardware.set_conveyor("FORWARD")) is None:
+                blocked = self._guarded_output(lambda: self.hardware.set_conveyor("FORWARD"))
+                if blocked:
+                    # The server credits on ITEM_ACCEPTED_POINT: an item the
+                    # conveyor never moved is rejected, never accepted.
+                    self.emit(
+                        "ITEM_REJECTED",
+                        {"reason": "ACTUATION_BLOCKED", "blockedBy": blocked},
+                        self.session_id(),
+                    )
+                else:
+                    self._sensor_sequence.extend(["CONVEYOR_FORWARD", "ACCEPTANCE_POINT"])
+                    self.emit("SENSOR_SEQUENCE", {"steps": self._sensor_sequence}, self.session_id())
                     self.emit("CONVEYOR_STARTED", {"direction": "FORWARD"}, self.session_id())
-                self.emit("ITEM_ACCEPTED_POINT", {"acceptanceBeam": True}, self.session_id())
-                self.hardware.set_conveyor("STOPPED")
-                if (
-                    self.config.compactor_enabled
-                    and self._guarded_output(lambda: self.hardware.set_compactor(True)) is None
-                ):
-                    self.emit("COMPACTION_STARTED", {}, self.session_id())
-                    time.sleep(0.15)
-                    self.hardware.set_compactor(False)
-                    self.emit("COMPACTION_COMPLETED", {}, self.session_id())
+                    self.emit("ITEM_ACCEPTED_POINT", {"acceptanceBeam": True}, self.session_id())
+                    self.hardware.set_conveyor("STOPPED")
+                    if (
+                        self.config.compactor_enabled
+                        and self._guarded_output(lambda: self.hardware.set_compactor(True)) is None
+                    ):
+                        self.emit("COMPACTION_STARTED", {}, self.session_id())
+                        time.sleep(0.15)
+                        self.hardware.set_compactor(False)
+                        self.emit("COMPACTION_COMPLETED", {}, self.session_id())
                 self._processing_started_at = None
                 self._sensor_sequence = []
                 self._reset_waste_type_selection()
-                self.set_state(MachineState.SESSION_ACTIVE, "item-accepted")
+                self.set_state(
+                    MachineState.SESSION_ACTIVE,
+                    "item-actuation-blocked" if blocked else "item-accepted",
+                )
         # Level-triggered enforcement: while latched, or while any physical
         # hazard is present, every tick drives all outputs off again, whatever
         # wrote them in between.
         if self.state == MachineState.SAFE_STATE or self._physical_hazards(current):
-            self.hardware.all_stop()
+            self._safe_all_stop()
 
     def _latch_hazard(
         self,
@@ -443,9 +480,10 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
     ) -> None:
         # Outputs off immediately, without waiting for the controller lock,
         # and again under it so an in-flight guarded write cannot survive.
-        self.hardware.all_stop()
+        # An output fault is reported but never prevents the latch below.
+        self._safe_all_stop()
         with self._lock:
-            self.hardware.all_stop()
+            self._safe_all_stop()
             if self.state == MachineState.SAFE_STATE and reason == self.db.get_json("safe_reason"):
                 return
             self._set_alert(category, reason, "CRITICAL", payload)
@@ -588,10 +626,30 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             else:
                 blocked = check(snapshot)
             if blocked:
-                self.hardware.all_stop()
+                self._safe_all_stop()
                 return blocked
             write()
             return None
+
+    def _safe_all_stop(self) -> bool:
+        """all_stop() for safety paths: an output fault never propagates, so
+        it cannot prevent latching or kill a control/session loop. The fault
+        is logged and reported once per episode (ERROR event
+        OUTPUT_STOP_FAILED); every later call retries the stop."""
+        try:
+            self.hardware.all_stop()
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            if self._output_fault != error:
+                self._output_fault = error
+                logger.error("all_stop failed: %s", error)
+                self.emit("ERROR", {"reason": "OUTPUT_STOP_FAILED", "error": error}, self.session_id())
+            return False
+        if self._output_fault is not None:
+            logger.info("all_stop recovered after: %s", self._output_fault)
+            self.db.audit("OUTPUT_STOP_RECOVERED", {"error": self._output_fault})
+            self._output_fault = None
+        return True
 
     def try_open_input_gate(self, reason: str) -> bool:
         blocked = self._guarded_output(lambda: self.hardware.set_input_gate(True))
@@ -610,7 +668,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         if self.state not in {MachineState.SESSION_ACTIVE, MachineState.PROCESSING}:
             return
         if not self.db.active_lease():
-            self.hardware.all_stop()
+            self._safe_all_stop()
             self.set_state(MachineState.SYNC_PENDING, "lease-expired")
 
     def session_id(self) -> str | None:

@@ -32,6 +32,10 @@ keselamatan lokal aktif. Kontraknya:
   `RvmController.actuation_block_reason(snapshot)`). Loop kontrol memegang
   lock yang sama untuk setiap tick, sehingga sensor tidak dapat diproses di
   antara pemeriksaan dan penulisan output.
+- **Item tidak dikreditkan bila conveyor ditolak.** Jika interlock menolak
+  conveyor di titik penerimaan, mesin mengirim `ITEM_REJECTED`
+  (`reason: ACTUATION_BLOCKED`, `blockedBy: <alasan>`) dan tidak pernah
+  mengirim `ITEM_ACCEPTED_POINT` maupun menjalankan compactor untuk item itu.
 - **Kondisi yang memblokir:** service panel atau pintu kolektor terbuka,
   suhu ≥ `max_temperature_c`, getaran ≥ `vibration_threshold_g`, kamera
   tidak memenuhi syarat (kamera aktif harus online dan tidak tertutup; hanya
@@ -59,14 +63,28 @@ keselamatan lokal aktif. Kontraknya:
   `SYNC_NOW`, `CAPTURE_SNAPSHOT` dan polling sesi server berjalan di luar
   lock, sehingga server lambat/hang tidak menunda loop sensor. Hasil perintah
   remote tetap di-cache per `id` dan dilaporkan ulang tanpa eksekusi ulang.
-  Batasan: server mengirim perintah remote satu per satu (FIFO), jadi
-  `STOP_ALL` yang antre di belakang `SYNC_NOW`/`CAPTURE_SNAPSHOT` tetap
-  menunggu perintah itu selesai; ini batasan protokol antrean server, bukan
-  lock mesin.
+- **Latensi `STOP_ALL` remote.** Server memberikan `STOP_ALL` yang tertunda
+  sebelum perintah lain, termasuk perintah yang sudah `DISPATCHED`. Mesin
+  memproses perintah remote satu per satu, jadi `STOP_ALL` yang tiba saat
+  `SYNC_NOW`/`CAPTURE_SNAPSHOT` sedang berjalan menunggu perintah itu selesai.
+  Durasinya dibatasi timeout HTTP yang ada: `SYNC_NOW` ≤ 5 s (batch event) +
+  2 × 20 s (upload bukti kamera) = 45 s, `CAPTURE_SNAPSHOT` ≤ 40 s, lalu
+  laporan hasil ≤ 5 s, jeda loop 2 s dan pengambilan perintah ≤ 3 s. Kasus
+  terburuk ±55 s setelah `STOP_ALL` diantrikan; tanpa perintah I/O yang
+  berjalan ±5 s. Timeout `urllib` berlaku per operasi socket, sehingga server
+  yang mengirim data sangat lambat dapat memperpanjangnya, dan perintah remote
+  kedaluwarsa setelah 60 s. Untuk penghentian darurat gunakan E-stop fisik
+  atau panel maintenance lokal.
 - **Boot/crash.** Output GPIO dibuat dalam keadaan mati (`initial_value=False`),
   `start()` memanggil `all_stop()`, dan sesi yang dipulihkan setelah restart
   tidak membuka gate secara otomatis. `all_stop()` GPIO tetap mematikan output
   lain walaupun salah satu output gagal ditulis.
+- **Gangguan output tidak mematikan loop.** Kegagalan `all_stop()` di jalur
+  keselamatan tidak pernah mencegah latch tersimpan dan tidak menghentikan
+  loop kontrol atau loop sesi; kegagalan itu dicatat di log, dilaporkan sekali
+  per kejadian sebagai event `ERROR` (`OUTPUT_STOP_FAILED`), dan setiap tick
+  mencoba mematikan output lagi. Error loop lain dicatat di log dan loop
+  berlanjut dengan backoff (kontrol ≤ 1 s, sesi ≤ 30 s).
 - Audit lokal mencatat `INPUT_GATE_OPENED` dan `ACTUATION_BLOCKED` beserta
   alasannya.
 

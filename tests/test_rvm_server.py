@@ -351,7 +351,8 @@ class ControllerExtraTest(unittest.TestCase):
                 raise RuntimeError("boom")
             c.hardware.read = boom
             c.running = True
-            with mock.patch("rvm.controller.time.sleep", lambda *a: None):
+            with self.assertLogs("rvm.controller", level="ERROR"), \
+                    mock.patch("rvm.controller.time.sleep", lambda *a: None):
                 t = threading.Thread(target=c._run)
                 t.start()
                 deadline = time.time() + 3

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib, hmac, tempfile, time, unittest
 import threading
+import urllib.error
 from unittest import mock
 from pathlib import Path
 from rvm.config import RvmConfig
@@ -392,6 +393,16 @@ class ActuatorPathTest(SafetyAssertions):
                 self.assertNotIn(("compactor", True), writes)
                 self.assertEqual(events_of(controller, "CONVEYOR_STARTED"), [])
                 self.assertEqual(events_of(controller, "COMPACTION_STARTED"), [])
+                # An item the conveyor never moved must not be credited: the
+                # server credits on ITEM_ACCEPTED_POINT.
+                self.assertEqual(events_of(controller, "ITEM_ACCEPTED_POINT"), [])
+                rejected = events_of(controller, "ITEM_REJECTED")
+                self.assertEqual(len(rejected), 1)
+                self.assertEqual(
+                    rejected[0]["payload"],
+                    {"reason": "ACTUATION_BLOCKED", "blockedBy": "CAMERA_OCCLUDED"},
+                )
+                self.assertEqual(controller.state, MachineState.SESSION_ACTIVE)
                 self.assert_outputs_off(controller)
             finally:
                 controller.db.close()
@@ -698,6 +709,160 @@ class NetworkIndependenceTest(SafetyAssertions):
                 self.assertEqual(len(reports), 2)
                 self.assertEqual(reports[0], reports[1])
                 self.assertTrue(reports[0][1]["success"])
+            finally:
+                controller.running = False
+                controller.db.close()
+
+
+    def test_remote_io_commands_are_bounded_by_http_timeouts(self):
+        """A slow server cannot hold the single remote-command loop forever:
+        every HTTP call made by SYNC_NOW / CAPTURE_SNAPSHOT carries a finite
+        timeout, and their sum stays within the worst case documented in
+        rvm/README.md (45 s and 40 s)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp, camera_enabled=True)
+            try:
+                def capture(capture_id: str) -> dict:
+                    image = Path(tmp) / f"{capture_id}.jpg"
+                    image.write_bytes(b"jpeg")
+                    return {
+                        "id": capture_id, "kind": "SECURITY", "reason": "TEST",
+                        "sessionId": None, "imagePath": str(image), "facePaths": [],
+                        "faceCount": 0, "personDetected": False, "occurredAt": iso_now(),
+                    }
+
+                for n in range(3):
+                    controller.db.enqueue_capture(capture(f"backlog-{n}"))
+                controller.emit("HEARTBEAT", {"status": "ONLINE"})
+                controller.camera.capture_evidence = lambda *a, **k: capture("remote")
+                timeouts: list = []
+
+                def urlopen(request, timeout=None):
+                    timeouts.append(timeout)
+                    raise urllib.error.URLError("timed out")
+
+                with mock.patch("rvm.sync.urllib.request.urlopen", urlopen):
+                    for command, bound in (("SYNC_NOW", 45), ("CAPTURE_SNAPSHOT", 40)):
+                        with self.subTest(command=command):
+                            timeouts.clear()
+                            controller.execute_remote_command(command, {})
+                            self.assertTrue(timeouts)
+                            self.assertTrue(
+                                all(isinstance(t, (int, float)) and t > 0 for t in timeouts),
+                                timeouts,
+                            )
+                            self.assertLessEqual(sum(timeouts), bound)
+                    timeouts.clear()
+                    controller.sync.fetch_remote_command()
+                    controller.sync.report_remote_command("cmd", True)
+                    self.assertEqual(timeouts, [3, 5])
+            finally:
+                controller.db.close()
+
+
+# --------------------------------------------------------------------------- #
+# an output fault never kills the loops or loses the latch
+# --------------------------------------------------------------------------- #
+class OutputFaultTest(SafetyAssertions):
+    @staticmethod
+    def break_all_stop(controller: RvmController) -> dict:
+        real_all_stop = controller.hardware.all_stop
+        fault = {"active": True}
+
+        def all_stop():
+            if fault["active"]:
+                raise OSError("gpio write failed")
+            real_all_stop()
+
+        controller.hardware.all_stop = all_stop
+        return fault
+
+    @staticmethod
+    def stop_fault_events(controller: RvmController) -> list[dict]:
+        return [
+            event for event in events_of(controller, "ERROR")
+            if event["payload"].get("reason") == "OUTPUT_STOP_FAILED"
+        ]
+
+    def test_failing_all_stop_still_persists_the_latch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                self.assertTrue(controller.activate_lease(signed_lease()))
+                fault = self.break_all_stop(controller)
+                controller.hardware.patch(service_panel_open=True)
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    for _tick in range(3):
+                        sensor_pass(controller)
+                self.assert_latched(controller, "SERVICE_PANEL_FORCED_OPEN")
+                # Surfaced once per fault episode, not on every tick.
+                self.assertEqual(len(self.stop_fault_events(controller)), 1)
+                fault["active"] = False
+                sensor_pass(controller)
+                self.assert_outputs_off(controller)
+                self.assert_latched(controller, "SERVICE_PANEL_FORCED_OPEN")
+            finally:
+                controller.db.close()
+
+    def test_control_loop_survives_failing_all_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            loop = threading.Thread(target=controller._run, name="control-loop", daemon=True)
+            try:
+                self.assertTrue(controller.activate_lease(signed_lease()))
+                fault = self.break_all_stop(controller)
+                controller.hardware.patch(service_panel_open=True)
+                with self.assertLogs("rvm.controller", level="ERROR"):
+                    controller.running = True
+                    loop.start()
+                    deadline = time.time() + 2
+                    while controller.state != MachineState.SAFE_STATE and time.time() < deadline:
+                        time.sleep(0.02)
+                    time.sleep(0.2)  # several ticks while the output fault persists
+                    self.assertTrue(loop.is_alive(), "control loop died on an output fault")
+                    self.assert_latched(controller, "SERVICE_PANEL_FORCED_OPEN")
+
+                    fault["active"] = False
+                    deadline = time.time() + 2
+                    while controller.hardware.input_gate_open and time.time() < deadline:
+                        time.sleep(0.02)
+                    self.assertTrue(loop.is_alive())
+                    self.assert_outputs_off(controller)
+                    self.assert_latched(controller, "SERVICE_PANEL_FORCED_OPEN")
+            finally:
+                controller.running = False
+                if loop.ident is not None:
+                    loop.join(2)
+                controller.db.close()
+
+    def test_session_loop_survives_poll_errors_and_failing_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                # The lease is refused by the open panel, and the refusal's
+                # all_stop fails as well.
+                controller.hardware.patch(service_panel_open=True)
+                self.break_all_stop(controller)
+                polls: list = []
+
+                def fetch_machine_session():
+                    polls.append(len(polls))
+                    if len(polls) == 1:
+                        raise RuntimeError("malformed session payload")
+                    if len(polls) == 3:
+                        controller.running = False
+                    return {"lease": signed_lease(), "session": None}
+
+                controller.sync.fetch_machine_session = fetch_machine_session
+                controller.sync.fetch_display = lambda: None
+                controller.running = True
+                with self.assertLogs("rvm.controller", level="WARNING"), mock.patch(
+                    "rvm.controller.time.sleep", lambda *_a: None
+                ):
+                    controller._lease_loop()
+                self.assertEqual(len(polls), 3)
+                self.assertIsNone(controller.db.active_lease())
+                self.assertEqual(controller.state, MachineState.IDLE)
             finally:
                 controller.running = False
                 controller.db.close()
