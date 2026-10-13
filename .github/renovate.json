@@ -27,9 +27,13 @@
       "automerge": true
     },
     {
-      "matchPackageNames": ["next"],
+      "matchPackageNames": ["next", "eslint-config-next"],
       "groupName": "Next.js",
       "labels": ["framework"]
+    },
+    {
+      "matchPackageNames": ["vitest", "@vitest/coverage-v8"],
+      "groupName": "Vitest"
     },
     {
       "matchPackageNames": ["prisma", "@prisma/client"],

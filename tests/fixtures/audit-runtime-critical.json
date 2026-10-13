@@ -1,0 +1,31 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "fixture-runtime-lib": {
+      "name": "fixture-runtime-lib",
+      "severity": "critical",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 9000001,
+          "name": "fixture-runtime-lib",
+          "dependency": "fixture-runtime-lib",
+          "title": "Synthetic critical advisory used only by the dependency gate test",
+          "url": "https://github.com/advisories/GHSA-fake-crit-0001",
+          "severity": "critical",
+          "cwe": ["CWE-94"],
+          "cvss": { "score": 9.8, "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" },
+          "range": "<2.0.0"
+        }
+      ],
+      "effects": [],
+      "range": "<2.0.0",
+      "nodes": ["node_modules/fixture-runtime-lib"],
+      "fixAvailable": true
+    }
+  },
+  "metadata": {
+    "vulnerabilities": { "info": 0, "low": 0, "moderate": 0, "high": 0, "critical": 1, "total": 1 },
+    "dependencies": { "prod": 2, "dev": 1, "optional": 0, "peer": 0, "peerOptional": 0, "total": 3 }
+  }
+}

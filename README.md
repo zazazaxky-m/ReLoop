@@ -23,7 +23,7 @@ Silakan merujuk ke dokumen berikut untuk detail pada masing-masing komponen:
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22.12+ (the CI and the Docker images run Node 22 LTS)
 - Docker (for the local PostgreSQL instance) — or your own PostgreSQL
 
 ## Getting started

@@ -6,7 +6,7 @@ on:
   pull_request:
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
 
 # Security scanners live in security-scan.yml (Semgrep, CodeQL, Trivy, …)
 # and run on the same PR/push events in parallel.
