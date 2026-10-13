@@ -17,6 +17,7 @@ import { MachineActivityPanel } from "./MachineActivityPanel";
 import { MachineRemoteConsole } from "./MachineRemoteConsole";
 import { MachineMediaManager } from "./MachineMediaManager";
 import type { MachineCaptureRow } from "@/lib/machine-captures";
+import type { MachineSyncStatus } from "@/lib/machine-sync-status";
 import type { SecurityEventRow } from "@/lib/security-events";
 import type { RemoteCommandView } from "@/lib/remote-commands";
 
@@ -62,6 +63,7 @@ export async function MachineDetailView({
   securityEvents,
   cameraCaptures,
   remoteCommands,
+  syncStatus,
 }: {
   machine: DetailMachine;
   wasteTypes: { id: string; name: string }[];
@@ -72,6 +74,7 @@ export async function MachineDetailView({
   securityEvents?: SecurityEventRow[];
   cameraCaptures?: MachineCaptureRow[];
   remoteCommands?: RemoteCommandView[];
+  syncStatus?: MachineSyncStatus | null;
 }) {
   const tokenValid =
     machine.qrToken &&
@@ -137,6 +140,7 @@ export async function MachineDetailView({
           <MachineActivityPanel
             securityEvents={securityEvents}
             cameraCaptures={cameraCaptures}
+            syncStatus={syncStatus}
             sessions={machine.sessions}
           />
         </div>

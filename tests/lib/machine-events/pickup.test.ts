@@ -47,4 +47,17 @@ describe('maybeCreateAutoPickup', () => {
     expect(mockTx.pickupRequest.create).not.toHaveBeenCalled();
     expect(fraud.notifyOrgAdmins).not.toHaveBeenCalled();
   });
+
+  it('defers the FULL notification to the post-commit collector (R02)', async () => {
+    mockTx.pickupRequest.findFirst.mockResolvedValue(null);
+    mockTx.pickupRequest.create.mockResolvedValue({ id: 'p1' });
+    const deferred: Array<() => Promise<void>> = [];
+
+    await maybeCreateAutoPickup(mockTx, { id: 'm1', organizationId: 'o1' }, 'M1', (effect) => deferred.push(effect));
+
+    expect(fraud.notifyOrgAdmins).not.toHaveBeenCalled();
+    expect(deferred).toHaveLength(1);
+    await deferred[0]();
+    expect(fraud.notifyOrgAdmins).toHaveBeenCalledWith('o1', expect.objectContaining({ type: 'MACHINE_FULL' }));
+  });
 });

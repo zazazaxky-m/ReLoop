@@ -556,4 +556,39 @@ describe('processEventSideEffects', () => {
     );
     expect(pickup.maybeCreateAutoPickup).not.toHaveBeenCalled();
   });
+
+  it('defers fraud admin notifications to the post-commit collector (R02)', async () => {
+    vi.mocked(item.resolveFraudDepositItemId).mockResolvedValue(null);
+    const deferred: Array<() => Promise<void>> = [];
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'FRAUD_DETECTED', sessionId: null, payload: {}, machineCode: 'M1' } as any,
+      'evt1',
+      undefined,
+      undefined,
+      (effect) => deferred.push(effect),
+    );
+    expect(fraud.notifyOrgAdmins).not.toHaveBeenCalled();
+    expect(deferred).toHaveLength(1);
+    await deferred[0]();
+    expect(fraud.notifyOrgAdmins).toHaveBeenCalledWith(
+      'o1',
+      expect.objectContaining({ title: 'Indikasi fraud terdeteksi' }),
+    );
+  });
+
+  it('passes the post-commit collector to auto pickup (R02)', async () => {
+    const collect = vi.fn();
+    await processEventSideEffects(
+      mockTx,
+      mockMachine,
+      { eventType: 'STATUS_CHANGED', payload: { status: 'FULL' }, machineCode: 'M1' } as any,
+      'evt1',
+      undefined,
+      undefined,
+      collect,
+    );
+    expect(pickup.maybeCreateAutoPickup).toHaveBeenCalledWith(mockTx, mockMachine, 'M1', collect);
+  });
 });

@@ -145,6 +145,15 @@
           <button class="scenario warning" data-command="simulate" data-scenario="machine-full"><b>Mesin penuh</b><span>Kapasitas 98%</span></button>
         </div>
       </div>
+      <div class="section-heading compact"><div><span>Sinkronisasi event</span><strong>Antrean ke server</strong></div><em id="outboxLastSuccess">Belum pernah sinkron</em></div>
+      <div class="outbox-stats">
+        <div><span>Menunggu dikirim</span><b id="outboxPending">0</b></div>
+        <div><span>Ditolak permanen</span><b id="outboxDeadLetter">0</b></div>
+      </div>
+      <ul id="deadLetterList" class="dead-letter-list"></ul>
+      <div class="maintenance-grid">
+        <button id="retryDeadLetter" data-command="retry-dead-letter" disabled>Kirim ulang event ditolak</button>
+      </div>
       <div class="section-heading compact"><div><span>Kontrol perangkat</span><strong>Operasi manual</strong></div></div>
       <div class="maintenance-grid">
         <button data-command="reset-safe-state">Reset safe state</button>

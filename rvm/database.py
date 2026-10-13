@@ -1,12 +1,32 @@
 from __future__ import annotations
 
 import json
+import random
 import sqlite3
 import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+
+# Outbox delivery states (column `delivery_status`, added by the protocol v2
+# upgrade). Only `pending` rows are sent; `dead_letter` rows are kept for the
+# operator and never deleted.
+PENDING = "pending"
+SENT = "sent"
+DEAD_LETTER = "dead_letter"
+
+RETRY_BACKOFF_CAP_SECONDS = 60
+
+
+def retry_delay(attempts: int, rand: Callable[[], float] = random.random) -> float:
+    """Seconds until the next delivery attempt after `attempts` failures:
+    2**attempts capped at RETRY_BACKOFF_CAP_SECONDS, with equal jitter (half
+    to all of the capped value) so a fleet does not retry in lockstep. Never
+    exceeds the cap."""
+    capped = min(float(RETRY_BACKOFF_CAP_SECONDS), 2.0 ** min(max(attempts, 1), 16))
+    return capped / 2 + capped / 2 * min(max(rand(), 0.0), 1.0)
 
 
 SCHEMA = """
@@ -29,7 +49,10 @@ CREATE TABLE IF NOT EXISTS outbox (
   attempts INTEGER NOT NULL DEFAULT 0,
   next_attempt_at REAL NOT NULL DEFAULT 0,
   last_error TEXT,
-  sent_at REAL
+  sent_at REAL,
+  delivery_status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (delivery_status IN ('pending','sent','dead_letter')),
+  dead_lettered_at REAL
 );
 CREATE INDEX IF NOT EXISTS outbox_pending_idx
 ON outbox(sent_at, next_attempt_at, id);
@@ -68,15 +91,82 @@ ON capture_outbox(sent_at, next_attempt_at, id);
 """
 
 
+# Additive upgrade of an outbox created before protocol v2. Existing columns
+# (attempts, next_attempt_at, last_error, sent_at) and every row are kept;
+# already-sent rows are backfilled to `sent`, everything else stays `pending`.
+OUTBOX_V2_COLUMNS = (
+    ("delivery_status",
+     "ALTER TABLE outbox ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'pending' "
+     "CHECK (delivery_status IN ('pending','sent','dead_letter'))"),
+    ("dead_lettered_at", "ALTER TABLE outbox ADD COLUMN dead_lettered_at REAL"),
+)
+OUTBOX_V2_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS outbox_delivery_idx ON outbox(delivery_status, next_attempt_at, id)",
+    "CREATE INDEX IF NOT EXISTS outbox_session_idx ON outbox(session_id, delivery_status, id)",
+)
+
+
 class EdgeDatabase:
     def __init__(self, path: str):
         db_path = Path(path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.path = str(db_path)
+        self.backup_path: str | None = None
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
         self._conn.row_factory = sqlite3.Row
+        legacy = self._outbox_columns()
+        if legacy and "delivery_status" not in legacy:
+            # Copy the untouched pre-v2 database aside before any schema change.
+            self.backup_path = self._backup("pre-outbox-v2")
         self._conn.executescript(SCHEMA)
+        self._upgrade_outbox()
+
+    def _outbox_columns(self) -> set[str]:
+        return {row["name"] for row in self._conn.execute("PRAGMA table_info(outbox)")}
+
+    def _backup(self, label: str) -> str:
+        """Consistent copy (WAL included) via the SQLite backup API, verified
+        before it is trusted. Raises instead of migrating without a backup."""
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        target = Path(f"{self.path}.{label}-{stamp}.bak")
+        suffix = 1
+        while target.exists():
+            target = Path(f"{self.path}.{label}-{stamp}-{suffix}.bak")
+            suffix += 1
+        copy = sqlite3.connect(str(target))
+        try:
+            self._conn.backup(copy)
+            integrity = copy.execute("PRAGMA integrity_check").fetchone()[0]
+            copied = copy.execute("SELECT COUNT(*) FROM outbox").fetchone()[0]
+        finally:
+            copy.close()
+        original = self._conn.execute("SELECT COUNT(*) FROM outbox").fetchone()[0]
+        if integrity != "ok" or copied != original:
+            raise RuntimeError(
+                f"Backup outbox {target} tidak valid; upgrade database dibatalkan"
+            )
+        return str(target)
+
+    def _upgrade_outbox(self) -> None:
+        columns = self._outbox_columns()
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                for name, ddl in OUTBOX_V2_COLUMNS:
+                    if name not in columns:
+                        self._conn.execute(ddl)
+                if "delivery_status" not in columns:
+                    self._conn.execute(
+                        "UPDATE outbox SET delivery_status='sent' WHERE sent_at IS NOT NULL"
+                    )
+                for ddl in OUTBOX_V2_INDEXES:
+                    self._conn.execute(ddl)
+                self._conn.execute("COMMIT")
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.execute("ROLLBACK")
+                raise
 
     def close(self) -> None:
         with self._lock:
@@ -128,11 +218,20 @@ class EdgeDatabase:
         return event_id
 
     def pending(self, limit: int) -> list[dict[str, Any]]:
+        """Due pending events in enqueue order. An event of a deposit session
+        is held while an earlier pending event of the same session is still
+        backing off: the backend resolves an item event against the session's
+        history, so it must arrive in order. Other sessions and session-less
+        events are not held, and dead-lettered events hold nothing."""
+        now = time.time()
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM outbox WHERE sent_at IS NULL AND next_attempt_at<=? "
-                "ORDER BY id LIMIT ?",
-                (time.time(), limit),
+                "SELECT * FROM outbox o WHERE o.delivery_status='pending' AND o.next_attempt_at<=? "
+                "AND (o.session_id IS NULL OR NOT EXISTS ("
+                "  SELECT 1 FROM outbox e WHERE e.session_id=o.session_id "
+                "  AND e.delivery_status='pending' AND e.id<o.id AND e.next_attempt_at>?)) "
+                "ORDER BY o.id LIMIT ?",
+                (now, now, limit),
             ).fetchall()
         return [
             {
@@ -149,36 +248,105 @@ class EdgeDatabase:
         ]
 
     def mark_sent(self, db_ids: list[int]) -> None:
+        """Durable ACK: only for events the server reported accepted/duplicate."""
         if not db_ids:
             return
         marks = ",".join("?" for _ in db_ids)
         with self._lock, self._conn:
             self._conn.execute(
-                f"UPDATE outbox SET sent_at=?,last_error=NULL WHERE id IN ({marks})",
+                f"UPDATE outbox SET sent_at=?,last_error=NULL,delivery_status='{SENT}' "
+                f"WHERE id IN ({marks}) AND delivery_status='{PENDING}'",
                 (time.time(), *db_ids),
             )
 
     def mark_failed(self, db_ids: list[int], error: str) -> None:
+        """Transient failure: stays pending, retried with the same
+        localEventId after retry_delay(attempts)."""
         if not db_ids:
             return
         with self._lock, self._conn:
             for db_id in db_ids:
                 row = self._conn.execute(
-                    "SELECT attempts FROM outbox WHERE id=?", (db_id,)
+                    f"SELECT attempts FROM outbox WHERE id=? AND delivery_status='{PENDING}'",
+                    (db_id,),
                 ).fetchone()
-                attempts = int(row["attempts"] if row else 0) + 1
-                delay = min(300, 2 ** min(attempts, 8))
+                if not row:
+                    continue
+                attempts = int(row["attempts"]) + 1
                 self._conn.execute(
                     "UPDATE outbox SET attempts=?,next_attempt_at=?,last_error=? WHERE id=?",
-                    (attempts, time.time() + delay, error[:500], db_id),
+                    (attempts, time.time() + retry_delay(attempts), error[:500], db_id),
                 )
 
+    def mark_dead_letter(self, ids: list[int], reason: str) -> None:
+        """Permanent rejection: the record is kept (payload untouched) for the
+        operator and is no longer sent until an authorized retry."""
+        if not ids:
+            return
+        marks = ",".join("?" for _ in ids)
+        with self._lock, self._conn:
+            self._conn.execute(
+                f"UPDATE outbox SET delivery_status='{DEAD_LETTER}',dead_lettered_at=?,"
+                f"last_error=?,attempts=attempts+1 WHERE id IN ({marks}) AND delivery_status='{PENDING}'",
+                (time.time(), reason[:500], *ids),
+            )
+
+    def retry_dead_letters(self, ids: list[int] | None = None) -> list[int]:
+        """Requeues dead-lettered events (all, or the given ids) for immediate
+        delivery with the same localEventId and payload. Attempts and the last
+        error stay as history. Returns the requeued ids."""
+        query = f"SELECT id FROM outbox WHERE delivery_status='{DEAD_LETTER}'"
+        params: tuple[Any, ...] = ()
+        if ids is not None:
+            if not ids:
+                return []
+            query += f" AND id IN ({','.join('?' for _ in ids)})"
+            params = tuple(ids)
+        with self._lock, self._conn:
+            requeued = [int(row["id"]) for row in self._conn.execute(query + " ORDER BY id", params)]
+            if requeued:
+                marks = ",".join("?" for _ in requeued)
+                self._conn.execute(
+                    f"UPDATE outbox SET delivery_status='{PENDING}',next_attempt_at=0 "
+                    f"WHERE id IN ({marks}) AND delivery_status='{DEAD_LETTER}'",
+                    requeued,
+                )
+        return requeued
+
     def queue_depth(self) -> int:
+        """Events still to deliver (dead letters are counted separately)."""
+        return self._count(PENDING)
+
+    def dead_letter_depth(self) -> int:
+        return self._count(DEAD_LETTER)
+
+    def _count(self, status: str) -> int:
         with self._lock:
             row = self._conn.execute(
-                "SELECT COUNT(*) AS count FROM outbox WHERE sent_at IS NULL"
+                "SELECT COUNT(*) AS count FROM outbox WHERE delivery_status=?", (status,)
             ).fetchone()
         return int(row["count"])
+
+    def dead_letters(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Operator view of dead-lettered events (metadata only, no payload)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id,local_event_id,event_type,occurred_at,attempts,last_error,dead_lettered_at "
+                f"FROM outbox WHERE delivery_status='{DEAD_LETTER}' ORDER BY id LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "localEventId": row["local_event_id"],
+                "eventType": row["event_type"],
+                "occurredAt": row["occurred_at"],
+                "attempts": row["attempts"],
+                "reason": row["last_error"],
+                "deadLetteredAt": row["dead_lettered_at"],
+            }
+            for row in rows
+        ]
 
     def audit(self, action: str, data: dict[str, Any]) -> None:
         with self._lock, self._conn:

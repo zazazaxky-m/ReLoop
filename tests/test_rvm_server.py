@@ -658,8 +658,11 @@ class SyncTest(unittest.TestCase):
     def test_flush_once_success(self):
         with tempfile.TemporaryDirectory() as tmp:
             w, db = make_sync(tmp)
-            db.enqueue("E", {"a": 1}, "now")
-            with mock.patch("rvm.sync.urllib.request.urlopen", UrlFake({"/machine-events": b"{}"})):
+            event_id = db.enqueue("E", {"a": 1}, "now")
+            # Protocol v2 (R02): only a matched accepted/duplicate result ACKs.
+            answer = json.dumps({"protocolVersion": 2, "received": 1, "results": [
+                {"localEventId": event_id, "status": "accepted", "eventId": "srv-1"}]}).encode()
+            with mock.patch("rvm.sync.urllib.request.urlopen", UrlFake({"/machine-events": answer})):
                 self.assertTrue(w.flush_once())
             self.assertTrue(w.online)
             self.assertEqual(db.queue_depth(), 0)
@@ -673,6 +676,15 @@ class SyncTest(unittest.TestCase):
             with mock.patch("rvm.sync.urllib.request.urlopen", UrlFake({"/machine-events": err})):
                 self.assertFalse(w.flush_once())
             self.assertFalse(w.online)
+            self.assertEqual(db.queue_depth(), 1)
+            db.close()
+
+    def test_flush_once_legacy_empty_body_keeps_queue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w, db = make_sync(tmp)
+            db.enqueue("E", {"a": 1}, "now")
+            with mock.patch("rvm.sync.urllib.request.urlopen", UrlFake({"/machine-events": b"{}"})):
+                self.assertFalse(w.flush_once())
             self.assertEqual(db.queue_depth(), 1)
             db.close()
 

@@ -4,15 +4,33 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import threading
 import time
 import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+from typing import Any
 
 from .config import RvmConfig
 from .database import EdgeDatabase
+
+# POST /api/machine-events protocol v2 (tests/fixtures/contracts/machine-events.v2.json).
+PROTOCOL_VERSION = 2
+ACK_STATUSES = frozenset({"accepted", "duplicate"})
+# A whole-batch rejection that one bad event could cause. The batch is then
+# sent one event at a time for a while so that event only holds back itself.
+ENVELOPE_REJECTION_STATUSES = frozenset({400, 413, 422})
+ISOLATION_SECONDS = 300.0
+LAST_SUCCESS_KEY = "sync_last_success_at"
+_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+
+
+def _error_code(value: Any) -> str:
+    """Server error codes are stored and shown as-is only when they look like
+    a code; anything else (free text, stack) is replaced."""
+    return value if isinstance(value, str) and _ERROR_CODE.fullmatch(value) else "SERVER_ERROR"
 
 
 class SyncWorker:
@@ -25,6 +43,7 @@ class SyncWorker:
         self.last_error: str | None = None
         self._thread: threading.Thread | None = None
         self._last_media_sync = 0.0
+        self._isolate_until = 0.0
 
     def start(self) -> None:
         self.running = True
@@ -45,7 +64,11 @@ class SyncWorker:
             time.sleep(self.config.sync_interval_seconds)
 
     def flush_once(self) -> bool:
-        rows = self.db.pending(self.config.batch_size)
+        """Sends one batch (one HTTP request, bounded by its 5 s timeout) and
+        applies the per-event results. True only when every sent event was
+        durably acknowledged (or nothing was due)."""
+        isolating = time.time() < self._isolate_until
+        rows = self.db.pending(1 if isolating else self.config.batch_size)
         if not rows:
             return True
         events = [{key: value for key, value in row.items() if key not in {"db_id", "attempts"}} for row in rows]
@@ -73,18 +96,117 @@ class SyncWorker:
         ids = [row["db_id"] for row in rows]
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
-                if 200 <= response.status < 300:
-                    self.db.mark_sent(ids)
-                    self.online = True
-                    self.last_sync_at = time.time()
-                    self.last_error = None
-                    return True
-                raise RuntimeError(f"HTTP {response.status}")
-        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as exc:
+                status = response.status
+                answer = response.read() if 200 <= status < 300 else b""
+        except urllib.error.HTTPError as exc:
+            status, answer = exc.code, b""
+            exc.close()
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            # Includes a response lost after the server committed: the retry
+            # reuses the localEventId and is answered as duplicate.
             self.online = False
             self.last_error = str(exc)
             self.db.mark_failed(ids, self.last_error)
             return False
+        if not 200 <= status < 300:
+            return self._reject_batch(rows, status)
+        self.online = True
+        try:
+            payload = json.loads(answer)
+        except ValueError:
+            return self._keep_pending(ids, "MALFORMED_RESPONSE")
+        return self.apply_event_results(rows, payload)
+
+    def _reject_batch(self, rows: list[dict], status: int) -> bool:
+        """HTTP-level failure: every event stays pending with backoff. Never
+        dead-lettered here, because the server (not the event) may be at fault."""
+        if status in ENVELOPE_REJECTION_STATUSES and len(rows) > 1:
+            self._isolate_until = time.time() + ISOLATION_SECONDS
+        self.online = False
+        self.last_error = f"HTTP_{status}"
+        self.db.mark_failed([row["db_id"] for row in rows], self.last_error)
+        return False
+
+    def _keep_pending(self, ids: list[int], reason: str) -> bool:
+        self.last_error = reason
+        self.db.mark_failed(ids, reason)
+        return False
+
+    @staticmethod
+    def _protocol_results(payload: Any, sent: dict[str, int]) -> list[dict] | None:
+        """The v2 results, or None when the response as a whole cannot be
+        trusted (not v2, wrong shape, a foreign or repeated localEventId).
+        Items without a usable localEventId are skipped: their events count as
+        unanswered and stay pending."""
+        if not isinstance(payload, dict):
+            return None
+        version, received, results = (
+            payload.get("protocolVersion"), payload.get("received"), payload.get("results"),
+        )
+        if type(version) is not int or version != PROTOCOL_VERSION:
+            return None
+        if type(received) is not int or received < 0 or not isinstance(results, list):
+            return None
+        seen: set[str] = set()
+        valid = []
+        for item in results:
+            if not isinstance(item, dict) or not isinstance(item.get("localEventId"), str):
+                continue
+            local_id = item["localEventId"]
+            if local_id not in sent or local_id in seen:
+                return None
+            seen.add(local_id)
+            valid.append(item)
+        return valid
+
+    def apply_event_results(self, rows: list[dict], payload: dict) -> bool:
+        """Applies a protocol v2 response to the rows that were sent. Only
+        matched accepted/duplicate results are ACKed (removed from pending);
+        an error with `retryable: false` is dead-lettered (kept, not sent
+        again); every other error, a missing or malformed item, or a response
+        that is not v2 keeps the event pending with backoff. Returns True only
+        when the whole batch was durably acknowledged."""
+        sent = {row["localEventId"]: row["db_id"] for row in rows}
+        results = self._protocol_results(payload, sent)
+        if results is None:
+            return self._keep_pending(list(sent.values()), "PROTOCOL_MISMATCH")
+
+        acked = {r["localEventId"] for r in results if r.get("status") in ACK_STATUSES}
+        ids = [r["db_id"] for r in rows if r["localEventId"] in acked]
+        self.db.mark_sent(ids)
+
+        dead: dict[str, list[int]] = {}
+        retry: dict[str, list[int]] = {}
+        for result in results:
+            local_id = result["localEventId"]
+            if local_id in acked:
+                continue
+            if result.get("status") == "error":
+                code = _error_code(result.get("error"))
+                # Only an explicit `retryable: false` is permanent; a missing
+                # or non-boolean flag is transient (compatibility phase).
+                target = dead if result.get("retryable") is False else retry
+                target.setdefault(code, []).append(sent[local_id])
+            else:
+                retry.setdefault("MALFORMED_RESULT", []).append(sent[local_id])
+        answered = {r["localEventId"] for r in results}
+        missing = [db_id for local_id, db_id in sent.items() if local_id not in answered]
+        if missing:
+            retry.setdefault("MISSING_RESULT", []).extend(missing)
+        for code, dead_ids in dead.items():
+            self.db.mark_dead_letter(dead_ids, code)
+        for code, retry_ids in retry.items():
+            self.db.mark_failed(retry_ids, code)
+
+        self.online = True
+        if ids:
+            now = time.time()
+            self.last_sync_at = now
+            self.db.set_json(LAST_SUCCESS_KEY, now)
+        complete = len(ids) == len(rows)
+        failures = sorted(set(dead) | set(retry))
+        self.last_error = None if complete else ",".join(failures)
+        return complete
 
     def flush_captures(self) -> bool:
         rows = self.db.pending_captures(2)
@@ -352,4 +474,8 @@ class SyncWorker:
             "lastError": self.last_error,
             "queueDepth": self.db.queue_depth(),
             "captureQueueDepth": self.db.capture_queue_depth(),
+            # Operator view (kiosk maintenance panel, remote REFRESH_STATE).
+            "deadLetterDepth": self.db.dead_letter_depth(),
+            "lastSuccessAt": self.db.get_json(LAST_SUCCESS_KEY),
+            "deadLetters": self.db.dead_letters(20),
         }

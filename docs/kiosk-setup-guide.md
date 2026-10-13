@@ -33,7 +33,7 @@ npm run realtime
 
 **Alur Kerja Realtime:**
 1. RVM Hardware (sensor) mendeteksi botol, menimbangnya, dan mengenali jenisnya menggunakan AI Camera.
-2. Hardware mengirim *payload* HMAC-SHA256 ke *endpoint* internal `/api/machine-events`.
+2. Hardware mengirim *payload* HMAC-SHA256 ke *endpoint* internal `/api/machine-events`. Event hanya dihapus dari antrean mesin setelah server menjawab `accepted`/`duplicate` per event (protokol v2); event yang ditolak permanen tersimpan sebagai dead-letter dan dapat dikirim ulang dari panel maintenance. Saat upgrade, deploy backend lebih dulu, lalu runtime mesin (yang mem-backup database outbox sebelum migrasi). Rincian: [`rvm/README.md`](../rvm/README.md#sinkronisasi-event-protokol-v2-retry-dan-dead-letter).
 3. Backend memproses data tersebut (memasukkan `DepositItem` ke database), lalu meneruskan notifikasi lewat WebSocket (menggunakan koneksi `realtime`).
 4. Kiosk yang terbuka di layar mesin otomatis merespons melalui WebSocket, memunculkan animasi botol masuk dan menambahkan poin di layar secara instan tanpa perlu memuat ulang (*refresh*) halaman.
 

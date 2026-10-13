@@ -7,7 +7,8 @@ menyinkronkan event ke ReLoop API secara batch saat koneksi tersedia.
 ## Fitur
 
 - State machine mesin dan session lease.
-- Durable event outbox + retry exponential backoff.
+- Durable event outbox dengan ACK per event (protokol v2), retry exponential
+  backoff ≤ 60 s + jitter, dan dead-letter yang terlihat operator (lihat bawah).
 - Local kiosk/API hanya pada loopback.
 - Sensor abstraction: mock/simulator dan Raspberry Pi GPIO.
 - Kamera OpenCV opsional: health, occlusion, blur, motion/impact evidence.
@@ -130,6 +131,82 @@ Perilaku ini diuji dengan mock hardware di `tests/test_rvm_safety.py`.
 **Uji penerimaan hardware oleh teknisi belum dilaksanakan** dan wajib lulus
 sebelum rollout armada; prosedurnya ada di
 [`docs/kiosk-setup-guide.md`](../docs/kiosk-setup-guide.md#4-interlock-keselamatan-dan-uji-penerimaan-teknisi).
+
+## Sinkronisasi event: protokol v2, retry dan dead-letter
+
+Setiap event mesin masuk outbox SQLite (`outbox`) dengan `localEventId` unik
+dan dikirim batch ke `POST /api/machine-events` (HMAC). Respons protokol v2
+(kontrak bersama: `tests/fixtures/contracts/machine-events.v2.json`):
+
+```json
+{ "protocolVersion": 2, "received": 3, "results": [
+  { "localEventId": "…", "status": "accepted", "eventId": "…" },
+  { "localEventId": "…", "status": "duplicate", "eventId": "…" },
+  { "localEventId": "…", "status": "error", "error": "TEMPORARY_FAILURE", "retryable": true }
+] }
+```
+
+- **ACK hanya untuk yang tercatat.** Batch yang valid selalu HTTP 200; mesin
+  hanya menandai `sent` event yang hasilnya `accepted`/`duplicate` dan
+  `localEventId`-nya cocok dengan yang dikirim. Server baru menjawab
+  `accepted` setelah event beserta reward-nya commit dalam satu transaksi.
+- **Retry dengan ID yang sama.** Error tanpa `retryable: false` (termasuk
+  error tanpa field `retryable`, item yang hilang/rusak, JSON rusak, HTTP
+  non-2xx, timeout) tetap `pending` dengan backoff `min(60, 2^attempts)`
+  detik dan jitter (50–100 % dari nilai itu, tidak pernah > 60 s). Retry
+  memakai `localEventId` yang sama, sehingga respons yang hilang setelah
+  commit dijawab `duplicate` tanpa reward kedua. Pengiriman bersamaan event
+  yang sama juga dijawab `duplicate` (server membaca ulang event pemenang
+  setelah benturan unique).
+- **Dead-letter.** `retryable: false` (`INVALID_EVENT`: event tidak dikenali;
+  `EVENT_REJECTED`: ditolak aturan/data) memindahkan event ke
+  `delivery_status = 'dead_letter'`. Baris tidak pernah dihapus atau diubah,
+  dan tidak dikirim lagi sampai teknisi mengirim ulang.
+- **Respons yang tidak dipercaya ditolak utuh.** Respons tanpa
+  `protocolVersion: 2` (termasuk respons backend lama v1), `results` yang
+  bukan daftar, atau ID asing/ganda tidak meng-ACK apa pun; seluruh batch tetap
+  `pending`.
+- **Event racun tidak menahan antrean.** Backoff berlaku per event, jadi event
+  yang terus gagal tidak menghalangi event lain. Bila server menolak seluruh
+  batch (HTTP 400/413/422), mesin mengirim satu event per batch selama 5 menit
+  agar event penyebabnya hanya menahan dirinya sendiri. Penolakan level HTTP
+  tidak pernah men-dead-letter event (server bisa jadi yang salah).
+- **Urutan per sesi.** Backend menentukan item sebuah event dari riwayat sesi,
+  jadi event sebuah sesi ditahan selama event sebelumnya dari sesi yang sama
+  masih menunggu retry (di mesin) dan dijawab `TEMPORARY_FAILURE` dalam batch
+  yang sama setelah event sebelumnya gagal sementara (di server). Sesi lain dan
+  event tanpa sesi tetap berjalan; event yang di-dead-letter tidak menahan sesi.
+- **Batas waktu tetap.** Satu `flush_once` tetap satu request HTTP dengan
+  timeout 5 s, sehingga angka latensi `STOP_ALL` di atas tidak berubah.
+
+**Tampilan operator.** Panel maintenance kiosk (PIN) menampilkan jumlah event
+menunggu, yang ditolak permanen (jenis, alasan, jumlah percobaan) dan waktu
+sinkron terakhir yang berhasil; tombol **Kirim ulang event ditolak**
+(`retry-dead-letter`, wajib token maintenance) mengembalikan event ke antrean
+dengan `localEventId` dan payload yang sama, menyimpan riwayat `attempts` dan
+`last_error`, dan mencatat audit `OUTBOX_DEAD_LETTER_RETRY`. Heartbeat
+membawa `queueDepth`, `deadLetterDepth` dan `lastSyncSuccessAt`, yang tampil di
+dashboard admin/superadmin pada tab **Sinkronisasi** detail mesin.
+
+### Upgrade outbox dan urutan rollout
+
+1. **Deploy backend dulu.** Respons v2 bersifat aditif (`protocolVersion` dan
+   `retryable` baru; `received`/`results` tetap), jadi worker lama tetap
+   berjalan.
+2. **Baru kemudian worker mesin.** Worker v2 menolak respons v1 tanpa
+   menghapus antrean; bila backend belum v2, event menumpuk `pending` sampai
+   backend di-upgrade.
+3. **Upgrade database otomatis saat start, dengan backup lebih dulu.** Bila
+   tabel `outbox` belum punya `delivery_status`, runtime menyalin database
+   (SQLite backup API, termasuk isi WAL) ke
+   `<database>.pre-outbox-v2-<UTC>.bak`, memverifikasi `integrity_check` dan
+   jumlah baris outbox, lalu dalam satu transaksi menambah kolom
+   `delivery_status` (`pending`/`sent`/`dead_letter`) dan `dead_lettered_at`,
+   mengisi `sent` untuk baris yang sudah punya `sent_at`, dan membuat index
+   baru. Kolom `attempts`, `next_attempt_at`, `last_error` dan seluruh baris
+   pending dipertahankan. Bila backup gagal diverifikasi, runtime berhenti
+   tanpa mengubah database. Simpan file `.bak` sampai mesin terbukti sinkron
+   normal.
 
 ## Kamera, deteksi orang, dan bukti wajah
 

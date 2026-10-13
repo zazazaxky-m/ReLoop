@@ -82,3 +82,9 @@ SESSION_SIMULATION_SCENARIOS = frozenset({
 
 def iso_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def iso_from_epoch(value: float | int | None) -> str | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")

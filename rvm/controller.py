@@ -23,9 +23,10 @@ from .states import (
     MachineState,
     SIMULATION_SCENARIOS,
     describe_interlocks,
+    iso_from_epoch,
     iso_now,
 )
-from .sync import SyncWorker
+from .sync import LAST_SUCCESS_KEY, SyncWorker
 
 logger = logging.getLogger(__name__)
 
@@ -463,6 +464,9 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             "temperatureC": sensor.temperature_c,
             "cameraOnline": self.camera.status.online if self.config.camera_enabled else sensor.camera_online,
             "queueDepth": self.db.queue_depth(),
+            # Outbox health for the dashboard (stored with the heartbeat event).
+            "deadLetterDepth": self.db.dead_letter_depth(),
+            "lastSyncSuccessAt": iso_from_epoch(self.db.get_json(LAST_SUCCESS_KEY)),
         }
 
     def emit(
@@ -845,6 +849,15 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 self._close_output(lambda: hardware.set_compactor(False))
         elif command == "flush":
             self.sync.flush_once()
+        elif command == "retry-dead-letter":
+            # Authorized by the maintenance token (rvm/api.py). Requeues with
+            # the same localEventId and payload; history is kept.
+            raw_ids = data.get("ids")
+            if raw_ids is not None and not isinstance(raw_ids, list):
+                raise ValueError("ids harus berupa daftar")
+            ids = None if raw_ids is None else [int(value) for value in raw_ids]
+            requeued = self.db.retry_dead_letters(ids)
+            self.db.audit("OUTBOX_DEAD_LETTER_RETRY", {"count": len(requeued), "ids": requeued})
         elif command == "mock-sensors" and isinstance(hardware, MockHardware):
             hardware.patch(**dict(data.get("values", {})))
         elif command == "simulate":

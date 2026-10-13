@@ -28,7 +28,12 @@ Kelompok endpoint existing yang dipakai:
   `/api/config`, `/api/reports`
 
 Machine ingestion `/api/machine-events` tetap khusus perangkat RVM dengan
-HMAC-SHA256 dan tidak digunakan aplikasi pengguna.
+HMAC-SHA256 dan tidak digunakan aplikasi pengguna. Sejak R02 responsnya
+protokol v2 (`protocolVersion: 2`, satu hasil per event dengan `retryable`
+pada error); kontraknya `tests/fixtures/contracts/machine-events.v2.json`
+(dipakai bersama oleh test backend dan test worker Python) dan aturan ACK,
+retry, dead-letter serta urutan rollout ada di
+[`rvm/README.md`](../rvm/README.md#sinkronisasi-event-protokol-v2-retry-dan-dead-letter).
 
 ## Fixture kontrak DTO berversi (F01)
 

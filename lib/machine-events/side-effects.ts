@@ -21,6 +21,14 @@ import { maybeCreateAutoPickup } from "./pickup";
 import { handleAcceptance } from "./acceptance";
 import type { DepositItemCache } from "./item-cache";
 
+/** Work that must run only after the event transaction commits (notifications, pushes). */
+export type PostCommitEffect = () => Promise<void>;
+
+/**
+ * Applies one event's effects inside `tx`. With `afterCommit`, notifications
+ * are handed to the caller to run after commit instead of being sent from
+ * inside the transaction (a rolled-back, retried event must not notify twice).
+ */
 export async function processEventSideEffects(
   tx: Prisma.TransactionClient,
   machine: MachineContext,
@@ -28,7 +36,13 @@ export async function processEventSideEffects(
   eventId: string,
   onItemCreated?: (id: string) => void,
   depositItemCache?: DepositItemCache,
+  afterCommit?: (effect: PostCommitEffect) => void,
 ) {
+  const autoPickup = () =>
+    afterCommit
+      ? maybeCreateAutoPickup(tx, machine, input.machineCode, afterCommit)
+      : maybeCreateAutoPickup(tx, machine, input.machineCode);
+
   const payload = payloadStr(input.payload);
 
   switch (input.eventType) {
@@ -49,7 +63,7 @@ export async function processEventSideEffects(
         (typeof fill === "number" && fill >= AUTO_PICKUP_FILL_THRESHOLD) ||
         payload.status === "FULL"
       ) {
-        await maybeCreateAutoPickup(tx, machine, input.machineCode);
+        await autoPickup();
       }
       break;
     }
@@ -61,7 +75,7 @@ export async function processEventSideEffects(
           data: { status: payload.status as MachineStatus },
         });
         if (payload.status === "FULL") {
-          await maybeCreateAutoPickup(tx, machine, input.machineCode);
+          await autoPickup();
         }
       }
       break;
@@ -78,7 +92,7 @@ export async function processEventSideEffects(
           },
         });
         if (fill >= AUTO_PICKUP_FILL_THRESHOLD) {
-          await maybeCreateAutoPickup(tx, machine, input.machineCode);
+          await autoPickup();
         }
       }
       break;
@@ -330,15 +344,18 @@ export async function processEventSideEffects(
           reason,
         );
       }
-      await notifyOrgAdmins(machine.organizationId, {
-        type: "MACHINE_FRAUD",
-        title:
-          input.eventType === "VANDALISM_DETECTED"
-            ? "Indikasi vandalisme terdeteksi"
-            : "Indikasi fraud terdeteksi",
-        body: `Mesin ${input.machineCode ?? ""} melaporkan ${reason.replaceAll("_", " ").toLowerCase()}. Tinjau di log keamanan.`.trim(),
-        data: { machineCode: input.machineCode, reason },
-      });
+      const notify = () =>
+        notifyOrgAdmins(machine.organizationId, {
+          type: "MACHINE_FRAUD",
+          title:
+            input.eventType === "VANDALISM_DETECTED"
+              ? "Indikasi vandalisme terdeteksi"
+              : "Indikasi fraud terdeteksi",
+          body: `Mesin ${input.machineCode ?? ""} melaporkan ${reason.replaceAll("_", " ").toLowerCase()}. Tinjau di log keamanan.`.trim(),
+          data: { machineCode: input.machineCode, reason },
+        });
+      if (afterCommit) afterCommit(notify);
+      else await notify();
       break;
     }
 

@@ -1,0 +1,127 @@
+{
+  "contract": "machine-events",
+  "version": 2,
+  "endpoint": "POST /api/machine-events",
+  "status": 200,
+  "description": "Signed batch the RVM edge worker (rvm/sync.py) sends and the per-event acknowledgement the backend returns. Loaded by tests/test_rvm_sync_contract.py (worker) and tests/api/machine-events-contract.test.ts (backend). Only accepted/duplicate results remove an event from the edge outbox; error+retryable:false dead-letters it; any other error, a missing/malformed item, or a response that is not protocol v2 keeps it pending. Breaking changes need a new versioned file.",
+  "request": {
+    "machineCode": "AUDIT-A-01",
+    "events": [
+      {
+        "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000001",
+        "eventType": "HEARTBEAT",
+        "payload": { "status": "ONLINE", "fillLevelPercent": 12, "queueDepth": 4, "deadLetterDepth": 0 },
+        "sessionId": null,
+        "depositItemId": null,
+        "occurredAt": "2026-10-13T08:00:00Z"
+      },
+      {
+        "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000002",
+        "eventType": "STATUS_CHANGED",
+        "payload": { "status": "ONLINE" },
+        "sessionId": null,
+        "depositItemId": null,
+        "occurredAt": "2026-10-13T08:00:01Z"
+      },
+      {
+        "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000003",
+        "eventType": "FILL_LEVEL_UPDATED",
+        "payload": { "fillLevelPercent": 40 },
+        "sessionId": null,
+        "depositItemId": null,
+        "occurredAt": "2026-10-13T08:00:02Z"
+      },
+      {
+        "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000004",
+        "eventType": "NOT_A_MACHINE_EVENT",
+        "payload": {},
+        "sessionId": null,
+        "depositItemId": null,
+        "occurredAt": "2026-10-13T08:00:03Z"
+      }
+    ]
+  },
+  "response": {
+    "protocolVersion": 2,
+    "received": 4,
+    "results": [
+      {
+        "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000001",
+        "status": "accepted",
+        "eventId": "cmauditevent00000000000001"
+      },
+      {
+        "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000002",
+        "status": "duplicate",
+        "eventId": "cmauditevent00000000000002"
+      },
+      {
+        "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000003",
+        "status": "error",
+        "error": "TEMPORARY_FAILURE",
+        "retryable": true
+      },
+      {
+        "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000004",
+        "status": "error",
+        "error": "INVALID_EVENT",
+        "retryable": false
+      }
+    ]
+  },
+  "workerOutcome": {
+    "acked": [
+      "3b0f6f4e-2a51-4d7c-9a51-000000000001",
+      "3b0f6f4e-2a51-4d7c-9a51-000000000002"
+    ],
+    "pending": ["3b0f6f4e-2a51-4d7c-9a51-000000000003"],
+    "deadLetter": ["3b0f6f4e-2a51-4d7c-9a51-000000000004"]
+  },
+  "compatibility": {
+    "errorWithoutRetryable": {
+      "description": "A v2 error item without retryable is treated as transient (stays pending) during the compatibility phase.",
+      "response": {
+        "protocolVersion": 2,
+        "received": 1,
+        "results": [
+          {
+            "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000003",
+            "status": "error",
+            "error": "EVENT_REJECTED"
+          }
+        ]
+      },
+      "workerOutcome": {
+        "acked": [],
+        "pending": ["3b0f6f4e-2a51-4d7c-9a51-000000000003"],
+        "deadLetter": []
+      }
+    },
+    "legacyV1": {
+      "description": "Pre-v2 backend response (no protocolVersion). The v2 worker refuses it and keeps every event pending; deploy the backend first.",
+      "response": {
+        "received": 2,
+        "results": [
+          {
+            "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000001",
+            "status": "accepted",
+            "eventId": "cmauditevent00000000000001"
+          },
+          {
+            "localEventId": "3b0f6f4e-2a51-4d7c-9a51-000000000002",
+            "status": "duplicate",
+            "eventId": "cmauditevent00000000000002"
+          }
+        ]
+      },
+      "workerOutcome": {
+        "acked": [],
+        "pending": [
+          "3b0f6f4e-2a51-4d7c-9a51-000000000001",
+          "3b0f6f4e-2a51-4d7c-9a51-000000000002"
+        ],
+        "deadLetter": []
+      }
+    }
+  }
+}

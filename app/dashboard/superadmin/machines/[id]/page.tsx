@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { wasteTypeOptions, regionOptions } from "@/lib/queries";
 import { getSecurityEvents } from "@/lib/security-events";
 import { getMachineCaptures } from "@/lib/machine-captures";
+import { getMachineSyncStatus } from "@/lib/machine-sync-status";
 
 export const metadata: Metadata = { title: "Detail Mesin" };
 
@@ -30,7 +31,7 @@ export default async function SuperadminMachineDetailPage({
   });
   if (!machine) notFound();
 
-  const [wasteTypes, regions, securityEvents, cameraCaptures, remoteCommandRows] = await Promise.all([
+  const [wasteTypes, regions, securityEvents, cameraCaptures, remoteCommandRows, syncStatus] = await Promise.all([
     wasteTypeOptions(machine.organizationId),
     regionOptions(),
     getSecurityEvents({ machineId: machine.id, take: 20 }),
@@ -40,6 +41,7 @@ export default async function SuperadminMachineDetailPage({
       orderBy: { createdAt: "desc" },
       take: 20,
     }),
+    getMachineSyncStatus(machine.id),
   ]);
   const remoteCommands = remoteCommandRows.map((command) => ({
     id: command.id,
@@ -76,6 +78,7 @@ export default async function SuperadminMachineDetailPage({
         securityEvents={securityEvents}
         cameraCaptures={cameraCaptures}
         remoteCommands={remoteCommands}
+        syncStatus={syncStatus}
       />
     </div>
   );
