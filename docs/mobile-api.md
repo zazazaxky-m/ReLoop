@@ -345,10 +345,18 @@ Respons 200:
 - Item dengan jenis sampah tidak dikenal selalu masuk `REVIEW` dengan reward 0
   di titik penerimaan, apa pun berat atau reward bawaan jenis cadangannya;
   menyetujuinya wajib memilih `wasteTypeId`.
+- `approve` hanya untuk item yang sudah melewati titik penerimaan mesin
+  (`ITEM_ACCEPTED_POINT`). Item yang sudah ada di antrean peninjauan sebelum
+  titik itu (misalnya jenis sampah tidak dikenal) hanya dapat ditolak atau
+  menunggu mesin: `approve` dijawab 409 `Item belum melewati titik penerimaan
+  mesin. Tunggu hingga mesin menyelesaikan setoran, atau tolak item ini.`.
 - `approve` dihitung dari bukti yang sudah diverifikasi: jenis sampah cadangan
   (tidak dikenal) tidak pernah dapat disetujui (422 `Jenis sampah cadangan tidak
   dapat disetujui. Pilih jenis sampah yang sebenarnya.`), dan berat diperiksa
-  ulang terhadap batas jenis yang dipilih (batas tarif, lalu batas jenis).
+  ulang serta harga dihitung dengan tarif yang tercatat saat titik penerimaan
+  (walaupun tarif itu sudah diganti); bila saat itu tidak ada tarif, dipakai
+  batas dan reward bawaan jenisnya. Item yang diklasifikasi ulang memakai tarif
+  jenis baru yang berlaku pada waktu penerimaan.
   Setiap jenis sampah ditimbang: berat kosong tidak pernah valid (422 `Berat
   setoran tidak tercatat. Item tanpa berat tidak dapat disetujui; tolak item
   ini.`), berat di luar batas juga 422 (`Berat setoran di luar batas jenis
@@ -356,8 +364,9 @@ Respons 200:
   item seperti ini hanya dapat ditolak.
 - Berat, label AI, dan barcode hanya dicatat sebelum titik penerimaan
   (`WEIGHT_MEASURED`, `IMAGE_CLASSIFIED`, `BARCODE_READ` setelahnya diabaikan,
-  event tetap tersimpan), di bawah lock User -> DepositSession -> DepositItem;
-  karena itu bacaan mesin yang terlambat tidak dapat mengubah nilai persetujuan.
+  event tetap tersimpan), di bawah lock User -> DepositSession -> DepositItem.
+  Bukti membeku tepat saat persetujuan menjadi mungkin, sehingga bacaan mesin
+  yang terlambat tidak dapat mengubah nilai persetujuan.
   `COMPACTION_*` hanya dicatat untuk item yang sudah melewati titik penerimaan
   dan tidak ditolak.
 - Kasus terbuka tampil di `GET /api/reports/reconciliation`

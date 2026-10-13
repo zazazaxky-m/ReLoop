@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { getWalletBalance } from "@/lib/ledger";
@@ -25,12 +26,15 @@ const decisionKey = (itemId: string) => `review:${itemId}:decision:v1`;
 /** A held item as the machine path leaves it: REVIEW with (optionally) a 50% EARN/PENDING hold. */
 async function heldItem(options: { earn?: { amount: number; status: "PENDING" | "AVAILABLE" } | null } = {}) {
   const link = await f.db.machineWasteType.findFirstOrThrow({ where: { machineId: f.ids.machineA, active: true } });
+  // The rate the acceptance point recorded (fixture org rate: Rp100 per item).
+  const rate = await f.db.rewardRate.findFirstOrThrow({ where: { organizationId: f.ids.orgA, wasteTypeId: link.wasteTypeId } });
   const session = await f.db.depositSession.create({
     data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "COMPLETED", completedAt: new Date() } });
   const item = await f.db.depositItem.create({ data: {
     sessionId: session.id, wasteTypeId: link.wasteTypeId, quantity: 1, measuredWeightGrams: 25, status: "REVIEW",
     validationReasonCode: "REVERSE_MOTION", complianceMultiplier: 0.5, baseRewardAmount: 100,
-    rewardAmount: options.earn?.amount ?? 0, source: "MACHINE", acceptedAt: new Date() } });
+    rewardAmount: options.earn?.amount ?? 0, source: "MACHINE", acceptedAt: new Date(),
+    acceptanceEventId: `evt-${randomUUID()}`, rewardRateId: rate.id } });
   const earn = options.earn === undefined ? { amount: 50, status: "PENDING" as const } : options.earn;
   if (earn) {
     await f.db.rewardLedger.create({ data: {

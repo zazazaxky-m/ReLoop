@@ -33,12 +33,19 @@
  *                                  or in the wrong state (input for M02/M05)
  *   rejectedItemsWithMoney         REJECTED deposit items that still carry money: net
  *                                  AVAILABLE EARN/ADJUST/REVERSE/PENALTY > 0, or a PENDING
- *                                  amount. Legacy states M04 can no longer produce: the old
- *                                  ungated ITEM_REJECTED flipped ACCEPTED items while their
- *                                  EARN stayed AVAILABLE (fraud can no longer hold a REJECTED
- *                                  item), and a machine-forged "REVIEW_REJECTED" stranded a
- *                                  PENDING hold. reconciliationCaseKeys lists OPEN reward
- *                                  cases already tracking the item (informational)
+ *                                  amount. Two sources:
+ *                                  - still produced by M04 by design: a review reject whose
+ *                                    REVERSE the available balance no longer covers (the
+ *                                    money was already paid out or reserved). The debit is
+ *                                    refused into an OPEN ANOMALY_ALREADY_PAID_OUT case
+ *                                    (lib/reward-credit.ts) and the EARN stays AVAILABLE;
+ *                                    such entries list that case in reconciliationCaseKeys;
+ *                                  - legacy rows from before M04: the old ungated
+ *                                    ITEM_REJECTED flipped ACCEPTED items while their EARN
+ *                                    stayed AVAILABLE, and a machine-forged "REVIEW_REJECTED"
+ *                                    stranded a PENDING hold (entries usually without a case).
+ *                                  reconciliationCaseKeys lists the OPEN reward cases already
+ *                                  tracking the item (informational)
  * (userId+idempotencyKey and businessKey duplicates cannot exist: unique indexes.)
  *
  * Procedure before the enforce migrations (20261013122400_wallet_keys_enforce,

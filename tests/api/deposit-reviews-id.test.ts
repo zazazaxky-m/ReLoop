@@ -40,6 +40,7 @@ vi.mock('@/lib/reward', async (importOriginal) => ({
 const mockTx = {
   depositItem: { findUnique: vi.fn(), updateMany: vi.fn() },
   wasteType: { findUnique: vi.fn() },
+  rewardRate: { findUnique: vi.fn() },
   rewardLedger: { findMany: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
   rewardReconciliationCase: { findUnique: vi.fn() },
 } as any;
@@ -52,7 +53,9 @@ const admin = { id: 'a1', role: 'ADMIN', organizationId: 'org1' };
 const ref = { id: 'di1', sessionId: 's1', session: { userId: 'u1', machineId: 'm1', machine: { organizationId: 'org1' } } };
 const lockedItem = (extra: Record<string, unknown> = {}) => ({
   id: 'di1', sessionId: 's1', status: 'REVIEW', wasteTypeId: 'wt1', quantity: 1, measuredWeightGrams: 25,
-  validationReasonCode: 'REVERSE_MOTION', acceptedAt: null,
+  validationReasonCode: 'REVERSE_MOTION', acceptedAt: new Date('2026-10-01T08:00:00.000Z'),
+  // Passed the acceptance point (fix round 3, R1); no rate recorded there (type defaults).
+  acceptanceEventId: 'evt1', rewardRateId: null,
   wasteType: { id: 'wt1', name: 'Plastik', defaultRewardPerItem: 100, unit: 'ITEM', organizationId: null,
     minWeightGrams: null, maxWeightGrams: null },
   session: {
@@ -218,8 +221,8 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     expect(missing.status).toBe(422);
     expect((await missing.json()).error).toBe('Berat setoran tidak tercatat. Item tanpa berat tidak dapat disetujui; tolak item ini.');
 
-    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ measuredWeightGrams: 500 }));
-    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr1', pointsPerItem: 100, unit: 'ITEM', minWeightGrams: 10, maxWeightGrams: 100 } as any);
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ measuredWeightGrams: 500, rewardRateId: 'rr1' }));
+    mockTx.rewardRate.findUnique.mockResolvedValue({ id: 'rr1', wasteTypeId: 'wt1', pointsPerItem: 100, unit: 'ITEM', minWeightGrams: 10, maxWeightGrams: 100 });
     const heavy = await patch({ action: 'approve' });
     expect(heavy.status).toBe(422);
     expect((await heavy.json()).error).toBe('Berat setoran di luar batas jenis sampah yang dipilih. Tolak item ini atau pilih jenis sampah yang sesuai.');
@@ -231,6 +234,39 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr1', pointsPerItem: 100, unit: 'ITEM' } as any);
     expect((await patch({ action: 'approve' })).status).toBe(422);
     expect((await patch({ action: 'reject' })).status).toBe(200);
+  });
+
+  it('approves only items that passed the acceptance point; they can always be rejected (R1)', async () => {
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ acceptanceEventId: null }));
+    const early = await patch({ action: 'approve' });
+    expect(early.status).toBe(409);
+    expect((await early.json()).error).toBe(
+      'Item belum melewati titik penerimaan mesin. Tunggu hingga mesin menyelesaikan setoran, atau tolak item ini.');
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+    expect(credit.applyRewardEffect).not.toHaveBeenCalled();
+    expect((await patch({ action: 'reject' })).status).toBe(200);
+  });
+
+  it('validates and prices against the rate recorded at acceptance, not the current one (R2)', async () => {
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ rewardRateId: 'rr-acc', measuredWeightGrams: 50 }));
+    mockTx.rewardRate.findUnique.mockResolvedValue({ id: 'rr-acc', wasteTypeId: 'wt1', pointsPerItem: 100, unit: 'ITEM', minWeightGrams: 10, maxWeightGrams: 100 });
+    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr-now', pointsPerItem: 300, unit: 'ITEM', minWeightGrams: 60, maxWeightGrams: 100 } as any);
+    expect((await patch({ action: 'approve' })).status).toBe(200);
+    expect(mockTx.rewardRate.findUnique).toHaveBeenCalledWith({ where: { id: 'rr-acc' } });
+    expect(reward.resolveRewardRate).not.toHaveBeenCalled();
+    expect(reward.computeRewardAmount).toHaveBeenCalledWith(100, 1, 1);
+    expect(mockTx.depositItem.updateMany.mock.calls[0][0].data).toMatchObject({ rewardRateId: 'rr-acc' });
+  });
+
+  it('a reclassified item is priced from the rate in effect at its acceptance (R2)', async () => {
+    const acceptedAt = new Date('2026-10-01T08:00:00.000Z');
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ rewardRateId: 'rr-acc', acceptedAt }));
+    mockTx.wasteType.findUnique.mockResolvedValue({ id: 'wt2', name: 'Kaca', organizationId: null, unit: 'ITEM', defaultRewardPerItem: 5 });
+    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr-wt2', pointsPerItem: 200, unit: 'ITEM' } as any);
+    expect((await patch({ action: 'approve', wasteTypeId: 'wt2' })).status).toBe(200);
+    expect(mockTx.rewardRate.findUnique).not.toHaveBeenCalled();
+    expect(reward.resolveRewardRate).toHaveBeenCalledWith(
+      { organizationId: 'org1', campaignId: null, wasteTypeId: 'wt2', now: acceptedAt }, mockTx);
   });
 
   it('requires a valid replacement waste type for unknown items', async () => {

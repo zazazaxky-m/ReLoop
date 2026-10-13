@@ -474,7 +474,9 @@ describe("fraud holds and erased recipients never force the ledger", () => {
       data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "COMPLETED", completedAt: new Date() } });
     const item = await f.db.depositItem.create({ data: {
       sessionId: session.id, wasteTypeId: await fixtureWasteTypeId(), quantity: 1, measuredWeightGrams: 25,
-      status: "REVIEW", validationReasonCode: "ANOMALY_REVIEW", source: "MACHINE" } });
+      status: "REVIEW", validationReasonCode: "ANOMALY_REVIEW", source: "MACHINE",
+      acceptanceEventId: `evt-${randomUUID()}`, acceptedAt: new Date(),
+      rewardRateId: (await f.db.rewardRate.findFirstOrThrow({ where: { organizationId: f.ids.orgA } })).id } });
     await f.db.user.update({ where: { id: f.ids.userA }, data: { status: "INACTIVE" } });
     const request = await f.db.deletionRequest.create({ data: {
       userId: f.ids.userA, scope: "FULL", status: "PROCESSING", verificationMethod: "SESSION", verifiedAt: new Date() } });
@@ -557,6 +559,10 @@ describe("decided items stay decided (M04 fix round 1)", () => {
     await machineEvent(unknown.session.id, "SENSOR_SEQUENCE", { steps: ["ITEM_PRESENT"], reverseMotion: true }, unknown.item.id);
     expect(await itemOf(unknown.item.id)).toMatchObject({
       status: "REVIEW", validationReasonCode: "UNKNOWN_WASTE_TYPE", externalFraudFlag: true });
+    // Fix round 3 (R1): nothing is approvable before the acceptance point.
+    expect((await review(unknown.item.id, { action: "approve" })).status).toBe(409);
+    await machineEvent(unknown.session.id, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }, unknown.item.id);
+    expect(await itemOf(unknown.item.id)).toMatchObject({ status: "REVIEW", validationReasonCode: "UNKNOWN_WASTE_TYPE" });
     const approve = await review(unknown.item.id, { action: "approve" });
     expect(approve.status).toBe(422);
     expect(approve.body.error).toBe("wasteTypeId wajib diisi untuk item tanpa jenis sampah");
@@ -787,5 +793,116 @@ describe("review approvals price verified, frozen inputs (M04 fix round 2)", () 
     }
     expect((await sent!).body.results[0].status).toBe("accepted");
     expect((await itemOf(pending.id)).measuredWeightGrams).toBe(40);
+  });
+});
+
+describe("approval needs the acceptance point and its recorded rate (M04 fix round 3)", () => {
+  const review = (id: string, body: Record<string, unknown>) => call("adminA", "PATCH", `/api/deposit-reviews/${id}`, body);
+  const itemOf = (id: string) => f.db.depositItem.findUniqueOrThrow({ where: { id } });
+  const send = async (sessionId: string, eventType: string, payload: Record<string, unknown>, depositItemId?: string) => {
+    const event = edgeEvent(sessionId, eventType, payload);
+    if (depositItemId) event.depositItemId = depositItemId;
+    expect((await postBatch([event])).body.results[0].status).toBe("accepted");
+  };
+  /** An unknown-type item before the acceptance point: already in the review queue (REVIEW). */
+  async function unknownBeforeAcceptance(weightGrams: number) {
+    const session = await f.db.depositSession.create({
+      data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
+    await send(session.id, "ITEM_DETECTED", { quantity: 1, inputBeam: true });
+    const item = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: session.id } });
+    await send(session.id, "WEIGHT_MEASURED", { weightGrams }, item.id);
+    expect(await itemOf(item.id)).toMatchObject({ status: "REVIEW", acceptanceEventId: null, measuredWeightGrams: weightGrams });
+    return { session, item };
+  }
+  /** A KG type with no weight window: Rp2.000/kg, so the weight alone sets the price. */
+  async function unboundedKgType() {
+    const type = await f.db.wasteType.create({ data: { name: "Logam Audit KG", unit: "KG", active: true } });
+    await f.db.rewardRate.create({ data: {
+      organizationId: f.ids.orgA, wasteTypeId: type.id, unit: "KG", pointsPerItem: 2_000, active: true,
+      effectiveFrom: new Date(Date.now() - 86_400_000) } });
+    return type.id;
+  }
+  const NOT_ACCEPTED = "Item belum melewati titik penerimaan mesin. Tunggu hingga mesin menyelesaikan setoran, atau tolak item ini.";
+
+  it("R1: an item in review before the acceptance point cannot be approved, whatever the machine reports next", async () => {
+    await warmUp();
+    const kg = await unboundedKgType();
+    const { session, item } = await unknownBeforeAcceptance(250);
+    const early = await review(item.id, { action: "approve", wasteTypeId: kg });
+    expect(early.status).toBe(409);
+    expect(early.body.error).toBe(NOT_ACCEPTED);
+
+    // The machine can still record evidence before acceptance, but nothing is priced from it.
+    await send(session.id, "WEIGHT_MEASURED", { weightGrams: 5_000_000 }, item.id);
+    expect((await review(item.id, { action: "approve", wasteTypeId: kg })).status).toBe(409);
+    expect(await f.db.rewardLedger.count({ where: { userId: f.ids.userA } })).toBe(0);
+
+    // The machine returns the item: it ends REJECTED with nothing paid.
+    await send(session.id, "ITEM_REJECTED", { reason: "ABNORMAL_ITEM_WEIGHT" }, item.id);
+    expect(await itemOf(item.id)).toMatchObject({ status: "REJECTED", validationReasonCode: "ABNORMAL_ITEM_WEIGHT", rewardAmount: 0 });
+    expect(await f.db.rewardLedger.count({ where: { userId: f.ids.userA } })).toBe(0);
+    expect(await getWalletBalance(f.ids.userA)).toMatchObject({ available: 0, pending: 0 });
+  });
+
+  it("R1: a pre-acceptance item can still be rejected by a reviewer", async () => {
+    await warmUp();
+    const { item } = await unknownBeforeAcceptance(250);
+    const rejected = await review(item.id, { action: "reject" });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.item).toMatchObject({ status: "REJECTED", validationReasonCode: "REVIEW_REJECTED" });
+  });
+
+  it("R1: evidence freezes at the acceptance point, exactly when approval becomes possible", async () => {
+    await warmUp();
+    const kg = await unboundedKgType();
+    const { session, item } = await unknownBeforeAcceptance(250);
+    await send(session.id, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }, item.id);
+    await send(session.id, "WEIGHT_MEASURED", { weightGrams: 5_000_000 }, item.id);
+    expect(await itemOf(item.id)).toMatchObject({ status: "REVIEW", measuredWeightGrams: 250 });
+    const approved = await review(item.id, { action: "approve", wasteTypeId: kg });
+    expect(approved.status).toBe(200);
+    expect(approved.body.targetAmount).toBe(500);
+  });
+
+  it("R2: a held item is validated and priced against the rate recorded at acceptance", async () => {
+    await warmUp();
+    const original = await f.db.rewardRate.findFirstOrThrow({ where: { organizationId: f.ids.orgA } });
+    await f.db.rewardRate.update({ where: { id: original.id }, data: { minWeightGrams: 10, maxWeightGrams: 100,
+      effectiveFrom: new Date(Date.now() - 86_400_000) } });
+    const held = await deposit({ weightGrams: 50, anomaly: true });
+    expect(held.item).toMatchObject({ status: "REVIEW", rewardRateId: original.id, rewardAmount: 50 });
+
+    // The organization supersedes the rate: narrower window, new price.
+    const now = new Date();
+    await f.db.rewardRate.update({ where: { id: original.id }, data: { effectiveTo: now } });
+    await f.db.rewardRate.create({ data: {
+      organizationId: f.ids.orgA, wasteTypeId: await fixtureWasteTypeId(), unit: "ITEM", pointsPerItem: 300,
+      minWeightGrams: 60, maxWeightGrams: 100, active: true, effectiveFrom: now } });
+
+    const approved = await review(held.item.id, { action: "approve" });
+    expect(approved.status).toBe(200);
+    expect(approved.body.targetAmount).toBe(100);
+    expect(approved.body.item.rewardRateId).toBe(original.id);
+    const rows = await f.db.rewardLedger.findMany({ where: { depositItemId: held.item.id } });
+    expect(rows.reduce((sum, row) => sum + row.amount, 0)).toBe(100);
+  });
+
+  it("R2: the recorded rate wins even if it was deactivated and a back-dated rate replaced it", async () => {
+    await warmUp();
+    const original = await f.db.rewardRate.findFirstOrThrow({ where: { organizationId: f.ids.orgA } });
+    const yesterday = new Date(Date.now() - 86_400_000);
+    await f.db.rewardRate.update({ where: { id: original.id }, data: { minWeightGrams: 10, maxWeightGrams: 100, effectiveFrom: yesterday } });
+    const held = await deposit({ weightGrams: 50, anomaly: true });
+    expect(held.item.rewardRateId).toBe(original.id);
+
+    // Deactivated (not expired) and replaced by a rate whose window covers the acceptance time too.
+    await f.db.rewardRate.update({ where: { id: original.id }, data: { active: false } });
+    await f.db.rewardRate.create({ data: {
+      organizationId: f.ids.orgA, wasteTypeId: await fixtureWasteTypeId(), unit: "ITEM", pointsPerItem: 300,
+      minWeightGrams: 60, maxWeightGrams: 100, active: true, effectiveFrom: yesterday } });
+
+    const approved = await review(held.item.id, { action: "approve" });
+    expect(approved.status).toBe(200);
+    expect(approved.body.targetAmount).toBe(100);
   });
 });

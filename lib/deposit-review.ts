@@ -42,6 +42,8 @@ import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
 export const REVIEW_DECIDED_DIFFERENTLY = "Item sudah ditinjau dengan keputusan lain";
 const ITEM_CHANGED = "Item setoran berubah saat ditinjau. Muat ulang lalu ulangi.";
 const REWARD_TOO_LARGE = "Nilai reward melebihi batas yang diizinkan";
+export const REVIEW_NOT_ACCEPTED =
+  "Item belum melewati titik penerimaan mesin. Tunggu hingga mesin menyelesaikan setoran, atau tolak item ini.";
 export const REVIEW_FALLBACK_TYPE =
   "Jenis sampah cadangan tidak dapat disetujui. Pilih jenis sampah yang sebenarnya.";
 export const REVIEW_WEIGHT_MISSING =
@@ -161,6 +163,27 @@ function sameDecision(item: LockedItem, input: ReviewInput): boolean {
   );
 }
 
+/**
+ * R2: the rate the acceptance point used. Same waste type: the rate recorded
+ * at acceptance (`rewardRateId`, even if it has since expired, been
+ * deactivated or superseded); when acceptance recorded none, the type's own
+ * window and default, exactly as acceptance priced it. A reclassified item
+ * (or a recorded rate that no longer exists): the rate in effect for the new
+ * type at the item's acceptance time.
+ */
+async function acceptanceRate(
+  tx: Prisma.TransactionClient,
+  item: LockedItem,
+  scope: { organizationId: string; campaignId: string | null; wasteTypeId: string },
+) {
+  if (scope.wasteTypeId === item.wasteTypeId) {
+    if (item.rewardRateId === null) return null;
+    const recorded = await tx.rewardRate.findUnique({ where: { id: item.rewardRateId } });
+    if (recorded && recorded.wasteTypeId === scope.wasteTypeId) return recorded;
+  }
+  return resolveRewardRate({ ...scope, now: item.acceptedAt ?? undefined }, tx);
+}
+
 async function approvalTarget(tx: Prisma.TransactionClient, item: LockedItem, input: ReviewInput) {
   const organizationId = item.session.machine.organizationId;
   if (isUnknownWasteTypeItem(item) && !input.wasteTypeId) {
@@ -182,15 +205,16 @@ async function approvalTarget(tx: Prisma.TransactionClient, item: LockedItem, in
   const campaign = item.session.campaign;
   const machineCampaign = campaign && campaignSupportsMachine(campaign) ? campaign : null;
   const mode = machineRewardMode({ campaign, organizationMode: item.session.machine.organization.machineRewardMode });
-  const rate = await resolveRewardRate(
-    { organizationId, campaignId: machineCampaign?.id ?? null, wasteTypeId: wasteType.id },
-    tx,
-  );
+  const rate = await acceptanceRate(tx, item, {
+    organizationId,
+    campaignId: machineCampaign?.id ?? null,
+    wasteTypeId: wasteType.id,
+  });
   // A2: the same weight check as the acceptance point, against the assigned
-  // type's window (rate window over type window). Rule: every waste type is
-  // weighed, so a missing weight is never valid. The weight priced is the one
-  // measured before the acceptance point (A3: later machine readings are
-  // ignored), so approval cannot be re-priced by a late WEIGHT_MEASURED.
+  // type's window (the acceptance rate's window over the type window). Rule:
+  // every waste type is weighed, so a missing weight is never valid. Only
+  // items past the acceptance point are approvable (R1), and their evidence
+  // is frozen there (A3), so a late WEIGHT_MEASURED cannot re-price them.
   const weight = validateWeight(
     item.measuredWeightGrams,
     rate?.minWeightGrams ?? wasteType.minWeightGrams,
@@ -290,6 +314,10 @@ export async function decideDepositReview(
     let data: Prisma.DepositItemUncheckedUpdateManyInput;
     let wasteTypeId = item.wasteTypeId;
     if (input.action === "approve") {
+      // R1: only an item that passed the acceptance point can be approved;
+      // before it, the item can only be rejected (or wait for the machine).
+      // Evidence freezes at exactly that point (recordItemEvidence).
+      if (item.acceptanceEventId === null) throw new HttpError(409, REVIEW_NOT_ACCEPTED);
       const approval = await approvalTarget(tx, item, input);
       targetAmount = approval.target;
       wasteTypeId = approval.wasteType.id;
