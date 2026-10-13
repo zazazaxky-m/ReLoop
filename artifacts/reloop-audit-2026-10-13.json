@@ -1,0 +1,612 @@
+{
+  "title": "Audit ReLoop: UI/UX, alur bisnis, logika dan security",
+  "date": "2026-10-13",
+  "scope": "Review kode web Next.js, API/Prisma, Flutter mobile, controller RVM dan realtime. Tidak mengubah kode aplikasi atau data operasional.",
+  "limitations": [
+    "Browser IAB tidak tersedia; tidak ada screenshot atau audit visual langsung. UI/UX adalah evaluasi struktur, copy, navigasi dan state dari kode.",
+    "Reproduksi keamanan memakai in-memory/mock/SQLite sementara. Race PostgreSQL, perangkat fisik dan deployment production tidak diuji.",
+    "Audit dependency mendeteksi advisories paket, bukan membuktikan semua advisory dapat dieksploitasi pada konfigurasi ini.",
+    "Pendanaan, biaya, volume dan margin belum tersedia; rekomendasi ekonomi merupakan perbaikan model/kontrol, bukan analisis profit aktual."
+  ],
+  "strengths": [
+    "Role/scope organisasi diperiksa di backend melalui lib/rbac.ts.",
+    "Zod validation, bcrypt cost 12, cookie httpOnly, tokenVersion dan security headers sudah tersedia.",
+    "Machine HMAC, durable outbox SQLite, deduplication event dan review ledger sudah menjadi fondasi.",
+    "Komponen UI bersama, empty/loading states, navigasi per role dan label form mendukung konsistensi."
+  ],
+  "verification": {
+    "javascript": "1211 passed, 131 test files; npm test -- --maxWorkers=2 --minWorkers=1",
+    "typecheck": "passed; npm run typecheck",
+    "python": "Tidak selesai: unittest discover menjalankan 27 entries, 24 passed, 1 skipped, 2 import errors karena cv2 tidak terpasang di interpreter python3. Dependensi ada di rvm/requirements.txt; tidak dilakukan install atau perubahan environment.",
+    "lint": "Exit 0; 0 errors, 4 warnings. Tiga alt-text warnings pada BrandLogo memakai alt via spread (belum tentu alt hilang); satu unused variable AccountDeletionForm.",
+    "npm_audit": {
+      "package_entries": 28,
+      "critical": 4,
+      "high": 19,
+      "moderate": 5,
+      "next_lockfile": "16.2.10",
+      "vitest_lockfile": "2.1.9"
+    }
+  },
+  "findings": [
+    {
+      "id": "SEC-01",
+      "area": "Security",
+      "priority": "P0",
+      "title": "Challenge MFA diterima sebagai session",
+      "impact": "Password admin yang benar dapat menghasilkan akses tanpa TOTP untuk akun aktif dengan tokenVersion=0. GET /api/auth/me dapat menerbitkan session penuh dari challenge tersebut.",
+      "recommendation": "Bedakan purpose session/MFA, issuer dan audience; validasi claim wajib secara ketat. Session verifier harus menolak token challenge.",
+      "evidence": [
+        "lib/auth.ts:78",
+        "lib/mfa.ts:108",
+        "lib/rbac.ts:29",
+        "app/api/auth/me/route.ts:25"
+      ],
+      "validation": "Reproduksi in-memory signer dan verifier asli: challenge diterima sebagai session. Jalur DB ditelusuri secara statis; tidak dieksploitasi pada layanan nyata.",
+      "acceptance": "Cookie berisi challenge menghasilkan 401 pada /me, API privileged dan validator websocket; session hasil TOTP tetap valid."
+    },
+    {
+      "id": "SEC-02",
+      "area": "Security",
+      "priority": "P0",
+      "title": "Lease dapat membuka pintu saat kondisi keselamatan masih aktif",
+      "impact": "activate_lease mengubah SAFE_STATE menjadi SESSION_ACTIVE dan membuka gate. Sensor pintu servis hanya bereaksi pada perubahan tertutup ke terbuka, sehingga pintu yang tetap terbuka tidak menghentikan gate lagi.",
+      "recommendation": "Terapkan interlock keselamatan sebelum setiap aktivasi output dan periksa kondisi pintu terus-menerus. Lease renewal tidak boleh mereset kondisi keselamatan yang masih terkunci.",
+      "evidence": [
+        "rvm/controller.py:416",
+        "rvm/controller.py:222",
+        "rvm/controller.py:186"
+      ],
+      "validation": "Direproduksi memakai SQLite sementara dan mock hardware: SAFE_STATE/gate=False menjadi SESSION_ACTIVE/gate=True saat service_panel_open=True; tick berikutnya tetap terbuka. Hardware fisik belum diuji.",
+      "acceptance": "Lease valid ditolak selama panel/collection door terbuka, safety alert aktif, maintenance atau kondisi full; hanya reset tervalidasi membuka operasi."
+    },
+    {
+      "id": "LOG-01",
+      "area": "Business logic",
+      "priority": "P0",
+      "title": "Permintaan pencairan paralel dapat menggunakan saldo yang sama",
+      "impact": "Dua request dengan idempotency key berbeda dapat sama-sama membaca saldo cukup sebelum transaksi. Contoh saldo Rp50.000, dua request Rp50.000 dapat membuat total reserve Rp100.000.",
+      "recommendation": "Kunci baris wallet/user, baca saldo dan buat reserve dalam transaksi yang sama; alternatif serializable dengan retry konflik dan pembacaan saldo di dalam transaksi.",
+      "evidence": [
+        "app/api/redemptions/route.ts:97",
+        "app/api/redemptions/route.ts:104",
+        "prisma/schema.prisma:781"
+      ],
+      "validation": "Terbukti dari posisi pembacaan dan mutation kode; race PostgreSQL belum dieksekusi. Unique idempotency key tidak melindungi dua request berbeda.",
+      "acceptance": "Integration test dua pencairan paralel: maksimal satu request berhasil dan saldo tidak negatif."
+    },
+    {
+      "id": "SEC-03",
+      "area": "Security",
+      "priority": "P1",
+      "title": "Email belum diverifikasi dapat mengklaim travel agent",
+      "impact": "Registrasi email undangan langsung memberi roleInAgent OWNER dan akses trip tanpa bukti kepemilikan mailbox. Akun yang mendaftar lebih awal juga dapat ditautkan saat diundang.",
+      "recommendation": "Gunakan invitation token acak, single-use, expiry dan verifikasi email sebelum membership aktif; cocok email saja tidak cukup.",
+      "evidence": [
+        "app/api/auth/register/route.ts:55",
+        "app/api/auth/register/route.ts:62",
+        "app/api/travel-agents/route.ts:134",
+        "app/api/trips/[id]/route.ts:24"
+      ],
+      "validation": "Analisis statis jalur registrasi, invitation dan guard trip. Bukan eskalasi menjadi ADMIN.",
+      "acceptance": "Registrasi tanpa token tidak mendapat membership; token benar hanya dapat dipakai sekali dan terikat email tujuan."
+    },
+    {
+      "id": "SEC-04",
+      "area": "Security",
+      "priority": "P1",
+      "title": "Setup ulang menonaktifkan MFA aktif tanpa autentikasi ulang",
+      "impact": "Session admin aktif dapat mengganti totpSecret dan menyetel mfaEnabled=false melalui endpoint setup. Session yang dicuri dapat mengganti authenticator.",
+      "recommendation": "Minta autentikasi ulang password/TOTP atau recovery tervalidasi untuk penggantian faktor. Simpan pending secret terpisah; faktor lama tetap aktif sampai konfirmasi.",
+      "evidence": [
+        "app/api/auth/mfa/setup/route.ts:7",
+        "lib/mfa.ts:45"
+      ],
+      "validation": "Analisis statis; test existing memang mengharapkan setup mematikan MFA.",
+      "acceptance": "Setup tanpa autentikasi ulang pada akun MFA aktif ditolak; pembatalan setup tidak mematikan faktor lama."
+    },
+    {
+      "id": "LOG-02",
+      "area": "Business logic",
+      "priority": "P1",
+      "title": "Status payout dan ledger dapat berbeda akibat aksi paralel",
+      "impact": "Transisi diperiksa sebelum transaksi, lalu update hanya memakai id. Fail yang disusul success dari snapshot lama dapat menghasilkan SUCCESS dengan reserve REVERSED; uang dinyatakan terkirim tetapi saldo kembali tersedia.",
+      "recommendation": "Conditional update berdasarkan id dan status asal dalam transaksi; settlement harus memastikan reserve sesuai dan rollback jika pasangan status/ledger tidak valid.",
+      "evidence": [
+        "app/api/redemptions/[id]/route.ts:66",
+        "app/api/redemptions/[id]/route.ts:81",
+        "lib/ledger.ts:193"
+      ],
+      "validation": "Analisis statis concurrency, bukan eksperimen PostgreSQL.",
+      "acceptance": "Dua aksi fail/success atau approve/cancel bersamaan hanya menghasilkan satu transisi valid; ledger dan payout selalu cocok."
+    },
+    {
+      "id": "LOG-03",
+      "area": "Business logic",
+      "priority": "P1",
+      "title": "Checkout mempercayai jumlah dan ID kantong mentah",
+      "impact": "returnedBagCount dapat melebihi jumlah kantong yang diterbitkan; ID duplikat dihitung berulang dan bags diperbarui hanya memakai id tanpa scope trip. Data kantong trip lain bisa berubah melalui validasi trip yang berhak diakses.",
+      "recommendation": "Ambil kantong milik trip, tolak ID duplikat/di luar trip, hitung reward dari record valid. Jalur count-only wajib returned <= issued.",
+      "evidence": [
+        "app/api/manual-validations/route.ts:85",
+        "app/api/manual-validations/route.ts:108",
+        "app/api/manual-validations/route.ts:128"
+      ],
+      "validation": "Analisis schema dan alur kode; membutuhkan role ADMIN/PENGEPUL/SUPERADMIN sesuai guard utama. Scope trip utama ada, scope anggota bags belum ada.",
+      "acceptance": "Trip satu kantong menolak count 500; ID berulang dan kantong lintas trip/organisasi ditolak tanpa mutation."
+    },
+    {
+      "id": "LOG-04",
+      "area": "Business logic",
+      "priority": "P1",
+      "title": "COMPLIANCE_ONLY tetap menghasilkan reward uang melalui mesin",
+      "impact": "Scan dapat menautkan campaign satu organisasi dan eligible, tetapi acceptance dan approval review tidak memeriksa rewardMode. Program yang dimaksudkan hanya untuk kepatuhan dapat menerbitkan saldo AVAILABLE.",
+      "recommendation": "Pusatkan kebijakan rewardMode dan campaignType pada semua jalur pemberian saldo: scan, acceptance, checkout dan review.",
+      "evidence": [
+        "app/api/scan/route.ts:86",
+        "lib/machine-events/acceptance.ts:87",
+        "app/api/deposit-reviews/[id]/route.ts:126",
+        "docs/tourism-compliance-user-manual.md:31"
+      ],
+      "validation": "Analisis statis. Prasyarat: campaign aktif/eligible satu organisasi dan campaign ID disertakan pada scan.",
+      "acceptance": "Semua jalur COMPLIANCE_ONLY menghasilkan skor tanpa saldo uang; MONEY_REWARD tetap bekerja."
+    },
+    {
+      "id": "LOG-05",
+      "area": "Business logic",
+      "priority": "P1",
+      "title": "Ketidakcocokan AI tidak memengaruhi penerimaan reward",
+      "impact": "evaluateSensorFusion dapat mengembalikan valid=true, wasteTypeMatch=false; acceptance hanya membaca valid. Berat yang lolos dengan jenis/confidence AI tidak cocok dapat menghasilkan ACCEPTED/AVAILABLE.",
+      "recommendation": "Jadikan mismatch/confidence rendah REVIEW/PENDING dengan alasan; cocokkan klasifikasi dengan waste type sebenarnya. Tentukan kebijakan jika AI tidak tersedia.",
+      "evidence": [
+        "lib/reward.ts:137",
+        "lib/machine-events/acceptance.ts:76"
+      ],
+      "validation": "Analisis fungsi dan handler; jalur ini membutuhkan berat valid dan tidak ada fraud/anomaly lain.",
+      "acceptance": "AI mismatch masuk REVIEW dan tidak menambah saldo tersedia sampai tinjauan selesai."
+    },
+    {
+      "id": "LOG-06",
+      "area": "Business logic",
+      "priority": "P1",
+      "title": "Sinkronisasi membuang event yang ditolak dalam respons HTTP 200",
+      "impact": "Backend mengirim status error per event dengan HTTP 200. Worker RVM menganggap semua event berhasil hanya dari kode HTTP dan menghapusnya dari antrean retry. Bukti setoran/reward/alert dapat hilang.",
+      "recommendation": "Baca results per localEventId; acknowledge hanya accepted/duplicate. Retain kegagalan transient dan pindahkan penolakan permanen ke antrean pemeriksaan; respons tidak lengkap tidak boleh dianggap sukses.",
+      "evidence": [
+        "rvm/sync.py:75",
+        "app/api/machine-events/route.ts:99"
+      ],
+      "validation": "Reproduksi mock HTTP 200 dengan event error: pending 1 menjadi 0 dan flush=True.",
+      "acceptance": "Batch campuran hanya menghapus event accepted/duplicate; event error tetap tersimpan dan alasan terlihat operator."
+    },
+    {
+      "id": "LOG-07",
+      "area": "Business logic",
+      "priority": "P1",
+      "title": "Angka liabilitas spendable belum mengurangi pencairan/reserve",
+      "impact": "outstanding = earnAvailable + adjustments. EARN yang sudah dicairkan tetap AVAILABLE; adjustment PENDING juga masuk. Pengguna memperoleh lalu mencairkan Rp100.000 dapat memiliki saldo 0 sementara liabilitas report tetap Rp100.000.",
+      "recommendation": "Hitung kewajiban bersih; bedakan spendable, reserve dan pending. Tentukan alokasi debit ke earning per organisasi, misalnya FIFO atau akun pendanaan.",
+      "evidence": [
+        "lib/ledger.ts:346",
+        "lib/ledger.ts:359",
+        "app/dashboard/superadmin/reconciliation/page.tsx:23"
+      ],
+      "validation": "Analisis rumus deterministik, dibandingkan model wallet. Indikator tidak ada discrepancy payout tidak menjamin liabilitas benar.",
+      "acceptance": "Earn 100 ribu lalu redeem penuh menghasilkan spendable 0; reserved dan pending tampil terpisah."
+    },
+    {
+      "id": "SEC-05",
+      "area": "Security",
+      "priority": "P1",
+      "title": "Penghapusan data berpotensi berhenti setelah akun dinonaktifkan",
+      "impact": "Profile diubah INACTIVE sebelum DepositSession.userId ditulis menjadi literal [REDACTED]. Field tersebut wajib mereferensikan User nyata; user yang punya sesi dapat mengalami foreign-key error dan tidak dapat login untuk mencoba lagi.",
+      "recommendation": "Anonimkan tanpa merusak relasi, atau ubah schema sesuai kebutuhan. Jalankan perubahan DB dalam transaksi dan sediakan proses idempotent untuk pekerjaan eksternal.",
+      "evidence": [
+        "lib/gdpr.ts:61",
+        "lib/gdpr.ts:75",
+        "prisma/schema.prisma:570"
+      ],
+      "validation": "Analisis schema dan urutan operasi; belum dijalankan terhadap PostgreSQL. Prasyarat ada session dan tidak ada User literal [REDACTED].",
+      "acceptance": "Integration deletion dengan session/payout/ledger selesai konsisten; kegagalan di tengah rollback atau bisa dilanjutkan."
+    },
+    {
+      "id": "SEC-06",
+      "area": "Security",
+      "priority": "P1",
+      "title": "Cache mobile dapat menampilkan data akun sebelumnya",
+      "impact": "Key wallet/dashboard/reconciliation bersifat global dan logout tidak menghapusnya. Akun B pada perangkat yang sama dapat melihat cache akun A jika request gagal, termasuk 401/403.",
+      "recommendation": "Namespace cache per verified userId, bersihkan saat logout, batalkan background/in-flight response akun lama; 401/403 jangan diperlakukan sebagai offline.",
+      "evidence": [
+        "mobile/lib/features/wallet/wallet_screen.dart:25",
+        "mobile/lib/features/wallet/wallet_screen.dart:68",
+        "mobile/lib/core/auth_provider.dart:138",
+        "mobile/lib/services/background_sync_service.dart:26"
+      ],
+      "validation": "Analisis statis. Cache terenkripsi melindungi disk, tetapi tidak memisahkan akun di aplikasi yang berjalan.",
+      "acceptance": "Logout A, login B, putus jaringan: data A tidak muncul; response terlambat A tidak menimpa cache B."
+    },
+    {
+      "id": "SEC-07",
+      "area": "Security",
+      "priority": "P1",
+      "title": "Dependency terkunci memiliki advisory keamanan",
+      "impact": "npm audit melaporkan 28 package entries: 4 critical, 19 high, 5 moderate. Lockfile Next 16.2.10 dan Vitest 2.1.9. Count adalah paket terdampak termasuk transitive/dev, bukan jumlah celah yang terbukti reachable pada production.",
+      "recommendation": "Triage runtime versus dev, periksa syarat tiap advisory, update ke rilis kompatibel yang patched dan jalankan regression/build. Jangan memakai audit fix --force tanpa meninjau perubahan major.",
+      "evidence": [
+        "package-lock.json",
+        "package.json",
+        "artifacts/reloop-dependency-audit-2026-10-13.json"
+      ],
+      "validation": "npm audit --json pada sesi ini; advisory Next diperiksa pada sumber maintainer. Belum dilakukan exploit/reachability setiap advisory.",
+      "acceptance": "Audit runtime ditriage dan dependency patched; hasil regression/build disimpan. Vitest UI/dev server tidak diekspos ke publik."
+    },
+    {
+      "id": "SEC-08",
+      "area": "Security",
+      "priority": "P2",
+      "title": "Audit chain memakai timestamp/canonical data yang tidak konsisten",
+      "impact": "Write checksum menggunakan new Date sebelum insert dan optional undefined; verification memakai createdAt DB dan nullable fields tersimpan. Row normal dapat dianggap corrupted.",
+      "recommendation": "Buat timestamp sekali dan simpan identik; gunakan satu canonicalizer dengan null normalization untuk write dan verify, serta ordering deterministik.",
+      "evidence": [
+        "lib/audit.ts:67",
+        "lib/audit.ts:83",
+        "lib/audit.ts:115",
+        "prisma/schema.prisma:986"
+      ],
+      "validation": "Reproduksi in-memory write/verify asli dengan insert tertunda 25 ms: row tidak diubah namun verification valid=false.",
+      "acceptance": "Write-read-verify valid untuk actor/metadata kosong dan insert tertunda; mengubah satu field membuat verifikasi gagal."
+    },
+    {
+      "id": "SEC-09",
+      "area": "Security",
+      "priority": "P2",
+      "title": "Nonce habis sebelum jendela signature berakhir",
+      "impact": "Timestamp diterima hingga 300 detik ke depan, nonce disimpan 360 detik dari penerimaan. Request bertimestamp +300 masih valid hingga +600 sehingga dapat diputar ulang setelah nonce hilang. ID event unik membatasi dampak duplicate deposit.",
+      "recommendation": "Simpan nonce hingga timestamp signature + skew + buffer atau sekurangnya dua kali skew plus buffer.",
+      "evidence": [
+        "lib/machine-auth.ts:45",
+        "lib/machine-nonce.ts:5"
+      ],
+      "validation": "Analisis jendela waktu; prasyarat request signed dari perangkat dengan clock maju tertangkap.",
+      "acceptance": "Request valid pertama ditolak saat replay sepanjang seluruh jendela signature."
+    },
+    {
+      "id": "SEC-10",
+      "area": "Security",
+      "priority": "P2",
+      "title": "Websocket tidak mengevaluasi ulang expiry dan revokasi",
+      "impact": "Role disimpan pada handshake dan dipakai selama socket hidup; session kedaluwarsa/akun dinonaktifkan masih dapat menerima security-alert. Payload saat ini terbatas metadata mesin/event.",
+      "recommendation": "Tutup socket pada expiry dan revalidate otorisasi/revokasi. Sertakan scope organisasi untuk routing admin.",
+      "evidence": [
+        "realtime/server.mjs:222",
+        "realtime/server.mjs:150",
+        "app/api/internal/ws-session/route.ts:37"
+      ],
+      "validation": "Reproduksi isolated realtime process: token expired=true tetapi alert delivered=1. Tidak mengirim pesan ke layanan pengguna.",
+      "acceptance": "Socket expired/revoked berhenti menerima topik restricted; admin hanya menerima event organisasinya."
+    },
+    {
+      "id": "UX-01",
+      "area": "UI/UX",
+      "priority": "P1",
+      "title": "Konteks QR hilang ketika pengguna perlu login",
+      "impact": "requirePageUser mengarahkan ke /login tanpa return URL; AuthForm membawa ke dashboard. User baru yang membuka QR mesin perlu scan ulang dan token berotasi.",
+      "recommendation": "Pertahankan tujuan lokal yang aman melalui login/registrasi, kembali ke scan dan ambil QR baru bila token kedaluwarsa. Beri instruksi pemulihan sederhana.",
+      "evidence": [
+        "lib/rbac.ts:57",
+        "components/auth/AuthForm.tsx:86",
+        "components/scan/ScanPageClient.tsx:58",
+        "lib/config.ts:13"
+      ],
+      "validation": "Evaluasi alur dari kode, belum diuji di browser.",
+      "acceptance": "User signed-out membuka QR lalu login dan kembali ke mesin yang sama tanpa kehilangan konteks; token lama ditangani dengan pesan jelas."
+    },
+    {
+      "id": "UX-02",
+      "area": "UI/UX",
+      "priority": "P1",
+      "title": "Sesi scan tidak memiliki pemulihan yang terlihat",
+      "impact": "State session hanya berada dalam komponen; refresh meninggalkan konteks sesi. Polling tidak menyajikan kegagalan jaringan, timeout dan receipt akhir. Tombol Selesai Setor juga masih dirender untuk EXPIRED.",
+      "recommendation": "Sediakan resume session dari backend; tampilkan offline/last-updated dan status menunggu sensor. Tutup sesi terminal dengan receipt jumlah accepted/pending/rejected dan nominal reward.",
+      "evidence": [
+        "components/scan/ScanPageClient.tsx:66",
+        "components/scan/ScanPageClient.tsx:74",
+        "components/scan/ScanPageClient.tsx:136",
+        "components/scan/ScanPageClient.tsx:316"
+      ],
+      "validation": "Evaluasi state dan kondisi rendering dari kode; belum capture layar.",
+      "acceptance": "Refresh saat sesi aktif bisa resume; gangguan jaringan terlihat; sesi EXPIRED tidak menawarkan finish yang gagal."
+    },
+    {
+      "id": "UX-03",
+      "area": "UI/UX",
+      "priority": "P1",
+      "title": "Aksi wallet dapat gagal tanpa penjelasan",
+      "impact": "disableAccount dan cancelRedemption tidak mengecek res.ok; banyak mutation memakai finally tanpa catch. UI melakukan refresh walau request gagal. payoutAccountId hanya diinisialisasi dari props pertama dan tidak dipilih saat akun pertama ditambahkan.",
+      "recommendation": "Standarkan handler request, periksa hasil, tampilkan error/success dan aksi retry. Sinkronkan pilihan akun bila daftar berubah dan gunakan idempotency key untuk retry pencairan.",
+      "evidence": [
+        "components/wallet/WalletPanel.tsx:55",
+        "components/wallet/WalletPanel.tsx:85",
+        "components/wallet/WalletPanel.tsx:96",
+        "components/wallet/WalletPanel.tsx:121"
+      ],
+      "validation": "Analisis handler dan state React. Perilaku pemilihan pertama memerlukan uji rerender browser.",
+      "acceptance": "500/network failure memberikan pesan yang jelas; tambah akun pertama memilih ID valid; retry tidak menambah request duplikat."
+    },
+    {
+      "id": "UX-04",
+      "area": "UI/UX",
+      "priority": "P2",
+      "title": "Pencairan belum memiliki layar konfirmasi dan rincian waktu/biaya",
+      "impact": "Pengguna langsung mengajukan nominal/provider; riwayat hanya memiliki badge, tanggal dan note. Tidak ada preview penerima, net payout, estimasi waktu atau detail status pada komponen ini.",
+      "recommendation": "Tambahkan review sebelum submit: tujuan dimasking, nama, gross/fee/net jika ada fee, estimasi proses dan kebijakan pembatalan. Setelah submit tampilkan timeline dan nomor pengajuan.",
+      "evidence": [
+        "components/wallet/WalletPanel.tsx:233",
+        "components/wallet/WalletPanel.tsx:261",
+        "components/wallet/WalletPanel.tsx:277"
+      ],
+      "validation": "Evaluasi komponen; fee/SLA tidak diasumsikan sudah menjadi kebijakan.",
+      "acceptance": "User dapat memastikan tujuan/nominal dan memahami kapan dana diproses; biaya hanya tampil jika kebijakannya ditetapkan."
+    },
+    {
+      "id": "UX-05",
+      "area": "UI/UX",
+      "priority": "P2",
+      "title": "Teks teknis dan demo muncul pada pengalaman setoran",
+      "impact": "Halaman user menyebut ?m=KODE&t=TOKEN, acceptance point dan simulator Python; empty state meminta menjalankan simulator. Ini mengaburkan tindakan pengguna di lapangan.",
+      "recommendation": "Ganti dengan instruksi konkret seperti masukkan botol satu per satu, tunggu konfirmasi, scan ulang QR mesin; informasi simulator hanya pada mode demo/operator.",
+      "evidence": [
+        "components/scan/ScanPageClient.tsx:205",
+        "components/scan/ScanPageClient.tsx:257",
+        "components/scan/ScanPageClient.tsx:281"
+      ],
+      "validation": "Teks eksplisit dari kode; tidak memerlukan penilaian visual.",
+      "acceptance": "Seluruh teks user menjelaskan tindakan/hasil tanpa kebutuhan memahami sistem internal."
+    },
+    {
+      "id": "UX-06",
+      "area": "UI/UX",
+      "priority": "P2",
+      "title": "Terminologi saldo dan riwayat belum konsisten",
+      "impact": "Wallet memakai Pending/Direservasi, navigasi mencampur Campaign/Program/Trash Bag dan poin hanya muncul pada user terhubung travel agent. Riwayat dibatasi 20 pencairan/30 ledger tanpa navigasi lanjut di halaman ini.",
+      "recommendation": "Tetapkan istilah: saldo tersedia, menunggu pemeriksaan, sedang dicairkan. Tampilkan konversi poin/Rp konsisten bila poin benar-benar produk utama. Tambahkan detail/filter/pagination riwayat.",
+      "evidence": [
+        "app/dashboard/user/wallet/page.tsx:36",
+        "app/dashboard/user/wallet/page.tsx:86",
+        "components/AppShell.tsx:52"
+      ],
+      "validation": "Evaluasi copy dan query limits; bukan penilaian estetika.",
+      "acceptance": "Pengguna memahami saldo yang dapat digunakan dan dapat membuka transaksi lebih lama dari batas query awal."
+    },
+    {
+      "id": "UX-07",
+      "area": "UI/UX",
+      "priority": "P2",
+      "title": "Peta belum membantu memilih mesin terdekat sebelum registrasi",
+      "impact": "Peta web membutuhkan akun; popup berisi status/kapasitas/material tanpa jarak, directions atau last heartbeat, dan viewport mencakup semua mesin.",
+      "recommendation": "Sediakan pencarian lokasi dan daftar alternatif mesin usable, filter material/status, freshness dan tombol rute. Pertimbangkan akses lokasi mesin publik untuk pengguna sebelum registrasi.",
+      "evidence": [
+        "app/map/page.tsx:13",
+        "components/map/MapView.tsx:107",
+        "components/map/MapView.tsx:140"
+      ],
+      "validation": "Evaluasi kode halaman web; mobile/halaman publik API tidak diasumsikan memiliki perilaku sama.",
+      "acceptance": "User dapat memilih mesin operasional terdekat dan melihat alternatif bila penuh/offline."
+    },
+    {
+      "id": "UX-08",
+      "area": "UI/UX",
+      "priority": "P2",
+      "title": "Aksesibilitas belum konsisten antarform dan dialog",
+      "impact": "AuthForm memiliki role alert/focus, tetapi error wallet/scan tidak; hint/error FormField tidak otomatis terhubung aria-describedby. Menu mobile memiliki aria-modal dan Escape namun belum trap focus/inert background. DataTable selalu min-width 700px.",
+      "recommendation": "Hubungkan hint/error ke input, gunakan live announcement untuk hasil, focus trap/restore untuk dialog; sediakan tampilan task/list untuk operasi pada ponsel.",
+      "evidence": [
+        "components/ui/FormField.tsx:99",
+        "components/AppShell.tsx:148",
+        "components/ui/DataTable.tsx:46",
+        "components/wallet/WalletPanel.tsx:140"
+      ],
+      "validation": "Risiko dari struktur DOM; kontras, target size, zoom dan screen reader belum diuji langsung.",
+      "acceptance": "Uji keyboard dan screen reader; fokus tidak keluar dari dialog dan pesan error terbaca; pekerjaan inti dapat dilakukan pada viewport sempit."
+    },
+    {
+      "id": "BIZ-01",
+      "area": "Business flow",
+      "priority": "P1",
+      "title": "Pembayaran bulk belum menutup siklus pickup",
+      "impact": "Dokumen meminta pengepul membayar pengelola, tetapi PickupRequest/PickupItem belum menyimpan harga, invoice, total settlement atau status pembayaran.",
+      "recommendation": "Tambahkan berat terverifikasi per material, harga kontrak, biaya/potongan, persetujuan kedua pihak, tagihan dan bukti pembayaran. Simpan logistik selesai terpisah dari pembayaran selesai.",
+      "evidence": [
+        "docs/business_logic_and_roles.md:83",
+        "prisma/schema.prisma:793"
+      ],
+      "validation": "Gap produk berdasarkan schema dan dokumen; bukan bukti semua pembayaran saat ini gagal di dunia nyata.",
+      "acceptance": "Setiap pickup dapat direkonsiliasi dengan nilai material dan pembayaran; dispute berat/harga memiliki jejak keputusan."
+    },
+    {
+      "id": "BIZ-02",
+      "area": "Business flow",
+      "priority": "P1",
+      "title": "Sumber pendanaan reward dan budget campaign belum menjadi batas",
+      "impact": "Reward AVAILABLE menjadi kewajiban bayar, tetapi campaign tidak memiliki budget/funding cap yang ditegakkan saat pemberian saldo. Nilai material belum membatasi kewajiban reward.",
+      "recommendation": "Tetapkan siapa membayar reward (admin/sponsor/platform), budget campaign, limit liability dan alert biaya. Pantau margin setelah logistik, payout dan operasional; pertimbangkan prefunding sesuai model bisnis.",
+      "evidence": [
+        "prisma/schema.prisma:538",
+        "lib/machine-events/acceptance.ts:115",
+        "app/api/manual-validations/route.ts:185"
+      ],
+      "validation": "Peluang kontrol ekonomi dari model data/jalur reward; tidak ada data margin atau volume sehingga kelayakan ekonomi belum dihitung.",
+      "acceptance": "Reward baru tidak melampaui budget yang disetujui; outstanding liability punya sumber funding yang dapat ditelusuri."
+    },
+    {
+      "id": "BIZ-03",
+      "area": "Business flow",
+      "priority": "P2",
+      "title": "Skema reward kantong berbeda dengan penjelasan timbangan",
+      "impact": "Dokumen menyebut poin dari timbangan; implementasi membayar Rp2.000 per kantong x campaign multiplier x compliance. actualWeightKg dicatat tetapi tidak dipakai menghitung reward.",
+      "recommendation": "Putuskan membayar partisipasi/perilaku atau nilai material. Untuk partisipasi gunakan batas kantong/ukuran/minimum isi; untuk nilai material gunakan berat tervalidasi x tarif. Selaraskan UI dan dokumen.",
+      "evidence": [
+        "lib/trip.ts:4",
+        "lib/trip.ts:38",
+        "docs/business_logic_and_roles.md:73"
+      ],
+      "validation": "Perbedaan kebijakan, bukan otomatis bug; insentif per kantong dapat sah jika itu tujuan produk.",
+      "acceptance": "Aturan reward konsisten dan dijelaskan sebelum trip; tidak mendorong menambah kantong kosong demi poin."
+    },
+    {
+      "id": "BIZ-04",
+      "area": "Business flow",
+      "priority": "P2",
+      "title": "Model assignment pengepul perlu disamakan",
+      "impact": "Dokumen menyebut self-assign, tetapi implementasi assignment dibatasi ADMIN/SUPERADMIN; empty state pengepul mengatakan menunggu admin menugaskan.",
+      "recommendation": "Pilih dispatch admin atau claim oleh mitra; samakan dokumen, UI dan notifikasi. Bila self-assign, gunakan claim atomik, expiry dan fallback jika pengepul tidak bergerak.",
+      "evidence": [
+        "docs/business_logic_and_roles.md:80",
+        "lib/pickup.ts:27",
+        "components/pickup/PickupTaskList.tsx:119"
+      ],
+      "validation": "Perbedaan dokumentasi/implementasi, bukan celah otorisasi.",
+      "acceptance": "Satu task dimiliki satu pengepul; operator memahami siapa mengambil aksi berikutnya dan escalation jika terlambat."
+    },
+    {
+      "id": "BIZ-05",
+      "area": "Business flow",
+      "priority": "P2",
+      "title": "Pendapatan platform dan penerima reward perlu dibuat eksplisit",
+      "impact": "Dokumen menyebut subscription/transaction fee dan reward rombongan ke tour guide. Redemption saat ini hanya memiliki satu amount, tanpa gross/fee/net. Hak penerima reward dan pendanaan belum menjadi bukti persetujuan tersendiri.",
+      "recommendation": "Nyatakan penerima reward pada konfirmasi trip; tetapkan fee/subscription jika memang model bisnis yang dipilih. Simpan nominal gross, fee, net dan penanggung biaya; tampilkan kuitansi transparan.",
+      "evidence": [
+        "docs/business_logic_and_roles.md:22",
+        "docs/business_logic_and_roles.md:74",
+        "prisma/schema.prisma:768",
+        "components/trip/TripManager.tsx:107"
+      ],
+      "validation": "Peluang bisnis/kejelasan produk; tidak ada rekomendasi fee nominal atau klaim regulasi.",
+      "acceptance": "Guide/admin melihat dan menyetujui tujuan reward; setiap potongan dapat ditelusuri dan sesuai informasi pengguna."
+    }
+  ],
+  "secondary": [
+    {
+      "title": "Approval review paralel dapat menggandakan ADJUST",
+      "evidence": "app/api/deposit-reviews/[id]/route.ts:43,149,187",
+      "action": "Lock item, hitung ulang reward dalam transaksi dan unique business reference untuk adjustment."
+    },
+    {
+      "title": "Dua scan kantong terakhir dapat memakai aggregate status yang usang",
+      "evidence": "app/api/trash-bags/route.ts:212,298",
+      "action": "Hitung status semua kantong setelah update di bawah lock trip. Double-reward tidak dibuktikan untuk jalur ini."
+    },
+    {
+      "title": "Filter effectiveTo reward rate tertimpa OR scope",
+      "evidence": "lib/reward.ts:39,69",
+      "action": "Gabungkan periode valid dan scope lewat AND; relevan jika rate expired masih active."
+    },
+    {
+      "title": "Dua user dapat membuat sesi aktif untuk mesin yang sama",
+      "evidence": "app/api/scan/route.ts:63,100",
+      "action": "Lease eksklusif/lock per mesin dan constraint satu sesi aktif."
+    }
+  ],
+  "roadmap": [
+    {
+      "phase": "Sebelum rollout/pencairan nyata",
+      "items": [
+        "SEC-01",
+        "SEC-02",
+        "LOG-01",
+        "LOG-02",
+        "LOG-03",
+        "LOG-04",
+        "LOG-06",
+        "SEC-07"
+      ]
+    },
+    {
+      "phase": "Integritas data dan alur utama",
+      "items": [
+        "LOG-05",
+        "LOG-07",
+        "SEC-03",
+        "SEC-04",
+        "SEC-05",
+        "SEC-06",
+        "UX-01",
+        "UX-02",
+        "UX-03"
+      ]
+    },
+    {
+      "phase": "Operasional dan ekonomi",
+      "items": [
+        "BIZ-01",
+        "BIZ-02",
+        "BIZ-03",
+        "BIZ-04",
+        "BIZ-05",
+        "UX-04",
+        "UX-06",
+        "UX-07",
+        "UX-08",
+        "SEC-08",
+        "SEC-09",
+        "SEC-10"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "OWASP MFA Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html"
+    },
+    {
+      "title": "OWASP Business Logic Security",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Business_Logic_Security_Cheat_Sheet.html"
+    },
+    {
+      "title": "Next maintainer: proxy bypass advisory",
+      "url": "https://github.com/vercel/next.js/security/advisories/GHSA-6gpp-xcg3-4w24"
+    },
+    {
+      "title": "Next maintainer: image optimization advisory",
+      "url": "https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4"
+    }
+  ],
+  "flow_steps": [
+    {
+      "step": 1,
+      "name": "Cari mesin sebelum datang",
+      "health": "Perlu perbaikan discoverability",
+      "finding": "UX-07"
+    },
+    {
+      "step": 2,
+      "name": "Daftar / masuk dari QR mesin",
+      "health": "Konteks scan belum dipertahankan",
+      "finding": "UX-01"
+    },
+    {
+      "step": 3,
+      "name": "Mulai sesi, setor dan selesai",
+      "health": "Risiko recovery dan integritas event/reward",
+      "finding": "UX-02 / LOG-05 / LOG-06"
+    },
+    {
+      "step": 4,
+      "name": "Akun payout dan ajukan pencairan",
+      "health": "Perlu perbaikan feedback dan transaksi atomik",
+      "finding": "UX-03 / UX-04 / LOG-01 / LOG-02"
+    },
+    {
+      "step": 5,
+      "name": "Trip, kantong dan checkout",
+      "health": "Scope data kantong dan kebijakan reward perlu diperketat",
+      "finding": "LOG-03 / LOG-04 / BIZ-03"
+    },
+    {
+      "step": 6,
+      "name": "Pickup bulk dan pembayaran pengepul",
+      "health": "Logistik ada; settlement keuangan perlu dilengkapi",
+      "finding": "BIZ-01 / BIZ-04"
+    }
+  ]
+}

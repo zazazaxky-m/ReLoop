@@ -1,0 +1,1038 @@
+{
+  "date": "2026-10-13",
+  "baselineCommit": "cdd31a5",
+  "status": "PLAN_ONLY",
+  "findings": [
+    {
+      "id": "SEC-01",
+      "title": "Challenge MFA diterima sebagai session",
+      "priority": "P0",
+      "tasks": [
+        "A01"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Security",
+      "acceptanceCriteria": "Cookie berisi challenge menghasilkan 401 pada /me, API privileged dan validator websocket; session hasil TOTP tetap valid.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/auth.test.ts",
+        "lib/mfa.test.ts",
+        "tests/api/auth/mfa.test.ts",
+        "tests/api/internal/ws-session.test.ts",
+        "tests/proxy.test.ts"
+      ]
+    },
+    {
+      "id": "SEC-02",
+      "title": "Lease dapat membuka pintu saat kondisi keselamatan masih aktif",
+      "priority": "P0",
+      "tasks": [
+        "R01"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "IoT/Backend",
+      "acceptanceCriteria": "Lease valid ditolak selama panel/collection door terbuka, safety alert aktif, maintenance atau kondisi full; hanya reset tervalidasi membuka operasi.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/test_rvm.py",
+        "tests/test_rvm_extra.py",
+        "tests/test_rvm_safety.py"
+      ]
+    },
+    {
+      "id": "LOG-01",
+      "title": "Permintaan pencairan paralel dapat menggunakan saldo yang sama",
+      "priority": "P0",
+      "tasks": [
+        "M01"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Finance",
+      "acceptanceCriteria": "Integration test dua pencairan paralel: maksimal satu request berhasil dan saldo tidak negatif.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/ledger.test.ts",
+        "tests/api/redemptions.test.ts",
+        "tests/integration/redemption-race.test.ts",
+        "tests/lib/ledger.test.ts"
+      ]
+    },
+    {
+      "id": "SEC-03",
+      "title": "Email belum diverifikasi dapat mengklaim travel agent",
+      "priority": "P1",
+      "tasks": [
+        "A03"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Security",
+      "acceptanceCriteria": "Registrasi tanpa token tidak mendapat membership; token benar hanya dapat dipakai sekali dan terikat email tujuan.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/integration/invitations.test.ts"
+      ]
+    },
+    {
+      "id": "SEC-04",
+      "title": "Setup ulang menonaktifkan MFA aktif tanpa autentikasi ulang",
+      "priority": "P1",
+      "tasks": [
+        "A02"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Security",
+      "acceptanceCriteria": "Setup tanpa autentikasi ulang pada akun MFA aktif ditolak; pembatalan setup tidak mematikan faktor lama.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/mfa.test.ts",
+        "tests/api/auth/mfa.test.ts",
+        "tests/integration/mfa-replacement.test.ts"
+      ]
+    },
+    {
+      "id": "LOG-02",
+      "title": "Status payout dan ledger dapat berbeda akibat aksi paralel",
+      "priority": "P1",
+      "tasks": [
+        "M02"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Finance",
+      "acceptanceCriteria": "Dua aksi fail/success atau approve/cancel bersamaan hanya menghasilkan satu transisi valid; ledger dan payout selalu cocok.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/api/redemptions-id.test.ts",
+        "tests/api/redemptions-proof.test.ts",
+        "tests/integration/payout-transitions.test.ts",
+        "tests/lib/ledger.test.ts"
+      ]
+    },
+    {
+      "id": "LOG-03",
+      "title": "Checkout mempercayai jumlah dan ID kantong mentah",
+      "priority": "P1",
+      "tasks": [
+        "M03"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Finance",
+      "acceptanceCriteria": "Trip satu kantong menolak count 500; ID berulang dan kantong lintas trip/organisasi ditolak tanpa mutation.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/api/manual-validations.test.ts",
+        "tests/api/trash-bags.test.ts",
+        "tests/integration/trip-validation.test.ts"
+      ]
+    },
+    {
+      "id": "LOG-04",
+      "title": "COMPLIANCE_ONLY tetap menghasilkan reward uang melalui mesin",
+      "priority": "P1",
+      "tasks": [
+        "M04"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Finance",
+      "acceptanceCriteria": "Semua jalur COMPLIANCE_ONLY menghasilkan skor tanpa saldo uang; MONEY_REWARD tetap bekerja.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/reward.test.ts",
+        "tests/api/deposit-reviews-id.test.ts",
+        "tests/integration/review-race.test.ts",
+        "tests/integration/reward-policy.test.ts",
+        "tests/lib/machine-events/acceptance.test.ts"
+      ]
+    },
+    {
+      "id": "LOG-05",
+      "title": "Ketidakcocokan AI tidak memengaruhi penerimaan reward",
+      "priority": "P1",
+      "tasks": [
+        "M04"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Finance",
+      "acceptanceCriteria": "AI mismatch masuk REVIEW dan tidak menambah saldo tersedia sampai tinjauan selesai.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/reward.test.ts",
+        "tests/api/deposit-reviews-id.test.ts",
+        "tests/integration/review-race.test.ts",
+        "tests/integration/reward-policy.test.ts",
+        "tests/lib/machine-events/acceptance.test.ts"
+      ]
+    },
+    {
+      "id": "LOG-06",
+      "title": "Sinkronisasi membuang event yang ditolak dalam respons HTTP 200",
+      "priority": "P1",
+      "tasks": [
+        "R02"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "IoT/Backend",
+      "acceptanceCriteria": "Batch campuran hanya menghapus event accepted/duplicate; event error tetap tersimpan dan alasan terlihat operator.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/api/machine-events-contract.test.ts",
+        "tests/contracts/machine-events.fixture.json",
+        "tests/test_rvm_sync_contract.py"
+      ]
+    },
+    {
+      "id": "LOG-07",
+      "title": "Angka liabilitas spendable belum mengurangi pencairan/reserve",
+      "priority": "P1",
+      "tasks": [
+        "M05",
+        "B02"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Finance",
+      "acceptanceCriteria": "Earn 100 ribu lalu redeem penuh menghasilkan spendable 0; reserved dan pending tampil terpisah.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/integration/ledger-allocation.test.ts",
+        "tests/integration/reconciliation.test.ts"
+      ]
+    },
+    {
+      "id": "SEC-05",
+      "title": "Penghapusan data berpotensi berhenti setelah akun dinonaktifkan",
+      "priority": "P1",
+      "tasks": [
+        "A04"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Security",
+      "acceptanceCriteria": "Integration deletion dengan session/payout/ledger selesai konsisten; kegagalan di tengah rollback atau bisa dilanjutkan.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/integration/erasure.test.ts"
+      ]
+    },
+    {
+      "id": "SEC-06",
+      "title": "Cache mobile dapat menampilkan data akun sebelumnya",
+      "priority": "P1",
+      "tasks": [
+        "U04"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Frontend/Mobile",
+      "acceptanceCriteria": "Logout A, login B, putus jaringan: data A tidak muncul; response terlambat A tidak menimpa cache B.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "mobile/test/services/account_cache_test.dart",
+        "mobile/test/services/background_sync_account_test.dart"
+      ]
+    },
+    {
+      "id": "SEC-07",
+      "title": "Dependency terkunci memiliki advisory keamanan",
+      "priority": "P1",
+      "tasks": [
+        "F00"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "QA/Platform",
+      "acceptanceCriteria": "Audit runtime ditriage dan dependency patched; hasil regression/build disimpan. Vitest UI/dev server tidak diekspos ke publik.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": []
+    },
+    {
+      "id": "SEC-08",
+      "title": "Audit chain memakai timestamp/canonical data yang tidak konsisten",
+      "priority": "P2",
+      "tasks": [
+        "A05"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Security",
+      "acceptanceCriteria": "Write-read-verify valid untuk actor/metadata kosong dan insert tertunda; mengubah satu field membuat verifikasi gagal.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/api/audit-verify.test.ts",
+        "tests/integration/audit-chain.test.ts",
+        "tests/lib/audit.test.ts"
+      ]
+    },
+    {
+      "id": "SEC-09",
+      "title": "Nonce habis sebelum jendela signature berakhir",
+      "priority": "P2",
+      "tasks": [
+        "R03"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "IoT/Backend",
+      "acceptanceCriteria": "Request valid pertama ditolak saat replay sepanjang seluruh jendela signature.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/machine-auth.test.ts",
+        "tests/api/scan.test.ts",
+        "tests/integration/machine-session-race.test.ts",
+        "tests/lib/machine-nonce.test.ts"
+      ]
+    },
+    {
+      "id": "SEC-10",
+      "title": "Websocket tidak mengevaluasi ulang expiry dan revokasi",
+      "priority": "P2",
+      "tasks": [
+        "R04"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "IoT/Backend",
+      "acceptanceCriteria": "Socket expired/revoked berhenti menerima topik restricted; admin hanya menerima event organisasinya.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/api/internal/ws-session.test.ts",
+        "tests/lib/realtime.test.ts",
+        "tests/realtime/session-scope.test.ts"
+      ]
+    },
+    {
+      "id": "UX-01",
+      "title": "Konteks QR hilang ketika pengguna perlu login",
+      "priority": "P1",
+      "tasks": [
+        "U01"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Frontend/Mobile",
+      "acceptanceCriteria": "User signed-out membuka QR lalu login dan kembali ke mesin yang sama tanpa kehilangan konteks; token lama ditangani dengan pesan jelas.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/return-to.test.ts",
+        "tests/browser/scan-recovery.spec.ts"
+      ]
+    },
+    {
+      "id": "UX-02",
+      "title": "Sesi scan tidak memiliki pemulihan yang terlihat",
+      "priority": "P1",
+      "tasks": [
+        "U01"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Frontend/Mobile",
+      "acceptanceCriteria": "Refresh saat sesi aktif bisa resume; gangguan jaringan terlihat; sesi EXPIRED tidak menawarkan finish yang gagal.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/return-to.test.ts",
+        "tests/browser/scan-recovery.spec.ts"
+      ]
+    },
+    {
+      "id": "UX-03",
+      "title": "Aksi wallet dapat gagal tanpa penjelasan",
+      "priority": "P1",
+      "tasks": [
+        "U02"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Frontend/Mobile",
+      "acceptanceCriteria": "500/network failure memberikan pesan yang jelas; tambah akun pertama memilih ID valid; retry tidak menambah request duplikat.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/api/wallet.test.ts",
+        "tests/browser/wallet-flow.spec.ts"
+      ]
+    },
+    {
+      "id": "UX-04",
+      "title": "Pencairan belum memiliki layar konfirmasi dan rincian waktu/biaya",
+      "priority": "P2",
+      "tasks": [
+        "U02",
+        "B03"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Frontend/Mobile",
+      "acceptanceCriteria": "User dapat memastikan tujuan/nominal dan memahami kapan dana diproses; biaya hanya tampil jika kebijakannya ditetapkan.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/api/wallet.test.ts",
+        "tests/browser/wallet-flow.spec.ts",
+        "tests/integration/commercial-policy.test.ts"
+      ]
+    },
+    {
+      "id": "UX-05",
+      "title": "Teks teknis dan demo muncul pada pengalaman setoran",
+      "priority": "P2",
+      "tasks": [
+        "U01"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Frontend/Mobile",
+      "acceptanceCriteria": "Seluruh teks user menjelaskan tindakan/hasil tanpa kebutuhan memahami sistem internal.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/return-to.test.ts",
+        "tests/browser/scan-recovery.spec.ts"
+      ]
+    },
+    {
+      "id": "UX-06",
+      "title": "Terminologi saldo dan riwayat belum konsisten",
+      "priority": "P2",
+      "tasks": [
+        "U02"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Frontend/Mobile",
+      "acceptanceCriteria": "Pengguna memahami saldo yang dapat digunakan dan dapat membuka transaksi lebih lama dari batas query awal.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/api/wallet.test.ts",
+        "tests/browser/wallet-flow.spec.ts"
+      ]
+    },
+    {
+      "id": "UX-07",
+      "title": "Peta belum membantu memilih mesin terdekat sebelum registrasi",
+      "priority": "P2",
+      "tasks": [
+        "U03"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Frontend/Mobile",
+      "acceptanceCriteria": "User dapat memilih mesin operasional terdekat dan melihat alternatif bila penuh/offline.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/api/public.test.ts",
+        "tests/browser/machine-finder.spec.ts"
+      ]
+    },
+    {
+      "id": "UX-08",
+      "title": "Aksesibilitas belum konsisten antarform dan dialog",
+      "priority": "P2",
+      "tasks": [
+        "U05"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Frontend/Mobile",
+      "acceptanceCriteria": "Uji keyboard dan screen reader; fokus tidak keluar dari dialog dan pesan error terbaca; pekerjaan inti dapat dilakukan pada viewport sempit.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "mobile/test/shared/widgets/",
+        "tests/browser/accessibility.spec.ts"
+      ]
+    },
+    {
+      "id": "BIZ-01",
+      "title": "Pembayaran bulk belum menutup siklus pickup",
+      "priority": "P1",
+      "tasks": [
+        "B04"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Product/Operations",
+      "acceptanceCriteria": "Setiap pickup dapat direkonsiliasi dengan nilai material dan pembayaran; dispute berat/harga memiliki jejak keputusan.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/integration/bulk-settlement.test.ts"
+      ]
+    },
+    {
+      "id": "BIZ-02",
+      "title": "Sumber pendanaan reward dan budget campaign belum menjadi batas",
+      "priority": "P1",
+      "tasks": [
+        "B01",
+        "B02"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Product/Operations",
+      "acceptanceCriteria": "Reward baru tidak melampaui budget yang disetujui; outstanding liability punya sumber funding yang dapat ditelusuri.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/integration/ledger-allocation.test.ts",
+        "tests/integration/reward-funding.test.ts"
+      ]
+    },
+    {
+      "id": "BIZ-03",
+      "title": "Skema reward kantong berbeda dengan penjelasan timbangan",
+      "priority": "P2",
+      "tasks": [
+        "B03"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Product/Operations",
+      "acceptanceCriteria": "Aturan reward konsisten dan dijelaskan sebelum trip; tidak mendorong menambah kantong kosong demi poin.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/integration/commercial-policy.test.ts"
+      ]
+    },
+    {
+      "id": "BIZ-04",
+      "title": "Model assignment pengepul perlu disamakan",
+      "priority": "P2",
+      "tasks": [
+        "B05"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Product/Operations",
+      "acceptanceCriteria": "Satu task dimiliki satu pengepul; operator memahami siapa mengambil aksi berikutnya dan escalation jika terlambat.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/integration/pickup-dispatch.test.ts"
+      ]
+    },
+    {
+      "id": "BIZ-05",
+      "title": "Pendapatan platform dan penerima reward perlu dibuat eksplisit",
+      "priority": "P2",
+      "tasks": [
+        "B03"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Product/Operations",
+      "acceptanceCriteria": "Guide/admin melihat dan menyetujui tujuan reward; setiap potongan dapat ditelusuri dan sesuai informasi pengguna.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/integration/commercial-policy.test.ts"
+      ]
+    },
+    {
+      "id": "EX-01",
+      "title": "Approval review paralel dapat menggandakan ADJUST",
+      "priority": "P2",
+      "tasks": [
+        "M04"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Finance",
+      "acceptanceCriteria": "Lock item, hitung ulang reward dalam transaksi dan unique business reference untuk adjustment.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/reward.test.ts",
+        "tests/api/deposit-reviews-id.test.ts",
+        "tests/integration/review-race.test.ts",
+        "tests/integration/reward-policy.test.ts",
+        "tests/lib/machine-events/acceptance.test.ts"
+      ]
+    },
+    {
+      "id": "EX-02",
+      "title": "Dua scan kantong terakhir dapat memakai aggregate status yang usang",
+      "priority": "P2",
+      "tasks": [
+        "M03"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Finance",
+      "acceptanceCriteria": "Hitung status semua kantong setelah update di bawah lock trip. Double-reward tidak dibuktikan untuk jalur ini.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "tests/api/manual-validations.test.ts",
+        "tests/api/trash-bags.test.ts",
+        "tests/integration/trip-validation.test.ts"
+      ]
+    },
+    {
+      "id": "EX-03",
+      "title": "Filter effectiveTo reward rate tertimpa OR scope",
+      "priority": "P2",
+      "tasks": [
+        "M04"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "Backend/Finance",
+      "acceptanceCriteria": "Gabungkan periode valid dan scope lewat AND; relevan jika rate expired masih active.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/reward.test.ts",
+        "tests/api/deposit-reviews-id.test.ts",
+        "tests/integration/review-race.test.ts",
+        "tests/integration/reward-policy.test.ts",
+        "tests/lib/machine-events/acceptance.test.ts"
+      ]
+    },
+    {
+      "id": "EX-04",
+      "title": "Dua user dapat membuat sesi aktif untuk mesin yang sama",
+      "priority": "P2",
+      "tasks": [
+        "R03"
+      ],
+      "status": "PLANNED",
+      "evidence": [],
+      "releaseVersion": null,
+      "ownerRole": "IoT/Backend",
+      "acceptanceCriteria": "Lease eksklusif/lock per mesin dan constraint satu sesi aktif.",
+      "migrationState": "NOT_STARTED",
+      "plannedTestFiles": [
+        "lib/machine-auth.test.ts",
+        "tests/api/scan.test.ts",
+        "tests/integration/machine-session-race.test.ts",
+        "tests/lib/machine-nonce.test.ts"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "A01",
+      "title": "Pisahkan session dan MFA challenge",
+      "document": "2026-10-13-reloop-01-security.md",
+      "dependencies": [],
+      "findings": [
+        "SEC-01"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "A02",
+      "title": "Penggantian faktor MFA tanpa mematikan faktor aktif",
+      "document": "2026-10-13-reloop-01-security.md",
+      "dependencies": [
+        "A01",
+        "F01"
+      ],
+      "findings": [
+        "SEC-04"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "A03",
+      "title": "Verifikasi kepemilikan email dan claim undangan",
+      "document": "2026-10-13-reloop-01-security.md",
+      "dependencies": [
+        "A01",
+        "F01"
+      ],
+      "findings": [
+        "SEC-03"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "A04",
+      "title": "Erasure yang konsisten dan dapat dilanjutkan",
+      "document": "2026-10-13-reloop-01-security.md",
+      "dependencies": [
+        "A01",
+        "M01",
+        "F01"
+      ],
+      "findings": [
+        "SEC-05"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "A05",
+      "title": "Canonical audit chain versi baru",
+      "document": "2026-10-13-reloop-01-security.md",
+      "dependencies": [
+        "F01"
+      ],
+      "findings": [
+        "SEC-08"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "M01",
+      "title": "Transaksi wallet dan idempotency yang benar",
+      "document": "2026-10-13-reloop-02-money.md",
+      "dependencies": [
+        "F01"
+      ],
+      "findings": [
+        "LOG-01"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "M02",
+      "title": "Transisi pencairan dan settlement atomik",
+      "document": "2026-10-13-reloop-02-money.md",
+      "dependencies": [
+        "M01"
+      ],
+      "findings": [
+        "LOG-02"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "M03",
+      "title": "Kantong valid, checkout dan aggregate trip serial",
+      "document": "2026-10-13-reloop-02-money.md",
+      "dependencies": [
+        "M01"
+      ],
+      "findings": [
+        "LOG-03",
+        "EX-02"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "M04",
+      "title": "Kebijakan reward, sensor review dan koreksi satu kali",
+      "document": "2026-10-13-reloop-02-money.md",
+      "dependencies": [
+        "M01",
+        "M03"
+      ],
+      "findings": [
+        "LOG-04",
+        "LOG-05",
+        "EX-01",
+        "EX-03"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "M05",
+      "title": "Rekonsiliasi saldo global dan kesiapan allocation",
+      "document": "2026-10-13-reloop-02-money.md",
+      "dependencies": [
+        "M01",
+        "M02",
+        "M04"
+      ],
+      "findings": [
+        "LOG-07"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "R01",
+      "title": "Interlock output dan safety latch mesin",
+      "document": "2026-10-13-reloop-03-machine.md",
+      "dependencies": [],
+      "findings": [
+        "SEC-02"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "R02",
+      "title": "ACK event per item dan durable retry",
+      "document": "2026-10-13-reloop-03-machine.md",
+      "dependencies": [
+        "F01"
+      ],
+      "findings": [
+        "LOG-06"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "R03",
+      "title": "Replay window dan sesi mesin eksklusif",
+      "document": "2026-10-13-reloop-03-machine.md",
+      "dependencies": [
+        "F01",
+        "M01"
+      ],
+      "findings": [
+        "SEC-09",
+        "EX-04"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "R04",
+      "title": "Otorisasi websocket selama koneksi hidup",
+      "document": "2026-10-13-reloop-03-machine.md",
+      "dependencies": [
+        "A01",
+        "F01"
+      ],
+      "findings": [
+        "SEC-10"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "U01",
+      "title": "Login kembali ke scan, resume dan receipt setoran",
+      "document": "2026-10-13-reloop-04-experience.md",
+      "dependencies": [
+        "A01",
+        "R03",
+        "R02",
+        "F01"
+      ],
+      "findings": [
+        "UX-01",
+        "UX-02",
+        "UX-05"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "U02",
+      "title": "Wallet jelas, retry aman dan histori lengkap",
+      "document": "2026-10-13-reloop-04-experience.md",
+      "dependencies": [
+        "M01",
+        "M02",
+        "M05",
+        "F01"
+      ],
+      "findings": [
+        "UX-03",
+        "UX-04",
+        "UX-06"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "U03",
+      "title": "Pencarian mesin publik dengan freshness dan rute",
+      "document": "2026-10-13-reloop-04-experience.md",
+      "dependencies": [
+        "F01",
+        "R03"
+      ],
+      "findings": [
+        "UX-07"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "U04",
+      "title": "Pisahkan cache mobile dan hentikan response akun lama",
+      "document": "2026-10-13-reloop-04-experience.md",
+      "dependencies": [
+        "A01",
+        "F01"
+      ],
+      "findings": [
+        "SEC-06"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "U05",
+      "title": "Aksesibilitas form, dialog dan operasi pada layar kecil",
+      "document": "2026-10-13-reloop-04-experience.md",
+      "dependencies": [
+        "U01",
+        "U02",
+        "U03",
+        "F01"
+      ],
+      "findings": [
+        "UX-08"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "B01",
+      "title": "Funding reward dan budget sebelum menerima setoran",
+      "document": "2026-10-13-reloop-05-business.md",
+      "dependencies": [
+        "M01",
+        "M03",
+        "M04",
+        "R01",
+        "R03",
+        "F01"
+      ],
+      "findings": [
+        "BIZ-02"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "B02",
+      "title": "Alokasi earning dan migrasi kewajiban per organisasi",
+      "document": "2026-10-13-reloop-05-business.md",
+      "dependencies": [
+        "M05",
+        "B01"
+      ],
+      "findings": [
+        "LOG-07",
+        "BIZ-02"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "B03",
+      "title": "Policy reward partisipasi, recipient dan fee snapshot",
+      "document": "2026-10-13-reloop-05-business.md",
+      "dependencies": [
+        "M03",
+        "M04",
+        "U02",
+        "B01"
+      ],
+      "findings": [
+        "BIZ-03",
+        "BIZ-05",
+        "UX-04"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "B04",
+      "title": "Settlement pembelian material bulk",
+      "document": "2026-10-13-reloop-05-business.md",
+      "dependencies": [
+        "F01",
+        "A05"
+      ],
+      "findings": [
+        "BIZ-01"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "B05",
+      "title": "Dispatch admin konsisten dan tugas punya pemilik",
+      "document": "2026-10-13-reloop-05-business.md",
+      "dependencies": [
+        "F01"
+      ],
+      "findings": [
+        "BIZ-04"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "F00",
+      "title": "Triage dependency dan upgrade yang dapat diverifikasi",
+      "document": "2026-10-13-reloop-06-validation-rollout.md",
+      "dependencies": [],
+      "findings": [
+        "SEC-07"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "F01",
+      "title": "Harness integration, browser, mobile dan RVM",
+      "document": "2026-10-13-reloop-06-validation-rollout.md",
+      "dependencies": [],
+      "findings": [
+        "TEST-FOUNDATION"
+      ],
+      "status": "PLANNED"
+    },
+    {
+      "id": "Z01",
+      "title": "Penutupan temuan, migrasi bertahap dan rollout",
+      "document": "2026-10-13-reloop-06-validation-rollout.md",
+      "dependencies": [
+        "F00",
+        "F01",
+        "A01",
+        "A02",
+        "A03",
+        "A04",
+        "A05",
+        "M01",
+        "M02",
+        "M03",
+        "M04",
+        "M05",
+        "R01",
+        "R02",
+        "R03",
+        "R04",
+        "U01",
+        "U02",
+        "U03",
+        "U04",
+        "U05",
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05"
+      ],
+      "findings": [
+        "RELEASE-GATE"
+      ],
+      "status": "PLANNED"
+    }
+  ],
+  "planValidation": {
+    "coverage": "34/34",
+    "tasks": 27,
+    "dependencyCycles": 0,
+    "unresolvedModifiedPaths": 0,
+    "brokenDocumentLinks": 0,
+    "applicationCodeChanged": false,
+    "implementationTestsRun": false
+  }
+}
