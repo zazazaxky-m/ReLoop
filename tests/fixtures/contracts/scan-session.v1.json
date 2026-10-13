@@ -1,0 +1,32 @@
+{
+  "contract": "scan-session",
+  "version": 1,
+  "endpoint": "POST /api/scan",
+  "status": 201,
+  "description": "Response when a USER scans a machine QR and a new deposit session starts. Consumed by mobile ScanResult.fromJson. Breaking changes need a new versioned file.",
+  "response": {
+    "session": {
+      "id": "cmauditsession0000000000001",
+      "userId": "cmaudituser000000000000001",
+      "machineId": "cmauditmachine000000000001",
+      "campaignId": null,
+      "status": "ACTIVE",
+      "startedAt": "2026-10-13T08:00:00.000Z",
+      "completedAt": null,
+      "timeoutAt": "2026-10-13T08:03:00.000Z",
+      "anomalyCount": 0,
+      "createdAt": "2026-10-13T08:00:00.000Z",
+      "updatedAt": "2026-10-13T08:00:00.000Z"
+    },
+    "machine": {
+      "id": "cmauditmachine000000000001",
+      "machineCode": "AUDIT-A-01",
+      "name": "Mesin Audit A",
+      "organizationName": "Organisasi Audit A",
+      "supportedWasteTypes": [
+        { "id": "cmauditwastetype0000000001", "name": "Botol Plastik Audit" }
+      ]
+    },
+    "resumed": false
+  }
+}

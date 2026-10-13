@@ -16,6 +16,11 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
+    "test:integration": "node scripts/run-audit-tests.mjs integration",
+    "test:browser": "node scripts/run-audit-tests.mjs browser",
+    "test:realtime": "node scripts/run-audit-tests.mjs realtime",
+    "test:rvm": "node scripts/run-audit-tests.mjs python",
+    "test:flutter": "node scripts/run-audit-tests.mjs flutter",
     "prisma:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
@@ -52,7 +57,9 @@
     "uuid": "^11.1.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/eslintrc": "^3.2.0",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/leaflet": "^1.9.21",

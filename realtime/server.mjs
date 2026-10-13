@@ -1,25 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { createServer } from "node:http";
+import { pathToFileURL } from "node:url";
 
-const port = Number(process.env.REALTIME_PORT || 3001);
-const host = process.env.REALTIME_HOST || "0.0.0.0";
-const internalSecret =
-  process.env.REALTIME_INTERNAL_SECRET ||
-  (process.env.NODE_ENV === "production" ? "" : "reloop-dev-realtime-secret");
-if (!internalSecret && process.env.NODE_ENV === "production") {
-  console.error(
-    "[realtime] REALTIME_INTERNAL_SECRET is not set in production. Aborting startup.",
-  );
-  process.exit(1);
-}
 const SESSION_COOKIE = "reloop_session";
-const wsSessionUrl = process.env.REALTIME_WS_SESSION_URL?.trim() || "";
 const ADMIN_ROLES = new Set(["ADMIN", "SUPERADMIN"]);
-// socket -> { role: string|null }. The public machine kiosk display connects
-// anonymously (role null) and only needs non-sensitive refresh signals;
-// dashboard clients carry the same session cookie as the Next.js app and can
-// receive everything, including security-alert topics.
-const clients = new Map();
 
 function parseCookies(header) {
   const out = {};
@@ -37,33 +22,6 @@ function parseCookies(header) {
     }
   }
   return out;
-}
-
-/** Private roles always require the live web verifier; no JWT-only fallback. */
-async function resolveSocketRole(req) {
-  const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-  if (!token) return null;
-
-  if (wsSessionUrl && internalSecret) {
-    try {
-      const res = await fetch(wsSessionUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${internalSecret}`,
-        },
-        body: JSON.stringify({ token }),
-        signal: AbortSignal.timeout(3000),
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return typeof data.role === "string" ? data.role : null;
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
 }
 
 function frame(text) {
@@ -85,115 +43,193 @@ function frame(text) {
   return Buffer.concat([header, payload]);
 }
 
-function broadcast(data) {
-  // security-alert carries fraud/vandalism detail and must stay admin-only;
-  // machine-event/machine-state are already visible on the public kiosk
-  // screen itself, so they're safe to fan out to anonymous listeners too.
-  const restricted = data && data.topic === "security-alert";
-  const packet = frame(JSON.stringify({ type: "event", data }));
-  let delivered = 0;
-  for (const [socket, meta] of clients) {
-    if (restricted && !ADMIN_ROLES.has(meta.role)) continue;
-    if (!socket.destroyed && socket.writable) {
-      socket.write(packet);
-      delivered += 1;
+/**
+ * Builds the gateway without binding a port. `now` is an internal clock
+ * dependency (production passes Date.now); there is deliberately no HTTP
+ * endpoint that can change time.
+ */
+export function createGateway({ internalSecret = "", wsSessionUrl = "", now = Date.now } = {}) {
+  // socket -> { role: string|null }. The public machine kiosk display connects
+  // anonymously (role null) and only needs non-sensitive refresh signals;
+  // dashboard clients carry the same session cookie as the Next.js app and can
+  // receive everything, including security-alert topics.
+  const clients = new Map();
+
+  /** Private roles always require the live web verifier; no JWT-only fallback. */
+  async function resolveSocketRole(req) {
+    const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+    if (!token) return null;
+
+    if (wsSessionUrl && internalSecret) {
+      try {
+        const res = await fetch(wsSessionUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${internalSecret}`,
+          },
+          body: JSON.stringify({ token }),
+          signal: AbortSignal.timeout(3000),
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        return typeof data.role === "string" ? data.role : null;
+      } catch {
+        return null;
+      }
     }
-  }
-  return delivered;
-}
 
-function authorized(req) {
-  if (!internalSecret) return false;
-  const supplied = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  const expected = Buffer.from(internalSecret);
-  const actual = Buffer.from(supplied);
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
-}
-
-const server = createServer((req, res) => {
-  if (req.method === "GET" && req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, clients: clients.size }));
-    return;
+    return null;
   }
 
-  if (req.method === "POST" && req.url === "/publish") {
-    if (!authorized(req)) {
-      res.writeHead(401);
-      res.end("Unauthorized");
+  function broadcast(data) {
+    // security-alert carries fraud/vandalism detail and must stay admin-only;
+    // machine-event/machine-state are already visible on the public kiosk
+    // screen itself, so they're safe to fan out to anonymous listeners too.
+    const restricted = data && data.topic === "security-alert";
+    const packet = frame(JSON.stringify({ type: "event", data }));
+    let delivered = 0;
+    for (const [socket, meta] of clients) {
+      if (restricted && !ADMIN_ROLES.has(meta.role)) continue;
+      if (!socket.destroyed && socket.writable) {
+        socket.write(packet);
+        delivered += 1;
+      }
+    }
+    return delivered;
+  }
+
+  function authorized(req) {
+    if (!internalSecret) return false;
+    const supplied = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    const expected = Buffer.from(internalSecret);
+    const actual = Buffer.from(supplied);
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  }
+
+  const server = createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, clients: clients.size }));
       return;
     }
-    let raw = "";
-    req.on("data", (chunk) => {
-      raw += chunk;
-      if (raw.length > 32_768) req.destroy();
-    });
-    req.on("end", () => {
-      try {
-        const data = JSON.parse(raw);
-        const delivered = broadcast(data);
-        res.writeHead(202, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ delivered }));
-      } catch {
-        res.writeHead(400);
-        res.end("Bad JSON");
+
+    if (req.method === "POST" && req.url === "/publish") {
+      if (!authorized(req)) {
+        res.writeHead(401);
+        res.end("Unauthorized");
+        return;
       }
-    });
-    return;
-  }
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += chunk;
+        if (raw.length > 32_768) req.destroy();
+      });
+      req.on("end", () => {
+        try {
+          const data = JSON.parse(raw);
+          const delivered = broadcast(data);
+          res.writeHead(202, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ delivered }));
+        } catch {
+          res.writeHead(400);
+          res.end("Bad JSON");
+        }
+      });
+      return;
+    }
 
-  res.writeHead(404);
-  res.end("Not found");
-});
-
-async function handleUpgrade(req, socket) {
-  const { pathname } = new URL(req.url, "http://internal");
-  if (pathname !== "/ws") {
-    socket.destroy();
-    return;
-  }
-  const key = req.headers["sec-websocket-key"];
-  if (!key) {
-    socket.destroy();
-    return;
-  }
-  const role = await resolveSocketRole(req);
-  const accept = createHash("sha1")
-    .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
-    .digest("base64");
-  socket.write(
-    [
-      "HTTP/1.1 101 Switching Protocols",
-      "Upgrade: websocket",
-      "Connection: Upgrade",
-      `Sec-WebSocket-Accept: ${accept}`,
-      "\r\n",
-    ].join("\r\n"),
-  );
-  clients.set(socket, { role });
-  socket.write(frame(JSON.stringify({ type: "connected", clients: clients.size })));
-  const remove = () => clients.delete(socket);
-  socket.on("close", remove);
-  socket.on("error", remove);
-  socket.on("end", remove);
-  socket.on("data", (buffer) => {
-    if ((buffer[0] & 0x0f) === 0x08) socket.end();
+    res.writeHead(404);
+    res.end("Not found");
   });
+
+  async function handleUpgrade(req, socket) {
+    const { pathname } = new URL(req.url, "http://internal");
+    if (pathname !== "/ws") {
+      socket.destroy();
+      return;
+    }
+    const key = req.headers["sec-websocket-key"];
+    if (!key) {
+      socket.destroy();
+      return;
+    }
+    const role = await resolveSocketRole(req);
+    const accept = createHash("sha1")
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.write(
+      [
+        "HTTP/1.1 101 Switching Protocols",
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        `Sec-WebSocket-Accept: ${accept}`,
+        "\r\n",
+      ].join("\r\n"),
+    );
+    clients.set(socket, { role });
+    socket.write(frame(JSON.stringify({ type: "connected", clients: clients.size })));
+    const remove = () => clients.delete(socket);
+    socket.on("close", remove);
+    socket.on("error", remove);
+    socket.on("end", remove);
+    socket.on("data", (buffer) => {
+      if ((buffer[0] & 0x0f) === 0x08) socket.end();
+    });
+  }
+
+  server.on("upgrade", (req, socket) => {
+    handleUpgrade(req, socket).catch(() => {
+      if (!socket.destroyed) socket.destroy();
+    });
+  });
+
+  const heartbeat = setInterval(() => {
+    const packet = frame(JSON.stringify({ type: "ping", at: now() }));
+    for (const socket of clients.keys()) {
+      if (!socket.destroyed && socket.writable) socket.write(packet);
+    }
+  }, 25_000);
+  heartbeat.unref();
+
+  return {
+    server,
+    close() {
+      clearInterval(heartbeat);
+      for (const socket of clients.keys()) socket.destroy();
+      clients.clear();
+      return new Promise((resolve) => server.close(() => resolve()));
+    },
+  };
 }
 
-server.on("upgrade", (req, socket) => {
-  handleUpgrade(req, socket).catch(() => {
-    if (!socket.destroyed) socket.destroy();
-  });
-});
-
-setInterval(() => {
-  const packet = frame(JSON.stringify({ type: "ping", at: Date.now() }));
-  for (const socket of clients.keys()) {
-    if (!socket.destroyed && socket.writable) socket.write(packet);
+function isEntrypoint() {
+  if (!process.argv[1]) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
   }
-}, 25_000).unref();
+}
 
-server.listen(port, host, () => {
-  console.log(`ReLoop realtime gateway listening on http://${host}:${port}`);
-});
+if (isEntrypoint()) {
+  const port = Number(process.env.REALTIME_PORT || 3001);
+  const host = process.env.REALTIME_HOST || "0.0.0.0";
+  const internalSecret =
+    process.env.REALTIME_INTERNAL_SECRET ||
+    (process.env.NODE_ENV === "production" ? "" : "reloop-dev-realtime-secret");
+  if (!internalSecret && process.env.NODE_ENV === "production") {
+    console.error(
+      "[realtime] REALTIME_INTERNAL_SECRET is not set in production. Aborting startup.",
+    );
+    process.exit(1);
+  }
+  const gateway = createGateway({
+    internalSecret,
+    wsSessionUrl: process.env.REALTIME_WS_SESSION_URL?.trim() || "",
+    now: Date.now,
+  });
+  gateway.server.listen(port, host, () => {
+    console.log(`ReLoop realtime gateway listening on http://${host}:${port}`);
+  });
+}

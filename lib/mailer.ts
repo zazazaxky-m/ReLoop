@@ -1,6 +1,8 @@
+import { auditTransportSink, captureTransport } from "./test-transport";
+
 export interface SendEmailResult {
   sent: boolean;
-  provider: "resend" | "log" | "none";
+  provider: "resend" | "log" | "none" | "test-capture";
 }
 
 export interface PasswordResetEmailInput {
@@ -30,14 +32,21 @@ function buildPasswordResetContent(resetUrl: string) {
   return { text, html };
 }
 
-/** Sends transactional email via Resend when configured; logs in dev otherwise. */
+/** Sends transactional email via Resend when configured; logs a redacted notice in dev otherwise. */
 export async function sendPasswordResetEmail(
   input: PasswordResetEmailInput,
 ): Promise<SendEmailResult> {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const from =
     process.env.EMAIL_FROM?.trim() ?? "ReLoop <noreply@reloop.local>";
+  const subject = "Reset kata sandi ReLoop";
   const { text, html } = buildPasswordResetContent(input.resetUrl);
+
+  const sink = auditTransportSink();
+  if (sink) {
+    captureTransport(sink, { kind: "mail", to: input.to, subject, text, html });
+    return { sent: true, provider: "test-capture" };
+  }
 
   if (apiKey) {
     const res = await fetch("https://api.resend.com/emails", {
@@ -49,7 +58,7 @@ export async function sendPasswordResetEmail(
       body: JSON.stringify({
         from,
         to: [input.to],
-        subject: "Reset kata sandi ReLoop",
+        subject,
         text,
         html,
       }),
@@ -66,8 +75,9 @@ export async function sendPasswordResetEmail(
   }
 
   if (process.env.NODE_ENV !== "production") {
+    // Never log the reset URL: it carries a live reset token.
     console.info(
-      `[mailer] Password reset for ${input.to}: ${input.resetUrl}`,
+      "[mailer] RESEND_API_KEY is not configured; password reset email was not sent (link withheld from logs)",
     );
     return { sent: false, provider: "log" };
   }

@@ -79,3 +79,31 @@ All demo accounts use the password **`password1234`** (minimum 12 characters).
 - `npm run lint` / `typecheck` / `test` - quality checks
 - `npm run db:migrate` / `db:push` / `db:seed` / `db:reset` - database
 - `npm run prisma:generate` - regenerate the Prisma client
+
+## Regression harness (real services)
+
+`npm test` stays fast and Docker-free (unit tests only). The suites below run through
+`scripts/run-audit-tests.mjs`, which needs Docker Engine + Compose v2 for the database suites:
+
+| Command | What runs |
+| --- | --- |
+| `npm run test:integration [-- <file> ...]` | Vitest `tests/integration/**` against real PostgreSQL 16 + Redis 7 and a real `next dev` server |
+| `npm run test:realtime [-- <file> ...]` | Vitest `tests/realtime/**`: gateway child process + fake live verifier |
+| `npm run test:browser [-- <playwright args>]` | Playwright `tests/browser/**/*.spec.ts` at 360/768/1280 px, light and dark (`npx playwright install chromium` once) |
+| `npm run test:rvm [-- <unittest args>]` | RVM `tests/test_rvm*.py` in a fresh temporary venv with `rvm/requirements.txt` |
+| `npm run test:flutter [-- <flutter test args>]` | `flutter test` from `mobile/` (needs Flutter 3.41.7; fails as "NOT RUN" when absent) |
+
+For each run the runner starts a uniquely named Compose project from `docker-compose.audit.yml`
+(no fixed names/ports, no persistent volumes), refuses any database that is not a loopback
+`reloop_audit_test` owned by the run, generates fresh secrets, migrates, runs the tests and removes
+the containers. It never reads `DATABASE_URL`/`REDIS_URL` from your shell or `.env`. Redacted logs
+and screenshots land in `test-results/audit/<suite>-<run-id>/` (gitignored).
+
+Writing a test: import `f` from `tests/support/audit-fixture.ts` (fresh seeded graph per test:
+orgs A/B, users, admins with MFA on admin A, superadmin, collectors, payout account, online machine,
+active money campaigns). Use `f.json(actor, method, path, body)` for real HTTP with production
+session cookies, `f.connection()` for extra connections in race tests (see
+`tests/support/race-probe.ts`), and `f.capturedTransport()` for mail/push sent through the fake
+transport. Browser specs import `test`/`expect` from `tests/support/browser-fixture.ts`.
+Cross-client DTO fixtures live in `tests/fixtures/contracts/` and are asserted by both
+`tests/support/contracts.ts` and `mobile/test/contracts/`.

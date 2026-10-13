@@ -1,0 +1,59 @@
+# Ephemeral PostgreSQL 16 + Redis 7 for the audit test harness ONLY.
+# Started by scripts/run-audit-tests.mjs with a unique project name
+# (reloop-audit-<run-id>) and torn down with `down --volumes`. No fixed
+# container names, no restart policy, no named volumes, and loopback-only
+# ports allocated by Docker. Never point this at operational data.
+services:
+  postgres:
+    image: postgres:16-alpine
+    command:
+      - postgres
+      - -c
+      - cluster_name=reloop-audit-${AUDIT_RUN_ID:?AUDIT_RUN_ID is required}
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+    environment:
+      POSTGRES_USER: reloop_audit
+      POSTGRES_PASSWORD: ${AUDIT_PG_PASSWORD:?AUDIT_PG_PASSWORD is required}
+      POSTGRES_DB: reloop_audit_test
+    labels:
+      com.reloop.audit.run: ${AUDIT_RUN_ID}
+    ports:
+      - "127.0.0.1::5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      # TCP, not the socket: the image's temporary init server only listens on
+      # the socket, so this stays unhealthy until the real server is up.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U reloop_audit -d reloop_audit_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --requirepass
+      - ${AUDIT_REDIS_PASSWORD:?AUDIT_REDIS_PASSWORD is required}
+    environment:
+      REDISCLI_AUTH: ${AUDIT_REDIS_PASSWORD}
+    labels:
+      com.reloop.audit.run: ${AUDIT_RUN_ID}
+    ports:
+      - "127.0.0.1::6379"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 60

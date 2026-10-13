@@ -1,5 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { prisma } from "./prisma";
+import { readCapturedTransport } from "./test-transport";
 
 const sendEachForMulticast = vi.fn(() => Promise.resolve({ successCount: 1 }));
 const messagingMock = { sendEachForMulticast };
@@ -134,6 +138,25 @@ describe("lib/notifications", () => {
     await sendPushToUsersBestEffort(["u1"], "x", "y");
     await sendPushToUsersBestEffort(["u1"], "x2", "y2");
     expect(sendEachForMulticast).not.toHaveBeenCalled();
+  });
+
+  it("captures push in the audit test sink without initializing firebase", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "reloop-push-"));
+    try {
+      vi.resetModules();
+      vi.stubEnv("AUDIT_TEST_RUN", "1");
+      vi.stubEnv("AUDIT_TRANSPORT_SINK", path.join(dir, "sink.jsonl"));
+      const { sendPushToUsersBestEffort } = await import("./notifications");
+      vi.mocked(prisma.deviceToken.findMany).mockResolvedValue([{ token: "device-1" }] as never);
+      await sendPushToUsersBestEffort(["u1"], "Judul", "Isi", { redemptionId: "r1" });
+      expect(initializeApp).not.toHaveBeenCalled();
+      expect(sendEachForMulticast).not.toHaveBeenCalled();
+      expect(readCapturedTransport(path.join(dir, "sink.jsonl"))).toEqual([
+        { kind: "push", tokens: ["device-1"], title: "Judul", body: "Isi", data: { redemptionId: "r1" } },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("reuses existing firebase admin app when apps already registered", async () => {

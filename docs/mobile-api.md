@@ -30,6 +30,16 @@ Kelompok endpoint existing yang dipakai:
 Machine ingestion `/api/machine-events` tetap khusus perangkat RVM dengan
 HMAC-SHA256 dan tidak digunakan aplikasi pengguna.
 
+## Fixture kontrak DTO berversi (F01)
+
+Respons yang dikonsumsi web dan mobile dibekukan sebagai fixture JSON berversi di
+`tests/fixtures/contracts/<kontrak>.v<N>.json`. Backend memvalidasinya lewat
+`tests/support/contracts.ts` (termasuk respons live di `npm run test:integration`),
+dan Flutter mem-parse file yang sama dengan model `fromJson` asli di
+`mobile/test/contracts/`. Fixture pertama: `scan-session.v1.json` untuk
+`POST /api/scan` (201, dibaca `ScanResult.fromJson`). Penambahan field boleh;
+menghapus, mengganti nama, atau mengubah tipe field wajib membuat versi baru.
+
 ## Strategi Caching & Offline (Khusus Pengepul)
 
 Mengingat **Pengepul** sering beroperasi di area dengan konektivitas rendah saat melakukan pengambilan (*pickup*) dari mesin RVM atau tempat wisata, aplikasi seluler dirancang untuk mendukung *Offline Tolerance* secara terbatas:
