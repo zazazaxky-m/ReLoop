@@ -8,6 +8,7 @@ import { decrypt, isEncrypted } from "@/lib/encryption";
 import { getWalletBalance } from "@/lib/ledger";
 import type { CurrentUser } from "@/lib/rbac";
 import type { AppRole } from "@/lib/roles";
+import { getErasureStatus, runErasureJob } from "@/lib/erasure-jobs";
 import { transitionRedemption } from "@/lib/wallet-service";
 import { f, type ActorKey, type FixtureActor } from "../support/audit-fixture";
 import { InjectedFault, deferred, failAfterCommit, isStillPending, waitForBlockedBy } from "../support/race-probe";
@@ -498,8 +499,9 @@ describe("payout destination snapshot", () => {
   });
 });
 
-describe("GDPR erasure of the payout destination snapshot", () => {
-  it("erases the destination of finished requests, keeps it for unsettled ones, and logs both", async () => {
+describe("account erasure of the payout destination snapshot", () => {
+  it("holds while a payout is open, then erases the destination of every settled request", async () => {
+    await f.depositHistory(); // a real DepositSession FK on the user being erased
     await f.seedBalance(80_000);
     const paid = await f.redeemAndSettle(20_000);
     const failed = await f.processingRedemption(15_000);
@@ -509,34 +511,39 @@ describe("GDPR erasure of the payout destination snapshot", () => {
     const cancelled = ((await created.json()) as Json).redemption.id as string;
     expect((await patch("userA", cancelled, { action: "cancel" })).status).toBe(200);
     const open = await f.processingRedemption(12_000);
+    // The remaining balance is paid out too, so only the open payout holds the erasure.
+    const { available } = await getWalletBalance(f.ids.userA);
+    const rest = await f.redeemAndSettle(available);
     const account = await f.db.payoutAccount.findUniqueOrThrow({ where: { id: f.ids.payoutAccountA } });
 
     const erased = await f.json("userA", "DELETE", "/api/user/data");
-    expect(erased.status).toBe(200);
+    expect(erased.status).toBe(202);
+    const body = (await erased.json()) as Json;
+    expect(body).toMatchObject({ status: "PENDING_RECONCILIATION", completed: false });
+    // Held: nothing erased yet, every snapshot still readable for settlement.
+    for (const id of [paid, failed, cancelled, open, rest]) {
+      const row = await f.db.redemption.findUniqueOrThrow({ where: { id } });
+      expect(decrypt(row.payoutDestinationIdentifier!)).toBe(account.accountIdentifier);
+    }
 
-    for (const id of [paid, failed, cancelled]) {
+    expect((await patch("superadmin", open, { action: "success", providerReference: "ERASE-OPEN-REF" })).status).toBe(200);
+    await runErasureJob(body.requestId);
+    expect((await getErasureStatus(body.requestId)).status).toBe("COMPLETED");
+
+    for (const id of [paid, failed, cancelled, open, rest]) {
       expect(await f.db.redemption.findUniqueOrThrow({ where: { id } })).toMatchObject({
         payoutDestinationIdentifier: null, payoutDestinationName: null,
         payoutDestinationSource: "REQUEST_SNAPSHOT", payoutDestinationProvider: "DANA" });
     }
-    // An unsettled request still needs its destination to be paid or reconciled.
-    const kept = await f.db.redemption.findUniqueOrThrow({ where: { id: open } });
-    expect(decrypt(kept.payoutDestinationIdentifier!)).toBe(account.accountIdentifier);
-
     const audit = await f.db.auditLog.findFirstOrThrow({ where: { action: "DATA_ERASURE", entityId: f.ids.userA } });
-    expect(audit.metadataJson).toMatchObject({
-      steps: expect.arrayContaining(["payout_accounts_deleted", "redemption_destinations_erased",
-        "redemption_destinations_retained_for_settlement"]),
-      redemptionDestinations: { erased: 3, retainedForSettlement: 1 },
-    });
+    expect(audit.metadataJson).toMatchObject({ redemptionDestinationsErased: 5, openRedemptions: 0 });
 
     const queue = (await (await f.json("superadmin", "GET", "/api/redemptions")).json()) as Json;
     const byId = new Map<string, Json>(queue.redemptions.map((r: Json) => [r.id, r]));
-    for (const id of [paid, failed, cancelled]) {
+    for (const id of [paid, failed, cancelled, open, rest]) {
       expect(byId.get(id)!.payoutDestination).toEqual({ source: "REQUEST_SNAPSHOT", provider: "DANA", erased: true,
         accountIdentifier: null, accountName: null, capturedAt: expect.any(String) });
     }
-    expect(byId.get(open)!.payoutDestination).toMatchObject({ erased: false, accountIdentifier: account.accountIdentifier });
   });
 });
 

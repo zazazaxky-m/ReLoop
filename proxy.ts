@@ -12,6 +12,10 @@ const PUBLIC_API_EXACT = new Set([
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
   "/api/auth/mfa/verify",
+  // Public account-deletion form and its emailed confirmation (owner verified by token).
+  "/api/account-deletion-requests",
+  "/api/account-deletion-requests/confirm",
+  "/api/data-deletion-requests",
   "/api/internal/ws-session",
   "/api/public/hero-slides",
   "/api/public/hero-image",

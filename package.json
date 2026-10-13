@@ -29,6 +29,7 @@
     "backfill:payout-encryption": "tsx scripts/backfill-payout-encryption.ts",
     "backfill:email-lookup": "tsx scripts/backfill-email-lookup.ts",
     "reconcile:wallet": "tsx scripts/reconcile-wallet-history.ts",
+    "erasure:process": "tsx scripts/process-erasure-jobs.ts",
     "db:reset": "prisma migrate reset --force"
   },
   "prisma": {

@@ -80,7 +80,8 @@ export async function POST(req: NextRequest) {
       action: "DATA_DELETION_REQUESTED",
       entityType: "DeletionRequest",
       entityId: request.id,
-      metadata: { email, ip, dataTypes },
+      // No email or IP in the immutable audit trail (they stay on the request row).
+      metadata: { dataTypes },
     });
 
     return jsonOk({

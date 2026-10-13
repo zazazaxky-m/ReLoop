@@ -23,6 +23,9 @@ import { HttpError } from "./rbac";
  * recipient User (immutable Trip.userId, if any), then the Trip, then all of
  * its TrashBagAssignment rows in id order, and writes the trip return EARN
  * (business key `trip:<id>:return`) last.
+ * An account erasure (lib/erasure-jobs.ts) locks the User, then every
+ * PayoutAccount and every Redemption of that user (each class in id order),
+ * and re-reads balances and open activity before anonymizing.
  */
 
 /**

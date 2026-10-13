@@ -26,7 +26,7 @@ const sections = [
   },
   {
     title: "4. Hak Anda",
-    body: "Anda berhak untuk: (a) mengakses data pribadi yang kami simpan; (b) meminta koreksi atas data yang tidak akurat; (c) menghapus akun dan data pribadi Anda; (d) menarik persetujuan atas pemrosesan data kapan saja; (e) mengajukan keluhan kepada otoritas perlindungan data yang berwenang. Anda dapat menggunakan hak-hak tersebut dengan menghubungi kami melalui email di bawah ini, melalui menu Privasi di aplikasi, atau dengan mengunjungi halaman Hapus Akun (/account-deletion) atau Hapus Data (/data-deletion).",
+    body: "Anda berhak untuk: (a) mengakses data pribadi yang kami simpan; (b) meminta koreksi atas data yang tidak akurat; (c) menghapus akun dan data pribadi Anda, dengan pengecualian catatan yang wajib kami simpan sebagaimana dijelaskan di bagian 6; (d) menarik persetujuan atas pemrosesan data kapan saja; (e) mengajukan keluhan kepada otoritas perlindungan data yang berwenang. Anda dapat menggunakan hak-hak tersebut dengan menghubungi kami melalui email di bawah ini, melalui menu Privasi di aplikasi, atau dengan mengunjungi halaman Hapus Akun (/account-deletion) atau Hapus Data (/data-deletion).",
   },
   {
     title: "5. Cookie & Teknologi Pelacakan",
@@ -34,7 +34,7 @@ const sections = [
   },
   {
     title: "6. Penyimpanan & Retensi Data",
-    body: "Data pribadi disimpan selama akun Anda aktif. Setelah akun dihapus, kami akan menghapus atau menganonimkan data pribadi Anda dalam waktu 30 hari, kecuali kami diharuskan menyimpan data tertentu lebih lama untuk memenuhi kewajiban hukum, akuntansi, atau pencegahan penipuan. Data agregat yang tidak dapat diidentifikasi dapat disimpan untuk tujuan analitik dan statistik.",
+    body: "Data pribadi disimpan selama akun Anda aktif. Saat Anda menghapus akun (dari aplikasi, atau lewat halaman Hapus Akun lalu mengonfirmasi tautan di email akun), kami menghapus nama, email, nomor telepon, kata sandi, kunci MFA, token perangkat, nomor dan nama akun pencairan, nomor tujuan pada riwayat pencairan, catatan operator, berkas bukti transfer, dan notifikasi Anda, lalu menonaktifkan akun. Jika masih ada saldo atau transaksi yang belum selesai, penghapusan ditunda sampai semuanya selesai dan saldo tidak dihanguskan. Yang tetap disimpan, tanpa nama, email, atau telepon Anda: riwayat setoran, ledger reward, nominal dan status pencairan, sidik jari nomor referensi transfer, catatan audit, data trip, dan foto keamanan mesin, untuk pembukuan, rekonsiliasi keuangan, keamanan, dan pencegahan penipuan. Lama penyimpanannya mengikuti kebijakan retensi yang disetujui ReLoop. Data agregat yang tidak dapat diidentifikasi dapat disimpan untuk tujuan analitik dan statistik.",
   },
   {
     title: "7. Layanan Pihak Ketiga",

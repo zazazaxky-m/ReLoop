@@ -1044,21 +1044,36 @@ model ConsentRecord {
 }
 
 model DeletionRequest {
-  id          String           @id @default(cuid())
-  email       String
+  id          String                @id @default(cuid())
+  /// Email typed into the public form (null for requests made from a signed-in
+  /// session). Erased together with the account (lib/erasure-jobs.ts).
+  email       String?
   userId      String?
-  // PARTIAL = some data categories; FULL = account + all data
-  scope       DeletionRequestScope @default(PARTIAL)
-  dataTypes   String[]         // For PARTIAL: which categories were requested
+  // PARTIAL = some data categories; FULL = account erasure (lib/erasure-jobs.ts)
+  scope       DeletionRequestScope  @default(PARTIAL)
+  dataTypes   String[] // For PARTIAL: which categories were requested
   reason      String?
   status      DeletionRequestStatus @default(PENDING)
   ipAddress   String?
   userAgent   String?
   processedAt DateTime?
-  createdAt   DateTime         @default(now())
+  createdAt   DateTime              @default(now())
+
+  /// How the account owner confirmed a FULL request; null = not verified, never executed.
+  verificationMethod    DeletionVerificationMethod?
+  /// SHA-256 of the one-time token mailed to the account (raw token never stored).
+  verificationTokenHash String?                     @unique
+  verificationExpiresAt DateTime?
+  verifiedAt            DateTime?
+  /// PENDING_RECONCILIATION only: the open balances/obligations that hold the
+  /// erasure (numbers and counts, never personal data).
+  reconciliationJson    Json?
+
+  steps ErasureJobStep[]
 
   @@index([email])
   @@index([status, createdAt])
+  @@index([userId, status])
 }
 
 enum DeletionRequestScope {
@@ -1066,12 +1081,58 @@ enum DeletionRequestScope {
   FULL
 }
 
+/// PENDING: received, not verified by the account owner (nothing runs).
+/// VERIFIED/PROCESSING: verified, erasure steps queued or running.
+/// PENDING_RECONCILIATION: verified, held until open balances/payouts settle; nothing erased yet.
+/// RETRYABLE_FAILED: a required step failed and will be retried; not complete.
+/// COMPLETED: every required step finished.
 enum DeletionRequestStatus {
   PENDING
   VERIFIED
   PROCESSING
+  PENDING_RECONCILIATION
+  RETRYABLE_FAILED
   COMPLETED
   REJECTED
+}
+
+enum DeletionVerificationMethod {
+  /// The owner asked from an authenticated session (DELETE /api/user/data).
+  SESSION
+  /// The owner opened the one-time link mailed to the account address.
+  EMAIL_TOKEN
+  /// An operator verified the owner out of band (scripts/process-erasure-jobs.ts).
+  OPERATOR
+}
+
+enum ErasureStepName {
+  /// One DB transaction under the User lock: redact profile, clear secrets and
+  /// tokens, disable payout accounts, erase destination copies and free text.
+  ANONYMIZE_ACCOUNT
+  /// After commit: delete the owner's transfer-proof files from private storage.
+  DELETE_PROOF_FILES
+}
+
+/// Durable, idempotent step of a FULL deletion request. A request is COMPLETED
+/// only when every one of its steps has completedAt.
+model ErasureJobStep {
+  id            String          @id @default(cuid())
+  requestId     String
+  request       DeletionRequest @relation(fields: [requestId], references: [id])
+  step          ErasureStepName
+  attempts      Int             @default(0)
+  /// Earliest time the periodic runner retries/re-checks this step.
+  nextAttemptAt DateTime        @default(now())
+  completedAt   DateTime?
+  /// Error class/code of the last failed attempt (never a message with data).
+  lastError     String?
+  /// Non-personal inputs of a post-commit step (e.g. redemption ids whose proof folders are removed).
+  payloadJson   Json?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([requestId, step])
+  @@index([completedAt, nextAttemptAt])
 }
 
 model SystemConfig {

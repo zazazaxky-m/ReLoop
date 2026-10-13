@@ -15,6 +15,7 @@ import {
 } from "./ledger";
 import { createNotification } from "./notifications";
 import {
+  ERASED_ACCOUNT_IDENTIFIER,
   SETTLED_REDEMPTION_STATUSES,
   destinationSnapshotData,
   unavailableDestinationData,
@@ -400,7 +401,10 @@ async function destinationForChange(
         select: { provider: true, accountIdentifier: true, accountName: true },
       })
     : null;
-  if (account) return destinationSnapshotData(account, "LEGACY_ACCOUNT_FALLBACK");
+  // An erased account (lib/erasure-jobs.ts) has no number left to record.
+  if (account && account.accountIdentifier !== ERASED_ACCOUNT_IDENTIFIER) {
+    return destinationSnapshotData(account, "LEGACY_ACCOUNT_FALLBACK");
+  }
   if (mode === "required") throw new HttpError(409, REDEMPTION_DESTINATION_UNAVAILABLE);
   return unavailableDestinationData();
 }
@@ -527,7 +531,9 @@ export async function transitionRedemption(
         metadata: {
           from,
           to: redemption.status,
-          note: input.note,
+          // The note itself stays on the request (erasable); audit rows are
+          // immutable, so free text that may hold account data never goes here.
+          hasNote: input.note ? true : undefined,
           destinationSource: rule.destination === "none" ? undefined : redemption.payoutDestinationSource,
           reconciliationResolved: resolvedReconciliation || undefined,
         },
@@ -599,7 +605,7 @@ export async function flagRedemptionForReconciliation(
         action: "REDEMPTION_FLAG_RECONCILIATION",
         entityType: "Redemption",
         entityId: id,
-        metadata: { note, destinationSource: outcome.redemption.payoutDestinationSource },
+        metadata: { hasNote: true, destinationSource: outcome.redemption.payoutDestinationSource },
       }),
     );
   }

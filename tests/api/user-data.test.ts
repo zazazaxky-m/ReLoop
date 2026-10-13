@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { GET, DELETE } from "@/app/api/user/data/route";
 import * as rbac from "@/lib/rbac";
 import * as gdpr from "@/lib/gdpr";
+import * as erasure from "@/lib/erasure-jobs";
 
 vi.mock("@/lib/rbac", () => ({
   requireApiUser: vi.fn(),
@@ -12,8 +13,16 @@ vi.mock("@/lib/rbac", () => ({
 
 vi.mock("@/lib/gdpr", () => ({
   createUserDataExportStream: vi.fn(),
-  processErasureRequest: vi.fn(),
 }));
+
+vi.mock('@/lib/erasure-jobs', () => ({
+  ERASURE_ONLY_USERS: 'Hanya pengguna biasa yang dapat menghapus data',
+  requestErasure: vi.fn(),
+  runErasureJob: vi.fn(),
+  getErasureStatus: vi.fn(),
+}));
+
+vi.mock('@/lib/auth', () => ({ clearSessionCookie: vi.fn() }));
 
 describe("/api/user/data", () => {
   beforeEach(() => {
@@ -45,11 +54,15 @@ describe("/api/user/data", () => {
       expect(res.status).toBe(403);
     });
 
-    it("processes erasure request if user is USER", async () => {
+    it("reports a retrying erasure as not completed (202)", async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: "u1", role: "USER" } as any);
+      vi.mocked(erasure.requestErasure).mockResolvedValue({ requestId: "r1", status: "PROCESSING" });
+      vi.mocked(erasure.runErasureJob).mockRejectedValue(new Error("db down"));
+      vi.mocked(erasure.getErasureStatus).mockResolvedValue({ requestId: "r1", status: "RETRYABLE_FAILED", completed: false, accountErased: false } as any);
+      vi.spyOn(console, "error").mockImplementation(() => {});
       const res = await DELETE();
-      expect(res.status).toBe(200);
-      expect(gdpr.processErasureRequest).toHaveBeenCalledWith("u1");
+      expect(res.status).toBe(202);
+      expect(await res.json()).toMatchObject({ status: "RETRYABLE_FAILED", completed: false });
     });
 
     it("handles errors", async () => {

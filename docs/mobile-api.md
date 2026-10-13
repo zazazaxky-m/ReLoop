@@ -145,10 +145,12 @@ mengembalikan `payoutDestination`:
 ```
 
 `erased: true` (dengan `accountIdentifier` dan `accountName` bernilai `null`)
-berarti nomor dan nama tujuan sudah dihapus karena pemiliknya mengajukan hapus
-data (`DELETE /api/user/data`). Penghapusan ini hanya berlaku untuk pengajuan
-yang sudah selesai (SUCCESS, FAILED, REVERSED); pengajuan yang belum selesai
-tetap menyimpan tujuannya agar bisa dibayar atau direkonsiliasi.
+berarti nomor dan nama tujuan sudah dihapus karena pemiliknya menghapus akun
+(`DELETE /api/user/data`, A04). Penghapusan akun baru berjalan setelah semua
+pengajuan pemilik selesai (SUCCESS, FAILED, REVERSED); selama masih ada
+pengajuan yang berjalan, permintaan ditahan (`PENDING_RECONCILIATION`) dan
+semua tujuan tetap tersimpan agar bisa dibayar atau direkonsiliasi. Pengajuan
+lama tanpa salinan yang akunnya sudah dihapus juga tampil `erased: true`.
 
 `source` bernilai `REQUEST_SNAPSHOT` (disalin saat pengajuan),
 `LEGACY_ACCOUNT_FALLBACK` (pengajuan lama tanpa salinan: akun pemilik dicatat
@@ -241,6 +243,45 @@ tidak menimpa trip yang sudah selesai (409 `Status trip sudah berubah. Muat
 ulang halaman lalu coba lagi.`). Antrean lock yang terlalu lama dijawab 503
 `Sistem sedang sibuk. Silakan coba lagi.` tanpa perubahan. Audit dan notifikasi
 dikirim setelah commit.
+
+## Penghapusan akun (A04)
+
+`DELETE /api/user/data` (role USER, sesi aktif = verifikasi pemilik) selalu
+menjawab **202 Accepted** dengan status pekerjaan; klien lama yang menerima
+semua 2xx tetap berfungsi tetapi wajib membaca `status`/`completed`:
+
+```json
+{ "requestId": "…", "status": "COMPLETED", "completed": true, "accountErased": true,
+  "message": "…", "resolutionSteps": [], "erased": ["…"], "retained": ["…"] }
+```
+
+| `status` | Arti | Akun |
+|---|---|---|
+| `PENDING_RECONCILIATION` | Ditunda: masih ada saldo tersedia/ditinjau/tertahan, pencairan berjalan, sesi setoran terbuka, atau trip aktif. **Belum ada data yang dihapus.** `resolutionSteps` berisi langkah penyelesaian. | Tetap aktif, login tidak dikunci |
+| `PROCESSING` | Sedang berjalan. | Aktif sampai anonimisasi selesai |
+| `RETRYABLE_FAILED` | Ada langkah gagal, dicoba ulang otomatis. `accountErased` menyatakan apakah profil sudah dianonimkan. Bukan sukses. | Nonaktif bila `accountErased` |
+| `COMPLETED` | Semua langkah wajib selesai. | Nonaktif, sesi dicabut |
+
+Bila `accountErased` bernilai `true`, server sudah mencabut semua sesi
+(`tokenVersion`) dan menghapus cookie; klien harus menghapus kredensial lokal
+(biometrik, email tersimpan) lalu logout. Memanggil ulang `DELETE` saat
+permintaan masih terbuka mengembalikan `requestId` yang sama (permintaan yang
+ditahan diperiksa ulang). `GET /api/user/data/erasure` mengembalikan
+`{ "erasure": <objek yang sama> | null }` untuk menampilkan status yang masih
+berjalan. Pesan tidak pernah menyatakan seluruh data terhapus: `retained`
+menjelaskan data yang tetap disimpan tanpa identitas dan alasannya (lihat
+docs/privacy-erasure.md).
+
+Formulir publik `POST /api/account-deletion-requests` hanya mencatat
+permintaan (202, jawaban sama untuk email terdaftar maupun tidak) dan mengirim
+tautan konfirmasi sekali pakai ke email akun. Penghapusan baru berjalan setelah
+`POST /api/account-deletion-requests/confirm { "token": "…" }` (jawaban 202
+dengan objek status di atas; token salah, terpakai, atau kedaluwarsa = 400).
+
+`GET /api/user/data` (ekspor) kini juga memuat `payoutAccounts`, `trips`,
+`notifications`, `deletionRequests`, dan `payoutDestination` per pencairan
+(nomor dan nama tujuan milik pemilik dalam bentuk teks biasa; ciphertext dan
+`requestHash` tidak pernah dikirim).
 
 ## Strategi Caching & Offline (Khusus Pengepul)
 

@@ -11,25 +11,25 @@ import { decrypt, encrypt } from "./encryption";
  * account. Ciphertext never leaves the server: use `publicRedemption` for
  * responses and `describePayoutDestination` for an authorized view.
  *
- * A data-erasure request (lib/gdpr.ts) nulls the identifier and name on the
- * owner's settled requests and keeps provider/source/capturedAt, so the queue
- * shows the destination as erased. Unsettled requests keep the snapshot: it is
- * still needed to pay or reconcile them.
+ * An account erasure (lib/erasure-jobs.ts) runs only once every request of the
+ * owner is settled; it then nulls the identifier and name on all of them and
+ * keeps provider/source/capturedAt, so the queue shows the destination as
+ * erased. It also blanks the owner's PayoutAccount (ERASED_ACCOUNT_IDENTIFIER),
+ * so a legacy request without a snapshot shows as erased, not as an empty
+ * live account.
  */
 
 /** Statuses after which a payout is settled and its destination no longer needed. */
 export const SETTLED_REDEMPTION_STATUSES = ["SUCCESS", "FAILED", "REVERSED"] as const satisfies readonly RedemptionStatus[];
 
-/** A request still carrying any destination PII. */
-export const HAS_DESTINATION_PII = {
-  OR: [{ payoutDestinationIdentifier: { not: null } }, { payoutDestinationName: { not: null } }],
-};
-
-/** Columns written when a data-erasure request removes a settled destination. */
+/** Columns written when an account erasure removes a settled destination. */
 export const ERASED_DESTINATION_DATA = {
   payoutDestinationIdentifier: null,
   payoutDestinationName: null,
 };
+
+/** PayoutAccount.accountIdentifier after the owner's account erasure (accountName is null). */
+export const ERASED_ACCOUNT_IDENTIFIER = "";
 
 export interface PayoutDestinationView {
   /** REQUEST_SNAPSHOT, a recorded legacy fallback, or a legacy live view (capturedAt null). */
@@ -39,7 +39,7 @@ export interface PayoutDestinationView {
   accountName: string | null;
   /** When the destination was recorded on the request; null = legacy, not recorded yet. */
   capturedAt: Date | null;
-  /** The number and name were removed by the owner's data-erasure request. */
+  /** The number and name were removed by the owner's account erasure. */
   erased: boolean;
 }
 
@@ -117,13 +117,14 @@ export function describePayoutDestination(
     };
   }
   if (currentAccount) {
+    const erased = currentAccount.accountIdentifier === ERASED_ACCOUNT_IDENTIFIER;
     return {
       source: "LEGACY_ACCOUNT_FALLBACK",
       provider: currentAccount.provider,
-      accountIdentifier: currentAccount.accountIdentifier,
-      accountName: currentAccount.accountName,
+      accountIdentifier: erased ? null : currentAccount.accountIdentifier,
+      accountName: erased ? null : currentAccount.accountName,
       capturedAt: null,
-      erased: false,
+      erased,
     };
   }
   return {

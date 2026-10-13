@@ -1,11 +1,6 @@
 import { prisma } from "./prisma";
 import { logAudit } from "./audit";
-import {
-  ERASED_DESTINATION_DATA,
-  HAS_DESTINATION_PII,
-  REDEMPTION_PRIVATE_COLUMNS,
-  SETTLED_REDEMPTION_STATUSES,
-} from "./payout-destination";
+import { describePayoutDestination, publicRedemption } from "./payout-destination";
 
 export const CONSENT_TYPES = [
   "marketing_emails",
@@ -53,73 +48,7 @@ export async function verifyConsent(
   return last?.granted ?? false;
 }
 
-export async function processErasureRequest(userId: string) {
-  const erasureLog: Record<string, unknown> = {
-    userId,
-    requestedAt: new Date().toISOString(),
-    steps: [] as string[],
-  };
-  const steps = erasureLog.steps as string[];
-
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw new Error("User not found");
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      name: "[REDACTED]",
-      email: `redacted-${userId}@reloop.id`,
-      phone: null,
-      passwordHash: null,
-      status: "INACTIVE",
-      totpSecret: null,
-      mfaEnabled: false,
-    },
-  });
-  steps.push("profile_redacted");
-
-  await prisma.depositSession.updateMany({
-    where: { userId },
-    data: { userId: "[REDACTED]" as never },
-  });
-  steps.push("sessions_anonymized");
-
-  await prisma.payoutAccount.deleteMany({ where: { userId } });
-  steps.push("payout_accounts_deleted");
-
-  // M02 copies the account number and holder name onto each redemption.
-  // Settled requests no longer need them; unsettled ones keep the copy until
-  // they are paid or reconciled (A04 gates erasure on open obligations).
-  const erasedDestinations = await prisma.redemption.updateMany({
-    where: { userId, status: { in: [...SETTLED_REDEMPTION_STATUSES] }, ...HAS_DESTINATION_PII },
-    data: ERASED_DESTINATION_DATA,
-  });
-  steps.push("redemption_destinations_erased");
-  const retainedDestinations = await prisma.redemption.count({
-    where: { userId, status: { notIn: [...SETTLED_REDEMPTION_STATUSES] }, ...HAS_DESTINATION_PII },
-  });
-  if (retainedDestinations > 0) steps.push("redemption_destinations_retained_for_settlement");
-  erasureLog.redemptionDestinations = {
-    erased: erasedDestinations.count,
-    retainedForSettlement: retainedDestinations,
-  };
-
-  await prisma.rewardLedger.updateMany({
-    where: { userId },
-    data: { actorId: "[REDACTED]" },
-  });
-  steps.push("ledger_anonymized");
-
-  await logAudit({
-    actorId: userId,
-    action: "DATA_ERASURE",
-    entityType: "User",
-    entityId: userId,
-    metadata: erasureLog,
-  });
-
-  return erasureLog;
-}
+// Account erasure lives in lib/erasure-jobs.ts (verified, atomic, resumable).
 
 async function paginatedFindMany<T>(
   fetchPage: (skip: number, take: number) => Promise<T[]>,
@@ -137,76 +66,117 @@ async function paginatedFindMany<T>(
   return rows;
 }
 
-/** Loads export data in bounded batches (for tests and small exports). */
-export async function exportUserData(userId: string) {
+type ExportPage = (userId: string, skip: number, take: number) => Promise<unknown[]>;
+
+/** Redemptions with the owner's own destination in plaintext; never ciphertext or the request hash. */
+const exportRedemptions: ExportPage = async (userId, skip, take) => {
+  const rows = await prisma.redemption.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, skip, take });
+  const accountIds = [...new Set(rows.map((row) => row.payoutAccountId).filter((id): id is string => Boolean(id)))];
+  const accounts = accountIds.length
+    ? await prisma.payoutAccount.findMany({ where: { id: { in: accountIds }, userId } })
+    : [];
+  const byId = new Map(accounts.map((account) => [account.id, account]));
+  return rows.map((row) => ({
+    ...publicRedemption(row),
+    payoutDestination: describePayoutDestination(
+      row,
+      row.payoutAccountId ? (byId.get(row.payoutAccountId) ?? null) : null,
+    ),
+  }));
+};
+
+/**
+ * Every section of an access export, in order. Both the in-memory export and
+ * the streamed download use this list, so they always expose the same data.
+ */
+const EXPORT_SECTIONS = {
+  depositSessions: (userId, skip, take) =>
+    prisma.depositSession.findMany({
+      where: { userId },
+      include: { items: true, machine: { select: { machineCode: true, name: true } } },
+      orderBy: { startedAt: "desc" },
+      skip,
+      take,
+    }),
+  ledger: (userId, skip, take) =>
+    prisma.rewardLedger.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, skip, take }),
+  consents: (userId, skip, take) =>
+    prisma.consentRecord.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, skip, take }),
+  redemptions: exportRedemptions,
+  // Decrypted by the PayoutAccount extension: the owner's own account data.
+  payoutAccounts: (userId, skip, take) =>
+    prisma.payoutAccount.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+      select: { id: true, provider: true, accountIdentifier: true, accountName: true, status: true,
+        verifiedAt: true, createdAt: true, updatedAt: true },
+    }),
+  // Leader name/contact describe the trip leader, not necessarily the owner: not exported.
+  trips: (userId, skip, take) =>
+    prisma.trip.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+      select: { id: true, campaignId: true, travelAgentName: true, groupName: true, participantCount: true,
+        status: true, complianceStatus: true, complianceScore: true, checkInAt: true, checkOutAt: true, createdAt: true },
+    }),
+  notifications: (userId, skip, take) =>
+    prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+      select: { id: true, type: true, title: true, body: true, readAt: true, createdAt: true },
+    }),
+  deletionRequests: (userId, skip, take) =>
+    prisma.deletionRequest.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take,
+      select: { id: true, scope: true, status: true, verificationMethod: true, createdAt: true, processedAt: true },
+    }),
+} satisfies Record<string, ExportPage>;
+
+type ExportSection = keyof typeof EXPORT_SECTIONS;
+const SECTION_NAMES = Object.keys(EXPORT_SECTIONS) as ExportSection[];
+
+async function exportProfile(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
+  return user
+    ? { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, createdAt: user.createdAt }
+    : null;
+}
 
-  const [sessions, ledger, consents, redemptions] = await Promise.all([
-    paginatedFindMany((skip, take) =>
-      prisma.depositSession.findMany({
-        where: { userId },
-        include: {
-          items: true,
-          machine: { select: { machineCode: true, name: true } },
-        },
-        orderBy: { startedAt: "desc" },
-        skip,
-        take,
-      }),
-    ),
-    paginatedFindMany((skip, take) =>
-      prisma.rewardLedger.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take,
-      }),
-    ),
-    paginatedFindMany((skip, take) =>
-      prisma.consentRecord.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take,
-      }),
-    ),
-    paginatedFindMany((skip, take) =>
-      prisma.redemption.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take,
-        omit: REDEMPTION_PRIVATE_COLUMNS,
-      }),
-    ),
+export type UserDataExport = {
+  exportDate: string;
+  profile: Awaited<ReturnType<typeof exportProfile>>;
+} & Record<ExportSection, unknown[]>;
+
+/** Loads export data in bounded batches (for tests and small exports). */
+export async function exportUserData(userId: string): Promise<UserDataExport> {
+  const [profile, sections] = await Promise.all([
+    exportProfile(userId),
+    Promise.all(SECTION_NAMES.map((name) =>
+      paginatedFindMany((skip, take) => EXPORT_SECTIONS[name](userId, skip, take)))),
   ]);
-
   return {
     exportDate: new Date().toISOString(),
-    profile: user
-      ? {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-          createdAt: user.createdAt,
-        }
-      : null,
-    depositSessions: sessions,
-    ledger,
-    consents,
-    redemptions,
+    profile,
+    ...(Object.fromEntries(SECTION_NAMES.map((name, index) => [name, sections[index]])) as Record<ExportSection, unknown[]>),
   };
 }
 
-async function writeJsonArrayStream<T>(
+async function writeJsonArrayStream(
   controller: ReadableStreamDefaultController<Uint8Array>,
   encoder: TextEncoder,
   label: string,
-  fetchPage: (skip: number, take: number) => Promise<T[]>,
+  fetchPage: (skip: number, take: number) => Promise<unknown[]>,
 ) {
-  controller.enqueue(encoder.encode(`"${label}":[`));
+  controller.enqueue(encoder.encode(`,${JSON.stringify(label)}:[`));
   let first = true;
   let skip = 0;
 
@@ -221,7 +191,7 @@ async function writeJsonArrayStream<T>(
     skip += batch.length;
   }
 
-  controller.enqueue(encoder.encode("],"));
+  controller.enqueue(encoder.encode("]"));
 }
 
 /** Streams a JSON export without loading the full payload into memory. */
@@ -231,76 +201,16 @@ export function createUserDataExportStream(userId: string): ReadableStream<Uint8
   return new ReadableStream({
     async start(controller) {
       try {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
-        const profile = user
-          ? {
-              id: user.id,
-              name: user.name,
-              email: user.email,
-              phone: user.phone,
-              role: user.role,
-              createdAt: user.createdAt,
-            }
-          : null;
-
-        controller.enqueue(encoder.encode("{"));
+        const profile = await exportProfile(userId);
         controller.enqueue(
           encoder.encode(
-            `"exportDate":${JSON.stringify(new Date().toISOString())},"profile":${JSON.stringify(profile)},`,
+            `{"exportDate":${JSON.stringify(new Date().toISOString())},"profile":${JSON.stringify(profile)}`,
           ),
         );
-
-        await writeJsonArrayStream(controller, encoder, "depositSessions", (skip, take) =>
-          prisma.depositSession.findMany({
-            where: { userId },
-            include: {
-              items: true,
-              machine: { select: { machineCode: true, name: true } },
-            },
-            orderBy: { startedAt: "desc" },
-            skip,
-            take,
-          }),
-        );
-
-        await writeJsonArrayStream(controller, encoder, "ledger", (skip, take) =>
-          prisma.rewardLedger.findMany({
-            where: { userId },
-            orderBy: { createdAt: "desc" },
-            skip,
-            take,
-          }),
-        );
-
-        await writeJsonArrayStream(controller, encoder, "consents", (skip, take) =>
-          prisma.consentRecord.findMany({
-            where: { userId },
-            orderBy: { createdAt: "desc" },
-            skip,
-            take,
-          }),
-        );
-
-        controller.enqueue(encoder.encode('"redemptions":['));
-        let first = true;
-        let skip = 0;
-        while (true) {
-          const batch = await prisma.redemption.findMany({
-            where: { userId },
-            orderBy: { createdAt: "desc" },
-            skip,
-            take: EXPORT_BATCH_SIZE,
-            omit: REDEMPTION_PRIVATE_COLUMNS,
-          });
-          for (const item of batch) {
-            if (!first) controller.enqueue(encoder.encode(","));
-            controller.enqueue(encoder.encode(JSON.stringify(item)));
-            first = false;
-          }
-          if (batch.length < EXPORT_BATCH_SIZE) break;
-          skip += batch.length;
+        for (const name of SECTION_NAMES) {
+          await writeJsonArrayStream(controller, encoder, name, (skip, take) => EXPORT_SECTIONS[name](userId, skip, take));
         }
-        controller.enqueue(encoder.encode("]}"));
+        controller.enqueue(encoder.encode("}"));
         controller.close();
       } catch (error) {
         controller.error(error);

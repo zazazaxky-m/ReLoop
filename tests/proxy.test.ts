@@ -68,6 +68,15 @@ describe("proxy", () => {
     expect(res.status).toBe(200);
   });
 
+  it("lets a signed-out owner reach the public deletion forms and the account-deletion confirmation", async () => {
+    for (const path of ["/api/account-deletion-requests", "/api/account-deletion-requests/confirm", "/api/data-deletion-requests"]) {
+      const res = await proxy(new NextRequest(`http://localhost${path}`, { method: "POST" }));
+      expect(res.status).toBe(200);
+    }
+    // The signed-in erasure endpoint stays behind the session check.
+    expect((await proxy(new NextRequest("http://localhost/api/user/data", { method: "DELETE" }))).status).toBe(401);
+  });
+
   it("allows public API prefix paths without a session", async () => {
     const res = await proxy(new NextRequest("http://localhost/api/display/ABC123"));
     expect(res.status).toBe(200);

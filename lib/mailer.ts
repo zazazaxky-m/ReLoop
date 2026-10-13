@@ -32,19 +32,25 @@ function buildPasswordResetContent(resetUrl: string) {
   return { text, html };
 }
 
-/** Sends transactional email via Resend when configured; logs a redacted notice in dev otherwise. */
-export async function sendPasswordResetEmail(
-  input: PasswordResetEmailInput,
-): Promise<SendEmailResult> {
+interface OutgoingEmail {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+  /** Indonesian noun phrase used in logs and errors, e.g. "reset". */
+  label: string;
+}
+
+/** Resend when configured; the audit test sink under AUDIT_TEST_RUN; never logs links or addresses. */
+async function deliverEmail(email: OutgoingEmail): Promise<SendEmailResult> {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const from =
     process.env.EMAIL_FROM?.trim() ?? "ReLoop <noreply@reloop.local>";
-  const subject = "Reset kata sandi ReLoop";
-  const { text, html } = buildPasswordResetContent(input.resetUrl);
+  const { to, subject, text, html, label } = email;
 
   const sink = auditTransportSink();
   if (sink) {
-    captureTransport(sink, { kind: "mail", to: input.to, subject, text, html });
+    captureTransport(sink, { kind: "mail", to, subject, text, html });
     return { sent: true, provider: "test-capture" };
   }
 
@@ -57,7 +63,7 @@ export async function sendPasswordResetEmail(
       },
       body: JSON.stringify({
         from,
-        to: [input.to],
+        to: [to],
         subject,
         text,
         html,
@@ -67,7 +73,7 @@ export async function sendPasswordResetEmail(
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
       throw new Error(
-        `Gagal mengirim email reset (${res.status})${detail ? `: ${detail}` : ""}`,
+        `Gagal mengirim email ${label} (${res.status})${detail ? `: ${detail}` : ""}`,
       );
     }
 
@@ -75,15 +81,67 @@ export async function sendPasswordResetEmail(
   }
 
   if (process.env.NODE_ENV !== "production") {
-    // Never log the reset URL: it carries a live reset token.
+    // Never log the link: it carries a live single-use token.
     console.info(
-      "[mailer] RESEND_API_KEY is not configured; password reset email was not sent (link withheld from logs)",
+      `[mailer] RESEND_API_KEY is not configured; ${label} email was not sent (link withheld from logs)`,
     );
     return { sent: false, provider: "log" };
   }
 
   console.warn(
-    "[mailer] RESEND_API_KEY is not configured; password reset email was not sent",
+    `[mailer] RESEND_API_KEY is not configured; ${label} email was not sent`,
   );
   return { sent: false, provider: "none" };
+}
+
+/** Sends transactional email via Resend when configured; logs a redacted notice in dev otherwise. */
+export async function sendPasswordResetEmail(
+  input: PasswordResetEmailInput,
+): Promise<SendEmailResult> {
+  const { text, html } = buildPasswordResetContent(input.resetUrl);
+  return deliverEmail({ to: input.to, subject: "Reset kata sandi ReLoop", text, html, label: "reset" });
+}
+
+export interface AccountDeletionEmailInput {
+  to: string;
+  confirmUrl: string;
+}
+
+function buildAccountDeletionContent(confirmUrl: string) {
+  const text = [
+    "Kami menerima permintaan untuk menghapus akun ReLoop yang terdaftar dengan alamat email ini.",
+    "",
+    "Tidak ada data yang dihapus sebelum Anda mengonfirmasi. Buka tautan berikut untuk meninjau dan mengonfirmasi (berlaku 24 jam, sekali pakai):",
+    confirmUrl,
+    "",
+    "Jika masih ada saldo atau pencairan yang belum selesai, penghapusan ditunda sampai semuanya selesai dan akun tetap dapat Anda gunakan.",
+    "Jika Anda tidak meminta penghapusan, abaikan email ini; akun Anda tidak berubah.",
+  ].join("\n");
+
+  const html = `<!DOCTYPE html>
+<html lang="id">
+<body style="font-family:system-ui,sans-serif;line-height:1.5;color:#0f172a">
+  <p>Kami menerima permintaan untuk menghapus akun ReLoop yang terdaftar dengan alamat email ini.</p>
+  <p>Tidak ada data yang dihapus sebelum Anda mengonfirmasi. Tautan berlaku 24 jam dan hanya dapat dipakai sekali.</p>
+  <p><a href="${confirmUrl}">Tinjau dan konfirmasi penghapusan akun</a></p>
+  <p style="color:#64748b;font-size:14px">Jika masih ada saldo atau pencairan yang belum selesai, penghapusan ditunda sampai semuanya selesai dan akun tetap dapat Anda gunakan.</p>
+  <p style="color:#64748b;font-size:14px">Jika Anda tidak meminta penghapusan, abaikan email ini; akun Anda tidak berubah.</p>
+</body>
+</html>`;
+
+  return { text, html };
+}
+
+/** One-time confirmation link for a public account-deletion request (lib/erasure-jobs.ts). */
+export async function sendAccountDeletionVerificationEmail(
+  input: AccountDeletionEmailInput,
+): Promise<SendEmailResult> {
+  const { text, html } = buildAccountDeletionContent(input.confirmUrl);
+  return deliverEmail({
+    to: input.to,
+    subject: "Konfirmasi penghapusan akun ReLoop",
+    text,
+    html,
+    label: "konfirmasi penghapusan akun",
+  });
 }

@@ -30,6 +30,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _biometricAvailable = false;
   bool _biometricEnabled = false;
   String? _biometricType;
+  // Latest verified account-erasure request (null = none); see /api/user/data/erasure.
+  Map<String, dynamic>? _erasure;
+  bool _erasing = false;
 
   @override
   void initState() {
@@ -39,6 +42,102 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _phoneCtrl.text = auth.user?.phone ?? '';
     _emailCtrl.text = auth.user?.email ?? '';
     _checkBiometric();
+    if (auth.user?.role == AppRole.USER) _loadErasureStatus();
+  }
+
+  Future<void> _loadErasureStatus() async {
+    try {
+      final res = await context.read<ApiClient>().get('/api/user/data/erasure');
+      final erasure = res.data is Map ? res.data['erasure'] : null;
+      if (mounted) {
+        setState(() => _erasure = erasure is Map ? Map<String, dynamic>.from(erasure) : null);
+      }
+    } catch (_) {
+      // Status is informational; the delete action still reports it.
+    }
+  }
+
+  List<String> _stringList(Object? value) =>
+      value is List ? value.whereType<String>().toList() : const [];
+
+  /// Asks the server to erase the account. Every 2xx carries the job status:
+  /// COMPLETED / PROCESSING / RETRYABLE_FAILED / PENDING_RECONCILIATION.
+  Future<void> _requestAccountDeletion() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hapus Akun?'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'Yang dihapus: nama, email, nomor telepon, kata sandi, MFA, token perangkat, '
+            'nomor dan nama akun pencairan, nomor tujuan pada riwayat pencairan, catatan operator, '
+            'bukti transfer, dan notifikasi. Akun dinonaktifkan dan semua sesi login dicabut.\n\n'
+            'Yang tetap disimpan tanpa identitas Anda: riwayat setoran, ledger reward, nominal '
+            'pencairan, dan catatan audit, untuk pembukuan dan pencegahan penipuan.\n\n'
+            'Jika masih ada saldo atau pencairan yang berjalan, penghapusan ditunda sampai '
+            'selesai dan saldo tidak dihanguskan.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Hapus Akun', style: TextStyle(color: ReLoopColors.danger)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _erasing = true);
+    try {
+      final res = await context.read<ApiClient>().delete('/api/user/data');
+      final data = res.data is Map ? Map<String, dynamic>.from(res.data as Map) : <String, dynamic>{};
+      if (!mounted) return;
+      final completed = data['completed'] == true;
+      final accountErased = data['accountErased'] == true;
+      final steps = _stringList(data['resolutionSteps']);
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(completed
+              ? 'Penghapusan selesai'
+              : data['status'] == 'PENDING_RECONCILIATION'
+                  ? 'Penghapusan ditunda'
+                  : 'Penghapusan belum selesai'),
+          content: SingleChildScrollView(
+            child: Text([
+              (data['message'] as String?) ?? 'Permintaan penghapusan diterima.',
+              ...steps.map((step) => '• $step'),
+            ].join('\n\n')),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Tutup')),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (accountErased) {
+        // The server already revoked every session; drop local credentials too.
+        await BiometricService().setEnabled(false);
+        await BiometricService().clearCredentials();
+        if (!mounted) return;
+        await context.read<AuthProvider>().logout();
+        return;
+      }
+      setState(() => _erasure = data);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ApiClient.getErrorMessage(e))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _erasing = false);
+    }
   }
 
   Future<void> _checkBiometric() async {
@@ -527,6 +626,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
           ),
+          if (user.role == AppRole.USER) ...[
+            const SizedBox(height: 16),
+            _AccountDeletionCard(
+              erasure: _erasure,
+              steps: _stringList(_erasure?['resolutionSteps']),
+              isLoading: _erasing,
+              onDelete: _requestAccountDeletion,
+            ),
+          ],
           const SizedBox(height: 32),
           ReLoopButton(
             label: 'Keluar',
@@ -550,6 +658,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onTap: () => context.push('/about'),
           ),
           const SizedBox(height: 80),
+        ],
+      ),
+    );
+  }
+}
+
+class _AccountDeletionCard extends StatelessWidget {
+  final Map<String, dynamic>? erasure;
+  final List<String> steps;
+  final bool isLoading;
+  final VoidCallback onDelete;
+
+  const _AccountDeletionCard({
+    required this.erasure,
+    required this.steps,
+    required this.isLoading,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final status = erasure?['status'] as String?;
+    final pending = status != null && erasure?['completed'] != true;
+    return ReLoopCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const ReLoopCardTitle(title: 'Hapus Akun'),
+          const SizedBox(height: 8),
+          Text(
+            pending
+                ? ((erasure?['message'] as String?) ?? 'Permintaan penghapusan belum selesai.')
+                : 'Menghapus data pribadi dan menonaktifkan akun. Catatan transaksi tetap disimpan tanpa identitas Anda.',
+            style: TextStyle(color: context.reloopMuted, fontSize: 13),
+          ),
+          if (pending && steps.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ...steps.map(
+              (step) => Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('• $step', style: TextStyle(color: context.reloopForeground, fontSize: 13)),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          ReLoopButton(
+            label: pending ? 'Periksa Ulang Status Penghapusan' : 'Hapus Akun',
+            icon: Icons.delete_outline,
+            variant: ReLoopButtonVariant.outline,
+            isLoading: isLoading,
+            onPressed: isLoading ? null : onDelete,
+          ),
         ],
       ),
     );

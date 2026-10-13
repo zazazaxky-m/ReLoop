@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 
 const INSECURE_DEFAULT = "audit-secret-change-me";
@@ -95,6 +96,51 @@ export async function logAudit(input: {
   } catch (err) {
     console.error("[AUDIT] failed to write log", err);
   }
+}
+
+/**
+ * Appends an audit entry inside the caller's transaction, so the entry commits
+ * or rolls back together with the change it records. Unlike `logAudit`, a
+ * failure is thrown (a swallowed error would leave the transaction aborted).
+ * The chain lock is held until the caller commits: call this last.
+ */
+export async function logAuditInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    actorId?: string | null;
+    action: string;
+    entityType: string;
+    entityId?: string | null;
+    metadata?: Record<string, unknown> | null;
+  },
+): Promise<void> {
+  const safeMetadata = redactAuditMetadata(input.metadata ?? undefined);
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${AUDIT_CHAIN_LOCK})`;
+  const prev = await tx.auditLog.findFirst({
+    orderBy: { createdAt: "desc" },
+    select: { checksum: true },
+  });
+  // Stamped after the chain lock, and the stored createdAt is the hashed ts.
+  const createdAt = new Date();
+  const canonical = JSON.stringify({
+    ts: createdAt.toISOString(),
+    actor: input.actorId,
+    action: input.action,
+    entity: `${input.entityType}:${input.entityId}`,
+    meta: safeMetadata,
+  });
+  await tx.auditLog.create({
+    data: {
+      actorId: input.actorId ?? null,
+      action: input.action,
+      entityType: input.entityType,
+      entityId: input.entityId ?? null,
+      metadataJson: (safeMetadata ?? undefined) as object | undefined,
+      previousHash: prev?.checksum ?? null,
+      checksum: checksumChain(prev?.checksum ?? null, canonical),
+      createdAt,
+    },
+  });
 }
 
 export async function verifyAuditChain(options?: {
