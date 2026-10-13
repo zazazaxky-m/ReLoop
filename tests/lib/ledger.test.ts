@@ -5,6 +5,9 @@ import {
   createEarnEntry,
   createRedeemReserve,
   settleRedeemLedger,
+  expectedReserveStatus,
+  RESERVE_MISMATCH,
+  RESERVE_MISSING,
   getLedgerHistory,
   countLedgerHistory,
   assertAppendOnlyPolicy,
@@ -128,27 +131,93 @@ describe('ledger', () => {
     });
   });
 
-  describe('settleRedeemLedger', () => {
-    it('returns null if no pending reserve found', async () => {
-      vi.mocked(prisma.rewardLedger.findFirst).mockResolvedValue(null);
-      const res = await settleRedeemLedger('red1', 'success');
-      expect(res).toBeNull();
+  describe('settleRedeemLedger (strict, inside the caller transaction)', () => {
+    type Row = Record<string, any>;
+    function settleTx(redemption: Row | null, reserves: Row[]) {
+      const tx = {
+        redemption: { findUnique: vi.fn(async () => redemption) },
+        rewardLedger: {
+          findMany: vi.fn(async () => reserves.map((r) => ({ ...r }))),
+          updateMany: vi.fn(async ({ where, data }: { where: Row; data: Row }) => {
+            const row = reserves.find((r) => r.id === where.id && r.status === where.status);
+            if (!row) return { count: 0 };
+            row.status = data.status;
+            return { count: 1 };
+          }),
+          findUnique: vi.fn(async ({ where }: { where: Row }) => reserves.find((r) => r.id === where.id) ?? null),
+        },
+      };
+      return tx as any;
+    }
+    const request = { id: 'red1', userId: 'u1', amount: 100 };
+    const reserve = (overrides: Row = {}) => ({ id: 'l1', userId: 'u1', amount: -100, status: 'PENDING', ...overrides });
+
+    it.each([
+      ['success', 'REDEEMED'],
+      ['failed', 'REVERSED'],
+    ] as const)('moves a PENDING reserve to the %s outcome with one conditional update', async (outcome, status) => {
+      const rows = [reserve()];
+      const tx = settleTx(request, rows);
+      await expect(settleRedeemLedger('red1', outcome, tx)).resolves.toMatchObject({ changed: true, entry: { id: 'l1', status } });
+      expect(tx.rewardLedger.updateMany).toHaveBeenCalledWith({ where: { id: 'l1', status: 'PENDING' }, data: { status } });
+      expect(tx.rewardLedger.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { entryType: 'REDEEM', referenceType: 'Redemption', referenceId: 'red1', status: { not: 'REJECTED' } } }));
+      expect(rows[0].status).toBe(status);
+      expect(prisma.rewardLedger.update).not.toHaveBeenCalled();
     });
 
-    it('updates to REDEEMED on success', async () => {
-      vi.mocked(prisma.rewardLedger.findFirst).mockResolvedValue({ id: 'ledger1' } as any);
-      await settleRedeemLedger('red1', 'success');
-      expect(prisma.rewardLedger.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'ledger1' }, data: { status: 'REDEEMED' } })
-      );
+    it('proves an existing matching settlement without mutating it', async () => {
+      const tx = settleTx(request, [reserve({ status: 'REDEEMED' })]);
+      await expect(settleRedeemLedger('red1', 'success', tx)).resolves.toMatchObject({ changed: false, entry: { status: 'REDEEMED' } });
+      expect(tx.rewardLedger.updateMany).not.toHaveBeenCalled();
     });
 
-    it('updates to REVERSED on failure', async () => {
-      vi.mocked(prisma.rewardLedger.findFirst).mockResolvedValue({ id: 'ledger1' } as any);
-      await settleRedeemLedger('red1', 'failed');
-      expect(prisma.rewardLedger.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'ledger1' }, data: { status: 'REVERSED' } })
-      );
+    it('refuses the opposite outcome instead of succeeding as a no-op', async () => {
+      const tx = settleTx(request, [reserve({ status: 'REVERSED' })]);
+      await expect(settleRedeemLedger('red1', 'success', tx)).rejects.toMatchObject({ status: 409, message: RESERVE_MISMATCH });
+      const paid = settleTx(request, [reserve({ status: 'REDEEMED' })]);
+      await expect(settleRedeemLedger('red1', 'failed', paid)).rejects.toMatchObject({ status: 409 });
+      expect(tx.rewardLedger.updateMany).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['missing', [], RESERVE_MISSING],
+      ['for another amount', [{ id: 'l1', userId: 'u1', amount: -90, status: 'PENDING' }], RESERVE_MISMATCH],
+      ['owned by another user', [{ id: 'l1', userId: 'u2', amount: -100, status: 'PENDING' }], RESERVE_MISMATCH],
+      ['duplicated', [{ id: 'l1', userId: 'u1', amount: -100, status: 'PENDING' }, { id: 'l2', userId: 'u1', amount: -100, status: 'PENDING' }], RESERVE_MISMATCH],
+    ])('answers 409 when the reserve is %s', async (_label, rows, message) => {
+      const tx = settleTx(request, rows as Row[]);
+      await expect(settleRedeemLedger('red1', 'success', tx)).rejects.toMatchObject({ status: 409, message });
+      expect(tx.rewardLedger.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for an unknown request', async () => {
+      await expect(settleRedeemLedger('nope', 'failed', settleTx(null, []))).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('accepts a lost conditional update only when the row already has the outcome', async () => {
+      const rows = [reserve()];
+      const tx = settleTx(request, rows);
+      tx.rewardLedger.updateMany = vi.fn(async () => {
+        rows[0].status = 'REDEEMED'; // settled by someone else between read and update
+        return { count: 0 };
+      });
+      await expect(settleRedeemLedger('red1', 'success', tx)).resolves.toMatchObject({ changed: false });
+      rows[0].status = 'PENDING';
+      tx.rewardLedger.updateMany = vi.fn(async () => {
+        rows[0].status = 'REVERSED';
+        return { count: 0 };
+      });
+      await expect(settleRedeemLedger('red1', 'success', tx)).rejects.toMatchObject({ status: 409 });
+    });
+
+    it('maps request status to the reserve status it must have', () => {
+      expect(expectedReserveStatus('REQUESTED')).toBe('PENDING');
+      expect(expectedReserveStatus('APPROVED')).toBe('PENDING');
+      expect(expectedReserveStatus('PROCESSING')).toBe('PENDING');
+      expect(expectedReserveStatus('SUCCESS')).toBe('REDEEMED');
+      expect(expectedReserveStatus('FAILED')).toBe('REVERSED');
+      expect(expectedReserveStatus('REVERSED')).toBe('REVERSED');
     });
   });
 

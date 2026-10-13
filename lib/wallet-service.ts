@@ -1,19 +1,29 @@
 import { createHash } from "node:crypto";
-import { Prisma, type Redemption } from "@prisma/client";
+import { Prisma, type Redemption, type RedemptionStatus } from "@prisma/client";
 import { z } from "zod";
 import { logAudit } from "./audit";
 import { getMinRedemption } from "./config";
-import { lockUser } from "./db-locks";
-import { createRedeemReserve, getWalletBalance } from "./ledger";
+import { lockRedemption, lockUser } from "./db-locks";
+import {
+  RESERVE_MISMATCH,
+  createRedeemReserve,
+  expectedReserveStatus,
+  getWalletBalance,
+  loadRedeemReserve,
+  settleRedeemLedger,
+  type RedeemOutcome,
+} from "./ledger";
+import { createNotification } from "./notifications";
+import { destinationSnapshotData, unavailableDestinationData } from "./payout-destination";
 import { prisma } from "./prisma";
 import { HttpError, type CurrentUser } from "./rbac";
 
 /**
- * Wallet transaction boundary. Request (M01) and, later, transition (M02) of a
+ * Wallet transaction boundary. Request (M01) and transition (M02) of a
  * redemption run here: one ReadCommitted transaction that locks the user row
  * first (lib/db-locks.ts), re-reads everything the decision depends on through
- * the same TransactionClient, and writes the request plus its ledger reserve.
- * Audit and other side effects run only after COMMIT.
+ * the same TransactionClient, and writes the request status together with its
+ * ledger reserve. Audit, notifications and any transfer run only after COMMIT.
  */
 
 /** Largest rupiah value a ledger row can hold (PostgreSQL `integer`). */
@@ -161,7 +171,7 @@ export async function requestRedemption(
         owned.length === 1
           ? await tx.payoutAccount.findUnique({
               where: { id: input.payoutAccountId },
-              select: { id: true, userId: true, status: true, provider: true },
+              select: { id: true, userId: true, status: true, provider: true, accountIdentifier: true, accountName: true },
             })
           : null;
       if (!account || account.userId !== userId) {
@@ -193,6 +203,8 @@ export async function requestRedemption(
           status: "REQUESTED",
           idempotencyKey: input.idempotencyKey,
           requestHash,
+          // Immutable destination: later account edits never redirect this payout.
+          ...destinationSnapshotData(account, "REQUEST_SNAPSHOT"),
         },
       });
       await createRedeemReserve(
@@ -226,4 +238,378 @@ export async function requestRedemption(
   }
   await hooks.afterCommit?.();
   return outcome;
+}
+
+// ---------------------------------------------------------------------------
+// Payout transitions (M02)
+// ---------------------------------------------------------------------------
+
+export type RedemptionAction = "approve" | "process" | "success" | "fail" | "cancel";
+
+export interface TransitionRedemptionInput {
+  action: RedemptionAction;
+  note?: string;
+  providerReference?: string;
+}
+
+const optionalText = (max: number, message: string) =>
+  z
+    .string({ invalid_type_error: message })
+    .max(max, message)
+    .optional()
+    .transform((value) => value?.trim() || undefined);
+
+const noteSchema = optionalText(500, "Catatan maksimal 500 karakter");
+const providerReferenceSchema = optionalText(120, "Nomor referensi maksimal 120 karakter");
+
+const transitionInputSchema = z.object({
+  action: z.enum(["approve", "process", "success", "fail", "cancel"], {
+    errorMap: () => ({ message: "Aksi pencairan tidak dikenal" }),
+  }),
+  note: noteSchema,
+  providerReference: providerReferenceSchema,
+});
+
+/** HTTP body of PATCH /api/redemptions/[id]. */
+export const redemptionPatchSchema = z.object({
+  action: z.enum(["approve", "process", "success", "fail", "cancel", "flag_reconciliation"], {
+    errorMap: () => ({ message: "Aksi pencairan tidak dikenal" }),
+  }),
+  note: noteSchema,
+  providerReference: providerReferenceSchema,
+});
+
+const reconciliationNoteSchema = z
+  .string({ required_error: "Catatan rekonsiliasi wajib diisi", invalid_type_error: "Catatan rekonsiliasi wajib diisi" })
+  .trim()
+  .min(1, "Catatan rekonsiliasi wajib diisi")
+  .max(500, "Catatan maksimal 500 karakter");
+
+interface TransitionRule {
+  from: readonly RedemptionStatus[];
+  to: RedemptionStatus;
+  /** What happens to the reserve: kept PENDING, or settled with this outcome. */
+  reserve: "hold" | RedeemOutcome;
+  /** The operator is about to (or did) send money: the destination must be recorded. */
+  destination: "required" | "record" | "none";
+}
+
+// success requires the full REQUESTED -> APPROVED -> PROCESSING chain so a
+// payout can't be marked complete before it was approved and processed.
+const TRANSITIONS: Record<RedemptionAction, TransitionRule> = {
+  approve: { from: ["REQUESTED"], to: "APPROVED", reserve: "hold", destination: "none" },
+  process: { from: ["APPROVED"], to: "PROCESSING", reserve: "hold", destination: "required" },
+  success: { from: ["PROCESSING"], to: "SUCCESS", reserve: "success", destination: "record" },
+  fail: { from: ["REQUESTED", "APPROVED", "PROCESSING"], to: "FAILED", reserve: "failed", destination: "none" },
+  cancel: { from: ["REQUESTED"], to: "REVERSED", reserve: "failed", destination: "none" },
+};
+
+const TERMINAL_STATUSES: readonly RedemptionStatus[] = ["SUCCESS", "FAILED", "REVERSED"];
+
+const STATUS_MESSAGES: Partial<Record<RedemptionAction, string>> = {
+  approve: "Pengajuan pencairan Anda telah disetujui dan akan segera diproses.",
+  process: "Pencairan Anda sedang diproses oleh tim kami.",
+  success: "Pencairan Anda berhasil, dana telah dikirim.",
+  fail: "Pencairan Anda gagal. Silakan hubungi dukungan atau ajukan ulang.",
+};
+
+export const REDEMPTION_NOT_FOUND = "Pengajuan pencairan tidak ditemukan";
+export const REDEMPTION_STATUS_CHANGED = "Status pencairan sudah berubah";
+export const REDEMPTION_INVALID_TRANSITION = "Transisi status pencairan tidak valid";
+export const REDEMPTION_OWNER_CHANGED = "Data pemilik pencairan berubah. Muat ulang lalu coba lagi.";
+export const REDEMPTION_PROOF_REQUIRED =
+  "Isi nomor referensi transfer atau unggah bukti transfer sebelum menandai sukses";
+export const REDEMPTION_DESTINATION_UNAVAILABLE =
+  "Tujuan pencairan tidak tersedia. Tandai gagal pengajuan ini atau hubungi pengguna.";
+export const REDEMPTION_RECONCILIATION_NOTE_REQUIRED =
+  "Pengajuan ini sedang direkonsiliasi. Isi catatan hasil pengecekan transfer sebelum menandai gagal.";
+export const REDEMPTION_PROOF_CLOSED = "Pengajuan pencairan sudah selesai, bukti baru tidak dapat diunggah";
+
+function assertMayTransition(actor: CurrentUser, action: RedemptionAction) {
+  if (actor.role === "SUPERADMIN") return;
+  // A user may only cancel their own still-pending request.
+  if (actor.role === "USER" && action === "cancel") return;
+  throw new HttpError(403, actor.role === "USER" ? "Aksi tidak diizinkan" : "Akses ditolak untuk peran ini");
+}
+
+/** Refusal for a status the action cannot start from. */
+function notFrom(status: RedemptionStatus): HttpError {
+  return new HttpError(409, TERMINAL_STATUSES.includes(status) ? REDEMPTION_STATUS_CHANGED : REDEMPTION_INVALID_TRANSITION);
+}
+
+/**
+ * Locks one payout request in the global order and re-reads it:
+ * immutable owner first (no lock), then User, then Redemption, then the row
+ * through the same `tx`. A request whose owner changed meanwhile is refused.
+ */
+async function lockRedemptionForChange(
+  tx: Prisma.TransactionClient,
+  actor: CurrentUser,
+  id: string,
+  expectedUserId?: string,
+): Promise<Redemption> {
+  const owner = await tx.redemption.findUnique({ where: { id }, select: { userId: true } });
+  if (!owner) throw new HttpError(404, REDEMPTION_NOT_FOUND);
+  if (actor.role === "USER" && owner.userId !== actor.id) {
+    throw new HttpError(403, "Bukan pengajuan pencairan Anda");
+  }
+  if (expectedUserId !== undefined && owner.userId !== expectedUserId) {
+    throw new HttpError(409, REDEMPTION_OWNER_CHANGED);
+  }
+
+  await lockUser(tx, owner.userId);
+  await lockRedemption(tx, id);
+
+  const redemption = await tx.redemption.findUnique({ where: { id } });
+  if (!redemption) throw new HttpError(404, REDEMPTION_NOT_FOUND);
+  if (redemption.userId !== owner.userId) throw new HttpError(409, REDEMPTION_OWNER_CHANGED);
+  return redemption;
+}
+
+/**
+ * Destination columns to write with this change. A request that already has a
+ * snapshot keeps it untouched. A legacy request (no snapshot) records the
+ * owner's account as it is now, flagged LEGACY_ACCOUNT_FALLBACK; if that
+ * account is gone, `required` refuses and otherwise LEGACY_UNAVAILABLE is
+ * recorded without guessing any number.
+ */
+async function destinationForChange(
+  tx: Prisma.TransactionClient,
+  redemption: Redemption,
+  mode: "required" | "record",
+) {
+  if (redemption.payoutDestinationSource) return {};
+  const account = redemption.payoutAccountId
+    ? await tx.payoutAccount.findFirst({
+        where: { id: redemption.payoutAccountId, userId: redemption.userId },
+        select: { provider: true, accountIdentifier: true, accountName: true },
+      })
+    : null;
+  if (account) return destinationSnapshotData(account, "LEGACY_ACCOUNT_FALLBACK");
+  if (mode === "required") throw new HttpError(409, REDEMPTION_DESTINATION_UNAVAILABLE);
+  return unavailableDestinationData();
+}
+
+/** A stored proof only counts for the request it was uploaded to. */
+function hasOwnProof(redemption: Redemption): boolean {
+  return Boolean(redemption.manualTransferProofUrl?.startsWith(`${redemption.id}/`));
+}
+
+/** Writes `data` only if the request is still in `status` (compare-and-set). */
+async function compareAndSet(
+  tx: Prisma.TransactionClient,
+  id: string,
+  where: Prisma.RedemptionWhereInput,
+  data: Prisma.RedemptionUncheckedUpdateManyInput,
+) {
+  const changed = await tx.redemption.updateMany({ where: { id, ...where }, data });
+  if (changed.count !== 1) throw new HttpError(409, REDEMPTION_STATUS_CHANGED);
+}
+
+interface TransitionOutcome {
+  redemption: Redemption;
+  idempotent: boolean;
+  from: RedemptionStatus;
+  /** This change closed an open reconciliation flag. */
+  resolvedReconciliation: boolean;
+}
+
+/**
+ * Moves a payout request through REQUESTED -> APPROVED -> PROCESSING ->
+ * SUCCESS (or FAILED / REVERSED) and commits the request status together with
+ * its reserve in one transaction under User -> Redemption locks.
+ *
+ * - The status change is a compare-and-set on the status read under the lock;
+ *   the reserve change is conditional on PENDING (settleRedeemLedger).
+ * - Repeating the outcome the request already has is idempotent (200,
+ *   `idempotent: true`) only when the reserve already matches it.
+ * - Any other status, the opposite outcome, a missing/mismatching reserve or a
+ *   changed owner is 409 and nothing is written.
+ * - Audit and notification run after COMMIT and never undo or repeat it.
+ */
+export async function transitionRedemption(
+  actor: CurrentUser,
+  id: string,
+  rawInput: TransitionRedemptionInput,
+  hooks: WalletServiceHooks = {},
+): Promise<{ redemption: Redemption; idempotent: boolean }> {
+  const input = transitionInputSchema.parse(rawInput);
+  assertMayTransition(actor, input.action);
+  const rule = TRANSITIONS[input.action];
+
+  const outcome = await runWalletTransaction<TransitionOutcome>(async (tx) => {
+    const current = await lockRedemptionForChange(tx, actor, id);
+    await hooks.afterLock?.(tx);
+    const reserve = await loadRedeemReserve(tx, current);
+
+    if (current.status === rule.to) {
+      // Same outcome again: a replay, but only if the ledger already agrees.
+      if (reserve.status !== expectedReserveStatus(current.status)) throw new HttpError(409, RESERVE_MISMATCH);
+      return { redemption: current, idempotent: true, from: current.status, resolvedReconciliation: false };
+    }
+    if (!rule.from.includes(current.status)) throw notFrom(current.status);
+    if (reserve.status !== "PENDING") throw new HttpError(409, RESERVE_MISMATCH);
+
+    if (input.action === "success" && !input.providerReference && !hasOwnProof(current)) {
+      throw new HttpError(422, REDEMPTION_PROOF_REQUIRED);
+    }
+    if (input.action === "fail" && current.reconciliationRequired && !input.note) {
+      throw new HttpError(422, REDEMPTION_RECONCILIATION_NOTE_REQUIRED);
+    }
+    const destination = rule.destination === "none" ? {} : await destinationForChange(tx, current, rule.destination);
+
+    await compareAndSet(tx, id, { status: current.status }, {
+      status: rule.to,
+      ...destination,
+      note: input.note,
+      providerReference: input.providerReference,
+      processedBySuperadminId: actor.role === "SUPERADMIN" ? actor.id : undefined,
+      // A terminal outcome resolves an open reconciliation; its note stays as history.
+      ...(TERMINAL_STATUSES.includes(rule.to) && current.reconciliationRequired
+        ? { reconciliationRequired: false }
+        : {}),
+    });
+    if (rule.reserve !== "hold") {
+      const settled = await settleRedeemLedger(id, rule.reserve, tx);
+      // The reserve was PENDING under our locks, so exactly one mutation must happen.
+      if (!settled.changed) throw new HttpError(409, RESERVE_MISMATCH);
+    }
+
+    const redemption = await tx.redemption.findUnique({ where: { id } });
+    if (!redemption) throw new HttpError(404, REDEMPTION_NOT_FOUND);
+    return {
+      redemption,
+      idempotent: false,
+      from: current.status,
+      resolvedReconciliation: current.reconciliationRequired && !redemption.reconciliationRequired,
+    };
+  });
+
+  if (!outcome.idempotent) {
+    const { redemption, from, resolvedReconciliation } = outcome;
+    await afterCommitSafely(`audit REDEMPTION_${input.action.toUpperCase()}`, () =>
+      logAudit({
+        actorId: actor.id,
+        action: `REDEMPTION_${input.action.toUpperCase()}`,
+        entityType: "Redemption",
+        entityId: id,
+        metadata: {
+          from,
+          to: redemption.status,
+          note: input.note,
+          destinationSource: rule.destination === "none" ? undefined : redemption.payoutDestinationSource,
+          reconciliationResolved: resolvedReconciliation || undefined,
+        },
+      }),
+    );
+    // The user's own cancel needs no self-notification.
+    const message = STATUS_MESSAGES[input.action];
+    if (actor.role === "SUPERADMIN" && message) {
+      await afterCommitSafely("notification REDEMPTION_STATUS", () =>
+        createNotification({
+          userId: redemption.userId,
+          type: "REDEMPTION_STATUS",
+          title: "Status pencairan diperbarui",
+          body: message,
+          data: { redemptionId: id, status: redemption.status },
+        }),
+      );
+    }
+  }
+  await hooks.afterCommit?.();
+  return { redemption: outcome.redemption, idempotent: outcome.idempotent };
+}
+
+/**
+ * The operator cannot confirm whether the manual transfer went out. The
+ * request stays PROCESSING with its reserve held and is flagged for
+ * reconciliation; it is never failed (which would hand the money back while it
+ * may already have been paid). Repeating the flag is idempotent.
+ */
+export async function flagRedemptionForReconciliation(
+  actor: CurrentUser,
+  id: string,
+  rawInput: { note: string },
+  hooks: WalletServiceHooks = {},
+): Promise<{ redemption: Redemption; idempotent: boolean }> {
+  if (actor.role !== "SUPERADMIN") throw new HttpError(403, "Akses ditolak untuk peran ini");
+  const note = reconciliationNoteSchema.parse(rawInput.note);
+
+  const outcome = await runWalletTransaction(async (tx) => {
+    const current = await lockRedemptionForChange(tx, actor, id);
+    await hooks.afterLock?.(tx);
+    const reserve = await loadRedeemReserve(tx, current);
+    if (current.status !== "PROCESSING") throw notFrom(current.status);
+    if (reserve.status !== "PENDING") throw new HttpError(409, RESERVE_MISMATCH);
+    if (current.reconciliationRequired) return { redemption: current, idempotent: true };
+
+    const destination = await destinationForChange(tx, current, "record");
+    await compareAndSet(tx, id, { status: "PROCESSING", reconciliationRequired: false }, {
+      ...destination,
+      reconciliationRequired: true,
+      reconciliationNote: note,
+      reconciliationFlaggedAt: new Date(),
+      processedBySuperadminId: actor.id,
+    });
+    const redemption = await tx.redemption.findUnique({ where: { id } });
+    if (!redemption) throw new HttpError(404, REDEMPTION_NOT_FOUND);
+    return { redemption, idempotent: false };
+  });
+
+  if (!outcome.idempotent) {
+    await afterCommitSafely("audit REDEMPTION_FLAG_RECONCILIATION", () =>
+      logAudit({
+        actorId: actor.id,
+        action: "REDEMPTION_FLAG_RECONCILIATION",
+        entityType: "Redemption",
+        entityId: id,
+        metadata: { note, destinationSource: outcome.redemption.payoutDestinationSource },
+      }),
+    );
+  }
+  await hooks.afterCommit?.();
+  return outcome;
+}
+
+/**
+ * Attaches an uploaded transfer proof (already stored under `<id>/`) to a
+ * still-open request. Takes the same User -> Redemption locks as transitions
+ * and refuses when the request now belongs to someone other than the owner
+ * the operator uploaded for (`expectedUserId`) or has already finished.
+ */
+export async function attachRedemptionProof(
+  actor: CurrentUser,
+  id: string,
+  input: { relativePath: string; expectedUserId: string; size: number; mime: string },
+  hooks: WalletServiceHooks = {},
+): Promise<{ redemption: Redemption }> {
+  if (actor.role !== "SUPERADMIN") throw new HttpError(403, "Akses ditolak untuk peran ini");
+  if (!input.relativePath.startsWith(`${id}/`)) throw new Error("proof path must live under the redemption id");
+
+  const redemption = await runWalletTransaction(async (tx) => {
+    const current = await lockRedemptionForChange(tx, actor, id, input.expectedUserId);
+    await hooks.afterLock?.(tx);
+    if (TERMINAL_STATUSES.includes(current.status)) throw new HttpError(409, REDEMPTION_PROOF_CLOSED);
+
+    const destination = await destinationForChange(tx, current, "record");
+    await compareAndSet(tx, id, { userId: input.expectedUserId, status: current.status }, {
+      ...destination,
+      manualTransferProofUrl: input.relativePath,
+    });
+    const updated = await tx.redemption.findUnique({ where: { id } });
+    if (!updated) throw new HttpError(404, REDEMPTION_NOT_FOUND);
+    return updated;
+  });
+
+  await afterCommitSafely("audit REDEMPTION_PROOF_UPLOAD", () =>
+    logAudit({
+      actorId: actor.id,
+      action: "REDEMPTION_PROOF_UPLOAD",
+      entityType: "Redemption",
+      entityId: id,
+      metadata: { size: input.size, mime: input.mime, destinationSource: redemption.payoutDestinationSource },
+    }),
+  );
+  await hooks.afterCommit?.();
+  return { redemption };
 }

@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { logAudit } from "./audit";
+import { REDEMPTION_PRIVATE_COLUMNS } from "./payout-destination";
 
 export const CONSENT_TYPES = [
   "marketing_emails",
@@ -153,6 +154,7 @@ export async function exportUserData(userId: string) {
         orderBy: { createdAt: "desc" },
         skip,
         take,
+        omit: REDEMPTION_PRIVATE_COLUMNS,
       }),
     ),
   ]);
@@ -266,6 +268,7 @@ export function createUserDataExportStream(userId: string): ReadableStream<Uint8
             orderBy: { createdAt: "desc" },
             skip,
             take: EXPORT_BATCH_SIZE,
+            omit: REDEMPTION_PRIVATE_COLUMNS,
           });
           for (const item of batch) {
             if (!first) controller.enqueue(encoder.encode(","));

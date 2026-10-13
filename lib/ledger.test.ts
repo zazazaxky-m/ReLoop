@@ -248,37 +248,32 @@ describe('lib/ledger', () => {
   });
 
   describe('settleRedeemLedger', () => {
-    it('returns null if entry not found (or already settled)', async () => {
-      vi.mocked(prisma.rewardLedger.findFirst).mockResolvedValue(null);
-      const res = await settleRedeemLedger('r1', 'success');
-      expect(res).toBeNull();
+    // Full contract: tests/lib/ledger.test.ts. Here: it only ever uses the given tx.
+    it('reads and writes through the caller transaction only', async () => {
+      const tx = {
+        redemption: { findUnique: vi.fn().mockResolvedValue({ id: 'r1', userId: 'u1', amount: 50 }) },
+        rewardLedger: {
+          findMany: vi.fn().mockResolvedValue([{ id: 'res_1', userId: 'u1', amount: -50, status: 'PENDING' }]),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      const res = await settleRedeemLedger('r1', 'failed', tx as any);
+      expect(res).toMatchObject({ changed: true, entry: { id: 'res_1', status: 'REVERSED' } });
+      expect(tx.rewardLedger.updateMany).toHaveBeenCalledWith({ where: { id: 'res_1', status: 'PENDING' }, data: { status: 'REVERSED' } });
       expect(prisma.rewardLedger.update).not.toHaveBeenCalled();
+      expect(prisma.rewardLedger.findFirst).not.toHaveBeenCalled();
     });
 
-    it('updates status to REDEEMED on success', async () => {
-      vi.mocked(prisma.rewardLedger.findFirst).mockResolvedValue({ id: 'res_1' } as any);
-      vi.mocked(prisma.rewardLedger.update).mockResolvedValue({ id: 'res_1', status: 'REDEEMED' } as any);
-      
-      const res = await settleRedeemLedger('r1', 'success');
-      
-      expect(res).toEqual({ id: 'res_1', status: 'REDEEMED' });
-      expect(prisma.rewardLedger.update).toHaveBeenCalledWith({
-        where: { id: 'res_1' },
-        data: { status: 'REDEEMED' }
-      });
-    });
-
-    it('updates status to REVERSED on failure', async () => {
-      vi.mocked(prisma.rewardLedger.findFirst).mockResolvedValue({ id: 'res_1' } as any);
-      vi.mocked(prisma.rewardLedger.update).mockResolvedValue({ id: 'res_1', status: 'REVERSED' } as any);
-      
-      const res = await settleRedeemLedger('r1', 'failed');
-      
-      expect(res).toEqual({ id: 'res_1', status: 'REVERSED' });
-      expect(prisma.rewardLedger.update).toHaveBeenCalledWith({
-        where: { id: 'res_1' },
-        data: { status: 'REVERSED' }
-      });
+    it('answers 409 instead of a no-op when the reserve was settled the other way', async () => {
+      const tx = {
+        redemption: { findUnique: vi.fn().mockResolvedValue({ id: 'r1', userId: 'u1', amount: 50 }) },
+        rewardLedger: {
+          findMany: vi.fn().mockResolvedValue([{ id: 'res_1', userId: 'u1', amount: -50, status: 'REDEEMED' }]),
+          updateMany: vi.fn(),
+        },
+      };
+      await expect(settleRedeemLedger('r1', 'failed', tx as any)).rejects.toMatchObject({ status: 409 });
+      expect(tx.rewardLedger.updateMany).not.toHaveBeenCalled();
     });
   });
 

@@ -1,4 +1,4 @@
-import type { PayoutProvider, PayoutResult } from "./types";
+import type { PayoutIdempotencyKey, PayoutProvider, PayoutResult } from "./types";
 
 /**
  * LinkAja disbursement adapter — TBD until official API docs, sandbox credentials,
@@ -10,7 +10,7 @@ export class LinkAjaProvider implements PayoutProvider {
   async disburse(_params: {
     accountIdentifier: string;
     amount: number;
-    idempotencyKey: string;
+    idempotencyKey: PayoutIdempotencyKey;
   }): Promise<PayoutResult> {
     return {
       success: false,

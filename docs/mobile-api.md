@@ -79,6 +79,80 @@ pengguna, sehingga pengajuan paralel tidak dapat memakai saldo yang sama. Status
 akun pencairan dibaca ulang di dalam transaksi tersebut. Audit ditulis setelah
 commit; kegagalannya tidak mengubah respons pengajuan yang sudah tersimpan.
 
+## Transisi pencairan, tujuan transfer, dan rekonsiliasi (M02)
+
+`PATCH /api/redemptions/{id}` menerima:
+
+```json
+{ "action": "approve | process | success | fail | cancel | flag_reconciliation", "note": "opsional, maks 500", "providerReference": "opsional, maks 120" }
+```
+
+| Aksi | Peran | Dari status | Ke status | Saldo yang ditahan (reserve) |
+| --- | --- | --- | --- | --- |
+| `approve` | SUPERADMIN | REQUESTED | APPROVED | tetap ditahan |
+| `process` | SUPERADMIN | APPROVED | PROCESSING | tetap ditahan |
+| `success` | SUPERADMIN | PROCESSING | SUCCESS | menjadi `REDEEMED` (dibayar) |
+| `fail` | SUPERADMIN | REQUESTED, APPROVED, PROCESSING | FAILED | menjadi `REVERSED` (kembali ke saldo) |
+| `cancel` | USER pemilik, SUPERADMIN | REQUESTED | REVERSED | menjadi `REVERSED` |
+| `flag_reconciliation` | SUPERADMIN, `note` wajib | PROCESSING | tetap PROCESSING | tetap ditahan |
+
+- `success` memerlukan `providerReference` atau bukti transfer yang diunggah
+  untuk pengajuan yang sama (`POST /api/redemptions/{id}/proof`).
+- Status pengajuan dan reserve ledger berubah dalam satu transaksi di bawah lock
+  User pemilik lalu Redemption, dengan compare-and-set pada status. Aksi yang
+  saling bertentangan (misalnya `fail` dan `success`, atau `approve` dan
+  `cancel`) yang dikirim bersamaan menghasilkan tepat satu 200 dan satu 409;
+  pengajuan yang reserve-nya sudah dilepas tidak bisa dihidupkan lagi.
+- `flag_reconciliation` dipakai bila operator tidak yakin transfer manual
+  berhasil. Pengajuan tetap PROCESSING, saldo tetap ditahan, dan
+  `reconciliationRequired=true` + `reconciliationNote` dicatat. Setelah hasilnya
+  pasti, operator menandai `success`, atau `fail` dengan `note` wajib berisi
+  hasil pengecekan (tanpa catatan: 422). Status gagal tidak pernah dipakai
+  untuk transfer yang belum pasti.
+
+Respons:
+
+| Status | Arti |
+| --- | --- |
+| 200 | `{ redemption, idempotent: false }` untuk perubahan baru; `{ redemption, idempotent: true }` bila aksi yang sama diulang dan ledger sudah sesuai (tanpa settlement, audit, atau notifikasi kedua) |
+| 403 | Peran tidak boleh menjalankan aksi ini, atau USER membatalkan pengajuan orang lain |
+| 404 | Pengajuan tidak ditemukan |
+| 409 | `Status pencairan sudah berubah` (pengajuan sudah diputuskan lain), `Transisi status pencairan tidak valid`, reserve hilang/jumlah atau pemilik tidak sesuai (perlu rekonsiliasi tim keuangan), pemilik pengajuan berubah, atau tujuan transfer data lama tidak tersedia. Tidak ada perubahan yang tersimpan. |
+| 422 | Validasi gagal, sukses tanpa referensi/bukti, atau gagal pada pengajuan yang sedang direkonsiliasi tanpa catatan |
+| 503 | Antrean saldo sibuk; tidak ada yang tersimpan, ulangi aksi yang sama |
+
+`idempotent` adalah field tambahan. Field `redemption` tetap sama, ditambah
+`payoutDestinationSource`, `payoutDestinationProvider`,
+`payoutDestinationCapturedAt`, `reconciliationRequired`, `reconciliationNote`,
+dan `reconciliationFlaggedAt`. `requestHash` dan ciphertext tujuan tidak pernah
+dikirim. Audit dan notifikasi ditulis setelah commit; kegagalannya tidak
+mengubah respons dan retry tidak mengulang settlement.
+
+**Tujuan transfer.** Saat pengajuan dibuat, akun pencairan yang dipilih disalin
+ke pengajuan (provider, nomor, nama; nomor dan nama dienkripsi). Antrean,
+`process`, `success`, dan unggah bukti memakai salinan ini, bukan akun yang
+mungkin diubah atau dinonaktifkan pengguna sesudahnya. `GET /api/redemptions`
+mengembalikan `payoutDestination`:
+
+```json
+{ "source": "REQUEST_SNAPSHOT", "provider": "DANA", "accountIdentifier": "08…", "accountName": "…", "capturedAt": "2026-10-13T…" }
+```
+
+`source` bernilai `REQUEST_SNAPSHOT` (disalin saat pengajuan),
+`LEGACY_ACCOUNT_FALLBACK` (pengajuan lama tanpa salinan: akun pemilik dicatat
+pada aksi operator pertama yang memerlukan tujuan, yaitu `process`, `success`,
+unggah bukti, atau `flag_reconciliation`; `capturedAt: null` berarti belum
+tercatat dan yang tampil adalah akun saat ini), atau `LEGACY_UNAVAILABLE` (akun
+pengajuan lama sudah tidak ada; nomor tidak ditebak, `process` ditolak 409,
+sedangkan `success`/`fail` tetap bisa dicatat). Field lama `payoutAccount`
+tetap ada untuk klien lama tetapi bukan acuan transfer.
+
+**Bukti transfer.** `POST /api/redemptions/{id}/proof` hanya untuk SUPERADMIN.
+Bukti dipasang di bawah lock yang sama dan ditolak (409, file dihapus lagi) bila
+pengajuan sudah selesai atau pemiliknya berubah sejak unggahan dimulai. Bukti
+yang tersimpan untuk satu pengajuan tidak pernah memenuhi syarat `success`
+pengajuan lain.
+
 ## Strategi Caching & Offline (Khusus Pengepul)
 
 Mengingat **Pengepul** sering beroperasi di area dengan konektivitas rendah saat melakukan pengambilan (*pickup*) dari mesin RVM atau tempat wisata, aplikasi seluler dirancang untuk mendukung *Offline Tolerance* secara terbatas:

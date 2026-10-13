@@ -1,5 +1,6 @@
-import type { LedgerEntryType, LedgerStatus, Prisma } from "@prisma/client";
+import type { LedgerEntryType, LedgerStatus, Prisma, RedemptionStatus, RewardLedger } from "@prisma/client";
 import { prisma } from "./prisma";
+import { HttpError } from "./rbac";
 
 /** Human-readable label for RewardLedger.reasonCode (wallet / reports UI). */
 export function ledgerReasonLabel(
@@ -207,29 +208,84 @@ export async function createRedeemReserve(
   });
 }
 
+export type RedeemOutcome = "success" | "failed";
+
+export const RESERVE_MISSING =
+  "Saldo yang ditahan untuk pencairan ini tidak ditemukan. Hubungi tim keuangan untuk rekonsiliasi.";
+export const RESERVE_MISMATCH =
+  "Saldo yang ditahan tidak sesuai dengan pengajuan pencairan. Hubungi tim keuangan untuk rekonsiliasi.";
+
+/** Reserve status that agrees with a payout request in `status`. */
+export function expectedReserveStatus(status: RedemptionStatus): LedgerStatus {
+  if (status === "SUCCESS") return "REDEEMED";
+  if (status === "FAILED" || status === "REVERSED") return "REVERSED";
+  return "PENDING"; // REQUESTED / APPROVED / PROCESSING still hold the money
+}
+
 /**
- * Settles the redemption's reserve ledger entry. Idempotent: re-running with the
- * same outcome (or after settlement) is a no-op.
+ * Reads, through the caller's `tx`, the single live reserve backing a payout
+ * request and proves it belongs to the same user for the same amount.
+ * REDEEM/REJECTED rows are neutralized legacy duplicates (M01) and never count.
+ * Missing or mismatching reserves are 409: a transition must not guess.
  */
-export async function settleRedeemLedger(
-  redemptionId: string,
-  outcome: "success" | "failed",
-  tx?: Prisma.TransactionClient,
-) {
-  const db = tx ?? prisma;
-  const entry = await db.rewardLedger.findFirst({
+export async function loadRedeemReserve(
+  tx: Prisma.TransactionClient,
+  redemption: { id: string; userId: string; amount: number },
+): Promise<RewardLedger> {
+  const rows = await tx.rewardLedger.findMany({
     where: {
       entryType: "REDEEM",
       referenceType: "Redemption",
-      referenceId: redemptionId,
-      status: "PENDING",
+      referenceId: redemption.id,
+      status: { not: "REJECTED" },
     },
+    orderBy: { id: "asc" },
+    take: 2,
   });
-  if (!entry) return null; // already settled or never reserved
-  return db.rewardLedger.update({
-    where: { id: entry.id },
-    data: { status: outcome === "success" ? "REDEEMED" : "REVERSED" },
+  if (rows.length === 0) throw new HttpError(409, RESERVE_MISSING);
+  const [reserve] = rows;
+  if (rows.length > 1 || reserve.userId !== redemption.userId || reserve.amount !== -redemption.amount) {
+    throw new HttpError(409, RESERVE_MISMATCH);
+  }
+  return reserve;
+}
+
+/**
+ * Settles a payout request's reserve inside the caller's transaction, which
+ * must hold `lockUser` and `lockRedemption` for it (lib/wallet-service.ts).
+ *
+ * Either proves an existing settlement that already matches `outcome`
+ * (`changed: false`) or performs exactly one conditional PENDING -> outcome
+ * mutation (`changed: true`). A missing or mismatching reserve, or one settled
+ * the opposite way, throws 409 so the caller's transaction rolls back: there is
+ * no successful no-op for the opposite outcome.
+ */
+export async function settleRedeemLedger(
+  redemptionId: string,
+  outcome: RedeemOutcome,
+  tx: Prisma.TransactionClient,
+): Promise<{ entry: RewardLedger; changed: boolean }> {
+  const redemption = await tx.redemption.findUnique({
+    where: { id: redemptionId },
+    select: { id: true, userId: true, amount: true },
   });
+  if (!redemption) throw new HttpError(404, "Pengajuan pencairan tidak ditemukan");
+  const reserve = await loadRedeemReserve(tx, redemption);
+  const target: LedgerStatus = outcome === "success" ? "REDEEMED" : "REVERSED";
+
+  if (reserve.status === target) return { entry: reserve, changed: false };
+  if (reserve.status !== "PENDING") throw new HttpError(409, RESERVE_MISMATCH);
+
+  const changed = await tx.rewardLedger.updateMany({
+    where: { id: reserve.id, status: "PENDING" },
+    data: { status: target },
+  });
+  if (changed.count !== 1) {
+    const current = await tx.rewardLedger.findUnique({ where: { id: reserve.id } });
+    if (current?.status === target) return { entry: current, changed: false };
+    throw new HttpError(409, RESERVE_MISMATCH);
+  }
+  return { entry: { ...reserve, status: target }, changed: true };
 }
 
 export async function getLedgerHistory(

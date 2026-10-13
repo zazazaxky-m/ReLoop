@@ -7,16 +7,18 @@ import { HttpError } from "./rbac";
  * Global lock order (take a prefix-ordered subset, never go back to an earlier
  * class; several IDs of one class are locked in lexicographic order):
  *
- *   User -> RewardFundingAccount -> Campaign -> Machine -> Trip ->
- *   DepositSession -> DepositItem -> Redemption -> RewardLedger
+ *   User -> PayoutAccount -> RewardFundingAccount -> Campaign -> Machine ->
+ *   Trip -> DepositSession -> DepositItem -> Redemption -> RewardLedger
  *
  * Read immutable relations first to learn which IDs to lock, take the locks,
  * then re-read every status, ownership and amount the decision depends on
  * through the same TransactionClient.
  *
- * A payout request also holds its destination PayoutAccount row FOR SHARE
- * right after User (the account belongs to the user's own aggregate), so the
- * account cannot be disabled between the check and COMMIT.
+ * A payout request holds its destination PayoutAccount row FOR SHARE right
+ * after User, so the account cannot be disabled between the check and COMMIT.
+ * A payout transition (lib/wallet-service.ts) locks the owner User (learned
+ * from the immutable Redemption.userId) and then the Redemption row; its
+ * reserve RewardLedger row is changed last, by a conditional update.
  */
 
 /**
@@ -33,4 +35,16 @@ export async function lockUser(tx: Prisma.TransactionClient, userId: string): Pr
   const rows = await tx.$queryRaw<{ id: string }[]>`
     SELECT id FROM "User" WHERE id = ${userId} FOR NO KEY UPDATE`;
   if (rows.length !== 1) throw new HttpError(404, "Pengguna tidak ditemukan");
+}
+
+/**
+ * Locks one payout request for a status transition. Callers must already hold
+ * `lockUser(tx, redemption.userId)` (User before Redemption) and must re-read
+ * the row through the same `tx` afterwards. FOR NO KEY UPDATE: status changes
+ * never touch the key, so foreign-key readers are not blocked.
+ */
+export async function lockRedemption(tx: Prisma.TransactionClient, redemptionId: string): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "Redemption" WHERE id = ${redemptionId} FOR NO KEY UPDATE`;
+  if (rows.length !== 1) throw new HttpError(404, "Pengajuan pencairan tidak ditemukan");
 }

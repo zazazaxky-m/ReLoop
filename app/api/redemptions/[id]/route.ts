@@ -1,44 +1,22 @@
-import { z } from "zod";
-import type { RedemptionStatus } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import { requireApiUser, HttpError } from "@/lib/rbac";
+import { requireApiUser } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
-import { settleRedeemLedger } from "@/lib/ledger";
-import { logAudit } from "@/lib/audit";
-import { createNotification } from "@/lib/notifications";
+import { publicRedemption } from "@/lib/payout-destination";
+import {
+  flagRedemptionForReconciliation,
+  redemptionPatchSchema,
+  transitionRedemption,
+} from "@/lib/wallet-service";
 
-const patchSchema = z.object({
-  action: z.enum(["approve", "process", "success", "fail", "cancel"]),
-  note: z.string().max(500).optional(),
-  providerReference: z.string().max(120).optional(),
-});
-
-// success now requires the full REQUESTED -> APPROVED -> PROCESSING chain
-// (no skipping straight from REQUESTED) so a superadmin can't accidentally
-// mark a payout complete before it was ever approved/processed.
-const FROM: Record<string, RedemptionStatus[]> = {
-  approve: ["REQUESTED"],
-  process: ["APPROVED"],
-  success: ["PROCESSING"],
-  fail: ["REQUESTED", "APPROVED", "PROCESSING"],
-  cancel: ["REQUESTED"],
-};
-
-const TO: Record<string, RedemptionStatus> = {
-  approve: "APPROVED",
-  process: "PROCESSING",
-  success: "SUCCESS",
-  fail: "FAILED",
-  cancel: "REVERSED",
-};
-
-const STATUS_MESSAGES: Record<string, string> = {
-  approve: "Pengajuan pencairan Anda telah disetujui dan akan segera diproses.",
-  process: "Pencairan Anda sedang diproses oleh tim kami.",
-  success: "Pencairan Anda berhasil, dana telah dikirim.",
-  fail: "Pencairan Anda gagal. Silakan hubungi dukungan atau ajukan ulang.",
-};
-
+/**
+ * Payout request transitions. The status and its ledger reserve change in one
+ * transaction under User -> Redemption locks (lib/wallet-service.ts):
+ *
+ * - approve / process / success / fail (SUPERADMIN), cancel (owner USER or
+ *   SUPERADMIN). Repeating the outcome the request already has answers 200
+ *   `idempotent: true`; anything else that no longer fits is 409.
+ * - flag_reconciliation (SUPERADMIN, note required): the transfer outcome is
+ *   unknown; the request stays PROCESSING with its reserve held.
+ */
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -46,78 +24,18 @@ export async function PATCH(
   try {
     const user = await requireApiUser(["USER", "SUPERADMIN"]);
     const { id } = await params;
-    const body = patchSchema.parse(await req.json());
+    const body = redemptionPatchSchema.parse(await req.json());
 
-    const redemption = await prisma.redemption.findUnique({ where: { id } });
-    if (!redemption) throw new HttpError(404, "Redemption tidak ditemukan");
+    const { redemption, idempotent } =
+      body.action === "flag_reconciliation"
+        ? await flagRedemptionForReconciliation(user, id, { note: body.note ?? "" })
+        : await transitionRedemption(user, id, {
+            action: body.action,
+            note: body.note,
+            providerReference: body.providerReference,
+          });
 
-    // User may only cancel their own still-pending request.
-    if (user.role === "USER") {
-      if (redemption.userId !== user.id) throw new HttpError(403, "Bukan redemption Anda");
-      if (body.action !== "cancel") throw new HttpError(403, "Aksi tidak diizinkan");
-    }
-
-    const target = TO[body.action];
-
-    // Idempotency: re-issuing the same terminal outcome is a no-op.
-    if (redemption.status === target) {
-      return jsonOk({ redemption, idempotent: true });
-    }
-    if (!FROM[body.action].includes(redemption.status)) {
-      throw new HttpError(409, "Transisi status pencairan tidak valid");
-    }
-
-    if (
-      body.action === "success" &&
-      !body.providerReference &&
-      !redemption.manualTransferProofUrl
-    ) {
-      throw new HttpError(
-        422,
-        "Isi nomor referensi transfer atau unggah bukti transfer sebelum menandai sukses",
-      );
-    }
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const row = await tx.redemption.update({
-        where: { id },
-        data: {
-          status: target,
-          note: body.note ?? undefined,
-          providerReference: body.providerReference ?? undefined,
-          processedBySuperadminId: user.role === "SUPERADMIN" ? user.id : undefined,
-        },
-      });
-      if (body.action === "success") {
-        await settleRedeemLedger(id, "success", tx);
-      } else if (body.action === "fail" || body.action === "cancel") {
-        await settleRedeemLedger(id, "failed", tx);
-      }
-      return row;
-    });
-
-    // Only notify when a superadmin changed the status on behalf of the
-    // user; the user's own "cancel" doesn't need a self-notification.
-    const statusMessage = STATUS_MESSAGES[body.action];
-    if (user.role === "SUPERADMIN" && statusMessage) {
-      await createNotification({
-        userId: redemption.userId,
-        type: "REDEMPTION_STATUS",
-        title: "Status pencairan diperbarui",
-        body: statusMessage,
-        data: { redemptionId: id, status: target },
-      });
-    }
-
-    await logAudit({
-      actorId: user.id,
-      action: `REDEMPTION_${body.action.toUpperCase()}`,
-      entityType: "Redemption",
-      entityId: id,
-      metadata: { from: redemption.status, to: target, note: body.note },
-    });
-
-    return jsonOk({ redemption: updated });
+    return jsonOk({ redemption: publicRedemption(redemption), idempotent });
   } catch (error) {
     return handleApiError(error);
   }

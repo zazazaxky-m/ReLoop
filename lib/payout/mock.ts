@@ -1,4 +1,5 @@
-import type { PayoutProvider, PayoutResult } from "./types";
+import { createHash } from "node:crypto";
+import type { PayoutIdempotencyKey, PayoutProvider, PayoutResult } from "./types";
 
 /** Development mock that always succeeds instantly. */
 export class MockPayoutProvider implements PayoutProvider {
@@ -7,11 +8,12 @@ export class MockPayoutProvider implements PayoutProvider {
   async disburse(params: {
     accountIdentifier: string;
     amount: number;
-    idempotencyKey: string;
+    idempotencyKey: PayoutIdempotencyKey;
   }): Promise<PayoutResult> {
     return {
       success: true,
-      providerReference: `MOCK-${params.idempotencyKey.slice(0, 8)}`,
+      // Derived from the whole business key: every payout gets its own reference.
+      providerReference: `MOCK-${createHash("sha256").update(params.idempotencyKey).digest("hex").slice(0, 16)}`,
       message: `Mock payout Rp${params.amount} ke ${params.accountIdentifier}`,
     };
   }

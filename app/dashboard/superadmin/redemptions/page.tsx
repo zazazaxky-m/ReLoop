@@ -8,6 +8,7 @@ import { Clock, Wallet } from "@/components/ui/icons";
 import { formatRupiah } from "@/lib/format";
 import { displayUserField } from "@/lib/display-user";
 import { RedemptionQueue, type RedemptionAdminRow } from "@/components/admin/RedemptionQueue";
+import { describePayoutDestination } from "@/lib/payout-destination";
 
 export const metadata: Metadata = { title: "Redemption & Payout" };
 
@@ -48,17 +49,24 @@ export default async function SuperadminRedemptionsPage({
 
   const rows: RedemptionAdminRow[] = redemptions.map((r) => {
     const acc = r.payoutAccountId ? accById.get(r.payoutAccountId) : null;
+    // Transfer to the destination recorded with the request, never the
+    // account as the user edited it afterwards (legacy rows are flagged).
+    const destination = describePayoutDestination(r, acc && acc.userId === r.userId ? acc : null);
     return {
       id: r.id,
       userName: displayUserField(r.user.name) ?? "",
       userEmail: displayUserField(r.user.email) ?? "",
       amount: r.amount,
-      provider: r.provider,
-      accountIdentifier: acc?.accountIdentifier ?? null,
-      accountName: acc?.accountName ?? null,
+      provider: destination.provider ?? r.provider,
+      accountIdentifier: destination.accountIdentifier,
+      accountName: destination.accountName,
+      destinationSource: destination.source,
+      destinationRecorded: destination.capturedAt !== null,
       status: r.status,
       note: r.note,
       manualTransferProofUrl: r.manualTransferProofUrl,
+      reconciliationRequired: r.reconciliationRequired,
+      reconciliationNote: r.reconciliationNote,
       createdAt: r.createdAt,
     };
   });

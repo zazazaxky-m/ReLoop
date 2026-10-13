@@ -3,6 +3,7 @@ import { GET, POST } from '@/app/api/redemptions/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
 import * as walletService from '@/lib/wallet-service';
+import { encrypt } from '@/lib/encryption';
 
 // Mematikan audit logging agar tidak error
 vi.mock('@/lib/audit', () => ({
@@ -74,9 +75,16 @@ describe('Redemptions API - GET', () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'user_1', role: 'USER' } as any);
     vi.mocked(prisma.redemption.count).mockResolvedValue(1);
     vi.mocked(prisma.redemption.findMany).mockResolvedValue([
-      { id: 'r1', userId: 'user_1', amount: 50000 } as any
+      {
+        id: 'r1', userId: 'user_1', amount: 50000, payoutAccountId: 'acc_1', requestHash: 'h'.repeat(64),
+        payoutDestinationSource: 'REQUEST_SNAPSHOT', payoutDestinationProvider: 'DANA',
+        payoutDestinationIdentifier: encrypt('081234567890'), payoutDestinationName: encrypt('Nama Saat Pengajuan'),
+        payoutDestinationCapturedAt: new Date('2026-10-13T00:00:00Z'),
+      } as any,
     ]);
-    vi.mocked(prisma.payoutAccount.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.payoutAccount.findMany).mockResolvedValue([
+      { id: 'acc_1', userId: 'user_1', provider: 'DANA', accountIdentifier: '081234567890', accountName: 'Nama Baru' } as any,
+    ]);
 
     const req = new Request('http://localhost/api/redemptions');
     const res = await GET(req);
@@ -85,12 +93,39 @@ describe('Redemptions API - GET', () => {
     expect(res.status).toBe(200);
     expect(body.redemptions).toHaveLength(1);
     expect(prisma.redemption.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ userId: 'user_1' }),
-        // Internal idempotency hash never leaves the server.
-        omit: { requestHash: true },
-      })
+      expect.objectContaining({ where: expect.objectContaining({ userId: 'user_1' }) })
     );
+    // Internal idempotency hash and destination ciphertext never leave the server.
+    const [row] = body.redemptions;
+    expect(row).not.toHaveProperty('requestHash');
+    expect(row).not.toHaveProperty('payoutDestinationIdentifier');
+    expect(row).not.toHaveProperty('payoutDestinationName');
+    // The destination is the request-time snapshot, not the renamed account.
+    expect(row.payoutDestination).toEqual({
+      source: 'REQUEST_SNAPSHOT', provider: 'DANA', accountIdentifier: '081234567890',
+      accountName: 'Nama Saat Pengajuan', capturedAt: '2026-10-13T00:00:00.000Z',
+    });
+  });
+
+  it('shows a legacy request without snapshot with the current account, flagged as legacy', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin_1', role: 'SUPERADMIN' } as any);
+    vi.mocked(prisma.redemption.count).mockResolvedValue(2);
+    vi.mocked(prisma.redemption.findMany).mockResolvedValue([
+      { id: 'r_legacy', userId: 'user_1', amount: 50000, payoutAccountId: 'acc_1', payoutDestinationSource: null } as any,
+      { id: 'r_foreign', userId: 'user_2', amount: 50000, payoutAccountId: 'acc_1', payoutDestinationSource: null } as any,
+    ]);
+    vi.mocked(prisma.payoutAccount.findMany).mockResolvedValue([
+      { id: 'acc_1', userId: 'user_1', provider: 'OVO', accountIdentifier: '0811', accountName: 'Pemilik' } as any,
+    ]);
+
+    const body = await (await GET(new Request('http://localhost/api/redemptions'))).json();
+    expect(body.redemptions[0].payoutDestination).toEqual({
+      source: 'LEGACY_ACCOUNT_FALLBACK', provider: 'OVO', accountIdentifier: '0811', accountName: 'Pemilik', capturedAt: null,
+    });
+    // Never borrow another user's account as a legacy destination.
+    expect(body.redemptions[1].payoutDestination).toEqual({
+      source: 'LEGACY_UNAVAILABLE', provider: null, accountIdentifier: null, accountName: null, capturedAt: null,
+    });
   });
 
   it('T3: Role SUPERADMIN dapat melihat semua riwayat tanpa batasan userId', async () => {

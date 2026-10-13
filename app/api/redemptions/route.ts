@@ -1,16 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { Prisma, Redemption } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireApiUser } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { redemptionRequestSchema, requestRedemption } from "@/lib/wallet-service";
+import { describePayoutDestination, publicRedemption } from "@/lib/payout-destination";
 import { displayUsers } from "@/lib/display-user";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
-
-/** requestHash is an internal idempotency detail; responses stay as before. */
-function publicRedemption({ requestHash: _requestHash, ...redemption }: Redemption) {
-  return redemption;
-}
 
 const ACTIVE_QUEUE = ["REQUESTED", "APPROVED", "PROCESSING"] as const;
 
@@ -35,25 +31,33 @@ export async function GET(req: Request) {
         orderBy: { createdAt: "desc" },
         skip: pagination.skip,
         take: pagination.take,
-        omit: { requestHash: true },
         include: {
           user: { select: { id: true, name: true, email: true } },
         },
       }),
     ]);
 
-    // Attach the payout account snapshot (no FK relation in schema).
+    // Current account (no FK relation in schema), kept for older clients.
     const accountIds = redemptions.map((r) => r.payoutAccountId).filter(Boolean) as string[];
     const accounts = accountIds.length
       ? await prisma.payoutAccount.findMany({ where: { id: { in: accountIds } } })
       : [];
     const accById = new Map(accounts.map((a) => [a.id, a]));
 
-    const enriched = redemptions.map((r) => ({
-      ...r,
-      user: r.user ? displayUsers([r.user])[0] : r.user,
-      payoutAccount: r.payoutAccountId ? (accById.get(r.payoutAccountId) ?? null) : null,
-    }));
+    const enriched = redemptions.map((r) => {
+      const account = r.payoutAccountId ? (accById.get(r.payoutAccountId) ?? null) : null;
+      return {
+        ...publicRedemption(r),
+        user: r.user ? displayUsers([r.user])[0] : r.user,
+        payoutAccount: account,
+        // Where this request is paid to: the request-time snapshot, never the
+        // mutable account (legacy rows: current account, flagged as such).
+        payoutDestination: describePayoutDestination(
+          r,
+          account && account.userId === r.userId ? account : null,
+        ),
+      };
+    });
 
     return jsonOk({
       redemptions: enriched,

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit';
 import { HttpError, type CurrentUser } from '@/lib/rbac';
+import { decrypt, isEncrypted } from '@/lib/encryption';
 import {
   REDEMPTION_KEY_CONFLICT,
   redemptionRequestHash,
@@ -30,7 +31,7 @@ const input = { amount: 50_000, payoutAccountId: 'acc_1', idempotencyKey: 'clien
 interface FakeState {
   userRows: { id: string }[];
   ownedAccountRows: { id: string }[];
-  account: { id: string; userId: string; status: string; provider: string } | null;
+  account: { id: string; userId: string; status: string; provider: string; accountIdentifier?: string; accountName?: string | null } | null;
   existing: Record<string, unknown> | null;
   ledger: { entryType: string; status: string; _sum: { amount: number } }[];
   minRedemption: string | null;
@@ -96,7 +97,7 @@ function defaults(overrides: Partial<FakeState> = {}): FakeState {
   return {
     userRows: [{ id: 'user_1' }],
     ownedAccountRows: [{ id: 'acc_1' }],
-    account: { id: 'acc_1', userId: 'user_1', status: 'VERIFIED', provider: 'DANA' },
+    account: { id: 'acc_1', userId: 'user_1', status: 'VERIFIED', provider: 'DANA', accountIdentifier: '081234567890', accountName: 'Pengguna Satu' },
     existing: null,
     ledger: [{ entryType: 'EARN', status: 'AVAILABLE', _sum: { amount: 80_000 } }],
     minRedemption: null,
@@ -159,8 +160,17 @@ describe('requestRedemption', () => {
       data: expect.objectContaining({
         userId: 'user_1', amount: 50_000, payoutAccountId: 'acc_1', provider: 'DANA',
         idempotencyKey: 'client-key-1', requestHash: redemptionRequestHash(input), status: 'REQUESTED',
+        payoutDestinationSource: 'REQUEST_SNAPSHOT', payoutDestinationProvider: 'DANA',
+        payoutDestinationCapturedAt: expect.any(Date),
       }),
     });
+    // The destination is copied encrypted inside the same transaction as the reserve.
+    const created = vi.mocked(tx.redemption.create).mock.calls[0][0].data as Record<string, string>;
+    expect(isEncrypted(created.payoutDestinationIdentifier)).toBe(true);
+    expect(decrypt(created.payoutDestinationIdentifier)).toBe('081234567890');
+    expect(decrypt(created.payoutDestinationName)).toBe('Pengguna Satu');
+    expect(tx.payoutAccount.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({ accountIdentifier: true, accountName: true }) }));
     expect(tx.rewardLedger.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ amount: -50_000, status: 'PENDING', businessKey: 'redemption:r_new:reserve' }),
     });

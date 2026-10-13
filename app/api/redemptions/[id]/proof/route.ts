@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
-import { logAudit } from "@/lib/audit";
+import {
+  REDEMPTION_NOT_FOUND,
+  REDEMPTION_PROOF_CLOSED,
+  attachRedemptionProof,
+} from "@/lib/wallet-service";
 import {
   PROOF_ALLOWED_TYPES,
   PROOF_MIME_BY_EXTENSION,
@@ -20,7 +24,9 @@ const TERMINAL_STATUSES = new Set(["SUCCESS", "FAILED", "REVERSED"]);
 /** Uploads (or replaces) the bank transfer proof for a manual redemption.
  * Required before PATCH .../[id] can mark it as `success` unless a
  * providerReference was supplied instead. SUPERADMIN-only, matching who
- * processes redemptions. */
+ * processes redemptions. The file is written first (outside any database
+ * transaction); attaching it rechecks owner and status under the
+ * User -> Redemption locks, and a refused attach deletes the file again. */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -29,10 +35,14 @@ export async function POST(
     const user = await requireApiUser(["SUPERADMIN"]);
     const { id } = await params;
 
-    const redemption = await prisma.redemption.findUnique({ where: { id } });
-    if (!redemption) throw new HttpError(404, "Redemption tidak ditemukan");
+    // Fast refusal before reading the upload; the decision is rechecked under lock.
+    const redemption = await prisma.redemption.findUnique({
+      where: { id },
+      select: { userId: true, status: true },
+    });
+    if (!redemption) throw new HttpError(404, REDEMPTION_NOT_FOUND);
     if (TERMINAL_STATUSES.has(redemption.status)) {
-      throw new HttpError(409, "Redemption sudah selesai, tidak bisa mengunggah bukti baru");
+      throw new HttpError(409, REDEMPTION_PROOF_CLOSED);
     }
 
     const formData = await req.formData();
@@ -57,18 +67,18 @@ export async function POST(
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, bytes);
 
-    await prisma.redemption.update({
-      where: { id },
-      data: { manualTransferProofUrl: relativePath },
-    });
-
-    await logAudit({
-      actorId: user.id,
-      action: "REDEMPTION_PROOF_UPLOAD",
-      entityType: "Redemption",
-      entityId: id,
-      metadata: { size: file.size, mime },
-    });
+    try {
+      await attachRedemptionProof(user, id, {
+        relativePath,
+        expectedUserId: redemption.userId,
+        size: file.size,
+        mime,
+      });
+    } catch (error) {
+      // Not attached: do not leave an orphan file that names this request.
+      await unlink(absolutePath).catch(() => undefined);
+      throw error;
+    }
 
     return jsonOk({ ok: true }, 201);
   } catch (error) {

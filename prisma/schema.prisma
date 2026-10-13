@@ -210,6 +210,18 @@ enum PayoutAccountStatus {
   DISABLED
 }
 
+/// Where Redemption.payoutDestination* came from. NULL on a row means a legacy
+/// request whose destination has not been captured yet.
+enum PayoutDestinationSource {
+  /// Copied from the chosen PayoutAccount inside the request transaction.
+  REQUEST_SNAPSHOT
+  /// Legacy request: copied from the account as it was when an operator first
+  /// acted on it (process / success / proof), not at request time.
+  LEGACY_ACCOUNT_FALLBACK
+  /// Legacy request whose account no longer exists: nothing is guessed.
+  LEGACY_UNAVAILABLE
+}
+
 enum RedemptionStatus {
   REQUESTED
   APPROVED
@@ -789,6 +801,19 @@ model Redemption {
   idempotencyKey          String
   /// sha256 of the canonical request (amount + payoutAccountId); null on legacy rows.
   requestHash             String?
+  /// Immutable payout destination used by the queue, process, success and proof
+  /// (never the mutable PayoutAccount). Identifier/name are AES-GCM ciphertext
+  /// from lib/encryption; never return them to clients (lib/payout-destination.ts).
+  payoutDestinationSource     PayoutDestinationSource?
+  payoutDestinationProvider   PayoutProviderType?
+  payoutDestinationIdentifier String?
+  payoutDestinationName       String?
+  payoutDestinationCapturedAt DateTime?
+  /// Operator could not confirm the external transfer: the request stays
+  /// PROCESSING with its reserve held until the outcome is reconciled.
+  reconciliationRequired      Boolean            @default(false)
+  reconciliationNote          String?
+  reconciliationFlaggedAt     DateTime?
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
 
