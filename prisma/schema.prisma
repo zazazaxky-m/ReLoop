@@ -349,26 +349,35 @@ enum NotificationType {
 // ============================================================
 
 model User {
-  id             String        @id @default(cuid())
-  name           String
+  id                      String        @id @default(cuid())
+  name                    String
   /// AES-GCM ciphertext (random IV). Equality lookups use emailLookup, not this field.
-  email          String
+  email                   String
   /// HMAC blind index for login/register (middleware fills on write; cuid default only for create typing).
-  emailLookup    String        @unique @default(cuid())
-  phone          String?
-  passwordHash   String?
-  authProvider   String        @default("CREDENTIALS")
-  role           Role          @default(USER)
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  status         UserStatus    @default(ACTIVE)
-  payoutEligible Boolean       @default(true)
+  emailLookup             String        @unique @default(cuid())
+  phone                   String?
+  passwordHash            String?
+  authProvider            String        @default("CREDENTIALS")
+  role                    Role          @default(USER)
+  organizationId          String?
+  organization            Organization? @relation(fields: [organizationId], references: [id])
+  status                  UserStatus    @default(ACTIVE)
+  payoutEligible          Boolean       @default(true)
   // Bumped on password reset/change, role demotion, or suspension — stale JWTs are rejected.
-  tokenVersion   Int           @default(0)
-  mfaEnabled     Boolean       @default(false)
-  totpSecret     String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  tokenVersion            Int           @default(0)
+  mfaEnabled              Boolean       @default(false)
+  totpSecret              String?
+  /// A02: a setup or replacement factor awaiting its first code (AES-GCM
+  /// ciphertext, like totpSecret). Never used for login; the active factor
+  /// stays in totpSecret until lib/mfa.ts promotes this one under the User
+  /// lock. The three pending fields are all set or all null (CHECK
+  /// "User_pendingTotp_all_or_none" in migration 20261014023251_mfa_pending_setup).
+  pendingTotpSecret       String?
+  pendingTotpExpiresAt    DateTime?
+  /// tokenVersion when the setup started; any later bump voids the setup.
+  pendingTotpTokenVersion Int?
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
 
   depositSessions       DepositSession[]
   ledgerEntries         RewardLedger[]

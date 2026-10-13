@@ -9,14 +9,12 @@ import { prisma } from "@/lib/prisma";
 import * as rateLimit from "@/lib/rate-limit";
 import * as rbac from "@/lib/rbac";
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    user: {
-      findUnique: vi.fn(),
-      update: vi.fn(),
-    },
-  },
-}));
+vi.mock("@/lib/prisma", () => {
+  const user = { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn() };
+  // runWalletTransaction's client: lockUser's SELECT ... FOR NO KEY UPDATE, then the same user mocks.
+  const tx = { $executeRaw: vi.fn(async () => 0), $queryRaw: vi.fn(async () => [{ id: "u1" }]), user };
+  return { prisma: { user, $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)) } };
+});
 
 vi.mock("@/lib/rbac", () => ({
   requireApiUser: vi.fn(),
@@ -60,6 +58,8 @@ describe("auth profile routes", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(rbac.requireApiUser).mockResolvedValue(sessionUser as never);
+    // Re-read under the User lock: the password verified above is still current.
+    vi.mocked(prisma.user.findUniqueOrThrow).mockResolvedValue({ passwordHash: "hash" } as never);
     vi.mocked(auth.buildSessionPayload).mockImplementation((user) => ({
       sub: user.id,
       email: user.email,
@@ -190,6 +190,37 @@ describe("auth profile routes", () => {
       data: expect.objectContaining({ email: "new@example.com", passwordHash: "new-hash" }),
     }));
     expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "PROFILE_AND_PASSWORD_UPDATE" }));
+  });
+
+  it("a password change discards a pending MFA setup under the User lock", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(dbUser as never);
+    vi.mocked(auth.verifyPassword).mockResolvedValue(true);
+    vi.mocked(auth.hashPassword).mockResolvedValue("new-hash");
+    vi.mocked(prisma.user.update).mockResolvedValue({ ...dbUser, tokenVersion: 1, passwordHash: "new-hash" } as never);
+
+    const res = await PATCH(req({ currentPassword: "ok", newPassword: "Password123!xy" }));
+
+    expect(res.status).toBe(200);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "u1" },
+      data: {
+        passwordHash: "new-hash", tokenVersion: { increment: 1 },
+        pendingTotpSecret: null, pendingTotpExpiresAt: null, pendingTotpTokenVersion: null,
+      },
+    });
+    expect(auth.setSessionCookie).toHaveBeenCalledWith(expect.objectContaining({ tokenVersion: 1 }));
+  });
+
+  it("refuses a credential change when the password changed after it was verified", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(dbUser as never);
+    vi.mocked(auth.verifyPassword).mockResolvedValue(true);
+    vi.mocked(prisma.user.findUniqueOrThrow).mockResolvedValue({ passwordHash: "changed-meanwhile" } as never);
+
+    const res = await PATCH(req({ currentPassword: "ok", newPassword: "Password123!xy" }));
+
+    expect(res.status).toBe(409);
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   it("returns handled error when PATCH throws", async () => {

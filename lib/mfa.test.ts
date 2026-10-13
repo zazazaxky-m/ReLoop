@@ -1,8 +1,17 @@
+import bcrypt from "bcryptjs";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import * as auth from "@/lib/auth";
 import * as mfa from "@/lib/mfa";
 import { prisma } from "@/lib/prisma";
 import { generateTotpCode, generateTotpSecret } from "@/lib/totp";
-import { encrypt } from "@/lib/encryption";
+import { decrypt, encrypt, isEncrypted } from "@/lib/encryption";
+
+/** The TransactionClient handed to runWalletTransaction callbacks. */
+const tx = vi.hoisted(() => ({
+  $executeRaw: vi.fn(),
+  $queryRaw: vi.fn(),
+  user: { findUniqueOrThrow: vi.fn(), update: vi.fn() },
+}));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -10,12 +19,35 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    $transaction: vi.fn(async (fn: (client: unknown) => unknown) => fn(tx)),
   },
 }));
+
+// Real bcrypt, observable: proves when the password is (not) checked.
+vi.mock("@/lib/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth")>();
+  return { ...actual, verifyPassword: vi.fn(actual.verifyPassword) };
+});
+
+const PASSWORD = "Correct-Horse-Battery-1";
+const PASSWORD_HASH = bcrypt.hashSync(PASSWORD, 4);
+const sessionFields = { id: "u1", email: "a@example.com", name: "A", role: "ADMIN", organizationId: null };
+
+/** A six-digit code that is not the current one. */
+function otherCode(code: string) {
+  return String((Number(code) + 500_000) % 1_000_000).padStart(6, "0");
+}
+
+function lockedBeforeRead() {
+  expect(tx.$queryRaw).toHaveBeenCalledTimes(1); // lockUser: SELECT ... FOR NO KEY UPDATE
+  expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.user.findUniqueOrThrow.mock.invocationCallOrder[0]);
+}
 
 describe("lib/mfa", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    tx.$queryRaw.mockResolvedValue([{ id: "u1" }]);
+    tx.user.update.mockResolvedValue({ ...sessionFields, tokenVersion: 4 });
   });
 
 
@@ -77,56 +109,215 @@ describe("lib/mfa", () => {
     await expect(mfa.verifyMfaLoginCode("user-1", code)).resolves.toBe(true);
   });
 
-  it("begins MFA setup and stores encrypted secret", async () => {
-    vi.mocked(prisma.user.update).mockResolvedValue({ id: "u1" } as never);
-    const result = await mfa.beginMfaSetup("u1", "a@example.com");
-    expect(result.secret).toBeDefined();
-    expect(result.otpauthUrl).toContain(encodeURIComponent("a@example.com"));
-    expect(prisma.user.update).toHaveBeenCalledWith({
-      where: { id: "u1" },
-      data: expect.objectContaining({ mfaEnabled: false }),
+  describe("beginMfaSetup", () => {
+    it("starts a first setup with the password only and writes nothing but the pending fields", async () => {
+      tx.user.findUniqueOrThrow.mockResolvedValue({
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: false, totpSecret: null, tokenVersion: 3,
+      });
+      const before = Date.now();
+
+      const result = await mfa.beginMfaSetup("u1", "a@example.com", { currentPassword: PASSWORD });
+
+      lockedBeforeRead();
+      expect(result.replacement).toBe(false);
+      expect(result.otpauthUrl).toContain(encodeURIComponent("a@example.com"));
+      expect(result.expiresAt.getTime()).toBeGreaterThanOrEqual(before + mfa.MFA_PENDING_TTL_MS);
+      expect(mfa.MFA_PENDING_TTL_MS).toBe(600_000);
+      const { data } = tx.user.update.mock.calls[0][0];
+      expect(Object.keys(data).sort()).toEqual(["pendingTotpExpiresAt", "pendingTotpSecret", "pendingTotpTokenVersion"]);
+      expect(isEncrypted(data.pendingTotpSecret)).toBe(true);
+      expect(decrypt(data.pendingTotpSecret)).toBe(result.secret);
+      expect(data.pendingTotpExpiresAt).toEqual(result.expiresAt);
+      expect(data.pendingTotpTokenVersion).toBe(3);
+    });
+
+    it("replaces an active factor only with password and a current code, leaving it active", async () => {
+      const active = generateTotpSecret();
+      tx.user.findUniqueOrThrow.mockResolvedValue({
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active), tokenVersion: 7,
+      });
+
+      const result = await mfa.beginMfaSetup("u1", "a@example.com",
+        { currentPassword: PASSWORD, currentCode: generateTotpCode(active) });
+
+      expect(result.replacement).toBe(true);
+      expect(result.secret).not.toBe(active);
+      expect(JSON.stringify(result)).not.toContain(active);
+      const { data } = tx.user.update.mock.calls[0][0];
+      expect(data).not.toHaveProperty("totpSecret");
+      expect(data).not.toHaveProperty("mfaEnabled");
+      expect(data.pendingTotpTokenVersion).toBe(7);
+    });
+
+    it("requires the current code while MFA is active, before checking the password", async () => {
+      tx.user.findUniqueOrThrow.mockResolvedValue({
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(generateTotpSecret()), tokenVersion: 0,
+      });
+
+      await expect(mfa.beginMfaSetup("u1", "a@example.com", { currentPassword: PASSWORD }))
+        .rejects.toMatchObject({ status: 422 });
+      // No password oracle for a session without the TOTP.
+      expect(auth.verifyPassword).not.toHaveBeenCalled();
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
+
+    it("answers a wrong password and a wrong code with the same 400, writing nothing", async () => {
+      const active = generateTotpSecret();
+      tx.user.findUniqueOrThrow.mockResolvedValue({
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active), tokenVersion: 0,
+      });
+      const code = generateTotpCode(active);
+
+      const wrongPassword = mfa.beginMfaSetup("u1", "a@example.com", { currentPassword: "wrong", currentCode: code });
+      await expect(wrongPassword).rejects.toBeInstanceOf(mfa.MfaProofError);
+      await expect(wrongPassword).rejects.toMatchObject({ status: 400, message: "Password atau kode MFA tidak valid" });
+      await expect(mfa.beginMfaSetup("u1", "a@example.com", { currentPassword: PASSWORD, currentCode: otherCode(code) }))
+        .rejects.toMatchObject({ status: 400, message: "Password atau kode MFA tidak valid" });
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects a wrong password on first setup, an undecryptable active factor and inactive accounts", async () => {
+      tx.user.findUniqueOrThrow.mockResolvedValueOnce({
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: false, totpSecret: null, tokenVersion: 0,
+      });
+      await expect(mfa.beginMfaSetup("u1", "a@example.com", { currentPassword: "wrong" }))
+        .rejects.toMatchObject({ status: 400, message: "Password saat ini tidak sesuai" });
+
+      tx.user.findUniqueOrThrow.mockResolvedValueOnce({
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true,
+        totpSecret: "000000000000000000000000:00000000000000000000000000000000:deadbeef", tokenVersion: 0,
+      });
+      await expect(mfa.beginMfaSetup("u1", "a@example.com", { currentPassword: PASSWORD, currentCode: "123456" }))
+        .rejects.toMatchObject({ status: 400 });
+
+      tx.user.findUniqueOrThrow.mockResolvedValueOnce({
+        status: "SUSPENDED", passwordHash: PASSWORD_HASH, mfaEnabled: false, totpSecret: null, tokenVersion: 0,
+      });
+      await expect(mfa.beginMfaSetup("u1", "a@example.com", { currentPassword: PASSWORD }))
+        .rejects.toMatchObject({ status: 403 });
+      expect(tx.user.update).not.toHaveBeenCalled();
     });
   });
 
-  it("enables MFA with valid code", async () => {
-    const secret = generateTotpSecret();
-    vi.mocked(prisma.user.findUnique).mockResolvedValue({
-      totpSecret: encrypt(secret),
-    } as never);
-    vi.mocked(prisma.user.update).mockResolvedValue({ id: "u1" } as never);
+  describe("enableMfa", () => {
+    const pendingRow = (secret: string, overrides: Record<string, unknown> = {}) => ({
+      status: "ACTIVE", mfaEnabled: true, tokenVersion: 4,
+      pendingTotpSecret: encrypt(secret), pendingTotpExpiresAt: new Date(Date.now() + 60_000), pendingTotpTokenVersion: 4,
+      ...overrides,
+    });
 
-    const code = generateTotpCode(secret);
-    await expect(mfa.enableMfa("u1", code)).resolves.toBe(true);
+    it("promotes the pending secret atomically and increments tokenVersion", async () => {
+      const pending = generateTotpSecret();
+      const row = pendingRow(pending);
+      tx.user.findUniqueOrThrow.mockResolvedValue(row);
+      tx.user.update.mockResolvedValue({ ...sessionFields, tokenVersion: 5 });
+
+      const result = await mfa.enableMfa("u1", generateTotpCode(pending));
+
+      lockedBeforeRead();
+      expect(result).toEqual({ ok: true, replaced: true, user: { ...sessionFields, tokenVersion: 5 } });
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
+      expect(tx.user.update.mock.calls[0][0]).toMatchObject({
+        where: { id: "u1" },
+        data: {
+          totpSecret: row.pendingTotpSecret, mfaEnabled: true,
+          pendingTotpSecret: null, pendingTotpExpiresAt: null,
+          pendingTotpTokenVersion: null, tokenVersion: { increment: 1 },
+        },
+      });
+    });
+
+    it("reports a first enable as not replaced", async () => {
+      const pending = generateTotpSecret();
+      tx.user.findUniqueOrThrow.mockResolvedValue(pendingRow(pending, { mfaEnabled: false }));
+      await expect(mfa.enableMfa("u1", generateTotpCode(pending))).resolves.toMatchObject({ ok: true, replaced: false });
+    });
+
+    it("keeps the pending setup on a wrong code", async () => {
+      const pending = generateTotpSecret();
+      tx.user.findUniqueOrThrow.mockResolvedValue(pendingRow(pending));
+      await expect(mfa.enableMfa("u1", otherCode(generateTotpCode(pending))))
+        .resolves.toEqual({ ok: false, reason: "invalid_code" });
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["expired", { pendingTotpExpiresAt: new Date(Date.now() - 1) }],
+      ["stale", { pendingTotpTokenVersion: 3 }],
+    ])("discards an %s pending setup even with the right code", async (reason, overrides) => {
+      const pending = generateTotpSecret();
+      tx.user.findUniqueOrThrow.mockResolvedValue(pendingRow(pending, overrides));
+      await expect(mfa.enableMfa("u1", generateTotpCode(pending))).resolves.toEqual({ ok: false, reason });
+      expect(tx.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: mfa.PENDING_MFA_CLEARED });
+    });
+
+    it("refuses without a pending setup and discards an undecryptable one", async () => {
+      tx.user.findUniqueOrThrow.mockResolvedValueOnce(pendingRow(generateTotpSecret(), {
+        pendingTotpSecret: null, pendingTotpExpiresAt: null, pendingTotpTokenVersion: null,
+      }));
+      await expect(mfa.enableMfa("u1", "123456")).resolves.toEqual({ ok: false, reason: "no_pending" });
+      expect(tx.user.update).not.toHaveBeenCalled();
+
+      tx.user.findUniqueOrThrow.mockResolvedValueOnce(pendingRow(generateTotpSecret(), {
+        pendingTotpSecret: "000000000000000000000000:00000000000000000000000000000000:deadbeef",
+      }));
+      await expect(mfa.enableMfa("u1", "123456")).resolves.toEqual({ ok: false, reason: "no_pending" });
+      expect(tx.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: mfa.PENDING_MFA_CLEARED });
+    });
+
+    it("rejects inactive accounts", async () => {
+      tx.user.findUniqueOrThrow.mockResolvedValue(pendingRow(generateTotpSecret(), { status: "SUSPENDED" }));
+      await expect(mfa.enableMfa("u1", "123456")).rejects.toMatchObject({ status: 403 });
+    });
   });
 
-  it("does not enable MFA with invalid code", async () => {
-    const secret = generateTotpSecret();
-    vi.mocked(prisma.user.findUnique).mockResolvedValue({
-      totpSecret: encrypt(secret),
-    } as never);
+  describe("disableMfa", () => {
+    it("needs password and a code of the active factor, then clears everything and increments tokenVersion", async () => {
+      const active = generateTotpSecret();
+      tx.user.findUniqueOrThrow.mockResolvedValue({
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active),
+      });
+      tx.user.update.mockResolvedValue({ ...sessionFields, tokenVersion: 9 });
 
-    await expect(mfa.enableMfa("u1", "000000")).resolves.toBe(false);
+      const result = await mfa.disableMfa("u1", { currentPassword: PASSWORD, code: generateTotpCode(active) });
+
+      lockedBeforeRead();
+      expect(result).toEqual({ ok: true, user: { ...sessionFields, tokenVersion: 9 } });
+      expect(tx.user.update.mock.calls[0][0]).toMatchObject({
+        where: { id: "u1" },
+        data: {
+          mfaEnabled: false, totpSecret: null, ...mfa.PENDING_MFA_CLEARED, tokenVersion: { increment: 1 },
+        },
+      });
+    });
+
+    it("rejects a wrong password or code and a disabled factor without writing", async () => {
+      const active = generateTotpSecret();
+      const row = { status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active) };
+      tx.user.findUniqueOrThrow.mockResolvedValue(row);
+      const code = generateTotpCode(active);
+
+      await expect(mfa.disableMfa("u1", { currentPassword: "wrong", code })).resolves.toEqual({ ok: false, reason: "invalid_proof" });
+      await expect(mfa.disableMfa("u1", { currentPassword: PASSWORD, code: otherCode(code) }))
+        .resolves.toEqual({ ok: false, reason: "invalid_proof" });
+      tx.user.findUniqueOrThrow.mockResolvedValue({ ...row, mfaEnabled: false, totpSecret: null });
+      await expect(mfa.disableMfa("u1", { currentPassword: PASSWORD, code })).resolves.toEqual({ ok: false, reason: "not_enabled" });
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
   });
 
-  it("disables MFA with valid code", async () => {
-    const secret = generateTotpSecret();
-    vi.mocked(prisma.user.findUnique).mockResolvedValue({
-      totpSecret: encrypt(secret),
-      mfaEnabled: true,
-    } as never);
-    vi.mocked(prisma.user.update).mockResolvedValue({ id: "u1" } as never);
+  describe("cancelMfaSetup", () => {
+    it("clears only the pending fields when a setup is pending", async () => {
+      tx.user.findUniqueOrThrow.mockResolvedValueOnce({ pendingTotpSecret: encrypt(generateTotpSecret()) });
+      await expect(mfa.cancelMfaSetup("u1")).resolves.toBe(true);
+      lockedBeforeRead();
+      expect(tx.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: mfa.PENDING_MFA_CLEARED });
 
-    const code = generateTotpCode(secret);
-    await expect(mfa.disableMfa("u1", code)).resolves.toBe(true);
-  });
-
-  it("returns true when disabling MFA that is already disabled", async () => {
-    vi.mocked(prisma.user.findUnique).mockResolvedValue({
-      totpSecret: null,
-      mfaEnabled: false,
-    } as never);
-
-    await expect(mfa.disableMfa("u1", "000000")).resolves.toBe(true);
+      tx.user.update.mockClear();
+      tx.user.findUniqueOrThrow.mockResolvedValueOnce({ pendingTotpSecret: null });
+      await expect(mfa.cancelMfaSetup("u1")).resolves.toBe(false);
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
   });
 
   it("returns MFA status", async () => {
@@ -185,15 +376,13 @@ describe("lib/mfa", () => {
     await expect(mfa.verifyMfaChallenge(token)).resolves.toBeNull();
   });
 
-  it("rejects enable/disable/verify when encrypted secret cannot be decrypted", async () => {
+  it("rejects login verification when the encrypted secret cannot be decrypted", async () => {
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
       totpSecret: "000000000000000000000000:00000000000000000000000000000000:deadbeef",
       mfaEnabled: true,
       status: "ACTIVE",
     } as never);
 
-    await expect(mfa.enableMfa("u1", "123456")).resolves.toBe(false);
-    await expect(mfa.disableMfa("u1", "123456")).resolves.toBe(false);
     await expect(mfa.verifyMfaLoginCode("u1", "123456")).resolves.toBe(false);
   });
 

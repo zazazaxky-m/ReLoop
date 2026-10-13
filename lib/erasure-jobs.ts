@@ -410,10 +410,12 @@ async function anonymizeAccount(
   }
 
   // 1. Profile (through the encryption extension: name/email ciphertext, new
-  //    emailLookup), secrets, and every live session via tokenVersion.
+  //    emailLookup), secrets (password, active and pending MFA factor), and
+  //    every live session via tokenVersion.
   await tx.user.update({ where: { id: userId }, data: {
     name: ERASED_USER_NAME, email: erasedEmailFor(userId), phone: null,
     passwordHash: null, totpSecret: null, mfaEnabled: false, status: "INACTIVE",
+    pendingTotpSecret: null, pendingTotpExpiresAt: null, pendingTotpTokenVersion: null,
     tokenVersion: { increment: 1 },
   } });
   const resetTokens = await tx.passwordResetToken.deleteMany({ where: { userId } });

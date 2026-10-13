@@ -139,7 +139,9 @@ describe("account erasure (real PostgreSQL foreign keys)", () => {
       note: `dibayar ke ${digits}` })).status).toBe(200);
     const trip = await f.trip({ bagCount: 1 });
     await f.db.trip.update({ where: { id: trip.id }, data: { status: "COMPLETED" } });
-    await f.db.user.update({ where: { id: userId }, data: { totpSecret: encrypt(generateTotpSecret()), phone: "081234567890" } });
+    await f.db.user.update({ where: { id: userId }, data: { totpSecret: encrypt(generateTotpSecret()), phone: "081234567890",
+      // A02: a pending MFA setup must not survive the erasure either.
+      pendingTotpSecret: encrypt(generateTotpSecret()), pendingTotpExpiresAt: later(10 * 60_000), pendingTotpTokenVersion: 0 } });
     await f.db.deviceToken.create({ data: { userId, token: `device-${randomUUID()}`, platform: "android" } });
     await f.db.passwordResetToken.create({ data: { userId, tokenHash: randomBytes(32).toString("hex"), expiresAt: later(HOUR_MS) } });
     await f.db.notification.create({ data: { userId, type: "REDEMPTION_STATUS", title: "Status", body: "Pencairan berhasil" } });
@@ -189,7 +191,9 @@ describe("account erasure (real PostgreSQL foreign keys)", () => {
     expect(joined.user.name).toBe("Pengguna dihapus");
 
     // Profile redacted through the encryption extension; secrets cleared; sessions revoked.
+    expect(before.user.pendingTotpSecret).not.toBeNull();
     expect(after.user).toMatchObject({ phone: null, passwordHash: null, totpSecret: null, mfaEnabled: false,
+      pendingTotpSecret: null, pendingTotpExpiresAt: null, pendingTotpTokenVersion: null,
       status: "INACTIVE", tokenVersion: before.user.tokenVersion + 1, emailLookup: emailLookupHash(`erased-${userId}@invalid.reloop`) });
     expect(isEncrypted(after.user.name) && decrypt(after.user.name)).toBe("Pengguna dihapus");
     expect(isEncrypted(after.user.email) && decrypt(after.user.email)).toBe(`erased-${userId}@invalid.reloop`);

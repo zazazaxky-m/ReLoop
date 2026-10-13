@@ -7,13 +7,12 @@ import * as rateLimit from "@/lib/rate-limit";
 import * as passwordReset from "@/lib/password-reset";
 import { NextRequest } from "next/server";
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    user: {
-      update: vi.fn(),
-    },
-  },
-}));
+vi.mock("@/lib/prisma", () => {
+  const user = { update: vi.fn() };
+  // runWalletTransaction's client: lockUser's SELECT ... FOR NO KEY UPDATE, then the same user mock.
+  const tx = { $executeRaw: vi.fn(async () => 0), $queryRaw: vi.fn(async () => [{ id: "user-1" }]), user };
+  return { prisma: { user, $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)) } };
+});
 
 vi.mock("@/lib/auth", () => ({
   hashPassword: vi.fn(),
@@ -59,11 +58,16 @@ describe("POST /api/auth/reset-password", () => {
 
     expect(res.status).toBe(200);
     expect(auth.hashPassword).toHaveBeenCalledWith("secret123456");
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
       data: {
         passwordHash: "new-hash",
         tokenVersion: { increment: 1 },
+        // A reset also discards a pending MFA setup (A02).
+        pendingTotpSecret: null,
+        pendingTotpExpiresAt: null,
+        pendingTotpTokenVersion: null,
       },
     });
     expect(auth.clearSessionCookie).toHaveBeenCalled();

@@ -9,11 +9,14 @@ import {
 } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
-import { requireApiUser } from "@/lib/rbac";
+import { HttpError, requireApiUser } from "@/lib/rbac";
 import { passwordSchema } from "@/lib/password-policy";
 import type { AppRole } from "@/lib/roles";
 import { userWhereEmail } from "@/lib/encryption";
 import { accountEmailSchema } from "@/lib/account-email";
+import { lockUser } from "@/lib/db-locks";
+import { PENDING_MFA_CLEARED } from "@/lib/mfa";
+import { runWalletTransaction } from "@/lib/wallet-service";
 
 const patchSchema = z.object({
   name: z.string().min(2).max(80).optional(),
@@ -87,23 +90,34 @@ export async function PATCH(req: Request) {
       }
     }
 
-    const updated = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        ...(data.name !== undefined ? { name: data.name.trim() } : {}),
-        ...(data.phone !== undefined
-          ? { phone: data.phone?.trim() || null }
-          : {}),
-        ...(changingEmail
-          ? { email: normalizedEmail, tokenVersion: { increment: 1 } }
-          : {}),
-        ...(changingPassword
-          ? {
-              passwordHash: await hashPassword(data.newPassword!),
-              tokenVersion: { increment: 1 },
-            }
-          : {}),
-      },
+    // Hash before the transaction (CPU only). Under the User lock the
+    // password checked above must still be current; a credential change also
+    // discards any pending MFA setup (A02).
+    const newPasswordHash = changingPassword ? await hashPassword(data.newPassword!) : undefined;
+    const updated = await runWalletTransaction(async (tx) => {
+      await lockUser(tx, user.id);
+      if (changingEmail || changingPassword) {
+        const current = await tx.user.findUniqueOrThrow({ where: { id: user.id }, select: { passwordHash: true } });
+        if (current.passwordHash !== user.passwordHash) {
+          throw new HttpError(409, "Data akun berubah. Muat ulang lalu coba lagi.");
+        }
+      }
+      return tx.user.update({
+        where: { id: user.id },
+        data: {
+          ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+          ...(data.phone !== undefined
+            ? { phone: data.phone?.trim() || null }
+            : {}),
+          ...(changingEmail
+            ? { email: normalizedEmail, tokenVersion: { increment: 1 } }
+            : {}),
+          ...(changingPassword
+            ? { passwordHash: newPasswordHash, tokenVersion: { increment: 1 } }
+            : {}),
+          ...(changingEmail || changingPassword ? PENDING_MFA_CLEARED : {}),
+        },
+      });
     });
 
     await setSessionCookie(buildSessionPayload({

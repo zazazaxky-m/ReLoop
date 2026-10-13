@@ -428,3 +428,59 @@ Pada mobile, `AuthProvider.checkSession()` menghapus pengguna aktif ketika
 Pesan pengguna: “Sesi Anda telah berakhir. Silakan masuk kembali.” Pemeriksaan
 runtime Flutter dan peluncuran terkoordinasi tetap menjadi gate F01/U04/Z01;
 A01 tidak menyatakan finding sudah RELEASED.
+
+### Setup dan penggantian faktor MFA (A02)
+
+Setup MFA tidak lagi menyentuh faktor yang aktif. Endpoint hanya untuk ADMIN dan
+SUPERADMIN, dan setiap langkah memerlukan bukti baru, bukan sesi saja:
+
+| Endpoint | Body | Hasil |
+|---|---|---|
+| `POST /api/auth/mfa/setup` | `{ currentPassword, currentCode? }` | `currentCode` wajib selama MFA aktif (penggantian); setup pertama cukup password. Respons: `secret`, `otpauthUrl`, `qrDataUrl`, `replacement`, `expiresAt`, `message`. |
+| `DELETE /api/auth/mfa/setup` | — | Membuang setup tertunda saja; faktor aktif dan sesi tidak berubah. Respons `{ cancelled, message }`. |
+| `POST /api/auth/mfa/enable` | `{ code }` | Kode dari secret tertunda. Berhasil: secret tertunda menjadi faktor aktif, `tokenVersion` naik, cookie sesi pemohon diterbitkan ulang. Respons `{ replaced, message }`. |
+| `POST /api/auth/mfa/disable` | `{ currentPassword, code }` | Kode dari faktor aktif. Berhasil: MFA mati, setup tertunda dibuang, `tokenVersion` naik, cookie sesi pemohon diterbitkan ulang. |
+
+Aturan:
+
+- Secret baru disimpan di `User.pendingTotpSecret` (ciphertext AES-GCM, helper
+  yang sama dengan `totpSecret`) dengan `pendingTotpExpiresAt` 10 menit dan
+  `pendingTotpTokenVersion` = `tokenVersion` saat setup dimulai. Ketiganya selalu
+  terisi bersama atau kosong bersama (CHECK `User_pendingTotp_all_or_none`).
+  Login (`/api/auth/mfa/verify`) hanya memakai `totpSecret`, sehingga faktor lama
+  tetap berlaku sampai konfirmasi.
+- Setup, konfirmasi, disable, dan pembatalan berjalan di bawah lock baris User
+  (`lockUser`, transaksi ReadCommitted dengan `lock_timeout`), lalu membaca ulang
+  password, faktor aktif, dan field tertunda. Dua konfirmasi paralel hanya
+  menghasilkan satu promosi; yang lain mendapat 409.
+- Konfirmasi ditolak (409, setup dibuang) bila setup kedaluwarsa atau
+  `tokenVersion` sudah berubah sejak setup dimulai. Kode salah (400) tidak
+  membuang setup. Tanpa setup tertunda juga 409.
+- Ganti password (`PATCH /api/auth/me`) dan reset password membuang setup
+  tertunda di bawah lock User yang sama; perubahan email juga. Penghapusan akun
+  (A04) mengosongkan ketiga field.
+- Enable/replace dan disable menaikkan `tokenVersion`: semua sesi lain dan
+  challenge MFA lama dicabut, sedangkan pemohon langsung menerima cookie sesi
+  baru dengan versi baru dan tetap masuk. Klien yang menyimpan cookie harus
+  memakai `Set-Cookie` dari respons ini.
+- Status: body tidak valid atau tanpa body 422 (klien lama yang memanggil setup
+  tanpa body ditolak, tidak ada fallback); password atau kode salah 400 dengan
+  satu pesan "Password atau kode MFA tidak valid" untuk kedua faktor; untuk
+  penggantian, kode yang hilang ditolak 422 sebelum password diperiksa.
+  Rate limit per pengguna + IP: setup 5/15 menit, enable 10/5 menit, disable
+  5/15 menit; kuota habis 429, rate limiter tidak tersedia 503.
+- Respons tidak pernah memuat secret yang aktif. Audit (`MFA_SETUP_STARTED`,
+  `MFA_SETUP_PROOF_FAILED`, `MFA_SETUP_CANCELLED`, `MFA_ENABLED`, `MFA_REPLACED`,
+  `MFA_ENABLE_FAILED`, `MFA_DISABLED`, `MFA_DISABLE_FAILED`) hanya mencatat IP
+  dan jenis setup; kode, secret, dan password tidak pernah dicatat di audit
+  maupun log server.
+- Tidak ada jalur pemulihan atau bypass lewat API. Admin yang kehilangan
+  perangkat authenticator dipulihkan oleh operator setelah identitasnya
+  divalidasi di luar aplikasi. Pemulihan harus mengosongkan `totpSecret`, field
+  tertunda, dan `mfaEnabled`, menaikkan `tokenVersion`, serta dicatat di audit.
+  Runbook operator (siapa memvalidasi dan bagaimana) belum ditetapkan.
+- Migrasi `20261014023251_mfa_pending_setup`: expand (tiga kolom nullable) dan
+  enforce (CHECK) dalam satu langkah, tanpa backfill. Baris lama semuanya
+  kosong, dan kode sebelum A02 tidak menulis kolom tersebut.
+- Mobile tidak memanggil endpoint `/api/auth/mfa/*` (hanya web dashboard,
+  `components/security/MfaManager.tsx`), jadi tidak ada perubahan Flutter.

@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
 import { hashPassword, clearSessionCookie } from "@/lib/auth";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
@@ -8,6 +7,9 @@ import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { passwordSchema } from "@/lib/password-policy";
 import { consumePasswordResetToken } from "@/lib/password-reset";
+import { lockUser } from "@/lib/db-locks";
+import { PENDING_MFA_CLEARED } from "@/lib/mfa";
+import { runWalletTransaction } from "@/lib/wallet-service";
 
 const schema = z.object({
   token: z.string().min(1, "Token tidak valid"),
@@ -39,12 +41,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        passwordHash: await hashPassword(data.password),
-        tokenVersion: { increment: 1 },
-      },
+    // Hash before the transaction (CPU only); the write also discards any
+    // pending MFA setup, under the same User lock as the MFA routes.
+    const passwordHash = await hashPassword(data.password);
+    await runWalletTransaction(async (tx) => {
+      await lockUser(tx, userId);
+      await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash, tokenVersion: { increment: 1 }, ...PENDING_MFA_CLEARED },
+      });
     });
 
     await clearSessionCookie();
