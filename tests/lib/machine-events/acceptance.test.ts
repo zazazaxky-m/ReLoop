@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { handleAcceptance, handleItemRejected } from '@/lib/machine-events/acceptance';
+import { handleAcceptance, handleItemRejected, recordItemEvidence } from '@/lib/machine-events/acceptance';
 import * as locks from '@/lib/db-locks';
 import * as credit from '@/lib/reward-credit';
 import * as machineState from '@/lib/machine-state';
@@ -275,6 +275,60 @@ describe('handleItemRejected (M04 fix round 1, C2)', () => {
     await reject(null);
     expect(mockTx.depositSession.update).not.toHaveBeenCalled();
     expect(mockTx.depositItem.updateMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('recordItemEvidence (M04 fix round 2, A3)', () => {
+  const ref = (extra: Record<string, unknown> = {}) => ({
+    sessionId: 's1', status: 'PENDING', acceptanceEventId: null, session: { userId: 'u1' }, ...extra,
+  });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTx.depositItem.findUnique.mockResolvedValue(ref());
+    mockTx.depositItem.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it('locks User -> DepositSession -> DepositItem, then writes measurements only to an undecided item', async () => {
+    expect(await recordItemEvidence(mockTx, 'd1', { kind: 'MEASUREMENT', data: { measuredWeightGrams: 40 } })).toBe(true);
+    const order = [locks.lockUser, locks.lockDepositSession, locks.lockDepositItem]
+      .map((fn) => vi.mocked(fn).mock.invocationCallOrder[0]);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(locks.lockUser).toHaveBeenCalledWith(mockTx, 'u1');
+    expect(mockTx.depositItem.findUnique.mock.invocationCallOrder.at(-1)).toBeGreaterThan(order[2]);
+    expect(mockTx.depositItem.updateMany).toHaveBeenCalledWith({
+      where: { id: 'd1', acceptanceEventId: null, status: { in: ['PENDING', 'REVIEW'] } },
+      data: { measuredWeightGrams: 40 },
+    });
+  });
+
+  it('never rewrites the evidence of an accepted, held, rejected or reviewed item', async () => {
+    for (const extra of [
+      { status: 'ACCEPTED', acceptanceEventId: 'e1' }, { status: 'REVIEW', acceptanceEventId: 'e1' },
+      { status: 'REJECTED' }, { status: 'ACCEPTED' },
+    ]) {
+      mockTx.depositItem.findUnique.mockResolvedValue(ref(extra));
+      expect(await recordItemEvidence(mockTx, 'd1', { kind: 'MEASUREMENT', data: { measuredWeightGrams: 950 } })).toBe(false);
+    }
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('records compaction only after acceptance, and never on a rejected item', async () => {
+    expect(await recordItemEvidence(mockTx, 'd1', { kind: 'COMPACTION', data: { compactionStatus: 'COMPACTED' } })).toBe(false);
+    mockTx.depositItem.findUnique.mockResolvedValue(ref({ status: 'REJECTED', acceptanceEventId: 'e1' }));
+    expect(await recordItemEvidence(mockTx, 'd1', { kind: 'COMPACTION', data: { compactionStatus: 'COMPACTED' } })).toBe(false);
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+    mockTx.depositItem.findUnique.mockResolvedValue(ref({ status: 'REVIEW', acceptanceEventId: 'e1' }));
+    expect(await recordItemEvidence(mockTx, 'd1', { kind: 'COMPACTION', data: { compactionStatus: 'COMPACTED' } })).toBe(true);
+    expect(mockTx.depositItem.updateMany).toHaveBeenCalledWith({
+      where: { id: 'd1', acceptanceEventId: { not: null }, status: { not: 'REJECTED' } },
+      data: { compactionStatus: 'COMPACTED' },
+    });
+  });
+
+  it('does nothing for an unknown item', async () => {
+    mockTx.depositItem.findUnique.mockResolvedValue(null);
+    expect(await recordItemEvidence(mockTx, 'd1', { kind: 'MEASUREMENT', data: { barcodeValue: 'x' } })).toBe(false);
+    expect(locks.lockUser).not.toHaveBeenCalled();
   });
 });
 

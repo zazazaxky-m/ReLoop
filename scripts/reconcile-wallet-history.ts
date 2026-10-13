@@ -1,5 +1,5 @@
 /**
- * Read-only wallet history inventory (tasks M01/M03, findings LOG-01, LOG-03, EX-02).
+ * Read-only wallet history inventory (tasks M01/M03/M04, findings LOG-01, LOG-03, EX-02).
  *
  *   npx tsx scripts/reconcile-wallet-history.ts      # or: npm run reconcile:wallet
  *
@@ -31,6 +31,14 @@
  *                                  (no/unknown reference, other owner, other amount)
  *   requestsWithoutMatchingReserve in-flight/paid requests whose reserve is missing
  *                                  or in the wrong state (input for M02/M05)
+ *   rejectedItemsWithMoney         REJECTED deposit items that still carry money: net
+ *                                  AVAILABLE EARN/ADJUST/REVERSE/PENALTY > 0, or a PENDING
+ *                                  amount. Legacy states M04 can no longer produce: the old
+ *                                  ungated ITEM_REJECTED flipped ACCEPTED items while their
+ *                                  EARN stayed AVAILABLE (fraud can no longer hold a REJECTED
+ *                                  item), and a machine-forged "REVIEW_REJECTED" stranded a
+ *                                  PENDING hold. reconciliationCaseKeys lists OPEN reward
+ *                                  cases already tracking the item (informational)
  * (userId+idempotencyKey and businessKey duplicates cannot exist: unique indexes.)
  *
  * Procedure before the enforce migrations (20261013122400_wallet_keys_enforce,
@@ -58,6 +66,11 @@
  * bagCount N is one QR, not automatically N units. Record per trip whether it
  * stays one unit (the current rule) or is reissued as separate rows by an
  * operator, in the case log; this script never normalizes it.
+ *
+ * rejectedItemsWithMoney needs an operator decision per item, recorded in the
+ * case log: if the rejection stands, recover the money with the user (a new
+ * ledger entry or a reconciliation case, never by editing rows); if the item
+ * was in fact valid, correct the item's status through a tracked case.
  *
  * unclosedReviewedTrips also needs an operator decision per trip, recorded in
  * the case log: verify the bags physically/with the group, then close the trip
@@ -101,6 +114,10 @@ export interface WalletInventory {
   }[];
   requestsWithoutMatchingReserve: {
     redemptionId: string; userId: string; amount: number; status: string; reserveStatuses: string[]; problem: string;
+  }[];
+  rejectedItemsWithMoney: {
+    depositItemId: string; userId: string; validationReasonCode: string | null; netAvailable: number; pending: number;
+    ledgerIds: string[]; reconciliationCaseKeys: string[];
   }[];
   summary: Record<string, number> & { blocksEnforcement: number };
   clean: boolean;
@@ -257,6 +274,29 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
       (r.status <> 'SUCCESS' AND l.status = 'PENDING')) = 0
     ORDER BY r."createdAt", r.id`);
 
+  // M04: same balance semantics as lib/ledger.ts computeBalance for the item's
+  // own rows (REDEEM rows never reference a deposit item).
+  const rejectedItemsWithMoney = (await db.$queryRaw<{
+    depositItemId: string; userId: string; validationReasonCode: string | null;
+    netAvailable: bigint | number; pending: bigint | number; ledgerIds: string[]; reconciliationCaseKeys: string[];
+  }[]>`
+    SELECT i.id AS "depositItemId", s."userId", i."validationReasonCode",
+           COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'AVAILABLE'), 0)::bigint AS "netAvailable",
+           COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'PENDING'), 0)::bigint AS pending,
+           array_agg(l.id ORDER BY l."createdAt", l.id) AS "ledgerIds",
+           COALESCE((SELECT array_agg(c."businessKey" ORDER BY c."businessKey") FROM "RewardReconciliationCase" c
+                     WHERE c."depositItemId" = i.id AND c.status = 'OPEN'), '{}') AS "reconciliationCaseKeys"
+    FROM "DepositItem" i
+    JOIN "DepositSession" s ON s.id = i."sessionId"
+    JOIN "RewardLedger" l ON l."depositItemId" = i.id
+      AND l."entryType" IN ('EARN', 'ADJUST', 'REVERSE', 'PENALTY')
+      AND l.status IN ('AVAILABLE', 'PENDING')
+    WHERE i.status = 'REJECTED'
+    GROUP BY i.id, s."userId", i."validationReasonCode"
+    HAVING COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'AVAILABLE'), 0) > 0
+        OR COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'PENDING'), 0) <> 0
+    ORDER BY i.id COLLATE "C"`).map((row) => ({ ...row, netAvailable: toNumber(row.netAvailable), pending: toNumber(row.pending) }));
+
   const summary = {
     negativeBalances: negativeBalances.length,
     duplicateEarnPerDepositItem: duplicateEarnPerDepositItem.length,
@@ -266,6 +306,7 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
     unclosedReviewedTrips: unclosedReviewedTrips.length,
     reservesWithoutRequest: reservesWithoutRequest.length,
     requestsWithoutMatchingReserve: requestsWithoutMatchingReserve.length,
+    rejectedItemsWithMoney: rejectedItemsWithMoney.length,
     blocksEnforcement:
       duplicateEarnPerDepositItem.length + duplicateReservePerRedemption.length + duplicateTripEarn.length,
   };
@@ -280,6 +321,7 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
     unclosedReviewedTrips,
     reservesWithoutRequest,
     requestsWithoutMatchingReserve,
+    rejectedItemsWithMoney,
     summary,
     clean: Object.entries(summary).every(([, count]) => count === 0),
   };

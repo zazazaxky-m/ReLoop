@@ -227,6 +227,38 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
     expect(indexes.map((row) => row.indexname)).toEqual(ENFORCE_INDEXES);
   });
 
+  it("lists REJECTED deposit items that still carry money (M04 fix round 2, A4)", async () => {
+    const [flipped, forged, settled, corrected] = await f.db.$transaction(async (tx) =>
+      [await depositItem(tx), await depositItem(tx), await depositItem(tx), await depositItem(tx)]);
+    // Pre-M04 ungated ITEM_REJECTED flipped an ACCEPTED item while its EARN stayed AVAILABLE.
+    const flippedEarn = await f.db.rewardLedger.create({ data: earn(flipped.id) });
+    // A machine-forged "REVIEW_REJECTED" (before the C1 namespace) stranded a PENDING hold.
+    const forgedHold = await f.db.rewardLedger.create({ data: { ...earn(forged.id), status: "PENDING", amount: 1_000 } });
+    // Settled correctly: the hold was rejected, or the earning was reversed (net 0).
+    await f.db.rewardLedger.create({ data: { ...earn(settled.id), status: "REJECTED" } });
+    await f.db.rewardLedger.create({ data: earn(corrected.id) });
+    await f.db.rewardLedger.create({ data: { ...earn(corrected.id), entryType: "REVERSE", amount: -2_000 } });
+    await f.db.rewardReconciliationCase.create({ data: {
+      businessKey: `fraud:${flipped.id}:hold:v1`, userId: f.ids.userA, depositItemId: flipped.id, amount: 2_000,
+      entryType: "EARN", reasonCode: "ANOMALY_ALREADY_PAID_OUT" } });
+    for (const [item, validationReasonCode] of [
+      [flipped, "ACTUATION_BLOCKED"], [forged, "REVIEW_REJECTED"], [settled, "REVIEW_REJECTED"], [corrected, "REVIEW_REJECTED"],
+    ] as const) {
+      await f.db.depositItem.update({ where: { id: item.id }, data: { status: "REJECTED", validationReasonCode } });
+    }
+
+    const inventory = await readOnlyInventory();
+    expect(inventory.rejectedItemsWithMoney).toEqual([
+      { depositItemId: flipped.id, userId: f.ids.userA, validationReasonCode: "ACTUATION_BLOCKED", netAvailable: 2_000,
+        pending: 0, ledgerIds: [flippedEarn.id], reconciliationCaseKeys: [`fraud:${flipped.id}:hold:v1`] },
+      { depositItemId: forged.id, userId: f.ids.userA, validationReasonCode: "REVIEW_REJECTED", netAvailable: 0,
+        pending: 1_000, ledgerIds: [forgedHold.id], reconciliationCaseKeys: [] },
+    ].sort((a, b) => (a.depositItemId < b.depositItemId ? -1 : 1)));
+    expect(inventory.summary).toMatchObject({ rejectedItemsWithMoney: 2, blocksEnforcement: 0 });
+    expect(inventory.clean).toBe(false);
+    expect(inventory.snapshot.readOnly).toBe(true);
+  });
+
   it("CLI prints the JSON report and exits 0 when clean, 3 with findings, without writing", async () => {
     const clean = runCli();
     expect(clean.status, clean.stderr).toBe(0);

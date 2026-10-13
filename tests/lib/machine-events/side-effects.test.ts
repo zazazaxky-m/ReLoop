@@ -20,7 +20,7 @@ vi.mock('@/lib/machine-events/item', () => ({
   resolveFraudDepositItemId: vi.fn(),
   resolveOrCreateUnknownWasteType: vi.fn(),
 }));
-vi.mock('@/lib/machine-events/acceptance', () => ({ handleAcceptance: vi.fn(), handleItemRejected: vi.fn() }));
+vi.mock('@/lib/machine-events/acceptance', () => ({ handleAcceptance: vi.fn(), handleItemRejected: vi.fn(), recordItemEvidence: vi.fn() }));
 vi.mock('@/lib/machine-state', () => ({
   transitionSession: vi.fn(),
   validateSensorSequence: vi.fn(),
@@ -142,14 +142,16 @@ describe('processEventSideEffects', () => {
   it('handles WEIGHT_MEASURED, IMAGE_CLASSIFIED, BARCODE_READ', async () => {
     vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
     
+    // M04 fix round 2 (A3): every evidence write goes through the gated, locked recorder.
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'WEIGHT_MEASURED', sessionId: 's1', payload: { weightGrams: 50 } } as any, 'evt1');
-    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { measuredWeightGrams: 50 } }));
+    expect(acceptance.recordItemEvidence).toHaveBeenLastCalledWith(mockTx, 'd1', { kind: 'MEASUREMENT', data: { measuredWeightGrams: 50 } });
 
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'IMAGE_CLASSIFIED', sessionId: 's1', payload: { detectedType: 'PET', confidence: 0.9 } } as any, 'evt1');
-    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { aiDetectedType: 'PET', aiConfidence: 0.9 } }));
+    expect(acceptance.recordItemEvidence).toHaveBeenLastCalledWith(mockTx, 'd1', { kind: 'MEASUREMENT', data: { aiDetectedType: 'PET', aiConfidence: 0.9 } });
 
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'BARCODE_READ', sessionId: 's1', payload: { barcode: '123' } } as any, 'evt1');
-    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { barcodeValue: '123' } }));
+    expect(acceptance.recordItemEvidence).toHaveBeenLastCalledWith(mockTx, 'd1', { kind: 'MEASUREMENT', data: { barcodeValue: '123' } });
+    expect(mockTx.depositItem.update).not.toHaveBeenCalled();
   });
 
   it('breaks WEIGHT/IMAGE/BARCODE/SENSOR when deposit item cannot be resolved', async () => {
@@ -159,6 +161,7 @@ describe('processEventSideEffects', () => {
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'BARCODE_READ', sessionId: 's1', payload: { barcode: 'x' } } as any, 'evt1');
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'SENSOR_SEQUENCE', sessionId: 's1', payload: {} } as any, 'evt1');
     expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+    expect(acceptance.recordItemEvidence).not.toHaveBeenCalled();
   });
 
   it('handles SENSOR_SEQUENCE and flags anomaly', async () => {
@@ -242,10 +245,11 @@ describe('processEventSideEffects', () => {
   it('handles COMPACTION_STARTED and COMPACTION_COMPLETED', async () => {
     vi.mocked(item.resolveDepositItemId).mockResolvedValue('d1');
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'COMPACTION_STARTED', sessionId: 's1' } as any, 'evt1');
-    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { compactionStatus: 'PENDING' } }));
+    expect(acceptance.recordItemEvidence).toHaveBeenLastCalledWith(mockTx, 'd1', { kind: 'COMPACTION', data: { compactionStatus: 'PENDING' } });
 
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'COMPACTION_COMPLETED', sessionId: 's1' } as any, 'evt1');
-    expect(mockTx.depositItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: { compactionStatus: 'COMPACTED' } }));
+    expect(acceptance.recordItemEvidence).toHaveBeenLastCalledWith(mockTx, 'd1', { kind: 'COMPACTION', data: { compactionStatus: 'COMPACTED' } });
+    expect(mockTx.depositItem.update).not.toHaveBeenCalled();
   });
 
   it('skips compaction updates when deposit item cannot be resolved', async () => {
@@ -253,6 +257,7 @@ describe('processEventSideEffects', () => {
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'COMPACTION_STARTED', sessionId: 's1' } as any, 'evt1');
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'COMPACTION_COMPLETED', sessionId: 's1' } as any, 'evt1');
     expect(mockTx.depositItem.update).not.toHaveBeenCalled();
+    expect(acceptance.recordItemEvidence).not.toHaveBeenCalled();
   });
 
   it('notifies fraud without deposit item when none is resolved', async () => {

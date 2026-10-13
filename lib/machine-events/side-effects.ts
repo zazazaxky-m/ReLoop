@@ -19,7 +19,7 @@ import {
 } from "./item";
 import { flagAnomaly, holdItemForFraud, notifyOrgAdmins } from "./fraud";
 import { maybeCreateAutoPickup } from "./pickup";
-import { handleAcceptance, handleItemRejected } from "./acceptance";
+import { handleAcceptance, handleItemRejected, recordItemEvidence } from "./acceptance";
 import type { DepositItemCache } from "./item-cache";
 
 /** Work that must run only after the event transaction commits (notifications, pushes). */
@@ -231,11 +231,11 @@ export async function processEventSideEffects(
     case "WEIGHT_MEASURED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: {
-          measuredWeightGrams: payload.weightGrams as number,
-        },
+      // M04 (A3): evidence is written only while the item is undecided,
+      // under the acceptance lock order; a later reading never re-prices it.
+      await recordItemEvidence(tx, itemId, {
+        kind: "MEASUREMENT",
+        data: { measuredWeightGrams: payload.weightGrams as number },
       });
       break;
     }
@@ -243,12 +243,9 @@ export async function processEventSideEffects(
     case "IMAGE_CLASSIFIED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: {
-          aiDetectedType: payload.detectedType as string,
-          aiConfidence: payload.confidence as number,
-        },
+      await recordItemEvidence(tx, itemId, {
+        kind: "MEASUREMENT",
+        data: { aiDetectedType: payload.detectedType as string, aiConfidence: payload.confidence as number },
       });
       break;
     }
@@ -256,10 +253,7 @@ export async function processEventSideEffects(
     case "BARCODE_READ": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: { barcodeValue: payload.barcode as string },
-      });
+      await recordItemEvidence(tx, itemId, { kind: "MEASUREMENT", data: { barcodeValue: payload.barcode as string } });
       break;
     }
 
@@ -341,20 +335,15 @@ export async function processEventSideEffects(
     case "COMPACTION_STARTED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: { compactionStatus: "PENDING" },
-      });
+      // Post-acceptance lifecycle only; never touches priced evidence.
+      await recordItemEvidence(tx, itemId, { kind: "COMPACTION", data: { compactionStatus: "PENDING" } });
       break;
     }
 
     case "COMPACTION_COMPLETED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: { compactionStatus: "COMPACTED" },
-      });
+      await recordItemEvidence(tx, itemId, { kind: "COMPACTION", data: { compactionStatus: "COMPACTED" } });
       break;
     }
 

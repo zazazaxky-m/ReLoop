@@ -52,10 +52,12 @@ export function isUnknownWasteTypeItem(item: {
   validationReasonCode: string | null;
   wasteType: { name: string; organizationId: string | null };
 }): boolean {
-  return (
-    item.validationReasonCode === UNKNOWN_WASTE_TYPE_REASON ||
-    (item.wasteType.name === UNKNOWN_WASTE_TYPE_NAME && item.wasteType.organizationId === null)
-  );
+  return item.validationReasonCode === UNKNOWN_WASTE_TYPE_REASON || isFallbackWasteType(item.wasteType);
+}
+
+/** The shared unknown-waste-type fallback itself (never a valid type to approve or price). */
+export function isFallbackWasteType(wasteType: { name: string; organizationId: string | null }): boolean {
+  return wasteType.name === UNKNOWN_WASTE_TYPE_NAME && wasteType.organizationId === null;
 }
 
 export interface IngestEventInput {

@@ -253,3 +253,64 @@ export async function handleItemRejected(
     data: { status: "REJECTED", validationReasonCode: input.reason },
   });
 }
+
+/**
+ * Machine evidence on one item (M04 fix round 2, finding A3).
+ *
+ * MEASUREMENT (WEIGHT_MEASURED, IMAGE_CLASSIFIED, BARCODE_READ) is what the
+ * acceptance point and a review price from, so it is written only while the
+ * item is undecided: PENDING or REVIEW and no acceptance point yet. After that
+ * (accepted, held, rejected, or decided by a reviewer) the priced evidence is
+ * fixed and later machine readings are ignored (the event row is still kept).
+ *
+ * COMPACTION (COMPACTION_STARTED / _COMPLETED) is a post-acceptance lifecycle
+ * signal and never priced: it is written only to an item that passed the
+ * acceptance point and was not rejected there, and only `compactionStatus`.
+ *
+ * Both take the acceptance lock order (recipient User -> DepositSession ->
+ * DepositItem, learned from the immutable relations) and compare-and-set the
+ * gate. Returns whether the item was written.
+ */
+export type ItemEvidence =
+  | {
+      kind: "MEASUREMENT";
+      data: { measuredWeightGrams?: number; aiDetectedType?: string; aiConfidence?: number; barcodeValue?: string };
+    }
+  | { kind: "COMPACTION"; data: { compactionStatus: "PENDING" | "COMPACTED" } };
+
+export async function recordItemEvidence(
+  tx: Prisma.TransactionClient,
+  depositItemId: string,
+  evidence: ItemEvidence,
+): Promise<boolean> {
+  const ref = await tx.depositItem.findUnique({
+    where: { id: depositItemId },
+    select: { sessionId: true, session: { select: { userId: true } } },
+  });
+  if (!ref) return false;
+  await lockUser(tx, ref.session.userId);
+  await lockDepositSession(tx, ref.sessionId);
+  await lockDepositItem(tx, depositItemId);
+
+  const item = await tx.depositItem.findUnique({
+    where: { id: depositItemId },
+    select: { status: true, acceptanceEventId: true },
+  });
+  if (!item) return false;
+
+  if (evidence.kind === "MEASUREMENT") {
+    if (item.acceptanceEventId !== null || (item.status !== "PENDING" && item.status !== "REVIEW")) return false;
+    const { count } = await tx.depositItem.updateMany({
+      where: { id: depositItemId, acceptanceEventId: null, status: { in: ["PENDING", "REVIEW"] } },
+      data: evidence.data,
+    });
+    return count === 1;
+  }
+  if (item.acceptanceEventId === null || item.status === "REJECTED") return false;
+  const { count } = await tx.depositItem.updateMany({
+    where: { id: depositItemId, acceptanceEventId: { not: null }, status: { not: "REJECTED" } },
+    data: { compactionStatus: evidence.data.compactionStatus },
+  });
+  return count === 1;
+}
+

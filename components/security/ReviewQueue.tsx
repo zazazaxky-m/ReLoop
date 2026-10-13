@@ -15,6 +15,11 @@ import {
   type Column,
 } from "@/components/ui";
 import { formatDateTime, formatRupiah } from "@/lib/format";
+import { UNKNOWN_WASTE_TYPE_NAME } from "@/lib/machine-events/shared";
+
+/** Unknown-type items (by reason, or by the fallback type itself) need a real type to approve (M04). */
+const needsReclassification = (row: { validationReasonCode: string | null; wasteType: { name: string } }) =>
+  row.validationReasonCode === "UNKNOWN_WASTE_TYPE" || row.wasteType.name === UNKNOWN_WASTE_TYPE_NAME;
 
 export interface ReviewQueueRow {
   id: string;
@@ -65,7 +70,7 @@ export function ReviewQueue({
   function openAction(row: ReviewQueueRow, kind: "approve" | "reject") {
     setActionId(row.id);
     setActionKind(kind);
-    setWasteTypeId(row.validationReasonCode === "UNKNOWN_WASTE_TYPE" ? "" : row.wasteType.id);
+    setWasteTypeId(needsReclassification(row) ? "" : row.wasteType.id);
     setQuantity(String(row.quantity));
     setNote("");
     setError(null);
@@ -77,7 +82,8 @@ export function ReviewQueue({
   }
 
   async function run(id: string, action: "approve" | "reject") {
-    const isUnknown = items.find((i) => i.id === id)?.validationReasonCode === "UNKNOWN_WASTE_TYPE";
+    const row = items.find((i) => i.id === id);
+    const isUnknown = row ? needsReclassification(row) : false;
     if (action === "approve" && isUnknown && !wasteTypeId) {
       setError("Pilih jenis sampah sebelum menyetujui item ini.");
       return;
@@ -180,7 +186,7 @@ export function ReviewQueue({
   ];
 
   const activeRow = items.find((i) => i.id === actionId) ?? null;
-  const needsWasteType = activeRow?.validationReasonCode === "UNKNOWN_WASTE_TYPE";
+  const needsWasteType = activeRow ? needsReclassification(activeRow) : false;
 
   return (
     <div className="space-y-4">

@@ -30,7 +30,8 @@ vi.mock('@/lib/wallet-service', () => ({
   afterCommitSafely: vi.fn(async (_label: string, effect: () => Promise<unknown>) => { await effect(); }),
 }));
 vi.mock('@/lib/reward-credit', () => ({ applyRewardEffect: vi.fn() }));
-vi.mock('@/lib/reward', () => ({
+vi.mock('@/lib/reward', async (importOriginal) => ({
+  validateWeight: (await importOriginal<typeof import('@/lib/reward')>()).validateWeight,
   resolveRewardRate: vi.fn(),
   computeRewardAmount: vi.fn(),
   computeWeightBasedRewardAmount: vi.fn(),
@@ -50,9 +51,10 @@ const admin = { id: 'a1', role: 'ADMIN', organizationId: 'org1' };
 
 const ref = { id: 'di1', sessionId: 's1', session: { userId: 'u1', machineId: 'm1', machine: { organizationId: 'org1' } } };
 const lockedItem = (extra: Record<string, unknown> = {}) => ({
-  id: 'di1', sessionId: 's1', status: 'REVIEW', wasteTypeId: 'wt1', quantity: 1, measuredWeightGrams: null,
+  id: 'di1', sessionId: 's1', status: 'REVIEW', wasteTypeId: 'wt1', quantity: 1, measuredWeightGrams: 25,
   validationReasonCode: 'REVERSE_MOTION', acceptedAt: null,
-  wasteType: { id: 'wt1', name: 'Plastik', defaultRewardPerItem: 100, unit: 'ITEM', organizationId: null },
+  wasteType: { id: 'wt1', name: 'Plastik', defaultRewardPerItem: 100, unit: 'ITEM', organizationId: null,
+    minWeightGrams: null, maxWeightGrams: null },
   session: {
     id: 's1', userId: 'u1', machineId: 'm1', campaignId: null, campaign: null,
     machine: { id: 'm1', organizationId: 'org1', organization: { machineRewardMode: 'MONEY_REWARD' } },
@@ -194,6 +196,41 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     const res = await patch({ action: 'reject' });
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe('Item sudah berstatus ACCEPTED, tidak lagi menunggu peninjauan');
+  });
+
+  it('refuses the fallback (unknown) waste type as an approval target (A1)', async () => {
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ validationReasonCode: 'UNKNOWN_WASTE_TYPE' }));
+    mockTx.wasteType.findUnique.mockResolvedValue({ id: 'wt-unknown', name: 'Tidak Diketahui (Unknown)', organizationId: null, unit: 'ITEM', defaultRewardPerItem: 500 });
+    const res = await patch({ action: 'approve', wasteTypeId: 'wt-unknown' });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('Jenis sampah cadangan tidak dapat disetujui. Pilih jenis sampah yang sebenarnya.');
+    // An item still typed as the fallback (reason overwritten) cannot be approved on its own type either.
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ wasteTypeId: 'wt-unknown',
+      wasteType: { id: 'wt-unknown', name: 'Tidak Diketahui (Unknown)', organizationId: null, unit: 'ITEM', defaultRewardPerItem: 500 } }));
+    expect((await patch({ action: 'approve', wasteTypeId: 'wt-unknown' })).status).toBe(422);
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+    expect(credit.applyRewardEffect).not.toHaveBeenCalled();
+  });
+
+  it('validates the weight against the assigned type window: missing or out of range is 422 (A2)', async () => {
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ measuredWeightGrams: null }));
+    const missing = await patch({ action: 'approve' });
+    expect(missing.status).toBe(422);
+    expect((await missing.json()).error).toBe('Berat setoran tidak tercatat. Item tanpa berat tidak dapat disetujui; tolak item ini.');
+
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ measuredWeightGrams: 500 }));
+    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr1', pointsPerItem: 100, unit: 'ITEM', minWeightGrams: 10, maxWeightGrams: 100 } as any);
+    const heavy = await patch({ action: 'approve' });
+    expect(heavy.status).toBe(422);
+    expect((await heavy.json()).error).toBe('Berat setoran di luar batas jenis sampah yang dipilih. Tolak item ini atau pilih jenis sampah yang sesuai.');
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+
+    // The type window applies when the rate has none; rejecting such an item still works.
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ measuredWeightGrams: 5,
+      wasteType: { ...lockedItem().wasteType, minWeightGrams: 10, maxWeightGrams: 100 } }));
+    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr1', pointsPerItem: 100, unit: 'ITEM' } as any);
+    expect((await patch({ action: 'approve' })).status).toBe(422);
+    expect((await patch({ action: 'reject' })).status).toBe(200);
   });
 
   it('requires a valid replacement waste type for unknown items', async () => {

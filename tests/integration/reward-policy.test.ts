@@ -63,12 +63,14 @@ function edgeEvent(sessionId: string, eventType: string, payload: Record<string,
 }
 
 const fixtureWasteTypeId = async () =>
-  (await f.db.machineWasteType.findFirstOrThrow({ where: { machineId: f.ids.machineA, active: true } })).wasteTypeId;
+  (await f.db.wasteType.findFirstOrThrow({ where: { name: "Botol Plastik Audit" } })).id;
 const machineCampaignId = async () =>
   (await f.db.campaign.findFirstOrThrow({ where: { organizationId: f.ids.orgA, campaignType: "MACHINE_DEPOSIT" } })).id;
 
 interface DepositOptions {
   campaignId?: string | null;
+  /** Defaults to the fixture's ITEM-unit waste type. */
+  wasteTypeId?: string;
   weightGrams?: number;
   /** [label, confidence] reported by IMAGE_CLASSIFIED; null = no classification event. */
   ai?: [string, number] | null;
@@ -93,7 +95,7 @@ function depositEvents(sessionId: string, wasteTypeId: string, options: DepositO
 
 /** One item through the signed machine protocol; every event must be ACKed. */
 async function deposit(options: DepositOptions = {}) {
-  const wasteTypeId = await fixtureWasteTypeId();
+  const wasteTypeId = options.wasteTypeId ?? (await fixtureWasteTypeId());
   const session = await f.db.depositSession.create({
     data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE", campaignId: options.campaignId ?? null },
   });
@@ -649,5 +651,141 @@ describe("decided items stay decided (M04 fix round 1)", () => {
       expect(await f.db.rewardLedger.count({ where: { depositItemId: unknown.item.id } })).toBe(0);
     }
     expect(await getWalletBalance(f.ids.userA)).toMatchObject({ available: 0, pending: 0 });
+  });
+});
+
+describe("review approvals price verified, frozen inputs (M04 fix round 2)", () => {
+  const review = (id: string, body: Record<string, unknown>) => call("adminA", "PATCH", `/api/deposit-reviews/${id}`, body);
+  const itemOf = (id: string) => f.db.depositItem.findUniqueOrThrow({ where: { id } });
+  const send = async (sessionId: string, eventType: string, payload: Record<string, unknown>, depositItemId?: string) => {
+    const event = edgeEvent(sessionId, eventType, payload);
+    if (depositItemId) event.depositItemId = depositItemId;
+    const res = await postBatch([event]);
+    expect(res.body.results[0].status).toBe("accepted");
+  };
+  async function unknownItem(weightGrams: number | null) {
+    const session = await f.db.depositSession.create({
+      data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
+    const events = [edgeEvent(session.id, "ITEM_DETECTED", { quantity: 1, inputBeam: true })];
+    if (weightGrams !== null) events.push(edgeEvent(session.id, "WEIGHT_MEASURED", { weightGrams, stable: true }));
+    events.push(edgeEvent(session.id, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }));
+    expect((await postBatch(events)).body.results.map((r: Json) => r.status)).toEqual(events.map(() => "accepted"));
+    const item = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: session.id } });
+    expect(item).toMatchObject({ status: "REVIEW", validationReasonCode: "UNKNOWN_WASTE_TYPE", rewardAmount: 0 });
+    return { session, item };
+  }
+  /** A KG waste type on the fixture machine: Rp2.000/kg, window 10-1.000 g. */
+  async function kgWasteType() {
+    const type = await f.db.wasteType.create({ data: { name: "Kaleng Audit KG", unit: "KG", active: true } });
+    await f.db.machineWasteType.create({ data: { machineId: f.ids.machineA, wasteTypeId: type.id, active: true } });
+    await f.db.rewardRate.create({ data: {
+      organizationId: f.ids.orgA, wasteTypeId: type.id, unit: "KG", pointsPerItem: 2_000,
+      minWeightGrams: 10, maxWeightGrams: 1_000, active: true } });
+    return type.id;
+  }
+
+  it("A1: approval refuses the fallback (unknown) waste type, however it is named", async () => {
+    await warmUp();
+    const fallback = await f.db.wasteType.create({
+      data: { name: UNKNOWN_WASTE_TYPE_NAME, unit: "ITEM", active: false, defaultRewardPerItem: 500 } });
+    const { item } = await unknownItem(25);
+    expect(item.wasteTypeId).toBe(fallback.id);
+    const refused = await review(item.id, { action: "approve", wasteTypeId: fallback.id });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toBe("Jenis sampah cadangan tidak dapat disetujui. Pilih jenis sampah yang sebenarnya.");
+    // A legacy row whose reason was overwritten is still recognized by its type.
+    await f.db.depositItem.update({ where: { id: item.id }, data: { validationReasonCode: "REVERSE_MOTION" } });
+    expect((await review(item.id, { action: "approve" })).status).toBe(422);
+    expect((await review(item.id, { action: "approve", wasteTypeId: fallback.id })).status).toBe(422);
+    expect(await itemOf(item.id)).toMatchObject({ status: "REVIEW", rewardAmount: 0 });
+    expect(await f.db.rewardLedger.count({ where: { userId: f.ids.userA } })).toBe(0);
+
+    // A concrete type with a valid weight is approved and priced from that type.
+    const approved = await review(item.id, { action: "approve", wasteTypeId: await fixtureWasteTypeId() });
+    expect(approved.status).toBe(200);
+    expect(approved.body.targetAmount).toBe(100);
+  });
+
+  it("A2: approval validates the weight against the assigned type: a missing weight is never valid", async () => {
+    await warmUp();
+    const { item } = await unknownItem(null);
+    const missing = await review(item.id, { action: "approve", wasteTypeId: await fixtureWasteTypeId() });
+    expect(missing.status).toBe(422);
+    expect(missing.body.error).toBe("Berat setoran tidak tercatat. Item tanpa berat tidak dapat disetujui; tolak item ini.");
+    expect(await itemOf(item.id)).toMatchObject({ status: "REVIEW", rewardAmount: 0 });
+    expect((await review(item.id, { action: "reject" })).status).toBe(200);
+
+    // Out of the assigned type's window (the rate window wins over the type window).
+    await f.db.rewardRate.updateMany({ where: { organizationId: f.ids.orgA }, data: { minWeightGrams: 10, maxWeightGrams: 100 } });
+    const heavy = await unknownItem(500);
+    const outOfWindow = await review(heavy.item.id, { action: "approve", wasteTypeId: await fixtureWasteTypeId() });
+    expect(outOfWindow.status).toBe(422);
+    expect(outOfWindow.body.error).toBe("Berat setoran di luar batas jenis sampah yang dipilih. Tolak item ini atau pilih jenis sampah yang sesuai.");
+    expect(await f.db.rewardLedger.count({ where: { userId: f.ids.userA } })).toBe(0);
+
+    const inWindow = await unknownItem(50);
+    const ok = await review(inWindow.item.id, { action: "approve", wasteTypeId: await fixtureWasteTypeId() });
+    expect(ok.status).toBe(200);
+    expect(ok.body.targetAmount).toBe(100);
+  });
+
+  it("A3: machine writes after acceptance cannot change the evidence a review prices from", async () => {
+    await warmUp();
+    const kg = await kgWasteType();
+    const held = await deposit({ wasteTypeId: kg, weightGrams: 250, anomaly: true });
+    expect(held.item).toMatchObject({ status: "REVIEW", baseRewardAmount: 500, rewardAmount: 250, measuredWeightGrams: 250 });
+
+    await send(held.session.id, "WEIGHT_MEASURED", { weightGrams: 950, stable: true }, held.item.id);
+    await send(held.session.id, "IMAGE_CLASSIFIED", { detectedType: "paper", confidence: 0.99 }, held.item.id);
+    await send(held.session.id, "BARCODE_READ", { barcode: "0000000000000" }, held.item.id);
+    expect(await itemOf(held.item.id)).toMatchObject({ measuredWeightGrams: 250, aiDetectedType: null, barcodeValue: null });
+
+    const approved = await review(held.item.id, { action: "approve" });
+    expect(approved.status).toBe(200);
+    expect(approved.body.targetAmount).toBe(500);
+    const rows = await f.db.rewardLedger.findMany({ where: { depositItemId: held.item.id } });
+    expect(rows.reduce((sum, row) => sum + row.amount, 0)).toBe(500);
+  });
+
+  it("A3: compaction is recorded only after acceptance; evidence only before it", async () => {
+    await warmUp();
+    const accepted = await deposit();
+    await send(accepted.session.id, "COMPACTION_COMPLETED", {}, accepted.item.id);
+    expect((await itemOf(accepted.item.id)).compactionStatus).toBe("COMPACTED");
+
+    const session = await f.db.depositSession.create({
+      data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
+    await send(session.id, "ITEM_DETECTED", { wasteTypeId: await fixtureWasteTypeId(), quantity: 1 });
+    const pending = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: session.id } });
+    await send(session.id, "COMPACTION_COMPLETED", {}, pending.id);
+    await send(session.id, "WEIGHT_MEASURED", { weightGrams: 30 }, pending.id);
+    await send(session.id, "IMAGE_CLASSIFIED", { detectedType: "bottle_pet", confidence: 0.9 }, pending.id);
+    await send(session.id, "BARCODE_READ", { barcode: "8991002100012" }, pending.id);
+    expect(await itemOf(pending.id)).toMatchObject({
+      compactionStatus: "NOT_REQUIRED", measuredWeightGrams: 30, aiDetectedType: "bottle_pet", barcodeValue: "8991002100012" });
+  });
+
+  it("A3: evidence writes take the recipient's User lock before the session and item", async () => {
+    await warmUp();
+    const session = await f.db.depositSession.create({
+      data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
+    await send(session.id, "ITEM_DETECTED", { wasteTypeId: await fixtureWasteTypeId(), quantity: 1 });
+    const pending = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: session.id } });
+    const weigh = edgeEvent(session.id, "WEIGHT_MEASURED", { weightGrams: 40 });
+    weigh.depositItemId = pending.id;
+    const observer = await f.connection();
+    const holder = await holdLock((tx) => tx.$queryRaw`SELECT id FROM "User" WHERE id = ${f.ids.userA} FOR NO KEY UPDATE`);
+    let sent: Promise<{ status: number; body: Json }> | undefined;
+    try {
+      sent = postBatch([weigh]);
+      sent.catch(() => {});
+      await waitForBlockedBy(observer, { holderPid: holder.pid, timeoutMs: 15_000 });
+      expect(await rowLockFree(observer, "DepositSession", session.id)).toBe(true);
+      expect(await rowLockFree(observer, "DepositItem", pending.id)).toBe(true);
+    } finally {
+      await holder.release();
+    }
+    expect((await sent!).body.results[0].status).toBe("accepted");
+    expect((await itemOf(pending.id)).measuredWeightGrams).toBe(40);
   });
 });

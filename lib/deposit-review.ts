@@ -4,12 +4,13 @@ import { lockDepositItem, lockDepositSession, lockMachine, lockUser } from "./db
 import {
   REVIEW_APPROVED_REASON,
   REVIEW_REJECTED_REASON,
+  isFallbackWasteType,
   isReviewFinal,
   isUnknownWasteTypeItem,
 } from "./machine-events/shared";
 import { prisma } from "./prisma";
 import { HttpError, assertOrgScope, type CurrentUser } from "./rbac";
-import { computeRewardAmount, computeWeightBasedRewardAmount, resolveRewardRate } from "./reward";
+import { computeRewardAmount, computeWeightBasedRewardAmount, resolveRewardRate, validateWeight } from "./reward";
 import { applyRewardEffect, type CreditEntryType } from "./reward-credit";
 import { campaignSupportsMachine, decideReward, machineRewardMode } from "./reward-policy";
 import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
@@ -41,6 +42,12 @@ import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
 export const REVIEW_DECIDED_DIFFERENTLY = "Item sudah ditinjau dengan keputusan lain";
 const ITEM_CHANGED = "Item setoran berubah saat ditinjau. Muat ulang lalu ulangi.";
 const REWARD_TOO_LARGE = "Nilai reward melebihi batas yang diizinkan";
+export const REVIEW_FALLBACK_TYPE =
+  "Jenis sampah cadangan tidak dapat disetujui. Pilih jenis sampah yang sebenarnya.";
+export const REVIEW_WEIGHT_MISSING =
+  "Berat setoran tidak tercatat. Item tanpa berat tidak dapat disetujui; tolak item ini.";
+export const REVIEW_WEIGHT_OUT_OF_RANGE =
+  "Berat setoran di luar batas jenis sampah yang dipilih. Tolak item ini atau pilih jenis sampah yang sesuai.";
 
 /** Largest rupiah value a ledger row can hold (PostgreSQL `integer`). */
 const MAX_RUPIAH = 2_147_483_647;
@@ -168,6 +175,9 @@ async function approvalTarget(tx: Prisma.TransactionClient, item: LockedItem, in
     }
     wasteType = found;
   }
+  // A1: the unknown-waste-type fallback is never a price source (its default
+  // reward and rate are what C3 removed from the acceptance point).
+  if (isFallbackWasteType(wasteType)) throw new HttpError(422, REVIEW_FALLBACK_TYPE);
   const quantity = input.quantity ?? item.quantity;
   const campaign = item.session.campaign;
   const machineCampaign = campaign && campaignSupportsMachine(campaign) ? campaign : null;
@@ -176,6 +186,19 @@ async function approvalTarget(tx: Prisma.TransactionClient, item: LockedItem, in
     { organizationId, campaignId: machineCampaign?.id ?? null, wasteTypeId: wasteType.id },
     tx,
   );
+  // A2: the same weight check as the acceptance point, against the assigned
+  // type's window (rate window over type window). Rule: every waste type is
+  // weighed, so a missing weight is never valid. The weight priced is the one
+  // measured before the acceptance point (A3: later machine readings are
+  // ignored), so approval cannot be re-priced by a late WEIGHT_MEASURED.
+  const weight = validateWeight(
+    item.measuredWeightGrams,
+    rate?.minWeightGrams ?? wasteType.minWeightGrams,
+    rate?.maxWeightGrams ?? wasteType.maxWeightGrams,
+  );
+  if (!weight.valid) {
+    throw new HttpError(422, weight.reasonCode === "WEIGHT_MISSING" ? REVIEW_WEIGHT_MISSING : REVIEW_WEIGHT_OUT_OF_RANGE);
+  }
   const points = rate?.pointsPerItem ?? wasteType.defaultRewardPerItem ?? 0;
   const multiplier = machineCampaign?.rewardMultiplier ?? 1;
   const unit = rate?.unit ?? wasteType.unit;
@@ -186,8 +209,9 @@ async function approvalTarget(tx: Prisma.TransactionClient, item: LockedItem, in
   if (!Number.isSafeInteger(baseAmount) || baseAmount < 0 || baseAmount > MAX_RUPIAH) {
     throw new HttpError(422, REWARD_TOO_LARGE);
   }
-  // A reviewer's approval settles weight, material and anomaly questions.
-  const decision = decideReward({ mode, baseAmount, weightValid: true, typeMatch: true, hasAnomaly: false });
+  // A reviewer's approval settles material and anomaly questions; the weight
+  // was verified above against the assigned type.
+  const decision = decideReward({ mode, baseAmount, weightValid: weight.valid, typeMatch: true, hasAnomaly: false });
   return { wasteType, quantity, rate, baseAmount: mode === "MONEY_REWARD" ? baseAmount : 0, target: decision.amount };
 }
 
