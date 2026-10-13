@@ -18,6 +18,15 @@ import { lockUser } from "@/lib/db-locks";
 import { PENDING_MFA_CLEARED } from "@/lib/mfa";
 import { runWalletTransaction } from "@/lib/wallet-service";
 
+/**
+ * The only User fields PATCH returns. Never secrets (totpSecret,
+ * pendingTotp*), passwordHash, emailLookup or tokenVersion (A02 fix 1, I1).
+ */
+const PROFILE_SELECT = {
+  id: true, name: true, email: true, phone: true, role: true, organizationId: true,
+  status: true, payoutEligible: true, createdAt: true, updatedAt: true,
+} as const;
+
 const patchSchema = z.object({
   name: z.string().min(2).max(80).optional(),
   phone: z.string().max(40).nullable().optional(),
@@ -117,6 +126,7 @@ export async function PATCH(req: Request) {
             : {}),
           ...(changingEmail || changingPassword ? PENDING_MFA_CLEARED : {}),
         },
+        select: { ...PROFILE_SELECT, tokenVersion: true },
       });
     });
 
@@ -142,8 +152,11 @@ export async function PATCH(req: Request) {
       },
     });
 
-    const { passwordHash: _, ...safeUser } = updated;
-    return jsonOk({ user: safeUser });
+    // Explicit allowlist: only PROFILE_SELECT fields leave, whatever the row holds.
+    const { id, name, email, phone, role, organizationId, status, payoutEligible, createdAt, updatedAt } = updated;
+    return jsonOk({
+      user: { id, name, email, phone, role, organizationId, status, payoutEligible, createdAt, updatedAt },
+    });
   } catch (error) {
     return handleApiError(error);
   }

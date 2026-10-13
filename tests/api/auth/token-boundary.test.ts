@@ -16,7 +16,16 @@ vi.mock("next/headers", () => ({ cookies: async () => ({
   get: () => state.cookie ? { value: state.cookie } : undefined,
   set: (name: string, value: string) => { if (name === "reloop_session") state.issued = value; },
 }) }));
-vi.mock("@/lib/prisma", () => ({ prisma: { user: { findUnique: async () => state.user } } }));
+vi.mock("@/lib/prisma", () => ({ prisma: { user: {
+  findUnique: async () => state.user,
+  // The login verifier's conditional single-use write (RFC 6238): only a newer step wins.
+  updateMany: async ({ where, data }: { where: { totpSecret: unknown }; data: { totpLastUsedStep: number } }) => {
+    const last = state.user.totpLastUsedStep as number | null | undefined;
+    if (where.totpSecret !== state.user.totpSecret || (last != null && last >= data.totpLastUsedStep)) return { count: 0 };
+    state.user.totpLastUsedStep = data.totpLastUsedStep;
+    return { count: 1 };
+  },
+} } }));
 vi.mock("@/lib/audit", () => ({ logAudit: vi.fn() }));
 vi.mock("@/lib/rate-limit", () => ({ checkRateLimit: async () => ({ allowed: state.available, unavailable: !state.available }) }));
 const secret = "JBSWY3DPEHPK3PXP";
@@ -29,7 +38,7 @@ async function complete(challengeToken: string, code = generateTotpCode(secret))
 beforeEach(async () => {
   state.cookie = ""; state.issued = ""; state.available = true;
   state.user = { id: "admin-1", email: "admin@example.com", name: "Admin", role: "ADMIN",
-    status: "ACTIVE", organizationId: null, tokenVersion: 0, mfaEnabled: true,
+    status: "ACTIVE", organizationId: null, tokenVersion: 0, mfaEnabled: true, totpLastUsedStep: null,
     totpSecret: secret, passwordHash: "$2a$04$Rnuw53joWdW8suLO1tAAdeacn0dT.G4zfQBmfSCG/lALzoNSluA82" };
   process.env.REALTIME_INTERNAL_SECRET = "internal-test";
 });
@@ -58,6 +67,13 @@ describe("real JWT and route boundaries", () => {
     const responses = await Promise.all([complete(token), complete(token)]);
     expect(responses.map(r => r.status).sort()).toEqual([200, 401]);
     expect((await complete(token)).status).toBe(401);
+  });
+  it("rejects an accepted code replayed with a fresh challenge", async () => {
+    const code = generateTotpCode(secret);
+    expect((await complete(await signMfaChallenge("admin-1", 0), code)).status).toBe(200);
+    state.issued = "";
+    expect((await complete(await signMfaChallenge("admin-1", 0), code)).status).toBe(401);
+    expect(state.issued).toBe("");
   });
   it("does not consume a challenge for an invalid code", async () => {
     const token = await signMfaChallenge("admin-1", 0);

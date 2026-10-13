@@ -6,6 +6,7 @@ import * as audit from "@/lib/audit";
 import * as rateLimit from "@/lib/rate-limit";
 import * as passwordReset from "@/lib/password-reset";
 import { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 
 vi.mock("@/lib/prisma", () => {
   const user = { update: vi.fn() };
@@ -29,6 +30,7 @@ vi.mock("@/lib/rate-limit", () => ({
 
 vi.mock("@/lib/password-reset", () => ({
   consumePasswordResetToken: vi.fn(),
+  findPasswordResetTokenOwner: vi.fn(),
 }));
 
 function makeRequest(body: unknown) {
@@ -47,6 +49,7 @@ describe("POST /api/auth/reset-password", () => {
   });
 
   it("updates password when token is valid", async () => {
+    vi.mocked(passwordReset.findPasswordResetTokenOwner).mockResolvedValue("user-1");
     vi.mocked(passwordReset.consumePasswordResetToken).mockResolvedValue(
       "user-1",
     );
@@ -75,7 +78,37 @@ describe("POST /api/auth/reset-password", () => {
     expect(data.message).toMatch(/berhasil/i);
   });
 
+  it("consumes the token inside the locked transaction, so a failed transaction keeps the link usable", async () => {
+    vi.mocked(passwordReset.findPasswordResetTokenOwner).mockResolvedValue("user-1");
+    vi.mocked(passwordReset.consumePasswordResetToken).mockResolvedValue("user-1");
+
+    expect((await POST(makeRequest({ token: "valid-token", password: "secret123456" }))).status).toBe(200);
+    // Called with the transaction client (not the global client), after the User lock.
+    const [, client] = vi.mocked(passwordReset.consumePasswordResetToken).mock.calls[0] as unknown as [string, { $queryRaw: { mock: { invocationCallOrder: number[] } } }];
+    expect(client).toBeDefined();
+    expect(client).not.toBe(prisma);
+    expect(client.$queryRaw.mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(passwordReset.consumePasswordResetToken).mock.invocationCallOrder[0]);
+
+    // Lock contention (503): the claim never ran outside the rolled-back transaction.
+    vi.mocked(passwordReset.consumePasswordResetToken).mockClear();
+    vi.mocked(prisma.$transaction).mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("lock timeout", { code: "P2010", clientVersion: "6", meta: { code: "55P03" } }),
+    );
+    expect((await POST(makeRequest({ token: "valid-token", password: "secret123456" }))).status).toBe(503);
+    expect(passwordReset.consumePasswordResetToken).not.toHaveBeenCalled();
+  });
+
+  it("rejects a token claimed by another request between lookup and lock", async () => {
+    vi.mocked(passwordReset.findPasswordResetTokenOwner).mockResolvedValue("user-1");
+    vi.mocked(passwordReset.consumePasswordResetToken).mockResolvedValue(null);
+
+    expect((await POST(makeRequest({ token: "valid-token", password: "secret123456" }))).status).toBe(400);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid or expired tokens", async () => {
+    vi.mocked(passwordReset.findPasswordResetTokenOwner).mockResolvedValue(null);
     vi.mocked(passwordReset.consumePasswordResetToken).mockResolvedValue(null);
 
     const res = await POST(
@@ -94,6 +127,7 @@ describe("POST /api/auth/reset-password", () => {
   });
 
   it("returns handled error when update throws", async () => {
+    vi.mocked(passwordReset.findPasswordResetTokenOwner).mockResolvedValue("user-1");
     vi.mocked(passwordReset.consumePasswordResetToken).mockResolvedValue("user-1");
     vi.mocked(prisma.user.update).mockRejectedValue(new Error("update boom"));
     expect(

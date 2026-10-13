@@ -208,6 +208,7 @@ describe("auth profile routes", () => {
         passwordHash: "new-hash", tokenVersion: { increment: 1 },
         pendingTotpSecret: null, pendingTotpExpiresAt: null, pendingTotpTokenVersion: null,
       },
+      select: expect.objectContaining({ id: true, tokenVersion: true }),
     });
     expect(auth.setSessionCookie).toHaveBeenCalledWith(expect.objectContaining({ tokenVersion: 1 }));
   });
@@ -221,6 +222,30 @@ describe("auth profile routes", () => {
 
     expect(res.status).toBe(409);
     expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it("selects and returns only profile fields, never secrets, pending MFA, emailLookup or passwordHash", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(dbUser as never);
+    // Even if the row came back with every column, only the allowlist leaves.
+    vi.mocked(prisma.user.update).mockResolvedValue({
+      ...dbUser, name: "New", status: "ACTIVE", payoutEligible: true, createdAt: new Date(0), updatedAt: new Date(0),
+      emailLookup: "lookup-hmac", totpSecret: "iv:tag:active", pendingTotpSecret: "iv:tag:pending",
+      pendingTotpExpiresAt: new Date(0), pendingTotpTokenVersion: 0, totpLastUsedStep: 1, mfaEnabled: true,
+      authProvider: "CREDENTIALS",
+    } as never);
+
+    const res = await PATCH(req({ name: "New" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(Object.keys(body.user).sort()).toEqual([
+      "createdAt", "email", "id", "name", "organizationId", "payoutEligible", "phone", "role", "status", "updatedAt",
+    ]);
+    const { select } = vi.mocked(prisma.user.update).mock.calls[0][0] as { select: Record<string, boolean> };
+    expect(Object.keys(select).sort()).toEqual([
+      "createdAt", "email", "id", "name", "organizationId", "payoutEligible", "phone", "role", "status", "tokenVersion", "updatedAt",
+    ]);
+    expect(auth.setSessionCookie).toHaveBeenCalledWith(expect.objectContaining({ tokenVersion: 0 }));
   });
 
   it("returns handled error when PATCH throws", async () => {

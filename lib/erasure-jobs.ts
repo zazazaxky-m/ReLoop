@@ -414,7 +414,7 @@ async function anonymizeAccount(
   //    every live session via tokenVersion.
   await tx.user.update({ where: { id: userId }, data: {
     name: ERASED_USER_NAME, email: erasedEmailFor(userId), phone: null,
-    passwordHash: null, totpSecret: null, mfaEnabled: false, status: "INACTIVE",
+    passwordHash: null, totpSecret: null, totpLastUsedStep: null, mfaEnabled: false, status: "INACTIVE",
     pendingTotpSecret: null, pendingTotpExpiresAt: null, pendingTotpTokenVersion: null,
     tokenVersion: { increment: 1 },
   } });

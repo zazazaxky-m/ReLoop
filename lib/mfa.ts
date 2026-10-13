@@ -10,8 +10,8 @@ import { decrypt, encrypt, isEncrypted } from "./encryption";
 import { HttpError } from "./rbac";
 import {
   buildTotpAuthUrl,
+  findTotpStep,
   generateTotpSecret,
-  verifyTotpCode,
 } from "./totp";
 import type { AppRole } from "./roles";
 import { runWalletTransaction } from "./wallet-service";
@@ -99,17 +99,33 @@ const SESSION_USER_SELECT = {
   id: true, email: true, name: true, role: true, organizationId: true, tokenVersion: true,
 } as const;
 
-/** Password and (when MFA is on) the active TOTP, checked against the locked row. */
-async function proofMatches(
-  user: { passwordHash: string | null; mfaEnabled: boolean; totpSecret: string | null },
+/**
+ * Single use (RFC 6238 §5.2): a code of the active factor is accepted only if
+ * its time step is after `totpLastUsedStep`, the step of the last accepted
+ * code (login, setup/disable proof, or the confirm code that made the factor
+ * active). Every acceptance records its step in the same write.
+ */
+function isFreshStep(step: number | null, lastUsedStep: number | null): step is number {
+  return step !== null && (lastUsedStep === null || step > lastUsedStep);
+}
+
+type ProofResult = { ok: false } | { ok: true; step: number | null };
+
+/**
+ * Password and (when MFA is on) an unused code of the active factor, checked
+ * against the locked row. `step` is the code's time step to record, or null
+ * when MFA is off and no code was checked.
+ */
+async function checkProof(
+  user: { passwordHash: string | null; mfaEnabled: boolean; totpSecret: string | null; totpLastUsedStep: number | null },
   currentPassword: string,
   currentCode: string | undefined,
-): Promise<boolean> {
+): Promise<ProofResult> {
   const passwordOk = Boolean(user.passwordHash) && (await verifyPassword(currentPassword, user.passwordHash!));
-  if (!user.mfaEnabled) return passwordOk;
+  if (!user.mfaEnabled) return passwordOk ? { ok: true, step: null } : { ok: false };
   const active = readTotpSecret(user.totpSecret);
-  const codeOk = Boolean(active && currentCode && verifyTotpCode(active, currentCode));
-  return passwordOk && codeOk;
+  const step = active && currentCode ? findTotpStep(active, currentCode) : null;
+  return passwordOk && isFreshStep(step, user.totpLastUsedStep) ? { ok: true, step } : { ok: false };
 }
 
 /**
@@ -134,18 +150,23 @@ export async function beginMfaSetup(
     await lockUser(tx, userId);
     const user = await tx.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { status: true, passwordHash: true, mfaEnabled: true, totpSecret: true, tokenVersion: true },
+      select: {
+        status: true, passwordHash: true, mfaEnabled: true, totpSecret: true, totpLastUsedStep: true, tokenVersion: true,
+      },
     });
     if (user.status !== "ACTIVE") throw new HttpError(403, ACCOUNT_INACTIVE);
     if (user.mfaEnabled && !proof.currentCode) throw new HttpError(422, CURRENT_CODE_REQUIRED);
-    if (!(await proofMatches(user, proof.currentPassword, proof.currentCode))) {
-      throw new MfaProofError(user.mfaEnabled ? WRONG_PROOF : WRONG_PASSWORD);
-    }
+    const checked = await checkProof(user, proof.currentPassword, proof.currentCode);
+    if (!checked.ok) throw new MfaProofError(user.mfaEnabled ? WRONG_PROOF : WRONG_PASSWORD);
 
     const expiresAt = new Date(Date.now() + MFA_PENDING_TTL_MS);
     await tx.user.update({
       where: { id: userId },
-      data: { pendingTotpSecret: sealed, pendingTotpExpiresAt: expiresAt, pendingTotpTokenVersion: user.tokenVersion },
+      data: {
+        pendingTotpSecret: sealed, pendingTotpExpiresAt: expiresAt, pendingTotpTokenVersion: user.tokenVersion,
+        // The proof code of the active factor is used up with this write.
+        ...(checked.step !== null ? { totpLastUsedStep: checked.step } : {}),
+      },
     });
     return { replacement: user.mfaEnabled, expiresAt };
   });
@@ -183,15 +204,18 @@ export async function enableMfa(userId: string, code: string): Promise<EnableMfa
       await tx.user.update({ where: { id: userId }, data: PENDING_MFA_CLEARED });
       return { ok: false, reason: expired ? "expired" : stale ? "stale" : "no_pending" };
     }
-    if (!verifyTotpCode(pending, code)) return { ok: false, reason: "invalid_code" };
+    const confirmStep = findTotpStep(pending, code);
+    if (confirmStep === null) return { ok: false, reason: "invalid_code" };
 
     // Proof and pending code verified in this transaction: promote atomically.
+    // The confirm code is the new factor's first used code (single use).
     const updated = await tx.user.update({
       where: { id: userId },
       data: {
         totpSecret: user.pendingTotpSecret, mfaEnabled: true,
         pendingTotpSecret: null, pendingTotpExpiresAt: null,
         pendingTotpTokenVersion: null, tokenVersion: { increment: 1 },
+        totpLastUsedStep: confirmStep,
       },
       select: SESSION_USER_SELECT,
     });
@@ -213,15 +237,18 @@ export async function disableMfa(
     await lockUser(tx, userId);
     const user = await tx.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { status: true, passwordHash: true, mfaEnabled: true, totpSecret: true },
+      select: { status: true, passwordHash: true, mfaEnabled: true, totpSecret: true, totpLastUsedStep: true },
     });
     if (user.status !== "ACTIVE") throw new HttpError(403, ACCOUNT_INACTIVE);
     if (!user.mfaEnabled) return { ok: false, reason: "not_enabled" };
-    if (!(await proofMatches(user, proof.currentPassword, proof.code))) return { ok: false, reason: "invalid_proof" };
+    if (!(await checkProof(user, proof.currentPassword, proof.code)).ok) return { ok: false, reason: "invalid_proof" };
 
     const updated = await tx.user.update({
       where: { id: userId },
-      data: { mfaEnabled: false, totpSecret: null, ...PENDING_MFA_CLEARED, tokenVersion: { increment: 1 } },
+      data: {
+        mfaEnabled: false, totpSecret: null, totpLastUsedStep: null, ...PENDING_MFA_CLEARED,
+        tokenVersion: { increment: 1 },
+      },
       select: SESSION_USER_SELECT,
     });
     return { ok: true, user: { ...updated, role: updated.role as AppRole } };
@@ -242,19 +269,35 @@ export async function cancelMfaSetup(userId: string): Promise<boolean> {
   });
 }
 
+/**
+ * Login second factor. The code must match the active factor at a time step
+ * after `totpLastUsedStep` (RFC 6238 §5.2: no second use of an OTP). The step
+ * is claimed by a conditional update on the same factor, so of two concurrent
+ * logins with one code exactly one succeeds; a lost claim counts as invalid.
+ */
 export async function verifyMfaLoginCode(
   userId: string,
   code: string,
 ): Promise<boolean> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { totpSecret: true, mfaEnabled: true, status: true },
+    select: { totpSecret: true, mfaEnabled: true, status: true, totpLastUsedStep: true },
   });
-  if (!user?.mfaEnabled || user.status !== "ACTIVE") return false;
+  if (!user?.mfaEnabled || user.status !== "ACTIVE" || !user.totpSecret) return false;
 
   const secret = readTotpSecret(user.totpSecret);
   if (!secret) return false;
-  return verifyTotpCode(secret, code);
+  const step = findTotpStep(secret, code);
+  if (!isFreshStep(step, user.totpLastUsedStep)) return false;
+
+  const claimed = await prisma.user.updateMany({
+    where: {
+      id: userId, mfaEnabled: true, status: "ACTIVE", totpSecret: user.totpSecret,
+      OR: [{ totpLastUsedStep: null }, { totpLastUsedStep: { lt: step } }],
+    },
+    data: { totpLastUsedStep: step },
+  });
+  return claimed.count === 1;
 }
 
 export async function signMfaChallenge(userId: string, tokenVersion: number): Promise<string> {

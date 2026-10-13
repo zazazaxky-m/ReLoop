@@ -59,6 +59,22 @@ function otherCode(code: string) {
   return String((Number(code) + 500_000) % 1_000_000).padStart(6, "0");
 }
 
+const STEP_MS = 30_000;
+
+/**
+ * A valid code of the next time step (inside the verifier's ±1 window). Codes
+ * are single use (RFC 6238 §5.2): after the current code was accepted, a test
+ * uses this instead of waiting up to 30 s for the next one.
+ */
+function nextCode(secret: string) {
+  return generateTotpCode(secret, Date.now() + STEP_MS);
+}
+
+/** The plaintext TOTP secret of a user's active factor. */
+async function activeSecretOf(userId = f.ids.adminA) {
+  return decrypt((await row(userId)).totpSecret!);
+}
+
 async function startReplacement() {
   const res = await call("adminA", "POST", SETUP, { currentPassword: password(), currentCode: f.totpCode("adminA") });
   expect(res.status).toBe(200);
@@ -200,9 +216,10 @@ describe("MFA factor replacement (SEC-04)", () => {
     expect(ttl).toBeLessThanOrEqual(PENDING_TTL_MS + 5_000);
     expect(new Date(setup.expiresAt).getTime()).toBe(after.pendingTotpExpiresAt!.getTime());
 
-    // Login still takes the old factor; the pending one is not active yet.
+    // Login still takes the old factor (a fresh code: the setup proof used the
+    // current one); the pending one is not active yet.
     expect(await loginWithCode(generateTotpCode(setup.secret))).toBe(401);
-    expect(await loginWithCode(f.totpCode("adminA"))).toBe(200);
+    expect(await loginWithCode(nextCode(activeSecret))).toBe(200);
   });
 
   it("confirms a replacement atomically, revokes other sessions and re-issues the requester's session", async () => {
@@ -234,9 +251,9 @@ describe("MFA factor replacement (SEC-04)", () => {
       sub: f.ids.adminA, tokenVersion: before.tokenVersion + 1,
     });
 
-    // The old factor no longer signs in; the new one does.
+    // The old factor no longer signs in; the new one does (with a code after the confirm code).
     expect(await loginWithCode(f.totpCode("adminA"))).toBe(401);
-    expect(await loginWithCode(generateTotpCode(setup.secret))).toBe(200);
+    expect(await loginWithCode(nextCode(setup.secret))).toBe(200);
     expect(await f.db.auditLog.count({ where: { action: "MFA_REPLACED", entityId: f.ids.adminA } })).toBe(1);
   });
 
@@ -254,7 +271,7 @@ describe("MFA factor replacement (SEC-04)", () => {
     expect(after.mfaEnabled).toBe(true);
     expect(after.tokenVersion).toBe(before.tokenVersion);
     expectNoPending(after); // the expired secret is discarded
-    expect(await loginWithCode(f.totpCode("adminA"))).toBe(200);
+    expect(await loginWithCode(nextCode(decrypt(before.totpSecret!)))).toBe(200);
   });
 
   it("aborting a replacement only discards the pending secret", async () => {
@@ -272,7 +289,7 @@ describe("MFA factor replacement (SEC-04)", () => {
     // The aborted secret can no longer be confirmed, the old one still signs in.
     expect((await call("adminA", "POST", ENABLE, { code: generateTotpCode(setup.secret) })).status).toBe(409);
     expect((await row()).totpSecret).toBe(before.totpSecret);
-    expect(await loginWithCode(f.totpCode("adminA"))).toBe(200);
+    expect(await loginWithCode(nextCode(decrypt(before.totpSecret!)))).toBe(200);
   });
 
   it("lets exactly one of two parallel replacement confirms succeed (deterministic lock order)", async () => {
@@ -393,8 +410,8 @@ describe("MFA factor replacement (SEC-04)", () => {
     expect(wrongPassword.body.error).toBe(wrongCode.body.error);
     expect((await row()).mfaEnabled).toBe(true);
 
-    await startReplacement(); // a pending setup is dropped with the factor
-    const ok = await call("adminA", "POST", DISABLE, { currentPassword: password(), code: f.totpCode("adminA") });
+    await startReplacement(); // a pending setup is dropped with the factor (its proof used the current code)
+    const ok = await call("adminA", "POST", DISABLE, { currentPassword: password(), code: nextCode(decrypt(before.totpSecret!)) });
     expect(ok.status).toBe(200);
 
     const after = await row();
@@ -460,7 +477,7 @@ describe("MFA factor replacement (SEC-04)", () => {
     const newCode = generateTotpCode(setup.body.secret);
     forbidden.add(newCode);
     expect((await call("adminA", "POST", ENABLE, { code: newCode })).status).toBe(200);
-    const disableCode = generateTotpCode(setup.body.secret);
+    const disableCode = nextCode(setup.body.secret);
     forbidden.add(disableCode);
     expect((await call("adminA", "POST", DISABLE, { currentPassword: password(), code: disableCode })).status).toBe(200);
 
@@ -477,5 +494,115 @@ describe("MFA factor replacement (SEC-04)", () => {
       expect(auditText).not.toContain(value);
       expect(serverLog).not.toContain(value);
     }
+  });
+});
+
+/** Fields PATCH /api/auth/me may return (A02 fix round 1, I1). */
+const PROFILE_KEYS = ["createdAt", "email", "id", "name", "organizationId", "payoutEligible", "phone", "role", "status", "updatedAt"];
+
+describe("A02 fix round 1: no secrets in profile responses, single-use codes, reset token", () => {
+  it("PATCH /api/auth/me never returns secrets, pending MFA fields, emailLookup or passwordHash", async () => {
+    await startReplacement(); // active and pending secret both present
+    const stored = await row();
+    const secrets = [stored.totpSecret!, stored.pendingTotpSecret!, stored.emailLookup, stored.passwordHash!];
+
+    for (const body of [{ name: "Admin Audit A Baru" }, { currentPassword: password(), newPassword: "Audit-Password-Changed-12345" }]) {
+      const res = await call("adminA", "PATCH", "/api/auth/me", body);
+      expect(res.status).toBe(200);
+      expect(Object.keys(res.body.user).sort()).toEqual(PROFILE_KEYS);
+      const text = JSON.stringify(res.body);
+      for (const secret of secrets) expect(text).not.toContain(secret);
+    }
+  });
+
+  it("a login code cannot be replayed at login, as setup proof or as disable proof", async () => {
+    const secret = await activeSecretOf();
+    const code = f.totpCode("adminA");
+    expect(await loginWithCode(code)).toBe(200);
+    const usedStep = (await row()).totpLastUsedStep;
+    expect(usedStep).toBeGreaterThanOrEqual(Math.floor(Date.now() / STEP_MS) - 2);
+
+    expect(await loginWithCode(code)).toBe(401);
+    const before = await row();
+    expect((await call("adminA", "POST", SETUP, { currentPassword: password(), currentCode: code })).status).toBe(400);
+    expect((await call("adminA", "POST", DISABLE, { currentPassword: password(), code })).status).toBe(400);
+    const after = await row();
+    expect(after.totpSecret).toBe(before.totpSecret);
+    expect(after.mfaEnabled).toBe(true);
+    expect(after.tokenVersion).toBe(before.tokenVersion);
+    expectNoPending(after);
+
+    // A fresh code of the same factor is still accepted.
+    expect((await call("adminA", "POST", SETUP, { currentPassword: password(), currentCode: nextCode(secret) })).status).toBe(200);
+  });
+
+  it("a setup proof code cannot be used twice, nor afterwards at login", async () => {
+    const code = f.totpCode("adminA");
+    expect((await call("adminA", "POST", SETUP, { currentPassword: password(), currentCode: code })).status).toBe(200);
+    expect((await call("adminA", "POST", SETUP, { currentPassword: password(), currentCode: code })).status).toBe(400);
+    expect(await loginWithCode(code)).toBe(401);
+  });
+
+  it("the confirm code of a replacement cannot be replayed at login, disable or setup", async () => {
+    const setup = await startReplacement();
+    const confirm = generateTotpCode(setup.secret);
+    expect((await call("adminA", "POST", ENABLE, { code: confirm })).status).toBe(200);
+
+    expect(await loginWithCode(confirm)).toBe(401);
+    expect((await call("adminA", "POST", DISABLE, { currentPassword: password(), code: confirm })).status).toBe(400);
+    expect((await call("adminA", "POST", SETUP, { currentPassword: password(), currentCode: confirm })).status).toBe(400);
+    const after = await row();
+    expect(after.mfaEnabled).toBe(true);
+    expect(decrypt(after.totpSecret!)).toBe(setup.secret);
+    expectNoPending(after);
+    expect(await loginWithCode(nextCode(setup.secret))).toBe(200);
+  });
+
+  it("two concurrent logins with the same code: exactly one succeeds", async () => {
+    const code = f.totpCode("adminA");
+    const challenges: string[] = [];
+    for (let i = 0; i < 2; i += 1) {
+      const login = await call("guest", "POST", "/api/auth/login", f.credentials("adminA"));
+      expect(login.body.requiresMfa).toBe(true);
+      challenges.push(login.body.challengeToken);
+    }
+    const observer = await f.connection();
+    const holder = await holdUserLock(f.ids.adminA);
+    let racers: Promise<number>[];
+    let queued: boolean;
+    try {
+      racers = challenges.map((challengeToken) =>
+        call("guest", "POST", "/api/auth/mfa/verify", { challengeToken, code }).then((r) => r.status));
+      // Both pass the read-side check, then race on the conditional step update.
+      queued = await Promise.race([
+        waitForLockQueue(observer, holder.pid, 2).then(() => true, () => false),
+        Promise.all(racers).then(() => false),
+      ]);
+    } finally {
+      await holder.release();
+    }
+    expect((await Promise.all(racers)).sort()).toEqual([200, 401]);
+    expect(queued).toBe(true);
+  });
+
+  it("a reset that fails with 503 under lock contention does not use up the reset link", async () => {
+    const token = await createPasswordResetToken(f.ids.adminA);
+    const newPassword = "Audit-Password-Reset-67890";
+    const holder = await holdUserLock(f.ids.adminA);
+    let busy: Awaited<ReturnType<typeof call>>;
+    try {
+      busy = await call("guest", "POST", "/api/auth/reset-password", { token, password: newPassword });
+    } finally {
+      await holder.release();
+    }
+    expect(busy.status).toBe(503);
+    const stored = await f.db.passwordResetToken.findFirstOrThrow({ where: { userId: f.ids.adminA } });
+    expect(stored.usedAt).toBeNull();
+
+    const retry = await call("guest", "POST", "/api/auth/reset-password", { token, password: newPassword });
+    expect(retry.status).toBe(200);
+    expect((await f.db.passwordResetToken.findFirstOrThrow({ where: { userId: f.ids.adminA } })).usedAt).not.toBeNull();
+    // Single use still holds after the successful retry.
+    expect((await call("guest", "POST", "/api/auth/reset-password", { token, password: newPassword })).status).toBe(400);
   });
 });

@@ -367,6 +367,10 @@ model User {
   tokenVersion            Int           @default(0)
   mfaEnabled              Boolean       @default(false)
   totpSecret              String?
+  /// A02 fix 1: RFC 6238 time step of the last code accepted for the active
+  /// factor (login, setup/disable proof, or the confirm code of a new factor).
+  /// A code at this step or earlier is a replay and is refused. Null: none yet.
+  totpLastUsedStep        Int?
   /// A02: a setup or replacement factor awaiting its first code (AES-GCM
   /// ciphertext, like totpSecret). Never used for login; the active factor
   /// stays in totpSecret until lib/mfa.ts promotes this one under the User

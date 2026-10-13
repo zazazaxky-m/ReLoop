@@ -494,3 +494,23 @@ Aturan:
   kosong, dan kode sebelum A02 tidak menulis kolom tersebut.
 - Mobile tidak memanggil endpoint `/api/auth/mfa/*` (hanya web dashboard,
   `components/security/MfaManager.tsx`), jadi tidak ada perubahan Flutter.
+- Kode TOTP sekali pakai (RFC 6238 §5.2, perbaikan A02 putaran 1).
+  `User.totpLastUsedStep` menyimpan langkah waktu (detik Unix / 30) kode
+  terakhir yang diterima untuk faktor aktif. Login (`/api/auth/mfa/verify`) serta
+  bukti setup dan disable menolak kode pada langkah itu atau sebelumnya, lalu
+  mencatat langkah baru dalam penulisan yang sama. Login memakai update
+  bersyarat, sehingga dua login paralel dengan kode yang sama hanya menghasilkan
+  satu keberhasilan. Saat faktor baru dipromosikan, nilainya menjadi langkah
+  kode konfirmasi faktor baru. Disable dan penghapusan akun mengosongkannya.
+  Akibatnya, kode yang baru dipakai untuk login tidak dapat dipakai lagi untuk
+  setup atau disable: pengguna menunggu kode berikutnya (maksimal 30 detik).
+  Migrasi `20261014032039_totp_last_used_step` hanya menambah satu kolom
+  nullable, tanpa backfill; NULL berarti belum ada kode yang dipakai.
+- `PATCH /api/auth/me` hanya mengembalikan `user` dengan `id`, `name`, `email`,
+  `phone`, `role`, `organizationId`, `status`, `payoutEligible`, `createdAt`,
+  dan `updatedAt` (select eksplisit). Secret TOTP aktif atau tertunda,
+  `passwordHash`, `emailLookup`, dan `tokenVersion` tidak pernah dikirim. Klien
+  mobile tidak membaca body ini dan memanggil `checkSession()` sesudahnya.
+- `POST /api/auth/reset-password` mengklaim token reset di dalam transaksi yang
+  sama dengan perubahan password, di bawah lock User. Kegagalan seperti 503
+  akibat lock membatalkan klaim, sehingga tautan reset tetap bisa dipakai.

@@ -18,6 +18,7 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
     $transaction: vi.fn(async (fn: (client: unknown) => unknown) => fn(tx)),
   },
@@ -32,6 +33,12 @@ vi.mock("@/lib/auth", async (importOriginal) => {
 const PASSWORD = "Correct-Horse-Battery-1";
 const PASSWORD_HASH = bcrypt.hashSync(PASSWORD, 4);
 const sessionFields = { id: "u1", email: "a@example.com", name: "A", role: "ADMIN", organizationId: null };
+
+const STEP_MS = 30_000;
+/** A code of `secret` at `at` and the RFC 6238 time step it belongs to. */
+function codeAt(secret: string, at = Date.now()) {
+  return { code: generateTotpCode(secret, at), step: Math.floor(at / STEP_MS) };
+}
 
 /** A six-digit code that is not the current one. */
 function otherCode(code: string) {
@@ -97,16 +104,47 @@ describe("lib/mfa", () => {
     expect(verified).toMatchObject({ userId: "user-1", tokenVersion: 0, challengeId: expect.any(String), expiresAt: expect.any(Number) });
   });
 
-  it("verifies login MFA codes against stored secret", async () => {
+  it("verifies login MFA codes against stored secret and records the step with a conditional update", async () => {
     const secret = generateTotpSecret();
+    const sealed = encrypt(secret);
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
-      totpSecret: secret,
+      totpSecret: sealed,
       mfaEnabled: true,
       status: "ACTIVE",
+      totpLastUsedStep: null,
+    } as never);
+    vi.mocked(prisma.user.updateMany).mockResolvedValue({ count: 1 } as never);
+
+    const { code, step } = codeAt(secret);
+    await expect(mfa.verifyMfaLoginCode("user-1", code)).resolves.toBe(true);
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "user-1", mfaEnabled: true, status: "ACTIVE", totpSecret: sealed,
+        OR: [{ totpLastUsedStep: null }, { totpLastUsedStep: { lt: step } }],
+      },
+      data: { totpLastUsedStep: step },
+    });
+  });
+
+  it("rejects a login code whose step was already used (RFC 6238 single use)", async () => {
+    const secret = generateTotpSecret();
+    const { code, step } = codeAt(secret);
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      totpSecret: encrypt(secret), mfaEnabled: true, status: "ACTIVE", totpLastUsedStep: step,
     } as never);
 
-    const code = generateTotpCode(secret);
-    await expect(mfa.verifyMfaLoginCode("user-1", code)).resolves.toBe(true);
+    await expect(mfa.verifyMfaLoginCode("user-1", code)).resolves.toBe(false);
+    expect(prisma.user.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a login code when a concurrent verifier recorded the step first", async () => {
+    const secret = generateTotpSecret();
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      totpSecret: encrypt(secret), mfaEnabled: true, status: "ACTIVE", totpLastUsedStep: null,
+    } as never);
+    vi.mocked(prisma.user.updateMany).mockResolvedValue({ count: 0 } as never);
+
+    await expect(mfa.verifyMfaLoginCode("user-1", codeAt(secret).code)).resolves.toBe(false);
   });
 
   describe("beginMfaSetup", () => {
@@ -135,10 +173,12 @@ describe("lib/mfa", () => {
       const active = generateTotpSecret();
       tx.user.findUniqueOrThrow.mockResolvedValue({
         status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active), tokenVersion: 7,
+        totpLastUsedStep: null,
       });
 
+      const proof = codeAt(active);
       const result = await mfa.beginMfaSetup("u1", "a@example.com",
-        { currentPassword: PASSWORD, currentCode: generateTotpCode(active) });
+        { currentPassword: PASSWORD, currentCode: proof.code });
 
       expect(result.replacement).toBe(true);
       expect(result.secret).not.toBe(active);
@@ -147,6 +187,30 @@ describe("lib/mfa", () => {
       expect(data).not.toHaveProperty("totpSecret");
       expect(data).not.toHaveProperty("mfaEnabled");
       expect(data.pendingTotpTokenVersion).toBe(7);
+      // The proof code is used up in the same update.
+      expect(data.totpLastUsedStep).toBe(proof.step);
+    });
+
+    it("fails closed when the last used step was not read (undefined is not 'none used')", async () => {
+      const active = generateTotpSecret();
+      tx.user.findUniqueOrThrow.mockResolvedValue({
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active), tokenVersion: 0,
+      });
+      await expect(mfa.beginMfaSetup("u1", "a@example.com", { currentPassword: PASSWORD, currentCode: generateTotpCode(active) }))
+        .rejects.toMatchObject({ status: 400 });
+    });
+
+    it("rejects a proof code whose step was already used (e.g. the login code), writing nothing", async () => {
+      const active = generateTotpSecret();
+      const proof = codeAt(active);
+      tx.user.findUniqueOrThrow.mockResolvedValue({
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active),
+        tokenVersion: 0, totpLastUsedStep: proof.step,
+      });
+
+      await expect(mfa.beginMfaSetup("u1", "a@example.com", { currentPassword: PASSWORD, currentCode: proof.code }))
+        .rejects.toMatchObject({ status: 400 });
+      expect(tx.user.update).not.toHaveBeenCalled();
     });
 
     it("requires the current code while MFA is active, before checking the password", async () => {
@@ -165,6 +229,7 @@ describe("lib/mfa", () => {
       const active = generateTotpSecret();
       tx.user.findUniqueOrThrow.mockResolvedValue({
         status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active), tokenVersion: 0,
+        totpLastUsedStep: null,
       });
       const code = generateTotpCode(active);
 
@@ -212,7 +277,8 @@ describe("lib/mfa", () => {
       tx.user.findUniqueOrThrow.mockResolvedValue(row);
       tx.user.update.mockResolvedValue({ ...sessionFields, tokenVersion: 5 });
 
-      const result = await mfa.enableMfa("u1", generateTotpCode(pending));
+      const confirm = codeAt(pending);
+      const result = await mfa.enableMfa("u1", confirm.code);
 
       lockedBeforeRead();
       expect(result).toEqual({ ok: true, replaced: true, user: { ...sessionFields, tokenVersion: 5 } });
@@ -223,6 +289,8 @@ describe("lib/mfa", () => {
           totpSecret: row.pendingTotpSecret, mfaEnabled: true,
           pendingTotpSecret: null, pendingTotpExpiresAt: null,
           pendingTotpTokenVersion: null, tokenVersion: { increment: 1 },
+          // The new factor's confirm code is its first used code.
+          totpLastUsedStep: confirm.step,
         },
       });
     });
@@ -275,7 +343,7 @@ describe("lib/mfa", () => {
     it("needs password and a code of the active factor, then clears everything and increments tokenVersion", async () => {
       const active = generateTotpSecret();
       tx.user.findUniqueOrThrow.mockResolvedValue({
-        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active),
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active), totpLastUsedStep: null,
       });
       tx.user.update.mockResolvedValue({ ...sessionFields, tokenVersion: 9 });
 
@@ -286,14 +354,27 @@ describe("lib/mfa", () => {
       expect(tx.user.update.mock.calls[0][0]).toMatchObject({
         where: { id: "u1" },
         data: {
-          mfaEnabled: false, totpSecret: null, ...mfa.PENDING_MFA_CLEARED, tokenVersion: { increment: 1 },
+          mfaEnabled: false, totpSecret: null, totpLastUsedStep: null, ...mfa.PENDING_MFA_CLEARED,
+          tokenVersion: { increment: 1 },
         },
       });
     });
 
+    it("rejects a disable proof code whose step was already used", async () => {
+      const active = generateTotpSecret();
+      const proof = codeAt(active);
+      tx.user.findUniqueOrThrow.mockResolvedValue({
+        status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active),
+        totpLastUsedStep: proof.step,
+      });
+      await expect(mfa.disableMfa("u1", { currentPassword: PASSWORD, code: proof.code }))
+        .resolves.toEqual({ ok: false, reason: "invalid_proof" });
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
+
     it("rejects a wrong password or code and a disabled factor without writing", async () => {
       const active = generateTotpSecret();
-      const row = { status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active) };
+      const row = { status: "ACTIVE", passwordHash: PASSWORD_HASH, mfaEnabled: true, totpSecret: encrypt(active), totpLastUsedStep: null };
       tx.user.findUniqueOrThrow.mockResolvedValue(row);
       const code = generateTotpCode(active);
 
