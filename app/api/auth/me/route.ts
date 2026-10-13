@@ -13,11 +13,12 @@ import { requireApiUser } from "@/lib/rbac";
 import { passwordSchema } from "@/lib/password-policy";
 import type { AppRole } from "@/lib/roles";
 import { userWhereEmail } from "@/lib/encryption";
+import { accountEmailSchema } from "@/lib/account-email";
 
 const patchSchema = z.object({
   name: z.string().min(2).max(80).optional(),
   phone: z.string().max(40).nullable().optional(),
-  email: z.string().email("Email tidak valid").optional(),
+  email: accountEmailSchema().optional(),
   currentPassword: z.string().min(1).optional(),
   newPassword: passwordSchema.optional(),
 });

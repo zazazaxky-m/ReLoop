@@ -9,6 +9,7 @@ import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { passwordSchema } from "@/lib/password-policy";
 import { userWhereEmail } from "@/lib/encryption";
+import { accountEmailSchema } from "@/lib/account-email";
 
 // Looser than login (legitimate signups are rare per visitor) but still
 // closes the previously wide-open account-creation endpoint.
@@ -17,7 +18,7 @@ const RATE_WINDOW_MS = 3_600_000;
 
 const schema = z.object({
   name: z.string().min(2, "Nama minimal 2 karakter"),
-  email: z.string().email("Email tidak valid"),
+  email: accountEmailSchema(),
   password: passwordSchema,
   phone: z
     .string()

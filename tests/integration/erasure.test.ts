@@ -3,10 +3,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import type { PrismaClient } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { decrypt, emailLookupHash, encrypt, isEncrypted, userWhereEmail } from "@/lib/encryption";
 import {
+  erasedEmailFor,
   getErasureStatus,
   processDueErasureJobs,
   requestErasure,
@@ -290,6 +291,22 @@ describe("account erasure (real PostgreSQL foreign keys)", () => {
   });
 });
 
+describe("reserved placeholder address", () => {
+  it("nobody can register or switch to an erased-account address, so erasure cannot be blocked by squatting", async () => {
+    const placeholder = erasedEmailFor(f.ids.userA);
+    const { password } = f.credentials("userB");
+    const register = await f.json("guest", "POST", "/api/auth/register",
+      { name: "Penyerobot", email: placeholder, password, phone: "081234567890" });
+    expect(register.status).toBe(422);
+    const change = await f.json("userB", "PATCH", "/api/auth/me", { email: placeholder.toUpperCase(), currentPassword: password });
+    expect(change.status).toBe(422);
+    expect(await f.db.user.findUnique({ where: userWhereEmail(placeholder) })).toBeNull();
+
+    const { body } = await eraseViaApi();
+    expect(body).toMatchObject({ status: "COMPLETED", completed: true });
+  });
+});
+
 describe("open obligations hold erasure (pending reconciliation)", () => {
   it("a pending payout holds anonymization with a clear status and the job continues after settlement", async () => {
     const userId = f.ids.userA;
@@ -476,9 +493,13 @@ describe("public deletion requests", () => {
     expect(await erasureSteps(body.requestId)).toEqual([]);
     expect(JSON.stringify(await erasureAudits())).not.toContain(email);
 
+    // Mailed after the response, only for the real account, with a link on the
+    // configured base URL (never the request Host).
+    await vi.waitFor(async () => expect(await f.capturedTransport("mail")).toHaveLength(1), { timeout: 10_000 });
     const mails = await f.capturedTransport("mail");
     expect(mails.map((m) => m.kind === "mail" && m.to)).toEqual([email]);
     const text = mails[0].kind === "mail" ? mails[0].text : "";
+    expect(text).toContain(`${process.env.NEXT_PUBLIC_BASE_URL}/account-deletion/confirm?token=`);
     const token = /\/account-deletion\/confirm\?token=([A-Za-z0-9_-]+)/.exec(text)?.[1];
     expect(token).toBeTruthy();
 

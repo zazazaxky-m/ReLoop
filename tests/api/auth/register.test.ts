@@ -73,6 +73,15 @@ describe('POST /api/auth/register', () => {
     expect(res.status).toBe(422);
   });
 
+  it('refuses the reserved erased-account domain, so an erased address cannot be squatted (422)', async () => {
+    for (const email of ['erased-ckuser123@invalid.reloop', 'Erased-X@INVALID.RELOOP', 'a@sub.invalid.reloop']) {
+      const res = await POST(makeReq({ name: 'John Doe', email, password: 'password1234', phone: '08123456789' }));
+      expect(res.status).toBe(422);
+    }
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('fails if email already registered (409)', async () => {
     vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'u1' } as any);
     

@@ -97,6 +97,13 @@ describe('/api/users API', () => {
       expect(res.status).toBe(422);
     });
 
+    it('refuses the reserved erased-account domain (422)', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin' } as any);
+      const res = await POST(makePostReq({ name: 'Test', email: 'erased-x@invalid.reloop', password: 'password1234', role: 'USER' }));
+      expect(res.status).toBe(422);
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
     it('fails if email already registered (409)', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin' } as any);
       vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'existing' } as any);

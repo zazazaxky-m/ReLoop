@@ -9,10 +9,11 @@ import { displayUsers } from "@/lib/display-user";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 import { passwordSchema } from "@/lib/password-policy";
 import { userWhereEmail } from "@/lib/encryption";
+import { accountEmailSchema } from "@/lib/account-email";
 
 const createSchema = z.object({
   name: z.string().min(2).max(120),
-  email: z.string().email(),
+  email: accountEmailSchema(),
   password: passwordSchema.max(100),
   role: z.enum(["SUPERADMIN", "ADMIN", "PENGEPUL", "USER"]),
   organizationId: z.string().nullable().optional(),

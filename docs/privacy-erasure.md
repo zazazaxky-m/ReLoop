@@ -19,7 +19,14 @@ Dokumen ini adalah acuan untuk tim produk, legal, dan operasional. Kode:
    - formulir publik `POST /api/account-deletion-requests` hanya mencatat
      permintaan `PENDING` dan mengirim tautan sekali pakai (24 jam) ke email
      akun; pemilik membuka `/account-deletion/confirm` dan menekan konfirmasi
-     (`POST /api/account-deletion-requests/confirm`, metode `EMAIL_TOKEN`);
+     (`POST /api/account-deletion-requests/confirm`, metode `EMAIL_TOKEN`).
+     Jawaban formulir sama dan sama cepat untuk email terdaftar maupun tidak:
+     email dikirim setelah respons (`after()`). Tautan hanya dibangun dari
+     `NEXT_PUBLIC_BASE_URL`, tidak pernah dari header Host; di production tanpa
+     nilai itu endpoint menjawab 503 dan tidak mengirim apa pun (sama untuk
+     lupa kata sandi). Domain `invalid.reloop` (alamat pengganti akun yang
+     dihapus) ditolak saat registrasi, ganti email, dan pembuatan akun oleh
+     admin;
    - operator, untuk pemilik yang tidak bisa masuk maupun membuka email akun
      (metode `OPERATOR`, lihat prosedur di bawah).
    Permintaan publik yang tidak diverifikasi tidak pernah dieksekusi: job dan

@@ -10,6 +10,7 @@ import {
   type SessionStatus,
   type TripStatus,
 } from "@prisma/client";
+import { ERASED_EMAIL_DOMAIN } from "./account-email";
 import { logAudit, logAuditInTransaction } from "./audit";
 import { lockUser } from "./db-locks";
 import { keyedFingerprint, userWhereEmail } from "./encryption";
@@ -54,7 +55,8 @@ import { runWalletTransaction } from "./wallet-service";
 type Tx = Prisma.TransactionClient;
 
 export const ERASED_USER_NAME = "Pengguna dihapus";
-export const erasedEmailFor = (userId: string) => `erased-${userId}@invalid.reloop`;
+/** Placeholder address of an erased account; its domain is never assignable (lib/account-email.ts). */
+export const erasedEmailFor = (userId: string) => `erased-${userId}@${ERASED_EMAIL_DOMAIN}`;
 /** Prefix of Redemption.providerReference after erasure: a keyed fingerprint, not the reference. */
 export const ERASED_REFERENCE_PREFIX = "erased-ref:";
 

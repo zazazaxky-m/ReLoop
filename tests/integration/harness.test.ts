@@ -218,8 +218,9 @@ describe("real Next HTTP with production sessions", () => {
     const { email } = f.credentials("userA");
     const response = await f.json("guest", "POST", "/api/auth/forgot-password", { email });
     expect(response.status).toBe(200);
+    // The reset mail is sent after the response (A04: no timing oracle).
+    await vi.waitFor(async () => expect(await f.capturedTransport("mail")).toHaveLength(1), { timeout: 10_000 });
     const mails = await f.capturedTransport("mail");
-    expect(mails).toHaveLength(1);
     expect(mails[0]).toMatchObject({ kind: "mail", to: email });
     expect(mails[0].kind === "mail" && mails[0].text).toMatch(/\/reset-password\?token=[\w-]{20,}/);
   });

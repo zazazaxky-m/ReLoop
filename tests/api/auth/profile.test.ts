@@ -148,6 +148,15 @@ describe("auth profile routes", () => {
     expect((await PATCH(req({ email: "new@example.com", currentPassword: "bad" }))).status).toBe(401);
   });
 
+  it("refuses an email change to the reserved erased-account domain", async () => {
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(dbUser as never);
+    vi.mocked(auth.verifyPassword).mockResolvedValue(true);
+
+    const res = await PATCH(req({ email: "erased-u2@invalid.reloop", currentPassword: "ok" }));
+    expect(res.status).toBe(422);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
   it("rejects duplicate email changes", async () => {
     vi.mocked(prisma.user.findUnique)
       .mockResolvedValueOnce(dbUser as never)
