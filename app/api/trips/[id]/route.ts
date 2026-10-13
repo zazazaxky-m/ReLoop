@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
-import { canManuallySetTripStatus } from "@/lib/trip";
+import { TRIP_CHANGED, canManuallySetTripStatus } from "@/lib/trip";
 
 const patchSchema = z.object({
   status: z.enum(["PLANNED", "ACTIVE", "COMPLETED", "CANCELLED"]),
@@ -109,7 +109,12 @@ export async function PATCH(
       throw new HttpError(422, allowed.reason!);
     }
 
-    const trip = await prisma.trip.update({ where: { id }, data: { status } });
+    // Compare-and-set: a check-out that closed the trip meanwhile (under the
+    // trip lock, lib/trip-validation.ts) must not be overwritten by a cancel
+    // decided on the status read above.
+    const { count } = await prisma.trip.updateMany({ where: { id, status: existing.status }, data: { status } });
+    if (count !== 1) throw new HttpError(409, TRIP_CHANGED);
+    const trip = await prisma.trip.findUniqueOrThrow({ where: { id } });
     await logAudit({
       actorId: user.id,
       action: "TRIP_STATUS",

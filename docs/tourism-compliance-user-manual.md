@@ -98,15 +98,24 @@ Hasil:
 
 1. Di halaman `Trip / Trash Bag`, klik `Validasi`.
 2. Pilih tahap `Gerbang pulang`.
-3. Isi QR trash bag jika ada.
-4. Isi jumlah tas kembali.
-5. Isi berat aktual jika ada.
-6. Pilih kondisi:
+3. Pindai atau pilih setiap kantong trip dan tentukan kondisinya:
    - `GOOD`: sampah terpilah baik
    - `PARTIAL`: sebagian sesuai
    - `POOR`: buruk/tidak sesuai
    - `NOT_RETURNED`: tidak kembali
-7. Simpan validasi.
+4. Isi berat aktual jika ada.
+5. Simpan validasi.
+
+Sistem hanya menerima kantong milik trip tersebut; kantong yang dipilih dua kali
+atau milik trip lain ditolak tanpa mengubah apa pun. Kantong yang tidak dipilih
+dan belum pernah dipindai dicatat `NOT_RETURNED`. Untuk trip `MONEY_REWARD`,
+reward hanya dihitung dari kantong yang dipindai, sekali per trip, walaupun
+check-out diulang atau dilakukan bersamaan dengan scan per kantong.
+
+Jika kondisi kantong ternyata salah setelah trip selesai, perubahan harus
+dicatat sebagai koreksi beserta alasannya. Koreksi memperbarui data kantong dan
+skor compliance, tetapi tidak mengubah reward yang sudah masuk; selisihnya
+tercatat di audit untuk ditindaklanjuti tim keuangan.
 
 Sistem menghitung skor:
 

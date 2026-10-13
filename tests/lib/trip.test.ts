@@ -10,6 +10,7 @@ import {
   canValidateTripStage,
   getTripTravelAgentGateBlockReason,
   getInvitedTravelAgentTripFilters,
+  aggregateBagCondition,
 } from "@/lib/trip";
 import { prisma } from "@/lib/prisma";
 
@@ -200,6 +201,27 @@ describe("trip", () => {
       await expect(
         getTripTravelAgentGateBlockReason({ travelAgentId: "ta1", organizationId: "org1" }),
       ).resolves.toMatch(/ditangguhkan atau dihapus/);
+    });
+
+    it("reads the link through a transaction client when one is given", async () => {
+      const tx = { travelAgentOrganization: { findUnique: vi.fn().mockResolvedValue({ status: "INVITED" }) } };
+      await expect(
+        getTripTravelAgentGateBlockReason({ travelAgentId: "ta1", organizationId: "org1" }, tx as any),
+      ).resolves.toBeNull();
+      expect(tx.travelAgentOrganization.findUnique).toHaveBeenCalled();
+      expect(prisma.travelAgentOrganization.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("aggregateBagCondition", () => {
+    it("ignores unreviewed bags and derives the trip condition", () => {
+      expect(aggregateBagCondition([])).toBeNull();
+      expect(aggregateBagCondition([null, undefined])).toBeNull();
+      expect(aggregateBagCondition(["NOT_RETURNED", "NOT_RETURNED", null])).toBe("NOT_RETURNED");
+      expect(aggregateBagCondition(["GOOD", null, "GOOD"])).toBe("GOOD");
+      expect(aggregateBagCondition(["GOOD", "POOR", "PARTIAL"])).toBe("POOR");
+      expect(aggregateBagCondition(["GOOD", "PARTIAL"])).toBe("PARTIAL");
+      expect(aggregateBagCondition(["GOOD", "NOT_RETURNED"])).toBe("PARTIAL");
     });
   });
 

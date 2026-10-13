@@ -115,7 +115,12 @@ function isIdempotencyKeyConflict(error: unknown): boolean {
   return Array.isArray(target) ? target.includes("idempotencyKey") : String(target ?? "").includes("idempotencyKey");
 }
 
-async function runWalletTransaction<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+/**
+ * ReadCommitted wallet transaction with `lock_timeout` 5s; lock contention is
+ * answered with a retryable 503 (nothing was committed). Also used by the trip
+ * check-out path (lib/trip-validation.ts), which writes trip return earnings.
+ */
+export async function runWalletTransaction<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   try {
     return await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL lock_timeout = '5s'`;
@@ -128,7 +133,7 @@ async function runWalletTransaction<T>(fn: (tx: Prisma.TransactionClient) => Pro
 }
 
 /** Post-commit side effects never turn a committed request into an error. */
-async function afterCommitSafely(label: string, effect: () => Promise<unknown>) {
+export async function afterCommitSafely(label: string, effect: () => Promise<unknown>) {
   try {
     await effect();
   } catch (error) {

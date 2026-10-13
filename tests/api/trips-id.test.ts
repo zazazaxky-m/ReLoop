@@ -5,7 +5,7 @@ import * as rbac from '@/lib/rbac';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    trip: { findUnique: vi.fn(), update: vi.fn() },
+    trip: { findUnique: vi.fn(), updateMany: vi.fn(), findUniqueOrThrow: vi.fn() },
     travelAgentUser: { findFirst: vi.fn() },
     travelAgentOrganization: { findUnique: vi.fn() },
     rewardLedger: { aggregate: vi.fn().mockResolvedValue({ _sum: { amount: 0 } }) },
@@ -210,13 +210,32 @@ describe('/api/trips/[id]', () => {
       vi.mocked(prisma.trip.findUnique).mockResolvedValue({
         id: 't1', campaign: { organizationId: 'org1' }, userId: null, status: 'PLANNED',
       } as any);
-      vi.mocked(prisma.trip.update).mockResolvedValue({ id: 't1', status: 'CANCELLED' } as any);
+      vi.mocked(prisma.trip.updateMany).mockResolvedValue({ count: 1 } as any);
+      vi.mocked(prisma.trip.findUniqueOrThrow).mockResolvedValue({ id: 't1', status: 'CANCELLED' } as any);
 
       const req = new Request('http://localhost', {
         method: 'PATCH', body: JSON.stringify({ status: 'CANCELLED' }),
       });
       const res = await PATCH(req, makeParams('t1'));
       expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ trip: { id: 't1', status: 'CANCELLED' } });
+      // Compare-and-set on the status the decision was made on.
+      expect(prisma.trip.updateMany).toHaveBeenCalledWith({ where: { id: 't1', status: 'PLANNED' }, data: { status: 'CANCELLED' } });
+    });
+
+    it('answers 409 when a check-out changed the trip meanwhile', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'a1', role: 'ADMIN', organizationId: 'org1' } as any);
+      vi.mocked(prisma.trip.findUnique).mockResolvedValue({
+        id: 't1', campaign: { organizationId: 'org1' }, userId: null, status: 'ACTIVE',
+      } as any);
+      vi.mocked(prisma.trip.updateMany).mockResolvedValue({ count: 0 } as any);
+
+      const res = await PATCH(new Request('http://localhost', {
+        method: 'PATCH', body: JSON.stringify({ status: 'CANCELLED' }),
+      }), makeParams('t1'));
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe('Status trip sudah berubah. Muat ulang halaman lalu coba lagi.');
+      expect(prisma.trip.findUniqueOrThrow).not.toHaveBeenCalled();
     });
 
     it('rejects illegal status transitions', async () => {

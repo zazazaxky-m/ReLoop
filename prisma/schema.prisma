@@ -750,18 +750,21 @@ model RewardLedger {
   referenceId    String?
   actorId        String?
   /// Unique key of the financial effect this row records (e.g. `redemption:<id>:reserve`,
-  /// `deposit-item:<id>:earn`). Required for every new write; null only on legacy rows.
+  /// `deposit-item:<id>:earn`, `trip:<id>:return`). Required for every new write; null only on legacy rows.
   businessKey    String?         @unique
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
-  // Partial unique indexes Prisma 6 cannot express (migration 20261013122400_wallet_keys_enforce);
-  // remove any DROP INDEX for them that `prisma migrate diff/dev` generates:
+  // Partial unique indexes Prisma 6 cannot express (migrations 20261013122400_wallet_keys_enforce,
+  // 20261013151919_trip_reward_keys_enforce); remove any DROP INDEX for them that
+  // `prisma migrate diff/dev` generates:
   //   RewardLedger_one_earn_per_deposit_item   ("depositItemId") WHERE EARN AND status <> 'REVERSED'
   //   RewardLedger_one_reserve_per_redemption  ("referenceId") WHERE REDEEM/Redemption AND status <> 'REJECTED'
+  //   RewardLedger_one_earn_per_trip           ("referenceId") WHERE EARN/Trip AND status <> 'REVERSED'
   @@index([userId, status])
   @@index([sessionId])
   @@index([depositItemId])
+  @@index([referenceType, referenceId])
 }
 
 // ============================================================

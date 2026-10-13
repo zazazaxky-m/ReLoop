@@ -2,11 +2,24 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireApiUser, assertOrgScope, assertActivePartnership, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
-import { TRASH_BAG_REWARD_PER_BAG, isRewardableCondition, computeTrashBagRewardAmount, canValidateTripStage, getTripTravelAgentGateBlockReason } from "@/lib/trip";
+import { canValidateTripStage, getTripTravelAgentGateBlockReason } from "@/lib/trip";
+import {
+  BAG_IDS_REQUIRED,
+  TRIP_CHANGED,
+  assertCountWithinIssued,
+  lockTripAggregate,
+  markUnreviewedBagsNotReturned,
+  refreshTripOutcome,
+  tripNotificationRecipients,
+  validateTripBags,
+} from "@/lib/trip-validation";
+import { afterCommitSafely, runWalletTransaction } from "@/lib/wallet-service";
 import { calculateCompliance } from "@/lib/tourism";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
 import { formatRupiah } from "@/lib/format";
+
+const conditionSchema = z.enum(["GOOD", "PARTIAL", "POOR", "NOT_RETURNED"]);
 
 const createSchema = z.object({
   tripId: z.string().min(1),
@@ -15,235 +28,159 @@ const createSchema = z.object({
   bagQrCode: z.string().max(60).optional(),
   returnedBagCount: z.number().int().min(0).max(500).default(0),
   actualWeightKg: z.number().min(0).max(100000).nullable().optional(),
-  conditionStatus: z.enum(["GOOD", "PARTIAL", "POOR", "NOT_RETURNED"]).optional(),
+  conditionStatus: conditionSchema.optional(),
   appCompleted: z.boolean().default(false),
   notes: z.string().max(500).optional(),
-  bags: z.array(z.object({
-    id: z.string(),
-    status: z.enum(["GOOD", "PARTIAL", "POOR", "NOT_RETURNED"])
-  })).optional()
+  bags: z.array(z.object({ id: z.string().min(1).max(191), status: conditionSchema })).max(2000).optional(),
 });
 
+/**
+ * Gate validation of a trip. Check-out is decided in one wallet transaction
+ * under the trip locks (lib/trip-validation.ts): bag IDs are verified as rows
+ * of this trip, the outcome is recomputed from every bag, and the return
+ * earning is written at most once (`trip:<tripId>:return`). A reward trip is
+ * never paid from a bare count. Audit and notifications run after COMMIT.
+ */
 export async function POST(req: Request) {
   try {
     const user = await requireApiUser(["ADMIN", "PENGEPUL", "SUPERADMIN"]);
     const data = createSchema.parse(await req.json());
 
-    const trip = await prisma.trip.findUnique({
+    // Scope uses only the trip's immutable campaign organization; every
+    // decision below is re-read under the locks.
+    const scope = await prisma.trip.findUnique({
       where: { id: data.tripId },
-      include: {
-        campaign: { select: { organizationId: true, rewardMode: true, campaignType: true, rewardMultiplier: true, name: true } },
-        _count: { select: { bagAssignments: true } },
-      },
+      select: { id: true, campaign: { select: { organizationId: true } } },
     });
-    if (!trip) throw new HttpError(404, "Trip tidak ditemukan");
+    if (!scope) throw new HttpError(404, "Trip tidak ditemukan");
     if (user.role === "PENGEPUL") {
-      await assertActivePartnership(user.id, trip.campaign.organizationId);
+      await assertActivePartnership(user.id, scope.campaign.organizationId);
       if (data.validationStage !== "BANK_SAMPAH_PICKUP") {
         throw new HttpError(403, "Pengepul hanya dapat mencatat pickup Bank Sampah");
       }
     } else {
-      assertOrgScope(user, trip.campaign.organizationId);
+      assertOrgScope(user, scope.campaign.organizationId);
+    }
+    const bags = data.bags ?? [];
+    if (bags.length > 0 && data.validationStage !== "CHECK_OUT") {
+      throw new HttpError(422, "Kondisi kantong hanya dicatat saat check-out");
     }
 
-    // Gate ops require invited agent; bank-sampah pickup after COMPLETED is allowed even if later suspended.
-    if (data.validationStage !== "BANK_SAMPAH_PICKUP") {
-      const agentBlock = await getTripTravelAgentGateBlockReason({
-        travelAgentId: trip.travelAgentId,
-        organizationId: trip.campaign.organizationId,
-      });
-      if (agentBlock) throw new HttpError(422, agentBlock);
-    }
+    const result = await runWalletTransaction(async (tx) => {
+      const trip = await lockTripAggregate(tx, scope.id);
+      const issued = trip.bagAssignments.length;
 
-    const stageGuard = canValidateTripStage(trip.status, data.validationStage);
-    if (!stageGuard.ok) {
-      throw new HttpError(422, stageGuard.reason!);
-    }
-
-    if (data.validationStage === "BANK_SAMPAH_PICKUP") {
-      const existingPickup = await prisma.manualValidation.findFirst({
-        where: { tripId: trip.id, validationStage: "BANK_SAMPAH_PICKUP" },
-        select: { id: true },
-      });
-      if (existingPickup) {
-        throw new HttpError(422, "Pickup bank sampah untuk trip ini sudah dicatat");
+      // Gate ops require an invited agent; bank-sampah pickup after COMPLETED is allowed even if later suspended.
+      if (data.validationStage !== "BANK_SAMPAH_PICKUP") {
+        const agentBlock = await getTripTravelAgentGateBlockReason(
+          { travelAgentId: trip.travelAgentId, organizationId: trip.campaign.organizationId }, tx);
+        if (agentBlock) throw new HttpError(422, agentBlock);
       }
-    }
+      const stageGuard = canValidateTripStage(trip.status, data.validationStage);
+      if (!stageGuard.ok) throw new HttpError(422, stageGuard.reason!);
 
-    if (data.bagQrCode) {
-      const bag = await prisma.trashBagAssignment.findUnique({
-        where: { bagQrCode: data.bagQrCode },
-      });
-      if (!bag || bag.tripId !== trip.id) {
-        throw new HttpError(422, "QR trash bag tidak valid untuk trip ini");
-      }
-    }
-
-    let finalReturnedBagCount = data.returnedBagCount;
-    let finalConditionStatus = data.conditionStatus;
-    
-    if (data.bags && data.bags.length > 0) {
-      finalReturnedBagCount = data.bags.filter(b => b.status !== "NOT_RETURNED").length;
-      const allGood = data.bags.every(b => b.status === "GOOD");
-      const anyPoor = data.bags.some(b => b.status === "POOR");
-      const allLost = data.bags.every(b => b.status === "NOT_RETURNED");
-      
-      if (allLost) finalConditionStatus = "NOT_RETURNED";
-      else if (allGood) finalConditionStatus = "GOOD";
-      else if (anyPoor) finalConditionStatus = "POOR";
-      else finalConditionStatus = "PARTIAL";
-    }
-
-    const compliance = calculateCompliance({
-      stage: data.validationStage,
-      appCompleted: data.appCompleted,
-      assignedBagCount: trip._count.bagAssignments,
-      returnedBagCount: finalReturnedBagCount,
-      conditionStatus: finalConditionStatus,
-    });
-
-    const rewardPerBag = TRASH_BAG_REWARD_PER_BAG;
-    let rewardableBagCount = 0;
-    let rewardAmount = 0;
-    if (trip.campaign.rewardMode === "MONEY_REWARD" && data.validationStage === "CHECK_OUT" && trip.userId) {
-      if (data.bags && data.bags.length > 0) {
-        rewardableBagCount = data.bags.filter((b) => isRewardableCondition(b.status)).length;
-      } else if (isRewardableCondition(finalConditionStatus) && finalReturnedBagCount > 0) {
-        rewardableBagCount = finalReturnedBagCount;
-      }
-
-      rewardAmount = computeTrashBagRewardAmount({
-        rewardableBagCount,
-        complianceScore: compliance.score,
-        rewardMultiplier: trip.campaign.rewardMultiplier,
-        rewardPerBag,
-      });
-    }
-
-    const result = await prisma.$transaction(async (tx) => {
-      if (data.bags && data.bags.length > 0) {
-        const returnedAt = new Date();
-        await Promise.all(
-          data.bags.map((b) =>
-            tx.trashBagAssignment.update({
-              where: { id: b.id },
-              data: {
-                status: b.status,
-                // NOT_RETURNED means the bag was never returned — do not stamp returnedAt.
-                returnedAt: b.status === "NOT_RETURNED" ? null : returnedAt,
-              },
-            }),
-          ),
-        );
-      }
-
-      const validation = await tx.manualValidation.create({
-        data: {
-          tripId: trip.id,
-          validatedById: user.id,
-          validationStage: data.validationStage,
-          gateType:
-            data.gateType ??
-            (data.validationStage === "CHECK_IN"
-              ? "ENTRY"
-              : data.validationStage === "CHECK_OUT"
-                ? "EXIT"
-                : "BANK_SAMPAH"),
-          bagQrCode: data.bagQrCode ?? null,
-          returnedBagCount: finalReturnedBagCount,
-          actualWeightKg: data.actualWeightKg ?? null,
-          conditionStatus: finalConditionStatus ?? null,
-          appCompleted: data.appCompleted,
-          complianceScore: compliance.score,
-          complianceStatus: compliance.status,
-          notes: data.notes ?? null,
-        },
-      });
-
-      if (data.validationStage === "CHECK_IN") {
-        await tx.trip.update({
-          where: { id: trip.id },
-          data: {
-            status: "ACTIVE",
-            complianceStatus: "CHECKED_IN",
-            complianceScore: compliance.score,
-            checkInAt: new Date(),
-          },
-        });
-      } else if (data.validationStage === "CHECK_OUT") {
-        await tx.trip.update({
-          where: { id: trip.id },
-          data: {
-            status: "COMPLETED",
-            complianceStatus: compliance.status,
-            complianceScore: compliance.score,
-            checkOutAt: new Date(),
-          },
-        });
-      }
-
-      if (rewardAmount > 0 && trip.userId) {
-        // Prefer Trip-scoped idempotency so progressive PATCH + bulk CHECK_OUT cannot double-pay.
-        const existingReward = await tx.rewardLedger.findFirst({
-          where: {
-            userId: trip.userId,
-            campaignId: trip.campaignId,
-            reasonCode: "TRASH_BAG_RETURN",
-            OR: [
-              { referenceType: "Trip", referenceId: trip.id },
-              { referenceType: "ManualValidation", referenceId: validation.id },
-            ],
-          },
+      if (data.validationStage === "BANK_SAMPAH_PICKUP") {
+        const existingPickup = await tx.manualValidation.findFirst({
+          where: { tripId: trip.id, validationStage: "BANK_SAMPAH_PICKUP" },
           select: { id: true },
         });
-        if (!existingReward) {
-          await tx.rewardLedger.create({
-            data: {
-              userId: trip.userId,
-              organizationId: trip.campaign.organizationId,
-              campaignId: trip.campaignId,
-              entryType: "EARN",
-              amount: rewardAmount,
-              status: "AVAILABLE",
-              reasonCode: "TRASH_BAG_RETURN",
-              referenceType: "Trip",
-              referenceId: trip.id,
-            },
-          });
-          return { validation, rewardAmount };
-        }
+        if (existingPickup) throw new HttpError(422, "Pickup bank sampah untuk trip ini sudah dicatat");
       }
-      return { validation, rewardAmount: 0 };
+      if (data.bagQrCode && !trip.bagAssignments.some((bag) => bag.bagQrCode === data.bagQrCode)) {
+        throw new HttpError(422, "QR trash bag tidak valid untuk trip ini");
+      }
+
+      const record = (fields: {
+        returnedBagCount: number;
+        conditionStatus: z.infer<typeof conditionSchema> | null;
+        complianceScore: number;
+        complianceStatus: ReturnType<typeof calculateCompliance>["status"];
+      }) =>
+        tx.manualValidation.create({
+          data: {
+            tripId: trip.id,
+            validatedById: user.id,
+            validationStage: data.validationStage,
+            gateType:
+              data.gateType ??
+              (data.validationStage === "CHECK_IN"
+                ? "ENTRY"
+                : data.validationStage === "CHECK_OUT"
+                  ? "EXIT"
+                  : "BANK_SAMPAH"),
+            bagQrCode: data.bagQrCode ?? null,
+            actualWeightKg: data.actualWeightKg ?? null,
+            appCompleted: data.appCompleted,
+            notes: data.notes ?? null,
+            ...fields,
+          },
+        });
+
+      if (data.validationStage === "CHECK_OUT" && bags.length > 0) {
+        // Verified rows only; unlisted unscanned bags did not come back.
+        await validateTripBags(tx, trip.id, bags);
+        await markUnreviewedBagsNotReturned(tx, trip.id);
+        const outcome = await refreshTripOutcome(tx, trip.id, { appCompleted: data.appCompleted });
+        if (!outcome.completedNow) throw new HttpError(409, TRIP_CHANGED);
+        const validation = await record({
+          returnedBagCount: outcome.returnedCount,
+          conditionStatus: outcome.conditionStatus,
+          complianceScore: outcome.compliance.score,
+          complianceStatus: outcome.compliance.status,
+        });
+        return { trip, validation, compliance: outcome.compliance, rewardAmount: outcome.rewardAmount };
+      }
+
+      // Legacy count-only request: bounded by the issued rows, never stamps a
+      // bag status and never earns money.
+      assertCountWithinIssued(data.returnedBagCount, issued);
+      if (
+        data.validationStage === "CHECK_OUT" &&
+        trip.campaign.rewardMode === "MONEY_REWARD" &&
+        trip.userId &&
+        issued > 0
+      ) {
+        throw new HttpError(422, BAG_IDS_REQUIRED);
+      }
+      const compliance = calculateCompliance({
+        stage: data.validationStage,
+        appCompleted: data.appCompleted,
+        assignedBagCount: issued,
+        returnedBagCount: data.returnedBagCount,
+        conditionStatus: data.conditionStatus,
+      });
+      if (data.validationStage !== "BANK_SAMPAH_PICKUP") {
+        const { count } = await tx.trip.updateMany({
+          where: { id: trip.id, status: trip.status },
+          data:
+            data.validationStage === "CHECK_IN"
+              ? { status: "ACTIVE", complianceStatus: "CHECKED_IN", complianceScore: compliance.score, checkInAt: new Date() }
+              : { status: "COMPLETED", complianceStatus: compliance.status, complianceScore: compliance.score, checkOutAt: new Date() },
+        });
+        if (count !== 1) throw new HttpError(409, TRIP_CHANGED);
+      }
+      const validation = await record({
+        returnedBagCount: data.returnedBagCount,
+        conditionStatus: data.conditionStatus ?? null,
+        complianceScore: compliance.score,
+        complianceStatus: compliance.status,
+      });
+      return { trip, validation, compliance, rewardAmount: 0 };
     });
 
-    await logAudit({
-      actorId: user.id,
-      action: "MANUAL_VALIDATION",
-      entityType: "ManualValidation",
-      entityId: result.validation.id,
-      metadata: { tripId: trip.id, rewardAmount: result.rewardAmount },
-    });
+    const { trip, validation, compliance, rewardAmount } = result;
+    await afterCommitSafely("audit MANUAL_VALIDATION", () =>
+      logAudit({
+        actorId: user.id,
+        action: "MANUAL_VALIDATION",
+        entityType: "ManualValidation",
+        entityId: validation.id,
+        metadata: { tripId: trip.id, rewardAmount },
+      }),
+    );
 
     // Best-effort in-app notifications for trip stakeholders.
-    const notifyUserIds = new Set<string>();
-    if (trip.userId) notifyUserIds.add(trip.userId);
-    if (trip.travelAgentId) {
-      const agentUsers = await prisma.travelAgentUser.findMany({
-        where: { travelAgentId: trip.travelAgentId },
-        select: { userId: true },
-      });
-      const invited = await prisma.travelAgentOrganization.findMany({
-        where: {
-          travelAgentId: trip.travelAgentId,
-          organizationId: trip.campaign.organizationId,
-          status: "INVITED",
-        },
-        select: { id: true },
-      });
-      if (invited.length > 0) {
-        for (const link of agentUsers) notifyUserIds.add(link.userId);
-      }
-    }
+    const recipients = await tripNotificationRecipients(trip);
     const groupLabel = trip.groupName ?? trip.campaign.name;
     const stageLabel =
       data.validationStage === "CHECK_IN"
@@ -251,29 +188,30 @@ export async function POST(req: Request) {
         : data.validationStage === "CHECK_OUT"
           ? "check-out"
           : "pickup bank sampah";
-    for (const userId of notifyUserIds) {
-      void createNotification({
-        userId,
-        type: "TRIP_STATUS",
-        title: `Trip ${stageLabel}`,
-        body: `${groupLabel}: status ${stageLabel} tercatat (skor ${compliance.score}/100).`,
-        data: { tripId: trip.id, stage: data.validationStage },
-      });
-      if (result.rewardAmount > 0 && userId === trip.userId) {
-        void createNotification({
+    for (const userId of recipients) {
+      await afterCommitSafely("notification TRIP_STATUS", () =>
+        createNotification({
           userId,
-          type: "TRASH_BAG_REWARD",
-          title: "Reward trash bag masuk",
-          body: `${formatRupiah(result.rewardAmount)} dari trip ${groupLabel} sudah tersedia di dompet.`,
-          data: { tripId: trip.id, rewardAmount: result.rewardAmount },
-        });
+          type: "TRIP_STATUS",
+          title: `Trip ${stageLabel}`,
+          body: `${groupLabel}: status ${stageLabel} tercatat (skor ${compliance.score}/100).`,
+          data: { tripId: trip.id, stage: data.validationStage },
+        }),
+      );
+      if (rewardAmount > 0 && userId === trip.userId) {
+        await afterCommitSafely("notification TRASH_BAG_REWARD", () =>
+          createNotification({
+            userId,
+            type: "TRASH_BAG_REWARD",
+            title: "Reward trash bag masuk",
+            body: `${formatRupiah(rewardAmount)} dari trip ${groupLabel} sudah tersedia di dompet.`,
+            data: { tripId: trip.id, rewardAmount },
+          }),
+        );
       }
     }
 
-    return jsonOk(
-      { validation: result.validation, rewardAmount: result.rewardAmount, compliance },
-      201,
-    );
+    return jsonOk({ validation, rewardAmount, compliance }, 201);
   } catch (error) {
     return handleApiError(error);
   }

@@ -1,5 +1,9 @@
 import { randomBytes } from "node:crypto";
+import type { ConditionStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+
+/** A trip changed between the caller's read and its write (compare-and-set lost). */
+export const TRIP_CHANGED = "Status trip sudah berubah. Muat ulang halaman lalu coba lagi.";
 
 /** Default reward per returned & sorted trash bag (Rp). Overridden by campaign.rewardMultiplier. */
 export const TRASH_BAG_REWARD_PER_BAG = 2000;
@@ -28,6 +32,22 @@ export function generateBagQrCode(): string {
 /** Condition statuses that still earn a reward (sorted/returned in usable shape). */
 export function isRewardableCondition(condition: string | null | undefined): boolean {
   return condition === "GOOD" || condition === "PARTIAL";
+}
+
+/**
+ * Trip-level condition from the bags that already have a status (null = not
+ * reviewed yet, ignored): all NOT_RETURNED -> NOT_RETURNED, all GOOD -> GOOD,
+ * any POOR -> POOR, otherwise PARTIAL. Null when no bag was reviewed.
+ */
+export function aggregateBagCondition(
+  statuses: ReadonlyArray<ConditionStatus | null | undefined>,
+): ConditionStatus | null {
+  const known = statuses.filter((status): status is ConditionStatus => Boolean(status));
+  if (known.length === 0) return null;
+  if (known.every((status) => status === "NOT_RETURNED")) return "NOT_RETURNED";
+  if (known.every((status) => status === "GOOD")) return "GOOD";
+  if (known.some((status) => status === "POOR")) return "POOR";
+  return "PARTIAL";
 }
 
 /**
@@ -103,14 +123,18 @@ export function canValidateTripStage(
 /**
  * Gate ops (issue bags / check-in / check-out / progressive scan) require the trip's
  * travel agent to still be INVITED for the campaign org. Pickup after COMPLETED is
- * allowed even if the agent was later suspended.
+ * allowed even if the agent was later suspended. Pass the transaction client
+ * to re-check the link after the trip locks are held.
  */
-export async function getTripTravelAgentGateBlockReason(input: {
-  travelAgentId: string | null | undefined;
-  organizationId: string;
-}): Promise<string | null> {
+export async function getTripTravelAgentGateBlockReason(
+  input: {
+    travelAgentId: string | null | undefined;
+    organizationId: string;
+  },
+  db: Pick<Prisma.TransactionClient, "travelAgentOrganization"> = prisma,
+): Promise<string | null> {
   if (!input.travelAgentId) return null;
-  const link = await prisma.travelAgentOrganization.findUnique({
+  const link = await db.travelAgentOrganization.findUnique({
     where: {
       travelAgentId_organizationId: {
         travelAgentId: input.travelAgentId,

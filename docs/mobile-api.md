@@ -165,6 +165,83 @@ pengajuan sudah selesai atau pemiliknya berubah sejak unggahan dimulai. Bukti
 yang tersimpan untuk satu pengajuan tidak pernah memenuhi syarat `success`
 pengajuan lain.
 
+## Validasi kantong trip, check-out, dan koreksi (M03)
+
+Kantong (`TrashBagAssignment`) adalah satu baris per QR fisik. Reward trip
+dihitung hanya dari baris kantong milik trip yang sudah diverifikasi di server;
+jumlah yang dikirim klien tidak pernah menghasilkan uang.
+
+**Check-out massal** `POST /api/manual-validations` (ADMIN organisasi trip,
+SUPERADMIN):
+
+```json
+{ "tripId": "<trip>", "validationStage": "CHECK_OUT", "appCompleted": true,
+  "bags": [{ "id": "<id kantong>", "status": "GOOD | PARTIAL | POOR | NOT_RETURNED" }] }
+```
+
+- Setiap `bags[].id` wajib baris kantong trip tersebut. ID ganda ditolak 422
+  `Kantong dipindai lebih dari sekali`; ID trip lain, organisasi lain, atau
+  yang tidak ada ditolak 422 `Kantong tidak sesuai trip`. Penolakan terjadi
+  sebelum kantong mana pun berubah.
+- Kantong yang belum pernah dipindai dan tidak ada di daftar dicatat
+  `NOT_RETURNED`; kantong yang sudah dipindai sebelumnya tetap dengan statusnya.
+  Skor compliance dan reward dihitung ulang dari seluruh kantong trip.
+- `bags` hanya diterima pada `CHECK_OUT` (tahap lain: 422
+  `Kondisi kantong hanya dicatat saat check-out`). Daftar kosong diperlakukan
+  sebagai permintaan lama tanpa ID (di bawah).
+- Respons tetap `201 { validation, rewardAmount, compliance }`; `rewardAmount`
+  adalah rupiah yang dikreditkan oleh permintaan ini.
+
+**Permintaan lama tanpa ID kantong** (`returnedBagCount` + `conditionStatus`):
+
+- `returnedBagCount` tidak boleh melebihi jumlah kantong yang diterbitkan untuk
+  trip (422 `Jumlah kantong kembali melebihi jumlah kantong yang diterbitkan
+  untuk trip ini`). Batas yang sama berlaku untuk check-in dan pickup Bank Sampah.
+- Trip `MONEY_REWARD` yang punya penerima reward dan kantong wajib mengirim
+  `bags`: tanpa ID ditolak 422 `Check-out trip berhadiah wajib menyertakan ID
+  setiap kantong. Muat ulang daftar kantong lalu ulangi.` Trip tetap ACTIVE
+  sehingga klien bisa mengulang dengan ID.
+- Trip `COMPLIANCE_ONLY`, trip tanpa penerima, atau trip tanpa kantong boleh
+  check-out dengan jumlah (dibatasi seperti di atas); status kantong tidak
+  diubah dan tidak ada reward. Trip tanpa kantong tidak pernah mendapat reward.
+- Web (`components/trip/TripManager.tsx`) dan mobile
+  (`admin_trips_screen.dart`) sudah mengirim `bags` dengan ID setiap kantong
+  saat check-out; pickup Bank Sampah mengirim jumlah baris kantong.
+
+**Scan per kantong** `PATCH /api/trash-bags` (ADMIN organisasi trip, SUPERADMIN):
+
+```json
+{ "id": "<id kantong>", "status": "GOOD", "appCompleted": true, "correctionReason": "opsional, 5-500 karakter" }
+```
+
+| Keadaan | Hasil |
+| --- | --- |
+| Trip ACTIVE, status berubah | 200, kantong diperbarui, skor dihitung ulang dari semua kantong. Scan yang membuat seluruh kantong sudah berstatus menutup trip (COMPLETED), mencatat satu validasi CHECK_OUT, dan mengkreditkan reward sekali. |
+| Trip ACTIVE, status sama | 200 `idempotent: true`, tidak ada perubahan kantong maupun audit. |
+| Trip COMPLETED, status sama | 200 `idempotent: true`, tidak ada yang ditulis (retry aman bila respons scan penutup hilang). |
+| Trip COMPLETED, status berbeda tanpa `correctionReason` | 422 `Trip sudah selesai. Perubahan kondisi kantong setelah check-out harus dicatat sebagai koreksi beserta alasannya.` |
+| Trip COMPLETED, status berbeda dengan `correctionReason` | 200 `correction: { previousStatus, paidRewardAmount, recomputedRewardAmount }`. Kantong dan skor compliance diperbarui, audit `TRASH_BAG_CORRECTION` mencatat alasan serta selisih reward. Saldo tidak berubah: tidak ada reward kedua, penyesuaian, atau pembalikan otomatis; selisih ditindaklanjuti tim keuangan. |
+| Trip PLANNED / CANCELLED | 422 seperti sebelumnya |
+
+`idempotent` dan `correction` adalah field tambahan; `bag`, `validation`,
+`compliance`, dan `rewardAmount` tidak berubah.
+
+**Serialisasi.** Check-out, scan, dan penerbitan kantong berjalan dalam satu
+transaksi di bawah lock User penerima reward (bila ada) -> Trip -> seluruh
+baris kantong trip (urut id). Dua kantong terakhir yang dipindai bersamaan,
+atau scan yang bersamaan dengan check-out massal, menghasilkan tepat satu
+penutupan trip dan satu reward; permintaan yang kalah melihat trip sudah
+selesai (`Trip sudah selesai; validasi gerbang tidak dapat diulang` untuk
+check-out kedua). Reward trip ditulis sekali dengan business key
+`trip:<tripId>:return`; reward lama tanpa key (referensi Trip atau
+ManualValidation) dihormati sehingga trip lama tidak dibayar dua kali.
+Penerbitan kantong ke trip yang baru ditutup ditolak 422, dan
+`PATCH /api/trips/{id}` (batal/buka ulang) memakai compare-and-set sehingga
+tidak menimpa trip yang sudah selesai (409 `Status trip sudah berubah. Muat
+ulang halaman lalu coba lagi.`). Antrean lock yang terlalu lama dijawab 503
+`Sistem sedang sibuk. Silakan coba lagi.` tanpa perubahan. Audit dan notifikasi
+dikirim setelah commit.
+
 ## Strategi Caching & Offline (Khusus Pengepul)
 
 Mengingat **Pengepul** sering beroperasi di area dengan konektivitas rendah saat melakukan pengambilan (*pickup*) dari mesin RVM atau tempat wisata, aplikasi seluler dirancang untuk mendukung *Offline Tolerance* secara terbatas:

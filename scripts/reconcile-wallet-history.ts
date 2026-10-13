@@ -1,5 +1,5 @@
 /**
- * Read-only wallet history inventory (task M01, finding LOG-01).
+ * Read-only wallet history inventory (tasks M01/M03, findings LOG-01, LOG-03, EX-02).
  *
  *   npx tsx scripts/reconcile-wallet-history.ts      # or: npm run reconcile:wallet
  *
@@ -12,31 +12,45 @@
  *   negativeBalances               users whose spendable or pending balance is below 0
  *   duplicateEarnPerDepositItem    more than one EARN row for one deposit item   (blocks enforce)
  *   duplicateReservePerRedemption  more than one reserve row for one redemption  (blocks enforce)
- *   duplicateTripEarn              more than one EARN row for one trip (input for M03)
+ *   duplicateTripEarn              more than one live trip return earning for one trip
+ *                                  (referenceType Trip, or a legacy ManualValidation
+ *                                  reference with reasonCode TRASH_BAG_RETURN resolved
+ *                                  to its trip)                                   (blocks enforce)
+ *   legacyBagUnits                 trash-bag rows whose bagCount is not 1, per trip. Rewards
+ *                                  count one unit per verified bag row and never multiply
+ *                                  by bagCount; review each trip before any bagCount
+ *                                  constraint (informational, does not block)
  *   reservesWithoutRequest         REDEEM rows not backed by a matching request
  *                                  (no/unknown reference, other owner, other amount)
  *   requestsWithoutMatchingReserve in-flight/paid requests whose reserve is missing
  *                                  or in the wrong state (input for M02/M05)
  * (userId+idempotencyKey and businessKey duplicates cannot exist: unique indexes.)
  *
- * Procedure before the enforce migration (20261013122400_wallet_keys_enforce)
- * and for any finding:
+ * Procedure before the enforce migrations (20261013122400_wallet_keys_enforce,
+ * 20261013151919_trip_reward_keys_enforce) and for any finding:
  *   1. Run this script against the target database and keep the JSON with the case.
  *   2. Open a tracked case per finding. Never delete ledger rows and never edit
  *      amounts or references. For duplicates keep the earliest row (first id in
  *      `ledgerIds`) and neutralize each extra row with a status-only transition
  *      that has no balance effect, recorded in the audit log:
  *        extra EARN for a deposit item  -> status REVERSED
+ *        extra trip return earning      -> status REVERSED
  *        extra reserve for a redemption -> status REJECTED
  *      These two states are produced by no application writer, and the enforce
  *      indexes exclude exactly them. If money from a duplicate was already paid
  *      out the balance goes negative: that is a recovery case with the user, not
  *      a forced debit.
- *   3. Re-run this script until both enforce-blocking sections are empty.
- *   4. If `prisma migrate deploy` already failed on the enforce migration, mark
+ *   3. Re-run this script until every enforce-blocking section is empty
+ *      (`summary.blocksEnforcement` is 0).
+ *   4. If `prisma migrate deploy` already failed on an enforce migration, mark
  *      it rolled back (its guard runs before any DDL, so nothing was applied):
- *        npx prisma migrate resolve --rolled-back 20261013122400_wallet_keys_enforce
+ *        npx prisma migrate resolve --rolled-back <migration name>
  *      then run `npx prisma migrate deploy` again.
+ *
+ * legacyBagUnits needs a decision, not a status change: a legacy row with
+ * bagCount N is one QR, not automatically N units. Record per trip whether it
+ * stays one unit (the current rule) or is reissued as separate rows by an
+ * operator, in the case log; this script never normalizes it.
  */
 import type { Prisma } from "@prisma/client";
 import { computeBalance, type LedgerGroup } from "../lib/ledger";
@@ -59,6 +73,10 @@ export interface WalletInventory {
   duplicateEarnPerDepositItem: DuplicateGroup[];
   duplicateReservePerRedemption: DuplicateGroup[];
   duplicateTripEarn: DuplicateGroup[];
+  legacyBagUnits: {
+    tripId: string; tripStatus: string; bagIds: string[]; bagRows: number; bagCountTotal: number;
+    tripReturnEarnings: number;
+  }[];
   reservesWithoutRequest: {
     ledgerId: string; userId: string; amount: number; status: string;
     referenceType: string | null; referenceId: string | null; problem: string;
@@ -117,13 +135,34 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
       AND "referenceId" IS NOT NULL AND status <> 'REJECTED'
     GROUP BY "referenceId" HAVING count(*) > 1 ORDER BY "referenceId"`);
 
+  // Same predicate as the 20261013151919_trip_reward_keys_enforce guard.
   const duplicateTripEarn = duplicates(await db.$queryRaw<DuplicateRow[]>`
-    SELECT "referenceId" AS key, count(*)::int AS rows,
-           array_agg(id ORDER BY "createdAt", id) AS "ledgerIds",
-           array_agg(DISTINCT "userId") AS "userIds", SUM(amount)::bigint AS amount
-    FROM "RewardLedger"
-    WHERE "entryType" = 'EARN' AND "referenceType" = 'Trip' AND "referenceId" IS NOT NULL
-    GROUP BY "referenceId" HAVING count(*) > 1 ORDER BY "referenceId"`);
+    SELECT e.trip_id AS key, count(*)::int AS rows,
+           array_agg(e.id ORDER BY e."createdAt", e.id) AS "ledgerIds",
+           array_agg(DISTINCT e."userId") AS "userIds", SUM(e.amount)::bigint AS amount
+    FROM (
+      SELECT l.id, l."createdAt", l."userId", l.amount,
+             COALESCE(CASE WHEN l."referenceType" = 'Trip' THEN l."referenceId" END, v."tripId") AS trip_id
+      FROM "RewardLedger" l
+      LEFT JOIN "ManualValidation" v ON l."referenceType" = 'ManualValidation' AND v.id = l."referenceId"
+      WHERE l."entryType" = 'EARN' AND l.status <> 'REVERSED'
+        AND ((l."referenceType" = 'Trip' AND l."referenceId" IS NOT NULL)
+          OR (l."referenceType" = 'ManualValidation' AND l."reasonCode" = 'TRASH_BAG_RETURN' AND v."tripId" IS NOT NULL))
+    ) e
+    GROUP BY e.trip_id HAVING count(*) > 1 ORDER BY e.trip_id`);
+
+  const legacyBagUnits = (await db.$queryRaw<{
+    tripId: string; tripStatus: string; bagIds: string[]; bagRows: number; bagCountTotal: bigint | number;
+    tripReturnEarnings: number;
+  }[]>`
+    SELECT b."tripId", t.status::text AS "tripStatus", array_agg(b.id ORDER BY b.id) AS "bagIds",
+           count(*)::int AS "bagRows", SUM(b."bagCount")::bigint AS "bagCountTotal",
+           (SELECT count(*)::int FROM "RewardLedger" l
+             WHERE l."entryType" = 'EARN' AND l."referenceType" = 'Trip' AND l."referenceId" = b."tripId") AS "tripReturnEarnings"
+    FROM "TrashBagAssignment" b
+    JOIN "Trip" t ON t.id = b."tripId"
+    WHERE b."bagCount" <> 1
+    GROUP BY b."tripId", t.status ORDER BY b."tripId"`).map((row) => ({ ...row, bagCountTotal: toNumber(row.bagCountTotal) }));
 
   const reservesWithoutRequest = (await db.$queryRaw<{
     ledgerId: string; userId: string; amount: number; status: string;
@@ -166,9 +205,11 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
     duplicateEarnPerDepositItem: duplicateEarnPerDepositItem.length,
     duplicateReservePerRedemption: duplicateReservePerRedemption.length,
     duplicateTripEarn: duplicateTripEarn.length,
+    legacyBagUnits: legacyBagUnits.length,
     reservesWithoutRequest: reservesWithoutRequest.length,
     requestsWithoutMatchingReserve: requestsWithoutMatchingReserve.length,
-    blocksEnforcement: duplicateEarnPerDepositItem.length + duplicateReservePerRedemption.length,
+    blocksEnforcement:
+      duplicateEarnPerDepositItem.length + duplicateReservePerRedemption.length + duplicateTripEarn.length,
   };
   return {
     generatedAt: new Date().toISOString(),
@@ -177,6 +218,7 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
     duplicateEarnPerDepositItem,
     duplicateReservePerRedemption,
     duplicateTripEarn,
+    legacyBagUnits,
     reservesWithoutRequest,
     requestsWithoutMatchingReserve,
     summary,

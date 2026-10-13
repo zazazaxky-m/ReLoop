@@ -12,7 +12,11 @@ const ROOT = path.resolve(__dirname, "../..");
 const ENFORCE_SQL = readFileSync(
   path.join(ROOT, "prisma/migrations/20261013122400_wallet_keys_enforce/migration.sql"), "utf8");
 const ENFORCE_GUARD = ENFORCE_SQL.match(/DO \$\$[\s\S]*?END \$\$;/)![0];
-const ENFORCE_INDEXES = ["RewardLedger_one_earn_per_deposit_item", "RewardLedger_one_reserve_per_redemption"];
+const TRIP_ENFORCE_SQL = readFileSync(
+  path.join(ROOT, "prisma/migrations/20261013151919_trip_reward_keys_enforce/migration.sql"), "utf8");
+const TRIP_ENFORCE_GUARD = TRIP_ENFORCE_SQL.match(/DO \$\$[\s\S]*?END \$\$;/)![0];
+const ENFORCE_INDEXES = [
+  "RewardLedger_one_earn_per_deposit_item", "RewardLedger_one_earn_per_trip", "RewardLedger_one_reserve_per_redemption"];
 
 class Rollback extends Error {}
 
@@ -39,6 +43,11 @@ function earn(depositItemId: string, status: "AVAILABLE" | "REVERSED" = "AVAILAB
 function reserve(userId: string, redemptionId: string, amount: number, status: "PENDING" | "REJECTED" = "PENDING") {
   return { userId, entryType: "REDEEM" as const, amount: -amount, status,
     reasonCode: "REDEMPTION_RESERVE", referenceType: "Redemption", referenceId: redemptionId };
+}
+
+function tripEarn(tripId: string, campaignId: string, status: "AVAILABLE" | "REVERSED" = "AVAILABLE") {
+  return { userId: f.ids.userA, entryType: "EARN" as const, amount: 2_000, status, campaignId,
+    reasonCode: "TRASH_BAG_RETURN", referenceType: "Trip", referenceId: tripId };
 }
 
 function runCli() {
@@ -72,6 +81,7 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
     const ledgerBefore = await f.db.rewardLedger.count();
     let inventory: Awaited<ReturnType<typeof collectWalletInventory>> | undefined;
     let guardError: unknown;
+    let tripGuardError: unknown;
     const ids: Record<string, string> = {};
 
     const db = await f.connection();
@@ -106,12 +116,30 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
       const campaign = await tx.campaign.findFirstOrThrow({ where: { campaignType: "TRASH_BAG", organizationId: f.ids.orgA } });
       const trip = await tx.trip.create({ data: { campaignId: campaign.id, userId: f.ids.userA, status: "COMPLETED" } });
       ids.trip = trip.id;
+      for (let i = 0; i < 2; i += 1) await tx.rewardLedger.create({ data: tripEarn(trip.id, campaign.id) });
+      await tx.rewardLedger.create({ data: tripEarn(trip.id, campaign.id, "REVERSED") }); // neutralized: not counted
+
+      // Earliest code paid once per CHECK_OUT validation (referenceType ManualValidation).
+      const legacyTrip = await tx.trip.create({ data: { campaignId: campaign.id, userId: f.ids.userA, status: "COMPLETED" } });
+      ids.legacyTrip = legacyTrip.id;
       for (let i = 0; i < 2; i += 1) {
-        await tx.rewardLedger.create({ data: { userId: f.ids.userA, entryType: "EARN", amount: 2_000, status: "AVAILABLE",
-          reasonCode: "TRASH_BAG_RETURN", referenceType: "Trip", referenceId: trip.id, campaignId: campaign.id } });
+        const validation = await tx.manualValidation.create({ data: { tripId: legacyTrip.id, validationStage: "CHECK_OUT" } });
+        await tx.rewardLedger.create({ data: { ...tripEarn(legacyTrip.id, campaign.id),
+          referenceType: "ManualValidation", referenceId: validation.id } });
       }
 
+      // A legacy bag row counting for several units (one QR is not automatically N units).
+      const bagTrip = await tx.trip.create({ data: { campaignId: campaign.id, userId: f.ids.userA, status: "ACTIVE" } });
+      ids.bagTrip = bagTrip.id;
+      const multi = await tx.trashBagAssignment.create({ data: { tripId: bagTrip.id, bagQrCode: `LEGACY-${randomUUID()}`, bagCount: 3 } });
+      ids.multiBag = multi.id;
+      await tx.trashBagAssignment.create({ data: { tripId: bagTrip.id, bagQrCode: `LEGACY-${randomUUID()}`, bagCount: 1 } });
+
       inventory = await collectWalletInventory(tx);
+      // A raised guard aborts the transaction: run the trip guard inside a savepoint.
+      await tx.$executeRawUnsafe("SAVEPOINT trip_guard");
+      tripGuardError = await tx.$executeRawUnsafe(TRIP_ENFORCE_GUARD).then(() => null, (error: unknown) => error);
+      await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT trip_guard");
       guardError = await tx.$executeRawUnsafe(ENFORCE_GUARD).then(() => null, (error: unknown) => error);
       throw new Rollback();
     }, { timeout: 30_000 })).rejects.toBeInstanceOf(Rollback);
@@ -123,7 +151,10 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
     expect(inventory!.duplicateReservePerRedemption).toEqual([
       expect.objectContaining({ key: ids.redemption, rows: 2, amount: -20_000 }),
     ]);
-    expect(inventory!.duplicateTripEarn).toEqual([expect.objectContaining({ key: ids.trip, rows: 2 })]);
+    expect(inventory!.duplicateTripEarn.map((group) => [group.key, group.rows, group.amount, group.ledgerIds.length]).sort())
+      .toEqual([[ids.legacyTrip, 2, 4_000, 2], [ids.trip, 2, 4_000, 2]].sort());
+    expect(inventory!.legacyBagUnits).toEqual([{
+      tripId: ids.bagTrip, tripStatus: "ACTIVE", bagIds: [ids.multiBag], bagRows: 1, bagCountTotal: 3, tripReturnEarnings: 0 }]);
     expect(inventory!.reservesWithoutRequest.map((r) => [r.referenceId, r.problem, r.userId]).sort()).toEqual([
       [ids.mismatched, "AMOUNT_MISMATCH", f.ids.userA],
       ["missing-redemption", "REQUEST_NOT_FOUND", f.ids.userB],
@@ -134,12 +165,16 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
     expect(inventory!.negativeBalances).toEqual([
       expect.objectContaining({ userId: f.ids.userB, available: -5_000, reserved: 5_000 }),
     ]);
-    expect(inventory!.summary.blocksEnforcement).toBe(2);
+    expect(inventory!.summary.blocksEnforcement).toBe(4);
+    expect(inventory!.summary.legacyBagUnits).toBe(1);
     expect(inventory!.clean).toBe(false);
 
     expect(String((guardError as Error)?.message)).toMatch(
       /wallet_keys_enforce aborted: 1 deposit item\(s\) with more than one EARN row, 1 redemption\(s\) with more than one reserve row/);
     expect(String((guardError as Error).message)).toContain("scripts/reconcile-wallet-history.ts");
+    expect(String((tripGuardError as Error)?.message)).toMatch(
+      /trip_reward_keys_enforce aborted: 2 trip\(s\) with more than one trip return earning\. Nothing was changed\./);
+    expect(String((tripGuardError as Error).message)).toContain("scripts/reconcile-wallet-history.ts");
 
     // Nothing was deleted, deduplicated or left behind; the enforce indexes are intact.
     expect(await f.db.rewardLedger.count()).toBe(ledgerBefore);
@@ -165,6 +200,19 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
 });
 
 describe("wallet enforce indexes (database backstop)", () => {
+  it("allow one live return earning per trip, excluding a neutralized legacy row", async () => {
+    const db = await f.connection();
+    const rejects = (write: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+      db.$transaction(write).then(() => null, (error: { code?: string }) => error.code);
+    const trip = await f.trip({ bagCount: 1 });
+    const { campaignId } = await f.db.trip.findUniqueOrThrow({ where: { id: trip.id } });
+    expect(await rejects((tx) => tx.rewardLedger.create({ data: tripEarn(trip.id, campaignId) }))).toBeNull();
+    expect(await rejects((tx) => tx.rewardLedger.create({ data: tripEarn(trip.id, campaignId) }))).toBe("P2002");
+    expect(await rejects((tx) => tx.rewardLedger.create({ data: tripEarn(trip.id, campaignId, "REVERSED") }))).toBeNull();
+    // The guard of the enforce migration passes on a reconciled history.
+    expect(await rejects((tx) => tx.$executeRawUnsafe(TRIP_ENFORCE_GUARD))).toBeNull();
+  });
+
   it("allow one EARN per deposit item and one reserve per redemption, excluding neutralized legacy rows", async () => {
     // Expected constraint errors go through an independent client (no error logging).
     const db = await f.connection();

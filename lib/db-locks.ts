@@ -19,6 +19,10 @@ import { HttpError } from "./rbac";
  * A payout transition (lib/wallet-service.ts) locks the owner User (learned
  * from the immutable Redemption.userId) and then the Redemption row; its
  * reserve RewardLedger row is changed last, by a conditional update.
+ * A trip check-out or bag scan (lib/trip-validation.ts) locks the reward
+ * recipient User (immutable Trip.userId, if any), then the Trip, then all of
+ * its TrashBagAssignment rows in id order, and writes the trip return EARN
+ * (business key `trip:<id>:return`) last.
  */
 
 /**
@@ -47,4 +51,27 @@ export async function lockRedemption(tx: Prisma.TransactionClient, redemptionId:
   const rows = await tx.$queryRaw<{ id: string }[]>`
     SELECT id FROM "Redemption" WHERE id = ${redemptionId} FOR NO KEY UPDATE`;
   if (rows.length !== 1) throw new HttpError(404, "Pengajuan pencairan tidak ditemukan");
+}
+
+/**
+ * Locks one trip aggregate root. Money-moving callers (check-out, bag scan)
+ * must already hold `lockUser(tx, trip.userId)` when the trip has a reward
+ * recipient (User before Trip); non-money writers (bag issuance, check-in)
+ * may lock the Trip alone. FOR NO KEY UPDATE: foreign-key inserts that only
+ * reference the trip (bags, validations) are not blocked by it.
+ */
+export async function lockTrip(tx: Prisma.TransactionClient, tripId: string): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "Trip" WHERE id = ${tripId} FOR NO KEY UPDATE`;
+  if (rows.length !== 1) throw new HttpError(404, "Trip tidak ditemukan");
+}
+
+/**
+ * Locks every bag row of a trip in id order (after `lockTrip`). Returns the
+ * locked ids; an empty list is valid (a trip without issued bags).
+ */
+export async function lockTripBags(tx: Prisma.TransactionClient, tripId: string): Promise<string[]> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "TrashBagAssignment" WHERE "tripId" = ${tripId} ORDER BY id FOR NO KEY UPDATE`;
+  return rows.map((row) => row.id);
 }
