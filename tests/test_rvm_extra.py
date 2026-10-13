@@ -228,6 +228,64 @@ class HardwareTest(unittest.TestCase):
             else:
                 sys.modules["gpiozero"] = real
 
+    def test_gpio_outputs_boot_off_and_all_stop_survives_failing_output(self):
+        fake = types.ModuleType("gpiozero")
+        outputs = []
+
+        class Input:
+            def __init__(self, *a, **k): self.is_pressed = False
+
+        class Output:
+            def __init__(self, *a, **k):
+                self.initial_value = k.get("initial_value")
+                self._value = bool(self.initial_value)
+                self.fail = False
+                outputs.append(self)
+
+            @property
+            def value(self): return self._value
+
+            @value.setter
+            def value(self, v):
+                if self.fail:
+                    raise OSError("gpio write failed")
+                self._value = bool(v)
+
+            def on(self): self.value = True
+            def off(self): self.value = False
+        fake.Button = Input
+        fake.DigitalOutputDevice = Output
+        fake.DistanceSensor = Input
+        pins = {
+            "chamber": 1, "item_beam": 2, "acceptance_beam": 3, "service_panel": 4,
+            "collection_door": 5, "input_gate": 6, "conveyor_forward": 7,
+            "conveyor_reverse": 8, "compactor": 9,
+        }
+        real = sys.modules.get("gpiozero")
+        sys.modules["gpiozero"] = fake
+        try:
+            hw = GpioHardware(RvmConfig(machine_secret="x", gpio_pins=pins))
+        finally:
+            if real is None:
+                sys.modules.pop("gpiozero", None)
+            else:
+                sys.modules["gpiozero"] = real
+        # Boot / crash restart: every actuator starts de-energised.
+        self.assertEqual(len(outputs), 4)
+        self.assertTrue(all(output.initial_value is False for output in outputs))
+        self.assertFalse(any(output.value for output in outputs))
+
+        hw.set_input_gate(True)
+        hw.set_conveyor("FORWARD")
+        hw.set_compactor(True)
+        hw.gate.fail = True
+        with self.assertRaisesRegex(OSError, "gpio write failed"):
+            hw.all_stop()
+        # A failing gate output must not leave the conveyor or compactor running.
+        self.assertFalse(hw.conveyor_fwd.value)
+        self.assertFalse(hw.conveyor_rev.value)
+        self.assertFalse(hw.compactor.value)
+
     def test_gpio_full_read(self):
         fake = types.ModuleType("gpiozero")
 
@@ -357,6 +415,11 @@ class FraudTest(unittest.TestCase):
             c = controller_in(tmp, camera_enabled=True)
             c._camera_alert("CAMERA_OCCLUDED", {})
             self.assertEqual(c.state, MachineState.SAFE_STATE)
+            # The latch only resets once the enabled camera is healthy again.
+            with self.assertRaisesRegex(ValueError, "kamera masih offline"):
+                c._reset_mock_state()
+            self.assertEqual(c.state, MachineState.SAFE_STATE)
+            c.camera.status.online = True
             c._reset_mock_state()
             c._camera_alert("FACE_MODEL_LOAD_FAILED", {})
             self.assertIsNone(c._active_alert)

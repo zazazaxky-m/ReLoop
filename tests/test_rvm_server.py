@@ -409,6 +409,7 @@ class ControllerExtraTest(unittest.TestCase):
     def test_activate_valid_camera_capture(self):
         with tempfile.TemporaryDirectory() as tmp:
             c = controller_in(tmp, camera_enabled=True, camera_capture_session_start=True)
+            c.camera.status.online = True  # enabled camera must be healthy to open the gate
             captured = []
             c._capture_camera_evidence = lambda *a, **k: captured.append(a)
             self.assertTrue(c.activate_lease(signed_lease(c.config.machine_secret, "cap-sess")))
@@ -491,13 +492,11 @@ class ControllerExtraTest(unittest.TestCase):
             "issuedAt": time.time(), "expiresAt": time.time() + 100,
             "status": "ACTIVE", "signature": "x",
         })
-        seen = {"n": 0}
         def fetch():
-            seen["n"] += 1
-            if seen["n"] == 1:
-                return {"lease": None}
-            raise StopIteration
+            self.c.running = False  # one poll, then the loop exits cleanly
+            return {"lease": None}
         self.c.sync.fetch_machine_session = fetch
+        self.c.sync.fetch_display = lambda: None
         self.c.running = True
         t = threading.Thread(target=self.c._lease_loop)
         t.start()

@@ -187,6 +187,9 @@ class ControllerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             controller = self.make_controller(tmp)
             controller.config.camera_enabled = True
+            # An enabled camera is part of the interlock: it must be online
+            # before a lease may open the gate.
+            controller.camera.status.online = True
             captures = []
             controller._capture_camera_evidence = (
                 lambda kind, reason, session_id: captures.append(

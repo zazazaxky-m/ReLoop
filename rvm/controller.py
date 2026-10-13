@@ -6,7 +6,7 @@ import json
 import secrets
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from .camera import CameraWorker
 from .config import RvmConfig
@@ -16,10 +16,12 @@ from .hardware import GpioHardware, HardwareAdapter, MockHardware, SensorSnapsho
 from .remote import RvmRemoteMixin
 from .simulation import RvmSimulationMixin
 from .states import (
+    LOCKED_STATE_BLOCK_REASONS,
     MAINTENANCE_LOCKOUT_SECONDS,
     MAINTENANCE_LOCKOUT_THRESHOLD,
     MachineState,
     SIMULATION_SCENARIOS,
+    describe_interlocks,
     iso_now,
 )
 from .sync import SyncWorker
@@ -141,26 +143,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
     def _run(self) -> None:
         while self.running:
             try:
-                snapshot = self.hardware.read()
-                self._process_sensors(snapshot)
-                self._last = snapshot
-                self._expire_lease()
-                if (
-                    self.state == MachineState.PROCESSING
-                    and self._processing_started_at
-                    and time.time() - self._processing_started_at
-                    > self.config.chamber_timeout_seconds
-                ):
-                    self.report_fraud("CHAMBER_PROCESS_TIMEOUT", {})
-                    self.emit("CHAMBER_TIMEOUT", {"timeoutSeconds": self.config.chamber_timeout_seconds}, self.session_id())
-                    self.emit("ITEM_REJECTED", {"reason": "CHAMBER_PROCESS_TIMEOUT"}, self.session_id())
-                    self._sensor_sequence = []
-                    self._reset_waste_type_selection()
-                    self.set_state(MachineState.SESSION_ACTIVE, "item-timeout")
-                    self.hardware.set_conveyor("STOPPED")
-                if time.time() - self._last_heartbeat >= self.config.heartbeat_seconds:
-                    self.emit("HEARTBEAT", self.heartbeat_payload(snapshot))
-                    self._last_heartbeat = time.time()
+                self._tick()
             except Exception as exc:
                 self.enter_safe_state(
                     "CONTROL_LOOP_ERROR",
@@ -170,19 +153,52 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 )
             time.sleep(0.05)
 
+    def _tick(self) -> None:
+        """One control-loop pass. The whole pass holds the controller lock, so a
+        guarded output write (check + write under the same lock) is never
+        interleaved with sensor processing: the loop sees either the state
+        before the write or the state after it."""
+        with self._lock:
+            snapshot = self.hardware.read()
+            self._process_sensors(snapshot)
+            self._last = snapshot
+            self._expire_lease()
+            if (
+                self.state == MachineState.PROCESSING
+                and self._processing_started_at
+                and time.time() - self._processing_started_at
+                > self.config.chamber_timeout_seconds
+            ):
+                self.report_fraud("CHAMBER_PROCESS_TIMEOUT", {})
+                self.emit("CHAMBER_TIMEOUT", {"timeoutSeconds": self.config.chamber_timeout_seconds}, self.session_id())
+                self.emit("ITEM_REJECTED", {"reason": "CHAMBER_PROCESS_TIMEOUT"}, self.session_id())
+                self._sensor_sequence = []
+                self._reset_waste_type_selection()
+                self.set_state(MachineState.SESSION_ACTIVE, "item-timeout")
+                self.hardware.set_conveyor("STOPPED")
+            if time.time() - self._last_heartbeat >= self.config.heartbeat_seconds:
+                self.emit("HEARTBEAT", self.heartbeat_payload(snapshot))
+                self._last_heartbeat = time.time()
+
     def _lease_loop(self) -> None:
         while self.running:
-            self._last_lease_poll = time.time()
-            payload = self.sync.fetch_machine_session()
-            if payload is not None:
-                lease = payload.get("lease")
-                self._server_session = payload.get("session")
-                self._idle_timeout_minutes = payload.get("idleTimeoutMinutes")
-                waste_types = payload.get("wasteTypes")
-                if waste_types is not None:
-                    self.db.set_json("waste_types", waste_types)
-                local_lease = self.db.active_lease()
+            self._poll_server_session()
+            time.sleep(2)
 
+    def _poll_server_session(self) -> None:
+        """One session-bridge poll. Network calls run outside the controller
+        lock; only the local lease/state decision is taken under it."""
+        self._last_lease_poll = time.time()
+        payload = self.sync.fetch_machine_session()
+        if payload is not None:
+            lease = payload.get("lease")
+            self._server_session = payload.get("session")
+            self._idle_timeout_minutes = payload.get("idleTimeoutMinutes")
+            waste_types = payload.get("wasteTypes")
+            if waste_types is not None:
+                self.db.set_json("waste_types", waste_types)
+            with self._lock:
+                local_lease = self.db.active_lease()
                 if lease and not local_lease:
                     self.activate_lease(lease)
                 elif lease and local_lease and str(local_lease["session_id"]) != str(lease["sessionId"]):
@@ -195,22 +211,24 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                     self._reset_waste_type_selection()
                     if self._active_alert and self._active_alert.get("category") == "FRAUD":
                         self._clear_alert()
-                    self.set_state(MachineState.IDLE, "server-session-ended")
+                    # A safety latch, maintenance or full bin outlives the
+                    # server session; only a validated operator reset ends it.
+                    if self.state not in LOCKED_STATE_BLOCK_REASONS:
+                        self.set_state(MachineState.IDLE, "server-session-ended")
 
-            if self.state == MachineState.IDLE and time.time() - self._last_display_poll >= 5:
-                self._last_display_poll = time.time()
-                display = self.sync.fetch_display()
-                if display:
-                    self.db.set_json(
-                        "display",
-                        {
-                            "qrDataUrl": display.get("qrDataUrl"),
-                            "expiresAt": display.get("expiresAt"),
-                            "status": display.get("status"),
-                            "updatedAt": time.time(),
-                        },
-                    )
-            time.sleep(2)
+        if self.state == MachineState.IDLE and time.time() - self._last_display_poll >= 5:
+            self._last_display_poll = time.time()
+            display = self.sync.fetch_display()
+            if display:
+                self.db.set_json(
+                    "display",
+                    {
+                        "qrDataUrl": display.get("qrDataUrl"),
+                        "expiresAt": display.get("expiresAt"),
+                        "status": display.get("status"),
+                        "updatedAt": time.time(),
+                    },
+                )
 
     def _process_sensors(self, current: SensorSnapshot) -> None:
         if current.chamber_open and not self._last.chamber_open:
@@ -219,26 +237,43 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             else:
                 self._sensor_sequence = ["CHAMBER_OPEN"]
                 self.emit("CHAMBER_OPENED", {"doorSensor": "OPEN"}, self.session_id())
-        if current.service_panel_open and not self._last.service_panel_open:
-            self.enter_safe_state("SERVICE_PANEL_FORCED_OPEN", {})
-        if current.collection_door_open and not self._last.collection_door_open:
-            self.enter_safe_state("COLLECTION_DOOR_FORCED_OPEN", {})
-        if current.vibration_g >= self.config.vibration_threshold_g:
-            self.enter_safe_state("HIGH_IMPACT_DETECTED", {"vibrationG": current.vibration_g})
-        if current.camera_occluded and not self._last.camera_occluded:
-            self.enter_safe_state("CAMERA_OCCLUDED", {})
+        self._latch_hazard(
+            current.service_panel_open,
+            self._last.service_panel_open,
+            "SERVICE_PANEL_FORCED_OPEN",
+            {},
+        )
+        self._latch_hazard(
+            current.collection_door_open,
+            self._last.collection_door_open,
+            "COLLECTION_DOOR_FORCED_OPEN",
+            {},
+        )
+        self._latch_hazard(
+            current.vibration_g >= self.config.vibration_threshold_g,
+            self._last.vibration_g >= self.config.vibration_threshold_g,
+            "HIGH_IMPACT_DETECTED",
+            {"vibrationG": current.vibration_g},
+        )
+        self._latch_hazard(
+            current.camera_occluded,
+            self._last.camera_occluded,
+            "CAMERA_OCCLUDED",
+            {},
+        )
         if self._last.camera_online and not current.camera_online:
             self.enter_safe_state("CAMERA_OFFLINE", {})
         if current.camera_blurry and not self._last.camera_blurry:
             self._set_alert("SENSOR", "CAMERA_BLURRY", "WARNING", {})
             self.emit("ERROR", {"reason": "CAMERA_BLURRY"}, self.session_id())
-        if current.temperature_c >= self.config.max_temperature_c:
-            self.enter_safe_state(
-                "HIGH_TEMPERATURE",
-                {"temperatureC": current.temperature_c, "limitC": self.config.max_temperature_c},
-                category="SAFETY",
-                event_type="ERROR",
-            )
+        self._latch_hazard(
+            current.temperature_c >= self.config.max_temperature_c,
+            self._last.temperature_c >= self.config.max_temperature_c,
+            "HIGH_TEMPERATURE",
+            {"temperatureC": current.temperature_c, "limitC": self.config.max_temperature_c},
+            category="SAFETY",
+            event_type="ERROR",
+        )
         if current.reverse_motion and not self._last.reverse_motion:
             self.emit(
                 "SENSOR_SEQUENCE",
@@ -252,7 +287,10 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             self.report_fraud("REVERSE_MOTION", {"retrievalAttempt": True})
         if current.fill_percent != self._last.fill_percent:
             self.emit("FILL_LEVEL_UPDATED", {"fillLevelPercent": current.fill_percent})
-        if current.fill_percent >= self.config.max_fill_percent and self.state != MachineState.FULL:
+        if current.fill_percent >= self.config.max_fill_percent and self.state not in {
+            MachineState.FULL,
+            MachineState.SAFE_STATE,  # the safety latch outranks capacity state
+        }:
             self.set_state(MachineState.FULL, "capacity")
             self.hardware.all_stop()
             self.emit("STATUS_CHANGED", {"status": "FULL"})
@@ -318,7 +356,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 self._sensor_sequence = []
                 self._reset_waste_type_selection()
                 self.set_state(MachineState.SESSION_ACTIVE, "abnormal-weight-rejected")
-                self.hardware.set_input_gate(True)
+                self.try_open_input_gate("abnormal-weight-rejected")
             self._weight_reported = True
         if current.acceptance_triggered and not self._last.acceptance_triggered:
             if self.state != MachineState.PROCESSING:
@@ -326,13 +364,15 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             else:
                 self._sensor_sequence.extend(["CONVEYOR_FORWARD", "ACCEPTANCE_POINT"])
                 self.emit("SENSOR_SEQUENCE", {"steps": self._sensor_sequence}, self.session_id())
-                self.hardware.set_conveyor("FORWARD")
-                self.emit("CONVEYOR_STARTED", {"direction": "FORWARD"}, self.session_id())
+                if self._guarded_output(lambda: self.hardware.set_conveyor("FORWARD")) is None:
+                    self.emit("CONVEYOR_STARTED", {"direction": "FORWARD"}, self.session_id())
                 self.emit("ITEM_ACCEPTED_POINT", {"acceptanceBeam": True}, self.session_id())
                 self.hardware.set_conveyor("STOPPED")
-                if self.config.compactor_enabled:
+                if (
+                    self.config.compactor_enabled
+                    and self._guarded_output(lambda: self.hardware.set_compactor(True)) is None
+                ):
                     self.emit("COMPACTION_STARTED", {}, self.session_id())
-                    self.hardware.set_compactor(True)
                     time.sleep(0.15)
                     self.hardware.set_compactor(False)
                     self.emit("COMPACTION_COMPLETED", {}, self.session_id())
@@ -340,6 +380,26 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 self._sensor_sequence = []
                 self._reset_waste_type_selection()
                 self.set_state(MachineState.SESSION_ACTIVE, "item-accepted")
+        # Level-triggered enforcement: while latched, or while any physical
+        # hazard is present, every tick drives all outputs off again, whatever
+        # wrote them in between.
+        if self.state == MachineState.SAFE_STATE or self._physical_hazards(current):
+            self.hardware.all_stop()
+
+    def _latch_hazard(
+        self,
+        active: bool,
+        was_active: bool,
+        reason: str,
+        payload: dict[str, Any],
+        **safe_state_options: str,
+    ) -> None:
+        """Latches SAFE_STATE whenever a hazard is present and the machine is
+        not latched yet (not only on the rising edge), so a door that is
+        already open when the latch is cleared re-latches on the next tick.
+        A new rising edge while latched still records its own alert."""
+        if active and (not was_active or self.state != MachineState.SAFE_STATE):
+            self.enter_safe_state(reason, payload, **safe_state_options)
 
     def heartbeat_payload(self, snapshot: SensorSnapshot | None = None) -> dict:
         sensor = snapshot or self.hardware.read()
@@ -381,6 +441,9 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         category: str = "VANDALISM",
         event_type: str = "VANDALISM_DETECTED",
     ) -> None:
+        # Outputs off immediately, without waiting for the controller lock,
+        # and again under it so an in-flight guarded write cannot survive.
+        self.hardware.all_stop()
         with self._lock:
             self.hardware.all_stop()
             if self.state == MachineState.SAFE_STATE and reason == self.db.get_json("safe_reason"):
@@ -428,13 +491,120 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 )
             return False
         lease = {**lease, "status": "ACTIVE"}
-        self.db.save_lease(lease)
-        self.set_state(MachineState.SESSION_ACTIVE, "lease-activated")
-        self.hardware.set_input_gate(True)
+
+        def start_session() -> None:
+            self.db.save_lease(lease)
+            self.set_state(MachineState.SESSION_ACTIVE, "lease-activated")
+            self.hardware.set_input_gate(True)
+
+        # Local interlocks outrank a backend lease: on refusal nothing is
+        # saved and the state/latch stay exactly as they were.
+        if self._guarded_output(start_session) is not None:
+            return False
         self.emit("CHAMBER_OPENED", {"leaseActivated": True}, lease["sessionId"])
         if self.config.camera_capture_session_start:
             self._capture_camera_evidence("SESSION_START", "SESSION_ACTIVATED", lease["sessionId"])
         return True
+
+    def _physical_hazards(self, snapshot: SensorSnapshot) -> list[str]:
+        """Conditions under which no actuator may move at all."""
+        reasons = []
+        if snapshot.service_panel_open:
+            reasons.append("SERVICE_PANEL_OPEN")
+        if snapshot.collection_door_open:
+            reasons.append("COLLECTION_DOOR_OPEN")
+        if snapshot.vibration_g >= self.config.vibration_threshold_g:
+            reasons.append("HIGH_VIBRATION")
+        if snapshot.temperature_c >= self.config.max_temperature_c:
+            reasons.append("HIGH_TEMPERATURE")
+        return reasons
+
+    def _unsafe_conditions(self, snapshot: SensorSnapshot) -> list[str]:
+        """Every safety condition that must be clear before outputs may be
+        opened or a safety latch may be reset: physical hazards plus the
+        camera requirement. The enabled camera worker must be online and
+        unobstructed; only MockHardware simulates camera signals (the GPIO
+        adapter has no camera inputs)."""
+        reasons = self._physical_hazards(snapshot)
+        camera_online = snapshot.camera_online if isinstance(self.hardware, MockHardware) else True
+        camera_occluded = snapshot.camera_occluded
+        if self.config.camera_enabled:
+            camera_online = camera_online and self.camera.status.online
+            camera_occluded = camera_occluded or self.camera.status.occluded
+        if not camera_online:
+            reasons.append("CAMERA_OFFLINE")
+        if camera_occluded:
+            reasons.append("CAMERA_OCCLUDED")
+        return reasons
+
+    def _safety_latch_active(self) -> bool:
+        alert = self._active_alert
+        return (
+            self.state == MachineState.SAFE_STATE
+            or bool(self.db.get_json("safe_reason"))
+            or bool(alert and alert.get("severity") == "CRITICAL")
+        )
+
+    def actuation_block_reason(self, snapshot: SensorSnapshot) -> str | None:
+        """Why the input gate, conveyor or compactor must not be opened or
+        started now, or None when every interlock is clear."""
+        unsafe = self._unsafe_conditions(snapshot)
+        if unsafe:
+            return unsafe[0]
+        if self._safety_latch_active():
+            return "SAFETY_LATCH_ACTIVE"
+        if self.state in LOCKED_STATE_BLOCK_REASONS:
+            return LOCKED_STATE_BLOCK_REASONS[self.state]
+        if snapshot.fill_percent >= self.config.max_fill_percent:
+            return "MACHINE_FULL"
+        return None
+
+    def _maintenance_block_reason(self, snapshot: SensorSnapshot) -> str | None:
+        """Interlock for a PIN-authorised technician jogging one output: any
+        physical hazard or an active safety latch blocks it, maintenance mode
+        does not."""
+        hazards = self._physical_hazards(snapshot)
+        if hazards:
+            return hazards[0]
+        if self._safety_latch_active():
+            return "SAFETY_LATCH_ACTIVE"
+        return None
+
+    def _guarded_output(
+        self,
+        write: Callable[[], None],
+        block_reason: Callable[[SensorSnapshot], str | None] | None = None,
+    ) -> str | None:
+        """Reads the latest sensors, evaluates the interlock and performs the
+        output write as one critical section under the controller lock.
+        Returns None when written, otherwise the blocking reason (with all
+        outputs forced off and `write` never called)."""
+        check = block_reason or self.actuation_block_reason
+        with self._lock:
+            try:
+                snapshot = self.hardware.read()
+            except Exception:
+                blocked: str | None = "SENSOR_READ_FAILED"
+            else:
+                blocked = check(snapshot)
+            if blocked:
+                self.hardware.all_stop()
+                return blocked
+            write()
+            return None
+
+    def try_open_input_gate(self, reason: str) -> bool:
+        blocked = self._guarded_output(lambda: self.hardware.set_input_gate(True))
+        self.db.audit(
+            "INPUT_GATE_OPENED" if blocked is None else "ACTUATION_BLOCKED",
+            {"output": "input_gate", "reason": reason, "blockedBy": blocked},
+        )
+        return blocked is None
+
+    def _maintenance_output(self, write: Callable[[], None]) -> None:
+        blocked = self._guarded_output(write, self._maintenance_block_reason)
+        if blocked:
+            raise ValueError(f"Aktuator ditolak: {describe_interlocks([blocked])}")
 
     def _expire_lease(self) -> None:
         if self.state not in {MachineState.SESSION_ACTIVE, MachineState.PROCESSING}:
@@ -506,11 +676,21 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         if command == "reset-safe-state":
             self._reset_mock_state()
         elif command == "gate":
-            hardware.set_input_gate(bool(data.get("open")))
+            if data.get("open"):
+                self._maintenance_output(lambda: hardware.set_input_gate(True))
+            else:
+                hardware.set_input_gate(False)
         elif command == "conveyor":
-            hardware.set_conveyor(str(data.get("direction", "STOPPED")))
+            direction = str(data.get("direction", "STOPPED"))
+            if direction in {"FORWARD", "REVERSE"}:
+                self._maintenance_output(lambda: hardware.set_conveyor(direction))
+            else:
+                hardware.set_conveyor("STOPPED")
         elif command == "compactor":
-            hardware.set_compactor(bool(data.get("active")))
+            if data.get("active"):
+                self._maintenance_output(lambda: hardware.set_compactor(True))
+            else:
+                hardware.set_compactor(False)
         elif command == "flush":
             self.sync.flush_once()
         elif command == "mock-sensors" and isinstance(hardware, MockHardware):

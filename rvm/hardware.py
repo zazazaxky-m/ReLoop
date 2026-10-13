@@ -80,7 +80,9 @@ class GpioHardware:
     Raspberry Pi GPIO skeleton with fail-safe defaults.
 
     Pin mapping is intentionally supplied by deployment config. Import is lazy,
-    so development machines do not require gpiozero.
+    so development machines do not require gpiozero. Every output is created
+    de-energised (initial_value=False), so boot and crash restarts start with
+    the gate closed and conveyor/compactor off.
     """
 
     def __init__(self, config):
@@ -139,8 +141,16 @@ class GpioHardware:
                 raise RuntimeError("Install mpu6050-raspberrypi untuk vibration sensor") from exc
             self.mpu = mpu6050(config.mpu6050_address)
         self._snapshot = SensorSnapshot()
+        # Sensor bus reads (HX711 bit-banging) and output writes are serialised
+        # separately, so a slow read never delays all_stop().
+        self._read_lock = threading.RLock()
+        self._output_lock = threading.RLock()
 
     def read(self) -> SensorSnapshot:
+        with self._read_lock:
+            return self._read_locked()
+
+    def _read_locked(self) -> SensorSnapshot:
         self._snapshot.chamber_open = self.chamber.is_pressed
         self._snapshot.item_present = self.item.is_pressed
         self._snapshot.acceptance_triggered = self.acceptance.is_pressed
@@ -163,23 +173,38 @@ class GpioHardware:
         return SensorSnapshot(**self._snapshot.to_dict())
 
     def set_input_gate(self, open_: bool) -> None:
-        self.gate.value = bool(open_)
+        with self._output_lock:
+            self.gate.value = bool(open_)
 
     def set_conveyor(self, direction: str) -> None:
-        self.conveyor_fwd.off()
-        self.conveyor_rev.off()
-        if direction == "FORWARD":
-            self.conveyor_fwd.on()
-        elif direction == "REVERSE":
-            self.conveyor_rev.on()
+        with self._output_lock:
+            self.conveyor_fwd.off()
+            self.conveyor_rev.off()
+            if direction == "FORWARD":
+                self.conveyor_fwd.on()
+            elif direction == "REVERSE":
+                self.conveyor_rev.on()
 
     def set_compactor(self, active: bool) -> None:
-        self.compactor.value = bool(active)
+        with self._output_lock:
+            self.compactor.value = bool(active)
 
     def all_stop(self) -> None:
-        self.set_input_gate(False)
-        self.set_conveyor("STOPPED")
-        self.set_compactor(False)
+        """De-energises every output. A failing output does not prevent the
+        others from being stopped; the first error is re-raised afterwards."""
+        errors: list[Exception] = []
+        with self._output_lock:
+            for stop in (
+                lambda: self.set_input_gate(False),
+                lambda: self.set_conveyor("STOPPED"),
+                lambda: self.set_compactor(False),
+            ):
+                try:
+                    stop()
+                except Exception as exc:
+                    errors.append(exc)
+        if errors:
+            raise errors[0]
 
     def close(self) -> None:
         self.all_stop()

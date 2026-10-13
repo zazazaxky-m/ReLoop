@@ -17,44 +17,53 @@ from .states import (
     MachineState,
     SESSION_SIMULATION_SCENARIOS,
     SIMULATION_SCENARIOS,
+    describe_interlocks,
     iso_now,
 )
 
 
 class RvmSimulationMixin:
     def _reset_mock_state(self, deactivate_lease: bool = True) -> None:
-        self.db.set_json("safe_reason", None)
-        self._clear_alert()
-        if deactivate_lease:
-            self.db.deactivate_leases()
-        self.hardware.all_stop()
-        if isinstance(self.hardware, MockHardware):
-            self.hardware.patch(
-                chamber_open=False,
-                item_present=False,
-                acceptance_triggered=False,
-                reverse_motion=False,
-                weight_grams=0,
-                weight_stable=False,
-                fill_percent=20,
-                service_panel_open=False,
-                collection_door_open=False,
-                vibration_g=0.02,
-                camera_online=True,
-                camera_occluded=False,
-                camera_blurry=False,
-                temperature_c=28.0,
-            )
-            self._last = self.hardware.read()
-        self._processing_started_at = None
-        self._sensor_sequence = []
-        self._reset_waste_type_selection()
-        if self.db.active_lease():
-            self.set_state(MachineState.SESSION_ACTIVE, "simulation-reset")
-            self.hardware.set_input_gate(True)
-        else:
-            self.set_state(MachineState.IDLE, "maintenance-reset")
-        self.emit("STATUS_CHANGED", {"status": "ONLINE", "source": "maintenance"})
+        """Operator reset (maintenance reset-safe-state, remote RESET_ALERT,
+        simulator). Clears the safety latch only when every safety condition
+        is clear on a fresh sensor read; on MockHardware the simulated
+        sensors are first returned to their idle values."""
+        with self._lock:
+            self.hardware.all_stop()
+            if isinstance(self.hardware, MockHardware):
+                self.hardware.patch(
+                    chamber_open=False,
+                    item_present=False,
+                    acceptance_triggered=False,
+                    reverse_motion=False,
+                    weight_grams=0,
+                    weight_stable=False,
+                    fill_percent=20,
+                    service_panel_open=False,
+                    collection_door_open=False,
+                    vibration_g=0.02,
+                    camera_online=True,
+                    camera_occluded=False,
+                    camera_blurry=False,
+                    temperature_c=28.0,
+                )
+                self._last = self.hardware.read()
+            unsafe = self._unsafe_conditions(self.hardware.read())
+            if unsafe:
+                raise ValueError("Reset ditolak: " + describe_interlocks(unsafe))
+            self.db.set_json("safe_reason", None)
+            self._clear_alert()
+            if deactivate_lease:
+                self.db.deactivate_leases()
+            self._processing_started_at = None
+            self._sensor_sequence = []
+            self._reset_waste_type_selection()
+            if self.db.active_lease():
+                self.set_state(MachineState.SESSION_ACTIVE, "simulation-reset")
+                self.try_open_input_gate("simulation-reset")
+            else:
+                self.set_state(MachineState.IDLE, "maintenance-reset")
+            self.emit("STATUS_CHANGED", {"status": "ONLINE", "source": "maintenance"})
 
     def _simulation_lease(self, seconds: int = 180) -> None:
         now = time.time()
