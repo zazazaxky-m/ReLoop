@@ -1,15 +1,15 @@
 import type { Prisma } from "@prisma/client";
 import { logAudit } from "../audit";
-import { lockCampaign, lockDepositSession, lockMachine, lockUser } from "../db-locks";
-import { expireIfTimedOut, sessionDeadline } from "../deposit-session-service";
+import { lockCampaign, lockDepositSession, lockFundingAccount, lockMachine, lockUser } from "../db-locks";
+import { MACHINE_CHANGED, expireIfTimedOut, sessionDeadline } from "../deposit-session-service";
 import { HttpError } from "../rbac";
 import {
   CLOSE_WATERMARK_RELEASE_REASON,
   findReservationByKey,
-  lockFundingAccountForOrganization,
   releaseUnusedRewardBudget,
   sessionAdmissionKey,
   sessionCloseWatermarkKey,
+  sessionReviewExposure,
 } from "../reward-funding";
 import { payloadStr, type IngestEventInput, type MachineContext } from "./shared";
 import type { PostCommitEffect } from "./side-effects";
@@ -21,12 +21,16 @@ import type { PostCommitEffect } from "./side-effects";
  * (rvm/sync.py), through the same ACKed outbox, so it is retried with the
  * same localEventId and arrives after everything it vouches for.
  *
- * Only then is S's residual reward hold released: the admission reservation
- * is closed under the business key `session:<id>:close-watermark`, so a
- * retried or duplicated watermark never gives money back twice. Without a
- * watermark (a lost connection, a dead machine, a dead-lettered event) the
- * hold is retained and reported (SOURCE_CLOSED_AWAITING_WATERMARK); only the
- * audited SUPERADMIN release frees it.
+ * Only then is S's residual reward hold released under the business key
+ * `session:<id>:close-watermark`, so a retried or duplicated watermark never
+ * gives money back twice. Fix round 1 (I1): what still-undecided accepted
+ * items could draw once a reviewer approves them (`sessionReviewExposure`)
+ * stays held: only `remaining - exposure` is released, the reservation stays
+ * ACTIVE, and the review decision that settles the last such item closes the
+ * remainder (`closeWatermarkedSessionIfSettled`, keyed `session:<id>:review-close`).
+ * Without a watermark (a lost connection, a dead machine, a dead-lettered
+ * event) the hold is retained and reported (SOURCE_CLOSED_AWAITING_WATERMARK);
+ * only the audited SUPERADMIN release frees it.
  *
  * Refusals: a count the server cannot confirm (fewer rows than the RVM
  * counted, or an unknown last event) is permanent (EVENT_REJECTED: the
@@ -35,8 +39,12 @@ import type { PostCommitEffect } from "./side-effects";
  * the next poll closed it); a session past its deadline is closed through the
  * timeout policy first.
  *
- * Lock order: owner User -> RewardFundingAccount -> Campaign -> Machine ->
- * DepositSession (-> DepositItem for the timeout policy).
+ * Lock order: owner User -> the RESERVATION's RewardFundingAccount (immutable
+ * on the reservation; C1) -> Campaign -> Machine -> DepositSession (->
+ * DepositItem for the timeout policy). Under the locks the machine's
+ * organization is re-read and must own that account (409 otherwise, as the
+ * admission does): a machine moved to another organization never releases
+ * the old organization's hold.
  */
 
 export const WATERMARK_COUNT_MISMATCH =
@@ -84,17 +92,28 @@ export async function handleCloseWatermark(
   const payload = parsePayload(payloadStr(input.payload));
   const sessionId = input.sessionId;
 
-  // Immutable relations first: who to lock.
+  // Immutable relations first: who to lock. The reservation's account is
+  // immutable on the reservation row (C1); the machine's current organization
+  // is only checked against it under the locks.
   const ref = await tx.depositSession.findUnique({
     where: { id: sessionId },
     select: { userId: true, campaignId: true, machineId: true },
   });
   if (!ref || ref.machineId !== machine.id) return;
+  const reservationRef = await findReservationByKey(tx, sessionAdmissionKey(sessionId));
   await lockUser(tx, ref.userId);
-  await lockFundingAccountForOrganization(tx, machine.organizationId);
+  if (reservationRef) await lockFundingAccount(tx, reservationRef.accountId);
   if (ref.campaignId) await lockCampaign(tx, ref.campaignId);
   await lockMachine(tx, machine.id);
   await lockDepositSession(tx, sessionId);
+
+  if (reservationRef) {
+    const [account, current] = await Promise.all([
+      tx.rewardFundingAccount.findUniqueOrThrow({ where: { id: reservationRef.accountId }, select: { organizationId: true } }),
+      tx.machine.findUnique({ where: { id: machine.id }, select: { organizationId: true } }),
+    ]);
+    if (!current || current.organizationId !== account.organizationId) throw new HttpError(409, MACHINE_CHANGED);
+  }
 
   let session = await tx.depositSession.findUnique({ where: { id: sessionId } });
   if (!session) return;
@@ -148,12 +167,18 @@ export async function handleCloseWatermark(
   });
 
   let releasedRupiah = 0;
+  let keptForReviewRupiah = 0;
   let reservationId: string | null = null;
-  const reservation = await findReservationByKey(tx, sessionAdmissionKey(sessionId));
+  // Re-read under the locks: what is still held now.
+  const reservation = reservationRef ? await findReservationByKey(tx, sessionAdmissionKey(sessionId)) : null;
   if (reservation && reservation.status === "ACTIVE") {
     reservationId = reservation.id;
-    const { released } = await releaseUnusedRewardBudget(tx, reservation.id, reservation.remainingRupiah, {
-      close: true,
+    // I1: keep what undecided accepted items can still draw at review.
+    const { exposure } = await sessionReviewExposure(tx, sessionId);
+    keptForReviewRupiah = exposure === null ? reservation.remainingRupiah : Math.min(exposure, reservation.remainingRupiah);
+    const releasable = reservation.remainingRupiah - keptForReviewRupiah;
+    const { released } = await releaseUnusedRewardBudget(tx, reservation.id, releasable, {
+      close: keptForReviewRupiah === 0,
       reason: CLOSE_WATERMARK_RELEASE_REASON,
       businessKey: sessionCloseWatermarkKey(sessionId),
     });
@@ -175,6 +200,7 @@ export async function handleCloseWatermark(
         consumedItems: payload.consumedItems,
         reservationId,
         releasedRupiah,
+        keptForReviewRupiah,
       },
     }),
   );

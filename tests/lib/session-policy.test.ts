@@ -9,6 +9,7 @@ import {
   policyItemCap,
   sessionLimits,
   sessionPolicyVersion,
+  snapshotMaxItemCap,
   type SessionPolicySnapshot,
 } from "@/lib/session-policy";
 
@@ -56,6 +57,15 @@ describe("session policy snapshot", () => {
     expect(policyItemCap({ unit: "ITEM", rewardPerUnit: 0, maxWeightGrams: null }, 15000)).toBe(0);
     expect(policyItemCap({ unit: "KG", rewardPerUnit: 2000, maxWeightGrams: 500 }, 15000)).toBe(1500);
     expect(policyItemCap({ unit: "KG", rewardPerUnit: 2000, maxWeightGrams: null }, 15000)).toBeNull();
+  });
+
+  it("the most one undecided item can still draw: the largest per-type cap, unbounded (null) when any type is, 0 for compliance", () => {
+    const bounded = { ...snapshot, wasteTypes: snapshot.wasteTypes.map((t) => ({ ...t, maxRewardRupiah: t.unit === "KG" ? 1_500 : t.maxRewardRupiah })) };
+    expect(snapshotMaxItemCap(bounded)).toBe(1_500);
+    expect(snapshotMaxItemCap(snapshot)).toBeNull();
+    expect(snapshotMaxItemCap({ ...bounded, mode: "COMPLIANCE_ONLY" })).toBe(0);
+    expect(snapshotMaxItemCap({ ...bounded, wasteTypes: [] })).toBe(0);
+    expect(snapshotMaxItemCap(null)).toBeNull();
   });
 
   it("the user-visible limit is the money ceiling and the item bound of the snapshot", () => {

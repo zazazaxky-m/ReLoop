@@ -57,6 +57,24 @@ def _str(value: Any) -> bool:
     return isinstance(value, str) and value != ""
 
 
+def _utf8(value: Any) -> bool:
+    """A string the canonical form can encode (a lone surrogate cannot be)."""
+    if not isinstance(value, str):
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+HEX64 = frozenset("0123456789abcdef")
+
+
+def _hex64(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(c in HEX64 for c in value)
+
+
 def lease_field_error(lease: dict[str, Any]) -> str | None:
     """Why the v2 fields are not well-typed, or None."""
     for key in LEASE_V2_FIELDS:
@@ -66,13 +84,16 @@ def lease_field_error(lease: dict[str, Any]) -> str | None:
         return "LEASE_FIELDS: id/machineCode/sessionId must be non-empty strings"
     if not (lease["userRef"] is None or _str(lease["userRef"])):
         return "LEASE_FIELDS: userRef must be a string or null"
+    for key in ("id", "machineCode", "sessionId", "userRef", "reservationId", "policyVersion"):
+        value = lease[key]
+        if isinstance(value, str) and not _utf8(value):
+            return f"LEASE_MALFORMED: {key} is not valid UTF-8"
     for key in ("issuedAt", "expiresAt"):
         if not _is_int(lease[key]) or lease[key] <= 0:
             return f"LEASE_FIELDS: {key} must be a positive integer"
     if not (lease["reservationId"] is None or _str(lease["reservationId"])):
         return "LEASE_FIELDS: reservationId must be a string or null"
-    version = lease["policyVersion"]
-    if not (_str(version) and len(version) == 64 and all(c in "0123456789abcdef" for c in version)):
+    if not _hex64(lease["policyVersion"]):
         return "LEASE_FIELDS: policyVersion must be a sha256 hex"
     ceiling = lease["ceilingRupiah"]
     if not (ceiling is None or (_is_int(ceiling) and ceiling >= 0)):
@@ -119,7 +140,7 @@ def policy_error(policy: Any) -> str | None:
         return "LEASE_POLICY_MALFORMED: wasteTypes"
     seen: set[str] = set()
     for entry in types:
-        if not isinstance(entry, dict) or not _str(entry.get("id")) or entry["id"] in seen:
+        if not isinstance(entry, dict) or not _str(entry.get("id")) or not _utf8(entry["id"]) or entry["id"] in seen:
             return "LEASE_POLICY_MALFORMED: wasteTypes[].id"
         seen.add(entry["id"])
         if entry.get("unit") not in {"ITEM", "KG"}:
@@ -150,29 +171,40 @@ def policy_version(policy: dict[str, Any]) -> str:
 def verify_lease_v2(secret: str, lease: Any, machine_code: str) -> str | None:
     """The refusal reason, or None when the lease is a valid v2 lease for this
     machine with a snapshot that hashes to its signed policyVersion."""
-    if not isinstance(lease, dict):
-        return "LEASE_MALFORMED"
-    if lease.get("version") != LEASE_PROTOCOL_VERSION or isinstance(lease.get("version"), bool):
-        return "LEASE_VERSION"
-    error = lease_field_error(lease)
-    if error:
-        return error
-    if lease["machineCode"] != machine_code:
-        return "LEASE_MACHINE_MISMATCH"
-    signature = lease.get("signature")
-    if not (_str(signature) and len(signature) == 64):
-        return "LEASE_SIGNATURE_FORMAT"
-    if not hmac.compare_digest(_hmac_hex(secret, canonical_lease_v2(lease)), signature):
-        return "LEASE_SIGNATURE"
-    policy = lease.get("policy")
-    if policy is None:
-        return "LEASE_POLICY_MISSING"
-    error = policy_error(policy)
-    if error:
-        return error
-    if policy_version(policy) != lease["policyVersion"]:
-        return "LEASE_POLICY_MISMATCH"
-    return None
+    # C4: malformed input is refused with a reason; this function never raises.
+    try:
+        if not isinstance(lease, dict):
+            return "LEASE_MALFORMED"
+        if lease.get("version") != LEASE_PROTOCOL_VERSION or isinstance(lease.get("version"), bool):
+            return "LEASE_VERSION"
+        error = lease_field_error(lease)
+        if error:
+            return error
+        if lease["machineCode"] != machine_code:
+            return "LEASE_MACHINE_MISMATCH"
+        signature = lease.get("signature")
+        if not _hex64(signature):
+            return "LEASE_SIGNATURE_FORMAT"
+        try:
+            canonical = canonical_lease_v2(lease)
+        except (ValueError, TypeError, UnicodeEncodeError):
+            return "LEASE_MALFORMED"
+        if not hmac.compare_digest(_hmac_hex(secret, canonical), signature):
+            return "LEASE_SIGNATURE"
+        policy = lease.get("policy")
+        if policy is None:
+            return "LEASE_POLICY_MISSING"
+        error = policy_error(policy)
+        if error:
+            return error
+        try:
+            if policy_version(policy) != lease["policyVersion"]:
+                return "LEASE_POLICY_MISMATCH"
+        except (ValueError, TypeError, UnicodeEncodeError):
+            return "LEASE_POLICY_MALFORMED"
+        return None
+    except Exception as exc:  # noqa: BLE001 - defensive: a lease must never crash the controller
+        return f"LEASE_MALFORMED: {type(exc).__name__}"
 
 
 # --------------------------------------------------------------------------- #

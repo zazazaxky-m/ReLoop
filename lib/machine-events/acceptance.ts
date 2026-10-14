@@ -27,6 +27,7 @@ import { bpsToMultiplier, parseSessionPolicy } from "../session-policy";
 import {
   SESSION_CLOSED_REASON,
   SESSION_TIMEOUT_REASON,
+  SNAPSHOT_TYPE_MISSING_REASON,
   UNKNOWN_WASTE_TYPE_REASON,
   isUnknownWasteTypeItem,
 } from "./shared";
@@ -63,9 +64,11 @@ class DepositItemChangedError extends Error {
  * admitted. The acceptance prices from it, so a late or offline batch that
  * arrives after the operator changed a rate or multiplier is never repriced
  * by the new configuration. A type the snapshot does not know (added to the
- * machine after admission) falls back to the live rate under the snapshot's
- * multiplier and mode; a session without a snapshot (admitted before B01b) is
- * priced live, as before.
+ * machine after admission) is never priced from the live configuration (fix
+ * round 1, C3): like the unknown-type fallback it is held for review at 0
+ * (TYPE_NOT_IN_SNAPSHOT) and a reviewer approves it as a type of the
+ * session's price list. A session without a snapshot (admitted before B01b)
+ * is priced live, as before.
  *
  * R03 (controller ruling C1): the machine stays the authority on the items in
  * its outbox, so an undecided item is decided here whatever its session's
@@ -153,7 +156,10 @@ export async function handleAcceptance(
   const unknownWasteType = isUnknownWasteTypeItem(item);
 
   const snapshotType = policy?.wasteTypes.find((type) => type.id === item.wasteTypeId) ?? null;
-  const rate = unknownWasteType
+  // C3: with a snapshot, only its price list prices; a type outside it is unpriceable here.
+  const typeOutsideSnapshot = policy !== null && snapshotType === null && !unknownWasteType;
+  const unpriceable = unknownWasteType || typeOutsideSnapshot;
+  const rate = unpriceable
     ? null
     : snapshotType
       ? {
@@ -177,7 +183,7 @@ export async function handleAcceptance(
     rate?.minWeightGrams ?? item.wasteType.minWeightGrams,
     rate?.maxWeightGrams ?? item.wasteType.maxWeightGrams,
   );
-  const material = unknownWasteType
+  const material = unpriceable
     ? null
     : verifyMaterial({
         policy: (config?.materialVerification ?? "AI_REQUIRED") as MaterialVerificationPolicy,
@@ -197,8 +203,8 @@ export async function handleAcceptance(
     unit === "KG"
       ? computeWeightBasedRewardAmount(points, item.measuredWeightGrams, multiplier)
       : computeRewardAmount(points, item.quantity, multiplier);
-  const outOfRange = !unknownWasteType && (!Number.isSafeInteger(computed) || computed < 0 || computed > MAX_RUPIAH);
-  const baseAmount = unknownWasteType || outOfRange ? 0 : computed;
+  const outOfRange = !unpriceable && (!Number.isSafeInteger(computed) || computed < 0 || computed > MAX_RUPIAH);
+  const baseAmount = unpriceable || outOfRange ? 0 : computed;
 
   const hasAnomaly = Boolean(
     sensorAnomaly || item.externalFraudFlag || session.status === "REVIEW" || outOfRange || late,
@@ -207,8 +213,8 @@ export async function handleAcceptance(
     mode,
     baseAmount,
     // The fallback type's weight window is meaningless: the reviewer decides.
-    weightValid: unknownWasteType || weight.valid,
-    typeMatch: !unknownWasteType && (material?.typeMatch ?? false),
+    weightValid: unpriceable || weight.valid,
+    typeMatch: !unpriceable && (material?.typeMatch ?? false),
     hasAnomaly,
   });
 
@@ -217,14 +223,16 @@ export async function handleAcceptance(
   else if (decision.status === "REVIEW") {
     reason = unknownWasteType
       ? UNKNOWN_WASTE_TYPE_REASON
-      : late
+      : typeOutsideSnapshot
+        ? SNAPSHOT_TYPE_MISSING_REASON
+        : late
         ? reportedAfterEnd
           ? SESSION_CLOSED_REASON
           : SESSION_TIMEOUT_REASON
         : sensorAnomaly ?? (outOfRange ? "REWARD_OUT_OF_RANGE" : hasAnomaly ? "ANOMALY_REVIEW" : material!.reason);
   }
   const complianceMultiplier =
-    decision.status === "ACCEPTED" ? 1.0 : decision.status === "REVIEW" && !unknownWasteType ? REVIEW_HOLD_RATIO : 0.0;
+    decision.status === "ACCEPTED" ? 1.0 : decision.status === "REVIEW" && !unpriceable ? REVIEW_HOLD_RATIO : 0.0;
 
   const { count } = await tx.depositItem.updateMany({
     where: { id: depositItemId, acceptanceEventId: null, status: { in: ["PENDING", "REVIEW"] } },

@@ -50,7 +50,11 @@ import { HttpError } from "./rbac";
  * (User -> account -> Campaign -> [Machine ->] DepositSession -> DepositItem),
  * bag issuance and trip outcome (User -> account -> Campaign -> Trip -> bags),
  * and a payout success (User -> every account the owner's funded earnings
- * draw from, in id order -> Redemption). The account counters, reservations
+ * draw from, in id order -> Redemption). The deposit review and the close
+ * watermark (B01b) take the account of the session's admission reservation
+ * (immutable on the reservation, read before any lock), not the machine's
+ * current organization's, and refuse with 409 when the machine's
+ * organization re-read under the locks no longer owns it. The account counters, reservations
  * and commit amounts change only under the account lock; a commit's
  * `reviewPending` flag follows the item and changes under its owner's User
  * lock. An operator topup/correction or residual release locks the account

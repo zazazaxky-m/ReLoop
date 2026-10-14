@@ -86,11 +86,12 @@ describe('handleAcceptance', () => {
       expect(credited()).toMatchObject({ amount: 0, funding: { ceilingRupiah: 0 } });
     });
 
-    it('a type the snapshot does not know falls back to the live rate under the snapshot multiplier', async () => {
+    it('C3: a type the snapshot does not know is held for review at 0 and never priced from live configuration', async () => {
       mockTx.depositSession.findUnique.mockResolvedValue(session({ policySnapshotJson: snapshot({ wasteTypes: [] }) }));
       await run();
-      expect(reward.resolveRewardRate).toHaveBeenCalledTimes(1);
-      expect(reward.computeRewardAmount).toHaveBeenCalledWith(200, 1, 2);
+      expect(reward.resolveRewardRate).not.toHaveBeenCalled();
+      expect(itemUpdate().data).toMatchObject({ status: 'REVIEW', validationReasonCode: 'TYPE_NOT_IN_SNAPSHOT', rewardAmount: 0, baseRewardAmount: 0, rewardRateId: null, complianceMultiplier: 0 });
+      expect(credited()).toMatchObject({ amount: 0, status: 'PENDING', funding: { ceilingRupiah: 0, reviewPending: true } });
     });
 
     it('a session without a snapshot (admitted before B01b) is priced live, as before', async () => {

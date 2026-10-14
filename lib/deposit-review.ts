@@ -1,6 +1,6 @@
 import type { LedgerEntryType, LedgerStatus, Prisma, RewardBudgetCommit, RewardLedger, RewardReconciliationCase } from "@prisma/client";
 import { logAudit } from "./audit";
-import { lockCampaign, lockDepositItem, lockDepositSession, lockMachine, lockUser } from "./db-locks";
+import { lockCampaign, lockDepositItem, lockDepositSession, lockFundingAccount, lockMachine, lockUser } from "./db-locks";
 import { depositItemEarnKey } from "./ledger";
 import {
   REVIEW_ENDED_SESSION_REJECT_ONLY,
@@ -35,7 +35,13 @@ import {
   validateWeight,
 } from "./reward";
 import { applyRewardEffect, type CreditEntryType } from "./reward-credit";
-import { lockFundingAccountForOrganization, settleOrCommitReward } from "./reward-funding";
+import {
+  closeWatermarkedSessionIfSettled,
+  findReservationByKey,
+  lockFundingAccountForOrganization,
+  sessionAdmissionKey,
+  settleOrCommitReward,
+} from "./reward-funding";
 import { resolveLegacyCutover, type LegacyCutover } from "./reward-legacy-cutover";
 import { campaignSupportsMachine, decideReward, machineRewardMode } from "./reward-policy";
 import { bpsToMultiplier, parseSessionPolicy } from "./session-policy";
@@ -47,8 +53,13 @@ import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
  * One ReadCommitted wallet transaction (`runWalletTransaction`) that:
  *   1. reads the immutable relations (item -> session -> user/machine) and
  *      checks the organization scope;
- *   2. locks User -> Machine -> DepositSession -> DepositItem (lib/db-locks.ts)
- *      and re-reads the item and every ledger row of the item;
+ *   2. locks User -> RewardFundingAccount -> Campaign -> Machine ->
+ *      DepositSession -> DepositItem (lib/db-locks.ts) and re-reads the item
+ *      and every ledger row of the item. The account is the session
+ *      reservation's (B01b fix 1, C1: immutable on the reservation, so the
+ *      settlement below takes the same row again), or for a session without
+ *      a reservation the machine's organization's; under the locks the
+ *      machine's organization must own it (409 otherwise);
  *   3. compare-and-sets the item out of REVIEW (a lost CAS is 409);
  *   4. settles the money once: holds (EARN/PENDING) are released when the
  *      decision pays, otherwise rejected, and the single correction worth
@@ -87,6 +98,12 @@ const REWARD_TOO_LARGE = "Nilai reward melebihi batas yang diizinkan";
 export { REVIEW_NOT_ACCEPTED };
 export const REVIEW_FALLBACK_TYPE =
   "Jenis sampah cadangan tidak dapat disetujui. Pilih jenis sampah yang sebenarnya.";
+/** C3: a snapshot session is priced from its admission price list only. */
+export const REVIEW_TYPE_NOT_IN_SNAPSHOT =
+  "Jenis sampah ini tidak termasuk daftar harga sesi; pilih jenis sampah yang berlaku saat sesi dimulai";
+/** B01b fix 1 (C1): the machine left the organization whose funds the session's reservation holds. */
+export const REVIEW_MACHINE_ORGANIZATION_CHANGED =
+  "Mesin setoran ini sudah dipindahkan ke organisasi lain. Peninjauan tidak dapat diproses; hubungi superadmin.";
 export const REVIEW_WEIGHT_MISSING =
   "Berat setoran tidak tercatat. Item tanpa berat tidak dapat disetujui; tolak item ini.";
 export const REVIEW_WEIGHT_OUT_OF_RANGE =
@@ -280,6 +297,8 @@ async function approvalTarget(
   // session pays nothing for its items.
   const policy = parseSessionPolicy(item.session.policySnapshotJson);
   const snapshotType = policy?.wasteTypes.find((type) => type.id === wasteType.id) ?? null;
+  // C3: never priced from the live configuration; the reviewer picks a type of the price list.
+  if (policy && !snapshotType) throw new HttpError(422, REVIEW_TYPE_NOT_IN_SNAPSHOT);
   const mode = policy?.mode ?? machineRewardMode({ campaign, organizationMode: item.session.machine.organization.machineRewardMode });
   const rate = snapshotType
     ? {
@@ -344,6 +363,8 @@ type TransactionOutcome =
       plan: ReviewSettlementPlan;
       /** B01: the funding obligation after this decision (null: legacy/compliance source). */
       fundingCommit: RewardBudgetCommit | null;
+      /** B01b (I1): the watermarked session's remainder closed by this decision (null: not applicable). */
+      watermarkClose: { released: number } | null;
       previousReasonCode: string | null;
       wasteTypeId: string;
       /** Instant the approval price was resolved at (null for a reject). */
@@ -388,10 +409,24 @@ export async function decideDepositReview(
 
   const outcome = await runWalletTransaction(async (tx): Promise<TransactionOutcome> => {
     // 2. Global lock order, then re-read everything the decision depends on.
-    await lockUser(tx, ref.session.userId);
     // B01: the decision settles the item's funding obligation (account and
-    // campaign before Machine).
-    await lockFundingAccountForOrganization(tx, ref.session.machine.organizationId);
+    // campaign before Machine). B01b fix 1 (C1): the account is the one the
+    // session's reservation holds (its accountId is immutable, read before
+    // any lock): settleOrCommitReward and the watermark close lock exactly
+    // that row again, so taking the machine's current organization's account
+    // here would put the reservation's account after Machine/DepositSession
+    // whenever the machine changed organization. A session without a
+    // reservation (legacy, compliance) locks its machine's organization's
+    // account, where a late reservation would be created.
+    const reservationRef = await findReservationByKey(tx, sessionAdmissionKey(ref.sessionId));
+    await lockUser(tx, ref.session.userId);
+    let fundingAccountId: string;
+    if (reservationRef) {
+      await lockFundingAccount(tx, reservationRef.accountId);
+      fundingAccountId = reservationRef.accountId;
+    } else {
+      fundingAccountId = (await lockFundingAccountForOrganization(tx, ref.session.machine.organizationId)).id;
+    }
     if (ref.session.campaignId) await lockCampaign(tx, ref.session.campaignId);
     await lockMachine(tx, ref.session.machineId);
     await lockDepositSession(tx, ref.sessionId);
@@ -407,6 +442,19 @@ export async function decideDepositReview(
       item.session.campaignId !== ref.session.campaignId
     ) {
       throw new HttpError(409, ITEM_CHANGED);
+    }
+    // C1: re-read under the locks. The machine's organization must still own
+    // the locked account, and the session's reservation (if one appeared
+    // meanwhile) must be on it; otherwise nothing is decided or settled.
+    const [fundingAccount, reservation] = await Promise.all([
+      tx.rewardFundingAccount.findUniqueOrThrow({ where: { id: fundingAccountId }, select: { organizationId: true } }),
+      findReservationByKey(tx, sessionAdmissionKey(ref.sessionId)),
+    ]);
+    if (
+      fundingAccount.organizationId !== item.session.machine.organizationId ||
+      (reservation !== null && reservation.accountId !== fundingAccountId)
+    ) {
+      throw new HttpError(409, REVIEW_MACHINE_ORGANIZATION_CHANGED);
     }
     const businessKey = reviewDecisionKey(itemId);
 
@@ -538,6 +586,10 @@ export async function decideDepositReview(
       targetRupiah: reconciliationCase ? null : targetAmount,
       reviewPending: false,
     });
+    // B01b fix 1 (I1): the watermark kept this item's exposure; once no
+    // undecided accepted item of the watermarked session is left, the
+    // reservation's remainder closes (keyed per session).
+    const watermarkClose = await closeWatermarkedSessionIfSettled(tx, item.sessionId);
 
     const updated = await tx.depositItem.findUnique({ where: { id: itemId }, include: LOCKED_ITEM_INCLUDE });
     return {
@@ -548,6 +600,7 @@ export async function decideDepositReview(
       reconciliationCase,
       plan,
       fundingCommit,
+      watermarkClose,
       previousReasonCode: item.validationReasonCode,
       wasteTypeId,
       pricedAt,
@@ -597,6 +650,8 @@ export async function decideDepositReview(
           rejectedHolds: outcome.plan.rejectIds.length,
           ledgerEntryId: outcome.ledgerEntry?.id ?? null,
           reconciliationCaseId: outcome.reconciliationCase?.id ?? null,
+          // B01b (I1): the reservation remainder this decision closed, if the session was watermarked.
+          fundingReleasedOnCloseRupiah: outcome.watermarkClose?.released ?? null,
           // B01: the obligation held for this item after the decision.
           fundingHeldRupiah: outcome.fundingCommit?.heldRupiah ?? null,
         },

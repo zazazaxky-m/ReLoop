@@ -9,10 +9,12 @@ import {
   type RewardReservationSource,
 } from "@prisma/client";
 import { lockCampaign, lockFundingAccount } from "./db-locks";
+import { depositItemEarnKey } from "./ledger";
 import { prisma } from "./prisma";
 import { HttpError } from "./rbac";
 import { resolveMigrationCutover, type LegacyCutover } from "./reward-legacy-cutover";
 import { machineRewardMode, tripRewardMode } from "./reward-policy";
+import { parseSessionPolicy, snapshotMaxItemCap } from "./session-policy";
 import { TRASH_BAG_REWARD_PER_BAG } from "./trip";
 
 /**
@@ -159,7 +161,10 @@ export const sessionAdmissionKey = (sessionId: string) => `session:${sessionId}:
 export const tripIssuanceKey = (tripId: string) => `trip:${tripId}:issuance`;
 /** B01b: the keyed release of a session's residue after the RVM close watermark (one per session, ever). */
 export const sessionCloseWatermarkKey = (sessionId: string) => `session:${sessionId}:close-watermark`;
+/** B01b fix 1 (I1): the keyed close of what the watermark kept for reviews, once the last undecided item is decided. */
+export const sessionReviewCloseKey = (sessionId: string) => `session:${sessionId}:review-close`;
 export const CLOSE_WATERMARK_RELEASE_REASON = "CLOSE_WATERMARK";
+export const REVIEW_SETTLED_RELEASE_REASON = "REVIEW_SETTLED";
 /** Evidence references compare trimmed and case-insensitively (C4). */
 export const normalizeFundingReference = (reference: string) => reference.trim().toUpperCase();
 /**
@@ -290,11 +295,22 @@ export function openSessionWhere(scope: { campaignId?: string | null; organizati
         closeWatermarkAt: null,
         items: { some: { status: { in: [...UNDECIDED_ITEM_STATUSES] } } },
       },
+      // Fix round 1 (I1): after the watermark no machine event can decide an
+      // item any more, but an accepted item awaiting a reviewer still can draw
+      // its exposure (kept by the watermark) once approved.
+      {
+        status: { in: [...TERMINAL_SESSION_STATUSES] },
+        closeWatermarkAt: { not: null },
+        items: { some: { status: { in: [...UNDECIDED_ITEM_STATUSES] }, acceptanceEventId: { not: null } } },
+      },
     ],
   };
 }
 
-/** Ended, not watermarked sessions of the scope whose admission reservation is still ACTIVE. */
+/**
+ * Ended sessions of the scope whose admission reservation is still ACTIVE
+ * (not yet watermarked, or watermarked with review exposure kept, I1).
+ */
 async function countHeldEndedSessions(
   tx: Prisma.TransactionClient,
   scope: { campaignId: string } | { organizationId: string },
@@ -306,7 +322,6 @@ async function countHeldEndedSessions(
           FROM "RewardBudgetReservation" r
           JOIN "DepositSession" s ON s.id = r."sourceId"
           WHERE r."sourceType" = 'SESSION' AND r.status = 'ACTIVE'
-            AND s."closeWatermarkAt" IS NULL
             AND s.status IN ('COMPLETED', 'CANCELLED', 'EXPIRED')
             AND s."campaignId" = ${scope.campaignId}`
       : await tx.$queryRaw<{ count: bigint }[]>`
@@ -315,10 +330,68 @@ async function countHeldEndedSessions(
           JOIN "DepositSession" s ON s.id = r."sourceId"
           JOIN "Machine" m ON m.id = s."machineId"
           WHERE r."sourceType" = 'SESSION' AND r.status = 'ACTIVE'
-            AND s."closeWatermarkAt" IS NULL
             AND s.status IN ('COMPLETED', 'CANCELLED', 'EXPIRED')
             AND s."campaignId" IS NULL AND m."organizationId" = ${scope.organizationId}`;
   return Number(rows[0]?.count ?? 0);
+}
+
+/**
+ * B01b fix 1 (I1): what the still-undecided accepted items of a session can
+ * draw from its reservation once a reviewer approves them (an unknown-type
+ * fallback item committed nothing; an anomaly hold may be reclassified to a
+ * pricier type): per item, the snapshot's largest per-type cap minus what is
+ * already committed for it, floored at 0. `exposure: null` = unbounded (a
+ * snapshot without a finite cap, or no snapshot): everything must be kept.
+ * Items without an acceptance event are not counted: after the watermark the
+ * machine sends nothing more for the session and no human can approve them
+ * (R03). The caller holds the session's funding locks.
+ */
+export async function sessionReviewExposure(
+  tx: Prisma.TransactionClient,
+  sessionId: string,
+): Promise<{ exposure: number | null; undecided: number }> {
+  const items = await tx.depositItem.findMany({
+    where: { sessionId, status: { in: [...UNDECIDED_ITEM_STATUSES] }, acceptanceEventId: { not: null } },
+    select: { id: true },
+    orderBy: { id: "asc" },
+  });
+  if (items.length === 0) return { exposure: 0, undecided: 0 };
+  const session = await tx.depositSession.findUnique({ where: { id: sessionId }, select: { policySnapshotJson: true } });
+  const cap = snapshotMaxItemCap(parseSessionPolicy(session?.policySnapshotJson));
+  if (cap === null) return { exposure: null, undecided: items.length };
+  const commits = await tx.rewardBudgetCommit.findMany({
+    where: { businessKey: { in: items.map((item) => depositItemEarnKey(item.id)) } },
+    select: { businessKey: true, heldRupiah: true },
+  });
+  const held = new Map(commits.map((commit) => [commit.businessKey, commit.heldRupiah]));
+  const exposure = items.reduce((sum, item) => sum + Math.max(0, cap - (held.get(depositItemEarnKey(item.id)) ?? 0)), 0);
+  return { exposure, undecided: items.length };
+}
+
+/**
+ * B01b fix 1 (I1): after the close watermark kept the review exposure, the
+ * review decision that leaves no undecided accepted item closes the
+ * reservation's remainder, keyed per session. Returns what was released, or
+ * null when nothing applied (no watermark yet, no ACTIVE reservation, or
+ * exposure still outstanding). The caller holds the owner's User, the
+ * account/campaign and the session locks.
+ */
+export async function closeWatermarkedSessionIfSettled(
+  tx: Prisma.TransactionClient,
+  sessionId: string,
+): Promise<{ released: number } | null> {
+  const session = await tx.depositSession.findUnique({ where: { id: sessionId }, select: { closeWatermarkAt: true } });
+  if (!session?.closeWatermarkAt) return null;
+  const reservation = await findReservationByKey(tx, sessionAdmissionKey(sessionId));
+  if (!reservation || reservation.status !== "ACTIVE") return null;
+  const { exposure } = await sessionReviewExposure(tx, sessionId);
+  if (exposure !== 0) return null;
+  const { released } = await releaseUnusedRewardBudget(tx, reservation.id, reservation.remainingRupiah, {
+    close: true,
+    reason: REVIEW_SETTLED_RELEASE_REASON,
+    businessKey: sessionReviewCloseKey(sessionId),
+  });
+  return { released };
 }
 
 /**
@@ -881,6 +954,10 @@ export async function releaseUnusedRewardBudget(
   options: { close?: boolean; releasedById?: string | null; reason?: string | null; businessKey?: string } = {},
 ): Promise<{ released: number; existing: boolean }> {
   assertRupiah(amount, "nilai pelepasan");
+  // C2: a partial release is a financial effect of its own and must be keyed;
+  // a close is idempotent through the reservation status (a key is still
+  // welcome and recorded).
+  if (!options.close && !options.businessKey) throw new RangeError("businessKey is required for a partial release");
   if (options.businessKey !== undefined && (!options.businessKey || options.businessKey.length > 191)) {
     throw new RangeError("businessKey is required");
   }

@@ -32,6 +32,7 @@ vi.mock('@/lib/rbac', () => ({
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn() }));
 vi.mock('@/lib/db-locks', () => ({
   lockUser: vi.fn(),
+  lockFundingAccount: vi.fn(),
   lockCampaign: vi.fn(),
   lockMachine: vi.fn(),
   lockDepositSession: vi.fn(),
@@ -40,7 +41,12 @@ vi.mock('@/lib/db-locks', () => ({
 // B01: the decision settles the item's funding obligation under the account lock.
 vi.mock('@/lib/reward-funding', () => ({
   lockFundingAccountForOrganization: vi.fn(),
+  // B01b fix 1 (C1): the session's admission reservation names the account to lock.
+  findReservationByKey: vi.fn(async () => null),
+  sessionAdmissionKey: (sessionId: string) => `session:${sessionId}:admission`,
   settleOrCommitReward: vi.fn(async () => null),
+  // B01b fix 1 (I1): the decision closes a watermarked session's remainder once nothing undecided is left.
+  closeWatermarkedSessionIfSettled: vi.fn(async () => null),
 }));
 vi.mock('@/lib/wallet-service', () => ({
   runWalletTransaction: vi.fn((fn: (tx: unknown) => unknown) => fn(mockTx)),
@@ -65,6 +71,7 @@ const mockTx = {
   rewardRate: { findUnique: vi.fn() },
   rewardLedger: { findMany: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
   rewardReconciliationCase: { findUnique: vi.fn() },
+  rewardFundingAccount: { findUniqueOrThrow: vi.fn() },
 } as any;
 
 const makeParams = (id: string) => ({ params: Promise.resolve({ id }) });
@@ -120,6 +127,9 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     vi.mocked(reward.computeRewardAmount).mockReturnValue(100);
     vi.mocked(credit.applyRewardEffect).mockResolvedValue({ outcome: 'CREDITED', entry: { id: 'adj1' }, reconciliationCase: null } as any);
     vi.mocked(cutover.resolveLegacyCutover).mockResolvedValue({ at: CUTOVER, source: 'migration' });
+    vi.mocked(funding.findReservationByKey).mockResolvedValue(null);
+    vi.mocked(funding.lockFundingAccountForOrganization).mockResolvedValue({ id: 'acct-org1', organizationId: 'org1' } as any);
+    mockTx.rewardFundingAccount.findUniqueOrThrow.mockResolvedValue({ organizationId: 'org1' });
   });
 
   it('returns 403 when not authorized', async () => {
@@ -159,6 +169,55 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     expect(mockTx.rewardLedger.findMany.mock.invocationCallOrder[0]).toBeGreaterThan(order[4]);
   });
 
+  describe('B01b fix 1 (C1): the funding account is the session reservation\'s, locked in the global order', () => {
+    const reservation = { id: 'res1', accountId: 'acct-a', status: 'ACTIVE', remainingRupiah: 900 };
+    const movedItem = () => lockedItem({
+      session: { ...lockedItem().session, machine: { id: 'm1', organizationId: 'org2', organization: { machineRewardMode: 'MONEY_REWARD' } } },
+    });
+
+    it("locks the reservation's account (read from the immutable reservation before any lock), never the machine's current organization's", async () => {
+      vi.mocked(funding.findReservationByKey).mockResolvedValue(reservation as any);
+      expect((await patch({ action: 'approve' })).status).toBe(200);
+      expect(funding.findReservationByKey).toHaveBeenCalledWith(mockTx, 'session:s1:admission');
+      expect(locks.lockFundingAccount).toHaveBeenCalledWith(mockTx, 'acct-a');
+      expect(funding.lockFundingAccountForOrganization).not.toHaveBeenCalled();
+      const first = (fn: unknown) => vi.mocked(fn as any).mock.invocationCallOrder[0] as number;
+      expect(first(funding.findReservationByKey)).toBeLessThan(first(locks.lockUser));
+      const order = [locks.lockUser, locks.lockFundingAccount, locks.lockMachine, locks.lockDepositSession, locks.lockDepositItem].map(first);
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+      // Re-read under the locks: the account's organization and the reservation.
+      expect(mockTx.rewardFundingAccount.findUniqueOrThrow).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'acct-a' } }));
+      expect(mockTx.rewardFundingAccount.findUniqueOrThrow.mock.invocationCallOrder[0]).toBeGreaterThan(order[4]);
+      expect(vi.mocked(funding.findReservationByKey).mock.invocationCallOrder[1]).toBeGreaterThan(order[4]);
+    });
+
+    it("refuses 409 when the machine's organization re-read under the locks no longer owns the reservation's account; nothing is decided or settled", async () => {
+      vi.mocked(funding.findReservationByKey).mockResolvedValue(reservation as any);
+      mockTx.depositItem.findUnique.mockResolvedValue(movedItem());
+      const res = await patch({ action: 'approve' });
+      expect(res.status).toBe(409);
+      expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+      expect(credit.applyRewardEffect).not.toHaveBeenCalled();
+      expect(funding.settleOrCommitReward).not.toHaveBeenCalled();
+      expect(funding.closeWatermarkedSessionIfSettled).not.toHaveBeenCalled();
+      expect(audit.logAudit).not.toHaveBeenCalled();
+    });
+
+    it("without a reservation it locks the machine's organization's account; a machine moved before the locks, or a reservation created meanwhile on another account, is 409", async () => {
+      mockTx.depositItem.findUnique.mockResolvedValue(movedItem());
+      expect((await patch({ action: 'reject' })).status).toBe(409);
+      expect(funding.lockFundingAccountForOrganization).toHaveBeenCalledWith(mockTx, 'org1');
+      expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+
+      vi.clearAllMocks();
+      mockTx.depositItem.findUnique.mockResolvedValue(lockedItem());
+      vi.mocked(funding.findReservationByKey).mockResolvedValueOnce(null).mockResolvedValueOnce({ ...reservation, accountId: 'acct-other' } as any);
+      expect((await patch({ action: 'reject' })).status).toBe(409);
+      expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+      expect(funding.settleOrCommitReward).not.toHaveBeenCalled();
+    });
+  });
+
   it('locks the session campaign after the account and refuses an item whose campaign changed (B01)', async () => {
     vi.mocked(prisma.depositItem.findUnique).mockResolvedValue({ ...ref, session: { ...ref.session, campaignId: 'c1' } } as any);
     mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ session: { ...lockedItem().session, campaignId: 'c1' } }));
@@ -194,6 +253,17 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
       { id: 'le1', entryType: 'EARN', status: 'AVAILABLE', amount: 100, userId: 'u1' }]);
     expect((await patch({ action: 'reject' })).status).toBe(200);
     expect(funding.settleOrCommitReward).toHaveBeenCalledWith(mockTx, expect.objectContaining({ targetRupiah: null }));
+  });
+
+  it("closes a watermarked session's remainder after the settlement, in the same transaction (B01b I1)", async () => {
+    vi.mocked(funding.closeWatermarkedSessionIfSettled).mockResolvedValueOnce({ released: 900 });
+    const res = await patch({ action: 'approve', note: 'ok' });
+    expect(res.status).toBe(200);
+    expect(funding.closeWatermarkedSessionIfSettled).toHaveBeenCalledWith(mockTx, 's1');
+    expect(vi.mocked(funding.closeWatermarkedSessionIfSettled).mock.invocationCallOrder[0])
+      .toBeGreaterThan(vi.mocked(funding.settleOrCommitReward).mock.invocationCallOrder[0]);
+    expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ fundingReleasedOnCloseRupiah: 900 }) }));
   });
 
   it('approves with a compare-and-set, releases the hold and pays target minus committed once', async () => {

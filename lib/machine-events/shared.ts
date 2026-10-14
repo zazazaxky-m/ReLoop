@@ -13,6 +13,13 @@ import type { MachineEventType } from "@prisma/client";
  */
 export const UNKNOWN_WASTE_TYPE_NAME = "Tidak Diketahui (Unknown)";
 export const UNKNOWN_WASTE_TYPE_REASON = "UNKNOWN_WASTE_TYPE";
+/**
+ * B01b fix 1 (C3): the item's type is not in the session's admission price
+ * list (added to the machine after the user was admitted). Never priced from
+ * the live configuration: held for review at 0; the reviewer approves it as a
+ * type of the session's price list (lib/deposit-review.ts).
+ */
+export const SNAPSHOT_TYPE_MISSING_REASON = "TYPE_NOT_IN_SNAPSHOT";
 
 /**
  * R03 session-release reasons (lib/deposit-session-service.ts). An item the

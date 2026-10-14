@@ -118,6 +118,46 @@ class FixtureContractTest(unittest.TestCase):
                 self.assertIsNotNone(verify_lease_v2(SECRET, {**base, field: value}, "AUDIT-A-01"))
 
 
+class MalformedInputTest(unittest.TestCase):
+    """C4: the verifier refuses malformed input with a reason; it never raises."""
+
+    def test_verifier_never_raises_and_checks_the_signature_format(self):
+        base = FIXTURE["leases"]["money"]["lease"]
+        cases = {
+            "lease not a dict": ("LEASE_MALFORMED", [1, 2, 3]),
+            "lone surrogate in id": ("LEASE_MALFORMED", {**base, "id": "lease-\ud800"}),
+            "lone surrogate in machineCode": ("LEASE_MALFORMED", {**base, "machineCode": "\udfff"}),
+            "signature not hex": ("LEASE_SIGNATURE_FORMAT", {**base, "signature": "z" * 64}),
+            "signature too short": ("LEASE_SIGNATURE_FORMAT", {**base, "signature": "ab"}),
+            "signature not a string": ("LEASE_SIGNATURE_FORMAT", {**base, "signature": 64}),
+            "policy not a dict": ("LEASE_POLICY_MALFORMED", {**base, "policy": ["x"]}),
+            "lone surrogate in policy type id": ("LEASE_POLICY_MALFORMED", {**base, "policy": {
+                **base["policy"], "wasteTypes": [{"id": "\ud800", "unit": "ITEM", "rewardPerUnit": 1, "maxRewardRupiah": 1}]}}),
+            "version as bool": ("LEASE_VERSION", {**base, "version": True}),
+        }
+        for name, (expected, lease) in cases.items():
+            with self.subTest(case=name):
+                try:
+                    reason = verify_lease_v2(SECRET, lease, "AUDIT-A-01")
+                except Exception as exc:  # noqa: BLE001 - the point of the test
+                    self.fail(f"verifier raised {type(exc).__name__}: {exc}")
+                self.assertIsInstance(reason, str)
+                self.assertTrue(reason.startswith(expected), f"{name}: {reason}")
+
+    def test_controller_refuses_malformed_leases_without_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                base = FIXTURE["leases"]["money"]["lease"]
+                for lease in ([1], {**base, "id": "\ud800", "expiresAt": "soon"}, {**base, "signature": None}):
+                    self.assertFalse(controller.verify_lease(lease))
+                    self.assertFalse(controller.activate_lease(lease))
+                self.assertIsNone(controller.db.active_lease())
+                self.assertEqual(controller.state, MachineState.IDLE)
+            finally:
+                controller.db.close()
+
+
 class ControllerLeaseV2Test(unittest.TestCase):
     def _live(self, lease: dict, **changes) -> dict:
         now = int(time.time())

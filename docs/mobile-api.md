@@ -612,7 +612,12 @@ resume) dan `GET /api/sessions/:id` memuat field aditif `limits`
   masuk (termasuk batch offline/terlambat dari mesin dan keputusan peninjauan)
   dihargai dengan tarif saat admisi, bukan konfigurasi yang diubah kemudian.
   Program yang berubah menjadi berhadiah setelah sesi dibuat tidak membayar
-  item sesi itu.
+  item sesi itu. Jenis sampah yang ditambahkan ke mesin setelah sesi dimulai
+  tidak ada dalam daftar harga sesi: item itu ditahan untuk ditinjau (reward 0,
+  alasan `TYPE_NOT_IN_SNAPSHOT`), dan `PATCH /api/deposit-reviews/:id` hanya
+  menyetujuinya dengan `wasteTypeId` dari daftar harga sesi (422 `Jenis sampah
+  ini tidak termasuk daftar harga sesi; pilih jenis sampah yang berlaku saat
+  sesi dimulai`).
 
 **Lease mesin v2** (`GET /api/machine-session/:code`, bukan API mobile): worker
 RVM yang mengirim header `x-reloop-lease-protocol: 2` menerima lease v2 dengan
@@ -627,7 +632,9 @@ worker mesin, baru flag (`rvm/README.md`, "Lease v2").
 
 **Close watermark.** Sisa reservasi dana sebuah sesi dilepas hanya setelah
 mesin mengirim `SESSION_CLOSE_WATERMARK` (event protokol v2 biasa, setelah
-server mengakhiri sesi dan semua event sesi ter-ACK). Koneksi mesin yang hilang
+server mengakhiri sesi dan semua event sesi ter-ACK); bagian yang masih dapat
+ditarik item yang menunggu peninjau tetap ditahan sampai keputusan peninjauan
+terakhir sesi itu. Koneksi mesin yang hilang
 berarti sisa tetap ditahan dan tampil di laporan rekonsiliasi
 (`SOURCE_CLOSED_AWAITING_WATERMARK`) sampai mesin kembali atau superadmin
 melepasnya secara eksplisit; tidak ada timeout yang membebaskan dana. Tidak ada

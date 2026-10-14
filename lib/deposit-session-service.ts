@@ -382,6 +382,11 @@ export async function ensureSessionPolicy(sessionId: string): Promise<SessionPol
       },
     });
     if (!machine) return null;
+    // C1: the account locked above belongs to the organization read before the
+    // locks; a machine moved in between is refused, exactly as the admission does.
+    if (machine.organizationId !== current.machine.organizationId || session.machineId !== current.machine.id) {
+      throw new HttpError(409, MACHINE_CHANGED);
+    }
     const campaign = session.campaign;
     const policy = await buildSessionPolicy(tx, {
       machine, campaign, ceilingRupiah: resolveSessionCeiling({ campaign, machine }), now: new Date(),

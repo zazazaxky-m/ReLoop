@@ -19,7 +19,9 @@ import {
   hasOpenProgramSources,
   isRewardFundingEnforced,
   openSessionWhere,
+  releaseUnusedRewardBudget,
   sessionCloseWatermarkKey,
+  sessionReviewCloseKey,
   isFundingReferenceConflict,
   normalizeFundingReference,
   resolveFundingCutover,
@@ -223,12 +225,14 @@ describe("open sources (B01b: open until the close watermark)", () => {
   const OPEN = ["RESERVED", "ACTIVE", "PROCESSING_ITEM", "REVIEW"];
   const TERMINAL = ["COMPLETED", "CANCELLED", "EXPIRED"];
 
-  it("an ended session stays open while it has no watermark and still holds undecided items or an active reservation", () => {
+  it("an ended session stays open while it holds undecided items (any, before the watermark; accepted ones after it) or an active reservation", () => {
     expect(openSessionWhere({ campaignId: "c1" })).toEqual({
       campaignId: "c1",
       OR: [
         { status: { in: OPEN } },
         { status: { in: TERMINAL }, closeWatermarkAt: null, items: { some: { status: { in: ["PENDING", "REVIEW"] } } } },
+        // Fix round 1 (I1): after the watermark an accepted item awaiting review still holds exposure.
+        { status: { in: TERMINAL }, closeWatermarkAt: { not: null }, items: { some: { status: { in: ["PENDING", "REVIEW"] }, acceptanceEventId: { not: null } } } },
       ],
     });
     expect(openSessionWhere({ campaignId: null, organizationId: "o1" })).toMatchObject({ campaignId: null, machine: { organizationId: "o1" } });
@@ -246,7 +250,8 @@ describe("open sources (B01b: open until the close watermark)", () => {
     expect(await hasOpenProgramSources(tx, "c1")).toBe(true);
     const sql = (tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join("?");
     expect(sql).toMatch(/RewardBudgetReservation/);
-    expect(sql).toMatch(/closeWatermarkAt" IS NULL/);
+    // I1: a watermarked session can keep an ACTIVE reservation (review exposure): the watermark is not a filter.
+    expect(sql).not.toMatch(/closeWatermarkAt/);
     expect(sql).toMatch(/'ACTIVE'/);
     expect(tx.trip.count).not.toHaveBeenCalled();
 
@@ -257,7 +262,15 @@ describe("open sources (B01b: open until the close watermark)", () => {
     expect(await hasOpenProgramSources(tx, "c1")).toBe(true);
   });
 
-  it("the watermark release is keyed per session", () => {
+  it("the watermark release and the review close are keyed per session", () => {
     expect(sessionCloseWatermarkKey("s1")).toBe("session:s1:close-watermark");
+    expect(sessionReviewCloseKey("s1")).toBe("session:s1:review-close");
+  });
+
+  it("C2: a partial release (close:false) without a business key is refused before any row is touched", async () => {
+    const tx = { rewardBudgetReservation: { findUnique: vi.fn() } } as any;
+    await expect(releaseUnusedRewardBudget(tx, "res1", 10, { close: false })).rejects.toThrow(RangeError);
+    await expect(releaseUnusedRewardBudget(tx, "res1", 10, {})).rejects.toThrow(RangeError);
+    expect(tx.rewardBudgetReservation.findUnique).not.toHaveBeenCalled();
   });
 });

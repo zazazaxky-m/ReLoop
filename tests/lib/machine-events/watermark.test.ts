@@ -5,7 +5,7 @@ import * as funding from "@/lib/reward-funding";
 import * as sessions from "@/lib/deposit-session-service";
 
 vi.mock("@/lib/db-locks", () => ({
-  lockUser: vi.fn(), lockCampaign: vi.fn(), lockMachine: vi.fn(), lockDepositSession: vi.fn(), lockDepositItem: vi.fn(),
+  lockUser: vi.fn(), lockFundingAccount: vi.fn(), lockCampaign: vi.fn(), lockMachine: vi.fn(), lockDepositSession: vi.fn(), lockDepositItem: vi.fn(),
 }));
 vi.mock("@/lib/reward-funding", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/reward-funding")>();
@@ -14,6 +14,7 @@ vi.mock("@/lib/reward-funding", async (importOriginal) => {
     lockFundingAccountForOrganization: vi.fn(),
     findReservationByKey: vi.fn(),
     releaseUnusedRewardBudget: vi.fn(),
+    sessionReviewExposure: vi.fn(),
   };
 });
 vi.mock("@/lib/deposit-session-service", async (importOriginal) => {
@@ -31,6 +32,8 @@ vi.mock("@/lib/audit", () => ({ logAudit: vi.fn() }));
 const tx = {
   depositSession: { findUnique: vi.fn(), update: vi.fn() },
   machineEvent: { count: vi.fn(), findFirst: vi.fn() },
+  rewardFundingAccount: { findUniqueOrThrow: vi.fn() },
+  machine: { findUnique: vi.fn() },
 } as any;
 const machine = { id: "m1", organizationId: "o1", chamberTimeoutSeconds: 20, sessionIdleTimeoutMinutes: 3, hasCompactor: false };
 const terminal = (over: Record<string, unknown> = {}) => ({
@@ -43,7 +46,8 @@ const input = (payload: Record<string, unknown> = { eventCount: 3, lastLocalEven
 });
 const calls = () => [
   ...vi.mocked(locks.lockUser).mock.invocationCallOrder.map((o) => [o, "User"] as const),
-  ...vi.mocked(funding.lockFundingAccountForOrganization).mock.invocationCallOrder.map((o) => [o, "RewardFundingAccount"] as const),
+  ...vi.mocked(locks.lockFundingAccount).mock.invocationCallOrder.map((o) => [o, "RewardFundingAccount"] as const),
+  ...vi.mocked(funding.lockFundingAccountForOrganization).mock.invocationCallOrder.map((o) => [o, "RewardFundingAccount(org)"] as const),
   ...vi.mocked(locks.lockCampaign).mock.invocationCallOrder.map((o) => [o, "Campaign"] as const),
   ...vi.mocked(locks.lockMachine).mock.invocationCallOrder.map((o) => [o, "Machine"] as const),
   ...vi.mocked(locks.lockDepositSession).mock.invocationCallOrder.map((o) => [o, "DepositSession"] as const),
@@ -58,15 +62,21 @@ describe("handleCloseWatermark", () => {
     tx.depositSession.update.mockResolvedValue({});
     tx.machineEvent.count.mockResolvedValue(3);
     tx.machineEvent.findFirst.mockResolvedValue({ id: "evt3" });
-    vi.mocked(funding.findReservationByKey).mockResolvedValue({ id: "res1", status: "ACTIVE", remainingRupiah: 800 } as any);
-    vi.mocked(funding.releaseUnusedRewardBudget).mockResolvedValue({ released: 800 } as any);
+    vi.mocked(funding.findReservationByKey).mockResolvedValue({ id: "res1", accountId: "acct1", status: "ACTIVE", remainingRupiah: 800 } as any);
+    vi.mocked(funding.releaseUnusedRewardBudget).mockResolvedValue({ released: 800, existing: false } as any);
+    vi.mocked(funding.sessionReviewExposure).mockResolvedValue({ exposure: 0, undecided: 0 });
+    tx.rewardFundingAccount.findUniqueOrThrow.mockResolvedValue({ id: "acct1", organizationId: "o1" });
+    tx.machine.findUnique.mockResolvedValue({ organizationId: "o1" });
   });
 
-  it("locks owner User -> account -> Campaign -> Machine -> DepositSession, records the watermark and releases the residue under a business key", async () => {
+  it("locks owner User -> the reservation's account -> Campaign -> Machine -> DepositSession, records the watermark and releases the residue under a business key", async () => {
     await handleCloseWatermark(tx, machine, input(), "wm-row", (effect) => afterCommit.push(effect));
     expect(calls()).toEqual(["User", "RewardFundingAccount", "Campaign", "Machine", "DepositSession"]);
     expect(locks.lockUser).toHaveBeenCalledWith(tx, "u1");
-    expect(funding.lockFundingAccountForOrganization).toHaveBeenCalledWith(tx, "o1");
+    // C1: the account comes from the immutable reservation, never from the machine's current organization.
+    expect(locks.lockFundingAccount).toHaveBeenCalledWith(tx, "acct1");
+    expect(funding.lockFundingAccountForOrganization).not.toHaveBeenCalled();
+    expect(vi.mocked(funding.findReservationByKey).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(locks.lockFundingAccount).mock.invocationCallOrder[0]);
     expect(tx.machineEvent.count).toHaveBeenCalledWith({
       where: { machineId: "m1", sessionId: "s1", eventType: { not: "SESSION_CLOSE_WATERMARK" } } });
     expect(tx.machineEvent.findFirst).toHaveBeenCalledWith({
@@ -116,6 +126,27 @@ describe("handleCloseWatermark", () => {
     expect(sessions.expireIfTimedOut).toHaveBeenCalledWith(tx, "s1", 3, expect.any(Date));
     expect(funding.releaseUnusedRewardBudget).toHaveBeenCalled();
     expect(afterCommit).toHaveLength(2); // expiry audit + watermark audit
+  });
+
+  it("C1: the machine's organization re-read under the locks must own the reservation's account, else 409 (hold kept)", async () => {
+    tx.machine.findUnique.mockResolvedValue({ organizationId: "o2" });
+    await expect(handleCloseWatermark(tx, machine, input(), "wm-row")).rejects.toMatchObject({ status: 409 });
+    expect(tx.depositSession.update).not.toHaveBeenCalled();
+    expect(funding.releaseUnusedRewardBudget).not.toHaveBeenCalled();
+  });
+
+  it("I1: keeps the exposure of undecided accepted items held: a keyed partial release, reservation left ACTIVE", async () => {
+    vi.mocked(funding.sessionReviewExposure).mockResolvedValue({ exposure: 150, undecided: 1 });
+    await handleCloseWatermark(tx, machine, input(), "wm-row", (effect) => afterCommit.push(effect));
+    expect(funding.sessionReviewExposure).toHaveBeenCalledWith(tx, "s1");
+    expect(funding.releaseUnusedRewardBudget).toHaveBeenCalledWith(tx, "res1", 650, {
+      close: false, reason: "CLOSE_WATERMARK", businessKey: "session:s1:close-watermark" });
+    // Unbounded exposure (a KG type without a maximum weight): nothing is released, the key is still recorded.
+    vi.mocked(funding.sessionReviewExposure).mockResolvedValue({ exposure: null, undecided: 1 });
+    tx.depositSession.findUnique.mockResolvedValue(terminal());
+    await handleCloseWatermark(tx, machine, input(), "wm-row");
+    expect(funding.releaseUnusedRewardBudget).toHaveBeenLastCalledWith(tx, "res1", 0, {
+      close: false, reason: "CLOSE_WATERMARK", businessKey: "session:s1:close-watermark" });
   });
 
   it("a compliance session (no reservation) only records the watermark; a malformed payload is rejected permanently", async () => {

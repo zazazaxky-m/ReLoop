@@ -11,13 +11,18 @@ import { MACHINE_LEASE_PROTOCOL_HEADER } from "@/lib/machine-auth-constants";
 import { verifyLeaseV2 } from "@/lib/machine-lease";
 import {
   PROGRAM_HAS_OPEN_SOURCES,
+  guardOrganizationModeChange,
   guardProgramRewardChange,
   sessionAdmissionKey,
   sessionCloseWatermarkKey,
 } from "@/lib/reward-funding";
+import { startOrResumeDeposit } from "@/lib/deposit-session-service";
+import type { CurrentUser } from "@/lib/rbac";
+import type { AppRole } from "@/lib/roles";
 import { sessionPolicyVersion } from "@/lib/session-policy";
 import { f, type ActorKey } from "../support/audit-fixture";
 import { machineLeaseV2 } from "../support/contracts";
+import { deferred, isStillPending, waitForBlockedBy } from "../support/race-probe";
 
 /**
  * B01b (BIZ-02, second half) against the real PostgreSQL, Redis and Next
@@ -54,6 +59,14 @@ const reservationOf = (businessKey: string) => f.db.rewardBudgetReservation.find
 const commitOf = (businessKey: string) => f.db.rewardBudgetCommit.findUnique({ where: { businessKey } });
 const earnKey = (itemId: string) => `deposit-item:${itemId}:earn`;
 const sessionRow = (id: string) => f.db.depositSession.findUniqueOrThrow({ where: { id } });
+
+async function actorOf(userId: string): Promise<CurrentUser> {
+  const user = await f.db.user.findUniqueOrThrow({ where: { id: userId } });
+  return {
+    id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role as AppRole,
+    organizationId: user.organizationId, organizationName: null, payoutEligible: false, status: user.status,
+  } as CurrentUser;
+}
 
 async function withEnv<T>(name: string, value: string, fn: () => Promise<T>): Promise<T> {
   const previous = process.env[name];
@@ -410,13 +423,16 @@ describe("close watermark (B01b)", () => {
     await expect(flip(shape, { ...shape, rewardMode: "MONEY_REWARD" })).rejects.toMatchObject({ status: 409, message: PROGRAM_HAS_OPEN_SOURCES });
     const marked = await postBatch([watermarkEvent(heldSession, await serverWatermarkFacts(heldSession))]);
     expect(marked.body.results[0].status).toBe("accepted");
-    await expect(flip(shape, { ...shape, rewardMode: "MONEY_REWARD" })).resolves.toBeUndefined();
-    // And once flipped, the held item is still priced at its admission mode: approval pays nothing.
-    await f.db.campaign.update({ where: { id: compliance.id }, data: { rewardMode: "MONEY_REWARD" } });
+    // Fix round 1 (I1): an accepted item still awaiting a reviewer keeps the session open even after the watermark.
+    await expect(flip(shape, { ...shape, rewardMode: "MONEY_REWARD" })).rejects.toMatchObject({ status: 409, message: PROGRAM_HAS_OPEN_SOURCES });
+    // The reviewer decides it: priced at the admission mode (compliance), it pays nothing; the program may then flip.
     const approved = await call("adminA", "PATCH", `/api/deposit-reviews/${item.id}`, { action: "approve" });
     expect(approved.status).toBe(200);
     expect(await f.db.rewardLedger.count({ where: { depositItemId: item.id } })).toBe(0);
     expect(await f.db.depositItem.findUniqueOrThrow({ where: { id: item.id } })).toMatchObject({ status: "ACCEPTED", rewardAmount: 0 });
+    await expect(flip(shape, { ...shape, rewardMode: "MONEY_REWARD" })).resolves.toBeUndefined();
+    await f.db.campaign.update({ where: { id: compliance.id }, data: { rewardMode: "MONEY_REWARD" } });
+    expect(await f.db.rewardLedger.count({ where: { sessionId: heldSession } })).toBe(0);
   });
 
   it("drives the real RVM worker: it stops at the bound, keeps the consumed counter across a restart and sends the watermark after the owner finished", async () => {
@@ -482,6 +498,265 @@ describe("close watermark (B01b)", () => {
     } finally {
       rmSync(workdir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("fix round 1: review exposure across the watermark, lock order, snapshot-missing types", () => {
+  /** An item the machine could not classify (unknown-type fallback): REVIEW, reward 0, no funding commit. */
+  async function unknownTypeDeposit(sessionId: string) {
+    const events = [
+      edgeEvent(sessionId, "ITEM_DETECTED", { quantity: 1, inputBeam: true }),
+      edgeEvent(sessionId, "WEIGHT_MEASURED", { weightGrams: 25, stable: true }),
+      edgeEvent(sessionId, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }),
+    ];
+    const res = await postBatch(events);
+    expect(res.body.results.map((r: Json) => r.status)).toEqual(events.map(() => "accepted"));
+    return f.db.depositItem.findFirstOrThrow({ where: { sessionId }, orderBy: { createdAt: "desc" } });
+  }
+  const releasesOf = (reservationId: string) =>
+    f.db.rewardBudgetRelease.findMany({ where: { reservationId }, orderBy: { createdAt: "asc" } });
+  const heldNeverExceedsConfirmed = async () => {
+    const row = await account();
+    expect(row.heldRupiah).toBeLessThanOrEqual(row.confirmedRupiah);
+  };
+
+  it("I1: the watermark keeps the exposure of an undecided accepted item held (keyed partial release); its approval is covered and the remainder closes once the last item is decided", async () => {
+    await warmUp();
+    await setMachineBounds({ maxRewardPerSessionRupiah: 1_000, maxItemsPerSession: null });
+    await f.confirmFunding(10_000);
+    const userA = await actorOf(f.ids.userA);
+    const token = await f.machineQrToken();
+    const { session } = await withEnforced(() => startOrResumeDeposit(userA, { machineCode: f.ids.machineCode, token }));
+    const sessionId = session.id;
+    const reservation = await reservationOf(sessionAdmissionKey(sessionId));
+    expect(reservation).toMatchObject({ remainingRupiah: 1_000 });
+
+    const held = await unknownTypeDeposit(sessionId);
+    expect(held).toMatchObject({ status: "REVIEW", rewardAmount: 0, validationReasonCode: "UNKNOWN_WASTE_TYPE" });
+    expect(held.acceptanceEventId).not.toBeNull();
+    expect(await commitOf(earnKey(held.id))).toBeNull();
+    expect((await finishSession("userA", sessionId)).status).toBe(200);
+
+    // Watermark: only remaining - exposure is released; the reservation stays ACTIVE for the review.
+    const mark = await postBatch([watermarkEvent(sessionId, await serverWatermarkFacts(sessionId))]);
+    expect(mark.body.results[0].status).toBe("accepted");
+    expect(await reservationOf(sessionAdmissionKey(sessionId))).toMatchObject({ status: "ACTIVE", remainingRupiah: 100 });
+    expect(await releasesOf(reservation.id)).toEqual([expect.objectContaining({ businessKey: sessionCloseWatermarkKey(sessionId), amount: 900 })]);
+    expect(await account()).toMatchObject({ heldRupiah: 100 });
+    expect(await sessionRow(sessionId)).toMatchObject({ closeWatermarkAt: expect.any(Date) });
+    // A replayed watermark releases nothing more.
+    await postBatch([watermarkEvent(sessionId, await serverWatermarkFacts(sessionId))]);
+    expect(await reservationOf(sessionAdmissionKey(sessionId))).toMatchObject({ status: "ACTIVE", remainingRupiah: 100 });
+    expect(await releasesOf(reservation.id)).toHaveLength(1);
+
+    // The freed capacity (9.900) admits others; the exposure is not available to them.
+    const userB = await actorOf(f.ids.userB);
+    const { session: next } = await withEnforced(() => startOrResumeDeposit(userB, { machineCode: f.ids.machineCode, token }));
+    expect(await account()).toMatchObject({ heldRupiah: 1_100 });
+    await heldNeverExceedsConfirmed();
+
+    // The reviewer reclassifies and approves after the watermark: covered by the kept exposure, never uncovered.
+    const approved = await call("adminA", "PATCH", `/api/deposit-reviews/${held.id}`, { action: "approve", wasteTypeId: await fixtureWasteTypeId() });
+    expect(approved.status).toBe(200);
+    expect(approved.body.targetAmount).toBe(100);
+    expect(await commitOf(earnKey(held.id))).toMatchObject({ heldRupiah: 100, uncoveredRupiah: 0, reviewPending: false });
+    expect(await account()).toMatchObject({ heldRupiah: 1_100 });
+    await heldNeverExceedsConfirmed();
+    // The last undecided item is decided: the remainder closes, keyed.
+    expect(await reservationOf(sessionAdmissionKey(sessionId))).toMatchObject({ status: "RELEASED", remainingRupiah: 0 });
+    const releases = await releasesOf(reservation.id);
+    expect(releases).toHaveLength(2);
+    expect(releases[1]).toMatchObject({ amount: 0 });
+    expect(await f.db.rewardBudgetReservation.count({ where: { status: "ACTIVE" } })).toBe(1); // userB's
+    expect((await finishSession("userB", next.id)).status).toBe(200);
+  });
+
+  it("I1: an undecided item whose approvable obligation is already committed leaves no exposure; a reject after the watermark also closes the remainder", async () => {
+    await warmUp();
+    await setMachineBounds({ maxRewardPerSessionRupiah: 1_000, maxItemsPerSession: null });
+    await f.confirmFunding(10_000);
+    const started = await scan("userA");
+    const sessionId = started.body.session.id as string;
+    const anomaly = await deposit(sessionId, { anomaly: true });
+    expect(anomaly.item.status).toBe("REVIEW");
+    expect(await commitOf(earnKey(anomaly.item.id))).toMatchObject({ heldRupiah: 100, reviewPending: true });
+    expect((await finishSession("userA", sessionId)).status).toBe(200);
+    await postBatch([watermarkEvent(sessionId, await serverWatermarkFacts(sessionId))]);
+    // Exposure = max item cap (100) - committed (100) = 0: everything is released and closed now.
+    expect(await reservationOf(sessionAdmissionKey(sessionId))).toMatchObject({ status: "RELEASED", remainingRupiah: 0, releaseReason: "CLOSE_WATERMARK" });
+    expect(await account()).toMatchObject({ heldRupiah: 100 });
+
+    // A second session with an unknown-type item: rejecting it after the watermark closes the remainder too.
+    const second = await scan("userB");
+    const rejected = await unknownTypeDeposit(second.body.session.id);
+    expect((await finishSession("userB", second.body.session.id)).status).toBe(200);
+    await postBatch([watermarkEvent(second.body.session.id, await serverWatermarkFacts(second.body.session.id))]);
+    expect(await reservationOf(sessionAdmissionKey(second.body.session.id))).toMatchObject({ status: "ACTIVE", remainingRupiah: 100 });
+    // Until the item is decided the organization's campaign-less sources stay open under enforcement.
+    const orgGuard = () => f.db.$transaction((tx) => guardOrganizationModeChange(tx,
+      { organizationId: f.ids.orgA, current: { machineRewardMode: "COMPLIANCE_ONLY" }, next: { machineRewardMode: "MONEY_REWARD" } }, { enforced: true }));
+    await expect(orgGuard()).rejects.toMatchObject({ status: 409 });
+    expect((await call("adminA", "PATCH", `/api/deposit-reviews/${rejected.id}`, { action: "reject" })).status).toBe(200);
+    expect(await reservationOf(sessionAdmissionKey(second.body.session.id))).toMatchObject({ status: "RELEASED", remainingRupiah: 0, releaseReason: "REVIEW_SETTLED" });
+    expect(await f.db.rewardBudgetRelease.findMany({ where: { reservationId: (await reservationOf(sessionAdmissionKey(second.body.session.id))).id } }))
+      .toEqual([expect.objectContaining({ amount: 900 }), expect.objectContaining({ amount: 100, reason: "REVIEW_SETTLED" })]);
+    expect(await account()).toMatchObject({ heldRupiah: 100 });
+    await heldNeverExceedsConfirmed();
+    // The first session's anomaly item is still undecided (no exposure kept: its obligation is committed), and
+    // a reviewer can still decide it: the campaign-less sources stay open until then (openSessionWhere, I1).
+    await expect(orgGuard()).rejects.toMatchObject({ status: 409 });
+    expect((await call("adminA", "PATCH", `/api/deposit-reviews/${anomaly.item.id}`, { action: "approve" })).status).toBe(200);
+    expect(await commitOf(earnKey(anomaly.item.id))).toMatchObject({ heldRupiah: 100, uncoveredRupiah: 0, reviewPending: false });
+    expect(await account()).toMatchObject({ heldRupiah: 100 });
+    await heldNeverExceedsConfirmed();
+    await expect(orgGuard()).resolves.toBeUndefined();
+  });
+
+  it("C1: a machine moved to another organization: the watermark is refused permanently and the hold stays; a legacy session's first v2 poll is refused too", async () => {
+    await warmUp();
+    await setMachineBounds({ maxRewardPerSessionRupiah: 1_000, maxItemsPerSession: null });
+    await f.confirmFunding(10_000);
+    const started = await scan("userA");
+    const sessionId = started.body.session.id as string;
+    await deposit(sessionId);
+    expect((await finishSession("userA", sessionId)).status).toBe(200);
+    await f.db.machine.update({ where: { id: f.ids.machineA }, data: { organizationId: f.ids.orgB } });
+    try {
+      const mark = await postBatch([watermarkEvent(sessionId, await serverWatermarkFacts(sessionId))]);
+      expect(mark.body.results[0]).toMatchObject({ status: "error", error: "EVENT_REJECTED", retryable: false });
+      expect(await reservationOf(sessionAdmissionKey(sessionId))).toMatchObject({ status: "ACTIVE", remainingRupiah: 900 });
+      expect((await sessionRow(sessionId)).closeWatermarkAt).toBeNull();
+
+    } finally {
+      await f.db.machine.update({ where: { id: f.ids.machineA }, data: { organizationId: f.ids.orgA } });
+    }
+
+    // A pre-B01b session (no snapshot): its first v2 poll creates the snapshot under the locks. Deterministic race:
+    // the machine moves to organization B while the poll waits on the Machine row it read as organization A.
+    const legacy = await f.db.depositSession.create({
+      data: { userId: f.ids.userB, machineId: f.ids.machineA, status: "ACTIVE", timeoutAt: new Date(Date.now() + 120_000) },
+    });
+    const holderConnection = await f.connection();
+    const locked = deferred<void>();
+    const release = deferred<void>();
+    const holder = holderConnection.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Machine" WHERE id = ${f.ids.machineA} FOR NO KEY UPDATE`;
+      locked.resolve();
+      await release.promise;
+      await tx.machine.update({ where: { id: f.ids.machineA }, data: { organizationId: f.ids.orgB } });
+    }, { maxWait: 10_000, timeout: 60_000 });
+    holder.catch(() => {});
+    await locked.promise;
+    try {
+      const poll = machineSessionInProcess("2");
+      poll.catch(() => {});
+      expect(await isStillPending(poll, 500)).toBe(true); // waiting on the Machine row after its pre-lock read
+      release.resolve();
+      await holder;
+      const refused = await poll;
+      expect(refused.status).toBe(409);
+      expect((await sessionRow(legacy.id)).policyVersion).toBeNull();
+      expect((await sessionRow(legacy.id)).policySnapshotJson).toBeNull();
+    } finally {
+      release.resolve();
+      await f.db.machine.update({ where: { id: f.ids.machineA }, data: { organizationId: f.ids.orgA } });
+    }
+  });
+
+  it("C1 (review): the decision locks the session reservation's account before the Machine row; a machine moved to another organization is refused 409 and nothing is settled", async () => {
+    await warmUp();
+    await setMachineBounds({ maxRewardPerSessionRupiah: 1_000, maxItemsPerSession: null });
+    await f.confirmFunding(10_000);
+    const started = await scan("userA");
+    const sessionId = started.body.session.id as string;
+    const held = await unknownTypeDeposit(sessionId);
+    expect(held).toMatchObject({ status: "REVIEW", rewardAmount: 0 });
+    expect((await finishSession("userA", sessionId)).status).toBe(200);
+    // Compile the review route before any lock is held.
+    expect((await call("superadmin", "PATCH", "/api/deposit-reviews/missing", { action: "reject" })).status).toBe(404);
+    const accountA = await account();
+    const wasteTypeId = await fixtureWasteTypeId();
+
+    // The machine moves to organization B after admission; the reservation (and its account) stay organization A's.
+    await f.db.machine.update({ where: { id: f.ids.machineA }, data: { organizationId: f.ids.orgB } });
+    const holderConnection = await f.connection();
+    const observer = await f.connection();
+    const locked = deferred<number>();
+    const release = deferred<void>();
+    const holder = holderConnection.$transaction(async (tx) => {
+      const [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+      await tx.$queryRaw`SELECT id FROM "RewardFundingAccount" WHERE id = ${accountA.id} FOR NO KEY UPDATE`;
+      locked.resolve(pid);
+      await release.promise;
+    }, { maxWait: 10_000, timeout: 60_000 });
+    holder.catch((error) => locked.reject(error));
+    try {
+      const holderPid = await locked.promise;
+      const review = call("superadmin", "PATCH", `/api/deposit-reviews/${held.id}`, { action: "approve", wasteTypeId });
+      review.catch(() => {});
+      await waitForBlockedBy(observer, { holderPid, timeoutMs: 15_000 });
+      // Global order: the review waits on the reservation's account holding no Machine lock (a decision that
+      // took the Machine first and the reservation's account later could deadlock with an admission).
+      const machineFree = await observer
+        .$transaction((tx) => tx.$queryRaw`SELECT id FROM "Machine" WHERE id = ${f.ids.machineA} FOR NO KEY UPDATE NOWAIT`)
+        .then(() => true, () => false);
+      expect(machineFree).toBe(true);
+      release.resolve();
+      await holder;
+      // Re-read under the locks: the machine's organization no longer owns the reservation's account.
+      const refused = await review;
+      expect(refused.status).toBe(409);
+    } finally {
+      release.resolve();
+      await holder.catch(() => {});
+      await f.db.machine.update({ where: { id: f.ids.machineA }, data: { organizationId: f.ids.orgA } });
+    }
+    // Nothing was decided or settled, on either organization's account.
+    expect(await f.db.depositItem.findUniqueOrThrow({ where: { id: held.id } })).toMatchObject({ status: "REVIEW", rewardAmount: 0 });
+    expect(await commitOf(earnKey(held.id))).toBeNull();
+    expect(await f.db.rewardLedger.count({ where: { depositItemId: held.id } })).toBe(0);
+    expect(await reservationOf(sessionAdmissionKey(sessionId))).toMatchObject({ status: "ACTIVE", remainingRupiah: 1_000 });
+    expect(await account()).toMatchObject({ heldRupiah: 1_000 });
+    expect((await f.db.rewardFundingAccount.findUnique({ where: { organizationId: f.ids.orgB } }))?.heldRupiah ?? 0).toBe(0);
+
+    // Back in its organization, the same decision goes through, covered by the session's reservation.
+    const approved = await call("adminA", "PATCH", `/api/deposit-reviews/${held.id}`, { action: "approve", wasteTypeId });
+    expect(approved.status).toBe(200);
+    expect(await commitOf(earnKey(held.id))).toMatchObject({ heldRupiah: 100, uncoveredRupiah: 0 });
+    expect(await account()).toMatchObject({ heldRupiah: 1_000 });
+    await heldNeverExceedsConfirmed();
+  });
+
+  it("C3: a type added to the machine after admission is held for review at 0, never priced from live configuration; approval must pick a type of the session's price list", async () => {
+    await warmUp();
+    await setMachineBounds({ maxRewardPerSessionRupiah: 1_000, maxItemsPerSession: null });
+    await f.confirmFunding(10_000);
+    const started = await scan("userA");
+    const sessionId = started.body.session.id as string;
+    const added = await f.db.wasteType.create({ data: { name: "Kaleng Baru", unit: "ITEM", active: true } });
+    await f.db.machineWasteType.create({ data: { machineId: f.ids.machineA, wasteTypeId: added.id, active: true } });
+    await f.db.rewardRate.create({ data: { organizationId: f.ids.orgA, wasteTypeId: added.id, unit: "ITEM", pointsPerItem: 999, active: true } });
+
+    const events = [
+      edgeEvent(sessionId, "ITEM_DETECTED", { wasteTypeId: added.id, quantity: 1, inputBeam: true }),
+      edgeEvent(sessionId, "WEIGHT_MEASURED", { weightGrams: 25, stable: true }),
+      edgeEvent(sessionId, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }),
+    ];
+    const res = await postBatch(events);
+    expect(res.body.results.map((r: Json) => r.status)).toEqual(events.map(() => "accepted"));
+    const item = await f.db.depositItem.findFirstOrThrow({ where: { sessionId } });
+    expect(item).toMatchObject({ status: "REVIEW", rewardAmount: 0, baseRewardAmount: 0, validationReasonCode: "TYPE_NOT_IN_SNAPSHOT", wasteTypeId: added.id });
+    expect(await f.db.rewardLedger.count({ where: { depositItemId: item.id } })).toBe(0);
+    expect(await reservationOf(sessionAdmissionKey(sessionId))).toMatchObject({ remainingRupiah: 1_000 });
+
+    const sameType = await call("adminA", "PATCH", `/api/deposit-reviews/${item.id}`, { action: "approve" });
+    expect(sameType.status).toBe(422);
+    const otherNew = await call("adminA", "PATCH", `/api/deposit-reviews/${item.id}`, { action: "approve", wasteTypeId: added.id });
+    expect(otherNew.status).toBe(422);
+    const snapshotType = await call("adminA", "PATCH", `/api/deposit-reviews/${item.id}`, { action: "approve", wasteTypeId: await fixtureWasteTypeId() });
+    expect(snapshotType.status).toBe(200);
+    expect(snapshotType.body.targetAmount).toBe(100);
+    expect(await commitOf(earnKey(item.id))).toMatchObject({ heldRupiah: 100, uncoveredRupiah: 0 });
   });
 });
 

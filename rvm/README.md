@@ -348,7 +348,12 @@ oleh `tests/test_rvm_lease_contract.py` dan `tests/contracts/machine-lease-contr
   per sesi), sehingga tiba setelah semua yang dijaminnya. Server baru melepas
   sisa reservasi sesi setelah watermark itu (`lib/machine-events/watermark.ts`,
   pelepasan berkunci `session:<id>:close-watermark`: retry tidak melepas dua
-  kali). Koneksi hilang, event tertahan, atau event dead-letter berarti **tidak
+  kali). Bagian sisa yang masih dapat ditarik item yang sudah melewati titik
+  penerimaan tetapi masih menunggu peninjau (item tanpa jenis, item anomali
+  yang bisa diklasifikasi ulang) **tetap ditahan**: hanya `sisa - eksposur`
+  yang dilepas dan reservasi tetap aktif sampai keputusan peninjauan terakhir
+  menutupnya (`session:<id>:review-close`). Koneksi hilang, event tertahan,
+  atau event dead-letter berarti **tidak
   ada watermark**: sisa dana tetap ditahan dan dilaporkan
   (`SOURCE_CLOSED_AWAITING_WATERMARK`); hanya pelepasan eksplisit superadmin
   yang membebaskannya. Watermark untuk sesi yang masih berjalan di server

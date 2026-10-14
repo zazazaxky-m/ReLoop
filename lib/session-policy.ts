@@ -115,6 +115,23 @@ export function machinePolicyView(policy: SessionPolicySnapshot): MachinePolicyV
   };
 }
 
+/**
+ * The most one still-undecided item of the session can draw from its
+ * reservation once a reviewer decides it (it may be reclassified to any type
+ * of the price list): the largest per-type cap. Null = unbounded (a KG type
+ * without a maximum weight) or no snapshot; 0 for a compliance session.
+ */
+export function snapshotMaxItemCap(policy: SessionPolicySnapshot | null | undefined): number | null {
+  if (!policy) return null;
+  if (policy.mode !== "MONEY_REWARD") return 0;
+  let max = 0;
+  for (const type of policy.wasteTypes) {
+    if (type.maxRewardRupiah === null) return null;
+    if (type.maxRewardRupiah > max) max = type.maxRewardRupiah;
+  }
+  return max;
+}
+
 /** The limit the user sees before the first item (scan/session responses). */
 export function sessionLimits(policy: SessionPolicySnapshot | null | undefined): SessionLimits {
   if (!policy) return { maxRewardRupiah: null, maxItems: null };
