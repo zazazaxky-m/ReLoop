@@ -10,8 +10,16 @@ import {
 
 describe("lib/pickup-dispatch input contract (B05)", () => {
   it("requires the operator's version for every decision that sets or closes ownership", () => {
-    expect(["assign", "cancel", "fail"].every((a) => requiresExpectedVersion(a as never))).toBe(true);
-    expect(["start", "arrive", "collect", "complete"].some((a) => requiresExpectedVersion(a as never))).toBe(false);
+    for (const role of ["PENGEPUL", "ADMIN", "SUPERADMIN"] as const) {
+      expect(["assign", "cancel", "fail"].every((a) => requiresExpectedVersion(a as never, role))).toBe(true);
+    }
+  });
+
+  it("keeps the version-less upgrade window for old collector apps only (PENGEPUL)", () => {
+    const forward = ["start", "arrive", "collect", "complete"] as const;
+    expect(forward.some((a) => requiresExpectedVersion(a, "PENGEPUL"))).toBe(false);
+    expect(forward.every((a) => requiresExpectedVersion(a, "SUPERADMIN"))).toBe(true);
+    expect(forward.every((a) => requiresExpectedVersion(a, "ADMIN"))).toBe(true);
   });
 
   it("uses the brief's Indonesian 409 and machine-readable codes", () => {

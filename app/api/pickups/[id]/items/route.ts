@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
 import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
-import { logAudit } from "@/lib/audit";
+import { logAuditInTransaction } from "@/lib/audit";
+import { lockPickupForFieldWork } from "@/lib/pickup-dispatch";
+import { runWalletTransaction } from "@/lib/wallet-service";
 
 const itemSchema = z.object({
   wasteTypeId: z.string().nullable().optional(),
@@ -13,6 +14,9 @@ const itemSchema = z.object({
   notes: z.string().max(500).nullable().optional(),
 });
 
+/** Statuses in which material may be recorded on the task. */
+const RECORDABLE = ["ARRIVED", "COLLECTED", "COMPLETED"];
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -22,34 +26,34 @@ export async function POST(
     const { id } = await params;
     const data = itemSchema.parse(await req.json());
 
-    const pickup = await prisma.pickupRequest.findUnique({ where: { id } });
-    if (!pickup) throw new HttpError(404, "Pickup tidak ditemukan");
-
-    if (user.role === "PENGEPUL" && pickup.assignedCollectorId !== user.id) {
-      throw new HttpError(403, "Pickup tidak ditugaskan kepada Anda");
-    }
-    if (!["ARRIVED", "COLLECTED", "COMPLETED"].includes(pickup.status)) {
-      throw new HttpError(409, "Material hanya dapat dicatat setelah tiba di lokasi");
-    }
-
-    const item = await prisma.pickupItem.create({
-      data: {
-        pickupRequestId: id,
-        wasteTypeId: data.wasteTypeId ?? null,
-        itemCount: data.itemCount ?? null,
-        estimatedWeightKg: data.estimatedWeightKg ?? null,
-        actualWeightKg: data.actualWeightKg ?? null,
-        source: data.source,
-        notes: data.notes ?? null,
-      },
-    });
-
-    await logAudit({
-      actorId: user.id,
-      action: "PICKUP_ITEM_RECORD",
-      entityType: "PickupItem",
-      entityId: item.id,
-      metadata: { pickupRequestId: id },
+    // B05: a material record is a field action like the PATCH steps. Under the
+    // pickup lock the assignee, the collector's live partnership (FOR SHARE)
+    // and the status are re-read, so a revoked or reassigned collector cannot
+    // record, and a concurrent cancel is decided first.
+    const item = await runWalletTransaction(async (tx) => {
+      const current = await lockPickupForFieldWork(tx, user, id);
+      if (!RECORDABLE.includes(current.status)) {
+        throw new HttpError(409, "Material hanya dapat dicatat setelah tiba di lokasi");
+      }
+      const created = await tx.pickupItem.create({
+        data: {
+          pickupRequestId: id,
+          wasteTypeId: data.wasteTypeId ?? null,
+          itemCount: data.itemCount ?? null,
+          estimatedWeightKg: data.estimatedWeightKg ?? null,
+          actualWeightKg: data.actualWeightKg ?? null,
+          source: data.source,
+          notes: data.notes ?? null,
+        },
+      });
+      await logAuditInTransaction(tx, {
+        actorId: user.id,
+        action: "PICKUP_ITEM_RECORD",
+        entityType: "PickupItem",
+        entityId: created.id,
+        metadata: { pickupRequestId: id, pickupVersion: current.version, status: current.status },
+      });
+      return created;
     });
 
     return jsonOk({ item }, 201);

@@ -86,7 +86,7 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
     final reason = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Batalkan Pickup'),
+        title: const Text('Batalkan pickup ini?'),
         content: TextField(
           onChanged: (v) => reasonText = v,
           maxLines: 3,

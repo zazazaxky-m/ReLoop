@@ -32,9 +32,10 @@ import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
  * cancel and fail require `expectedVersion`; a different version is 409
  * PICKUP_VERSION_CONFLICT for every action. During the client upgrade window
  * the forward field actions (start, arrive, collect, complete) are still
- * accepted without `expectedVersion`, and only for the current assignee with
- * a live partnership at the status the action starts from; the write is still
- * conditional on the version read under the lock.
+ * accepted without `expectedVersion` from a PENGEPUL only, and only for the
+ * current assignee with a live partnership at the status the action starts
+ * from; the write is still conditional on the version read under the lock.
+ * ADMIN and SUPERADMIN always send `expectedVersion`.
  */
 
 export const PICKUP_VERSION_CONFLICT = "Tugas telah diperbarui; muat ulang";
@@ -67,8 +68,13 @@ export const versionRequired = () => new PickupDispatchError(409, PICKUP_VERSION
 /** Actions that decide who owns the task, or close it: they always carry the operator's version. */
 const VERSION_REQUIRED_ACTIONS = new Set<PickupAction>(["assign", "cancel", "fail"]);
 
-export function requiresExpectedVersion(action: PickupAction): boolean {
-  return VERSION_REQUIRED_ACTIONS.has(action);
+/**
+ * Whether `expectedVersion` is mandatory. The upgrade window (a version-less
+ * start/arrive/collect/complete) exists only for old collector apps, so it is
+ * open to PENGEPUL alone; every other role always sends the version.
+ */
+export function requiresExpectedVersion(action: PickupAction, role: CurrentUser["role"]): boolean {
+  return VERSION_REQUIRED_ACTIONS.has(action) || role !== "PENGEPUL";
 }
 
 const versionSchema = z.number().int().min(0).max(2_147_483_647);
@@ -169,6 +175,31 @@ function assertActionRole(actor: CurrentUser, action: PickupAction) {
   throw new HttpError(403, action === "assign"
     ? "Penugasan pengepul dilakukan oleh admin organisasi"
     : "Peran tidak diizinkan untuk aksi ini");
+}
+
+/**
+ * Field work outside the PATCH transitions (B05 I1: material records). Locks
+ * the pickup, re-reads it and, for a PENGEPUL, requires the current assignment
+ * and a live ACTIVE partnership, held FOR SHARE until COMMIT. Callers run inside
+ * `runWalletTransaction` and decide on the returned (locked) row's status.
+ */
+export async function lockPickupForFieldWork(
+  tx: Prisma.TransactionClient,
+  actor: CurrentUser,
+  pickupId: string,
+): Promise<{ id: string; organizationId: string; status: PickupStatus; version: number; assignedCollectorId: string | null }> {
+  await lockPickupRequest(tx, pickupId);
+  const current = await tx.pickupRequest.findUniqueOrThrow({
+    where: { id: pickupId },
+    select: { id: true, organizationId: true, status: true, version: true, assignedCollectorId: true },
+  });
+  if (actor.role === "PENGEPUL") {
+    if (current.assignedCollectorId !== actor.id) throw new HttpError(403, PICKUP_NOT_YOURS);
+    if (!(await lockedPartnership(tx, actor.id, current.organizationId))) throw new HttpError(403, PARTNERSHIP_INACTIVE);
+  } else if (actor.role !== "SUPERADMIN") {
+    throw new HttpError(403, "Peran tidak diizinkan untuk aksi ini");
+  }
+  return current;
 }
 
 const CURRENT_SELECT = {
@@ -288,7 +319,7 @@ export async function transitionPickup(
   assertActionRole(actor, action);
   let expectedVersion: number | null = null;
   if (input.expectedVersion !== undefined) expectedVersion = parseExpectedVersion(input.expectedVersion);
-  else if (requiresExpectedVersion(action)) throw versionRequired();
+  else if (requiresExpectedVersion(action, actor.role)) throw versionRequired();
   const closing = action === "cancel" || action === "fail";
   const reason = closing ? parseReason(input.reason) : null;
   const ref = await readImmutable(pickupId);

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { SESSION_COOKIE } from "@/lib/auth";
+import { signMachinePayload } from "@/lib/machine-auth";
 import { f, type ActorKey, type FixtureActor } from "../support/audit-fixture";
 import { deferred, isStillPending, waitForBlockedBy } from "../support/race-probe";
 
@@ -77,6 +78,31 @@ function escalationRunner(args: string[] = []) {
     throw new Error(`runner stdout is not one JSON document: ${JSON.stringify(run.stdout)} stderr: ${JSON.stringify(run.stderr)}`);
   }
   return { status: run.status, output, stderr: run.stderr };
+}
+
+const recordItem = (actor: ActorKey, id: string) =>
+  call(actor, "POST", `/api/pickups/${id}/items`, { itemCount: 12, actualWeightKg: 3.5, source: "MANUAL_WEIGHING" });
+
+/** Signs and sends one machine HEARTBEAT exactly like rvm/sync.py does (fixture machine A). */
+async function heartbeat(fillLevelPercent: number) {
+  const machine = await f.db.machine.findUniqueOrThrow({ where: { id: f.ids.machineA } });
+  const raw = JSON.stringify({ machineCode: f.ids.machineCode, events: [{
+    localEventId: randomUUID(), eventType: "HEARTBEAT", payload: { status: "ONLINE", fillLevelPercent },
+    sessionId: null, depositItemId: null, occurredAt: new Date().toISOString(),
+  }] });
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const nonce = randomUUID().replaceAll("-", "");
+  const response = await fetch(new URL("/api/machine-events", process.env.AUDIT_BASE_URL), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json", "x-reloop-machine": f.ids.machineCode, "x-reloop-timestamp": timestamp,
+      "x-reloop-nonce": nonce, "x-reloop-signature": signMachinePayload(machine.ingestSecret!, timestamp, nonce, raw),
+    },
+    body: raw,
+  });
+  const body = (await response.json()) as Json;
+  expect(response.status).toBe(200);
+  expect(body.results[0]).toMatchObject({ status: "accepted" });
 }
 
 /** A second database session holding the pickup row lock until released. */
@@ -175,6 +201,10 @@ describe("pickup dispatch (B05)", () => {
       .toBe("PICKUP_VERSION_CONFLICT");
     expect(await row(pickup.id)).toMatchObject({ status: "ASSIGNED", version: 1 });
 
+    // The window is for old collector apps only: a SUPERADMIN field step always carries the version.
+    expect((await patch("superadmin", pickup.id, { action: "start" })).body.code).toBe("PICKUP_VERSION_REQUIRED");
+    expect(await row(pickup.id)).toMatchObject({ status: "ASSIGNED", version: 1 });
+
     // Upgrade window: the current assignee's forward step at its from-status, without a version.
     const legacyStart = await patch("collectorA", pickup.id, { action: "start" });
     expect(legacyStart.status).toBe(200);
@@ -201,6 +231,22 @@ describe("pickup dispatch (B05)", () => {
     expect(await recipients(pickup.id, "PICKUP_ASSIGNED")).toEqual({ [f.ids.collectorA]: 1 });
     expect(await noticesFor(pickup.id, "PICKUP_STATUS")).toEqual([]);
     expect(await f.db.auditLog.count({ where: { entityId: pickup.id, action: "PICKUP_ASSIGN" } })).toBe(1);
+  });
+
+  it("a reassignment racing an old app's version-less start: the start re-reads the owner and is refused", async () => {
+    const pickup = await f.pickup();
+    await assign(pickup.id, "collectorA");
+    // Compile the route before holding locks.
+    expect((await patch("collectorA", "missing-pickup", { action: "start" })).status).toBe(404);
+
+    const [reassign, legacyStart] = await inOrder(pickup.id,
+      () => patch("adminA", pickup.id, { action: "assign", collectorUserId: f.ids.collectorB, expectedVersion: 1 }),
+      () => patch("collectorA", pickup.id, { action: "start" }));
+
+    expect(reassign.status).toBe(200);
+    expect(legacyStart).toEqual({ status: 403, body: { error: "Tugas ini tidak lagi ditugaskan kepada Anda. Muat ulang daftar tugas." } });
+    expect(await row(pickup.id)).toMatchObject({ status: "ASSIGNED", version: 2, assignedCollectorId: f.ids.collectorB });
+    expect(await f.db.auditLog.count({ where: { entityId: pickup.id, action: "PICKUP_START" } })).toBe(0);
   });
 
   it("the previous collector cannot start or complete after reassignment", async () => {
@@ -240,6 +286,8 @@ describe("pickup dispatch (B05)", () => {
     await assign(pickup.id, "collectorA");
     await assign(other.id, "collectorA");
     expect((await step("collectorA", other.id, "start")).status).toBe(200);
+    expect((await step("collectorA", other.id, "arrive")).status).toBe(200);
+    expect((await recordItem("collectorA", other.id)).status).toBe(201);
 
     const partnership = await f.db.organizationCollectorPartner.findUniqueOrThrow({
       where: { organizationId_collectorUserId: { organizationId: f.ids.orgA, collectorUserId: f.ids.collectorA } },
@@ -249,9 +297,12 @@ describe("pickup dispatch (B05)", () => {
     const inactive = { status: 403, body: { error: "Kemitraan pengepul belum aktif untuk organisasi ini" } };
     expect(await step("collectorA", pickup.id, "start")).toEqual(inactive);
     expect(await step("collectorA", pickup.id, "fail", { reason: "Mobil mogok" })).toEqual(inactive);
-    expect(await step("collectorA", other.id, "arrive")).toEqual(inactive);
+    expect(await step("collectorA", other.id, "collect")).toEqual(inactive);
+    // Material records are an action too (they feed the B04 settlement).
+    expect(await recordItem("collectorA", other.id)).toEqual(inactive);
+    expect(await f.db.pickupItem.count({ where: { pickupRequestId: other.id } })).toBe(1);
     expect(await row(pickup.id)).toMatchObject({ status: "ASSIGNED", version: 1 });
-    expect(await row(other.id)).toMatchObject({ status: "ON_THE_WAY", version: 2 });
+    expect(await row(other.id)).toMatchObject({ status: "ARRIVED", version: 3 });
 
     // A suspended partner cannot be dispatched either; the admin reassigns the untouched task.
     const third = await f.pickup();
@@ -259,6 +310,55 @@ describe("pickup dispatch (B05)", () => {
     expect((await row(third.id)).assignedCollectorId).toBeNull();
     await assign(pickup.id, "collectorB");
     expect((await step("collectorB", pickup.id, "start")).status).toBe(200);
+  });
+
+  it("a cancel and a material record on the same task are decided in pickup-lock order", async () => {
+    const pickup = await f.pickup();
+    await assign(pickup.id, "collectorA");
+    for (const action of ["start", "arrive"]) expect((await step("collectorA", pickup.id, action)).status).toBe(200);
+    // Compile the items route before holding locks.
+    expect((await recordItem("collectorA", "missing-pickup")).status).toBe(404);
+
+    const [cancelled, recorded] = await inOrder(pickup.id,
+      () => patch("adminA", pickup.id, { action: "cancel", expectedVersion: 3, reason: "Lokasi ditutup sementara" }),
+      () => recordItem("collectorA", pickup.id));
+
+    expect(cancelled.status).toBe(200);
+    expect(recorded).toEqual({ status: 409, body: { error: "Material hanya dapat dicatat setelah tiba di lokasi" } });
+    expect(await f.db.pickupItem.count({ where: { pickupRequestId: pickup.id } })).toBe(0);
+    expect(await row(pickup.id)).toMatchObject({ status: "CANCELLED", version: 4 });
+  });
+
+  it("a heartbeat between a fail and its replacement keeps the replacement recorded", async () => {
+    const created = await call("adminA", "POST", "/api/pickups", { machineId: f.ids.machineA, reason: "FULL" });
+    expect(created.status).toBe(201);
+    const failedId = created.body.pickup.id as string;
+    await assign(failedId, "collectorB");
+    expect((await step("collectorB", failedId, "start")).status).toBe(200);
+    expect((await step("collectorB", failedId, "fail", { reason: "Truk mogok di jalan" })).status).toBe(200);
+
+    // The machine is still full: its next heartbeat raises the FULL pickup, which replaces the failed task.
+    await heartbeat(95);
+    const auto = await f.db.pickupRequest.findFirstOrThrow({ where: { machineId: f.ids.machineA, status: "REQUESTED" } });
+    expect(auto).toMatchObject({ reason: "FULL", replacesPickupId: failedId, version: 0 });
+    await heartbeat(96);
+    expect(await f.db.pickupRequest.count({ where: { machineId: f.ids.machineA } })).toBe(2);
+
+    const listed = (await call("adminA", "GET", "/api/pickups")).body.pickups.find((p: Json) => p.id === failedId);
+    expect(listed.dispatch).toMatchObject({ needsReplacement: false, nextActor: null });
+    expect(listed.replacedBy).toMatchObject({ id: auto.id });
+    // The admin's "Buat pengganti" (e.g. from a stale page) returns that task instead of failing.
+    expect(await call("adminA", "POST", "/api/pickups", { replacesPickupId: failedId }))
+      .toMatchObject({ status: 200, body: { existing: true, pickup: { id: auto.id } } });
+
+    // After a completed task, the next FULL pickup replaces nothing.
+    await assign(auto.id, "collectorB");
+    for (const action of ["start", "arrive", "collect", "complete"]) {
+      expect((await step("collectorB", auto.id, action)).status).toBe(200);
+    }
+    await heartbeat(97);
+    const next = await f.db.pickupRequest.findFirstOrThrow({ where: { machineId: f.ids.machineA, status: "REQUESTED" } });
+    expect(next.replacesPickupId).toBeNull();
   });
 
   it("escalates an overdue start once per version, only to the organization's active admins", async () => {

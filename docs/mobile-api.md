@@ -792,25 +792,27 @@ karakter), `notes`. Respons `{ pickup }` membawa `version` baru.
 | Aksi | Peran | Dari status | `expectedVersion` |
 |---|---|---|---|
 | `assign` | ADMIN/SUPERADMIN | REQUESTED, ASSIGNED (ganti pengepul hanya sebelum berangkat) | wajib |
-| `start` / `arrive` / `collect` / `complete` | pengepul yang ditugaskan (atau SUPERADMIN) | ASSIGNED / ON_THE_WAY / ARRIVED / COLLECTED | dikirim klien baru; lihat masa transisi |
+| `start` / `arrive` / `collect` / `complete` | pengepul yang ditugaskan (atau SUPERADMIN) | ASSIGNED / ON_THE_WAY / ARRIVED / COLLECTED | wajib untuk SUPERADMIN; PENGEPUL: dikirim klien baru, lihat masa transisi |
 | `fail` | pengepul yang ditugaskan (atau SUPERADMIN) | ASSIGNED … COLLECTED | wajib, plus `reason` |
 | `cancel` | ADMIN/SUPERADMIN | REQUESTED, ASSIGNED, ON_THE_WAY, ARRIVED | wajib, plus `reason` |
 
 Kesalahan: **409** `{ error: "Tugas telah diperbarui; muat ulang", code:
 "PICKUP_VERSION_CONFLICT" }` bila `expectedVersion` berbeda dari versi saat ini
 (semua aksi); **409** `{ code: "PICKUP_VERSION_REQUIRED" }` bila assign/cancel/
-fail tanpa `expectedVersion` (pesan meminta muat ulang atau perbarui aplikasi);
+fail tanpa `expectedVersion`, atau bila ADMIN/SUPERADMIN mengirim aksi apa pun
+tanpa `expectedVersion` (pesan meminta muat ulang atau perbarui aplikasi);
 409 tanpa `code` untuk status yang tidak mengizinkan aksi (mis. assign setelah
 pengepul berangkat); **403** bila pengepul bukan lagi yang ditugaskan, atau
 kemitraannya tidak aktif (diperiksa di dalam transaksi sebelum setiap aksi);
 **422** alasan kosong atau tenggat tidak valid. Klien memuat ulang daftar pada
 409/403 dan tidak mengulang permintaan yang sama.
 
-**Masa transisi klien.** Aplikasi lama yang tidak mengirim `expectedVersion`
-tetap dapat menjalankan `start`, `arrive`, `collect` dan `complete`, dan hanya
-itu: server menerimanya hanya bila pengguna adalah pengepul yang saat ini
-ditugaskan, kemitraannya aktif, dan status saat ini adalah status asal aksi
-tersebut. Penulisannya tetap bersyarat pada versi yang dibaca di bawah lock
+**Masa transisi klien.** Hanya aplikasi pengepul lama (peran PENGEPUL) yang
+boleh tidak mengirim `expectedVersion`, dan hanya untuk `start`, `arrive`,
+`collect` dan `complete`: server menerimanya hanya bila pengguna PENGEPUL itu
+adalah pengepul yang saat ini ditugaskan, kemitraannya aktif, dan status saat
+ini adalah status asal aksi tersebut. ADMIN dan SUPERADMIN selalu wajib
+mengirim `expectedVersion` (tanpa versi: 409 `PICKUP_VERSION_REQUIRED`). Penulisannya tetap bersyarat pada versi yang dibaca di bawah lock
 dan menaikkan versi; audit mencatat `expectedVersionProvided: false`.
 `expectedVersion` yang dikirim tetapi usang selalu ditolak 409. Assign, cancel
 dan fail tidak pernah diterima tanpa versi. Pada rilis berikutnya (setelah
@@ -820,7 +822,17 @@ aplikasi lama tidak dipakai) `expectedVersion` diwajibkan untuk semua aksi.
 `POST /api/pickups { "replacesPickupId": "<id>" }`: 201 tugas REQUESTED baru
 (organisasi, mesin, alasan dan prioritas disalin), 200 `existing: true` bila
 pengganti sudah ada (satu pengganti per tugas), 409 bila tugas belum ditutup
-atau mesinnya sudah punya tugas terbuka.
+atau mesinnya sudah punya tugas terbuka. Pickup otomatis FULL dari mesin
+(heartbeat/status penuh) dicatat sebagai pengganti tugas terakhir mesin itu
+bila tugas tersebut dibatalkan/gagal dan belum punya pengganti; tombol "Buat
+pengganti" lalu menjawab 200 `existing: true` dengan tugas otomatis tersebut.
+
+**Catat material.** `POST /api/pickups/:id/items` (PENGEPUL yang ditugaskan
+atau SUPERADMIN) berjalan di bawah lock pickup yang sama: penugasan,
+kemitraan aktif (403 bila pengepul bukan lagi yang ditugaskan atau
+kemitraannya tidak aktif) dan status (409 di luar ARRIVED/COLLECTED/COMPLETED)
+dibaca ulang di dalam transaksi, sehingga pembatalan yang bersamaan diputuskan
+lebih dulu.
 
 **Notifikasi** (dikirim setelah commit): `PICKUP_ASSIGNED` ke pengepul yang
 ditugaskan; `PICKUP_STATUS` ke pengepul lama saat dialihkan dan ke pengepul

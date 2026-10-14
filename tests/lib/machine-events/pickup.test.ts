@@ -39,6 +39,36 @@ describe('maybeCreateAutoPickup', () => {
     );
   });
 
+  it('records the FULL request as the replacement of the latest cancelled/failed task (B05)', async () => {
+    mockTx.pickupRequest.findFirst
+      .mockResolvedValueOnce(null) // no open pickup
+      .mockResolvedValueOnce({ id: 'failed1', status: 'FAILED', replacedBy: null });
+    mockTx.pickupRequest.create.mockResolvedValue({ id: 'p2' });
+
+    await maybeCreateAutoPickup(mockTx, { id: 'm1', organizationId: 'o1' }, 'M1');
+
+    expect(mockTx.pickupRequest.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { machineId: 'm1' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    }));
+    expect(mockTx.pickupRequest.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ machineId: 'm1', reason: 'FULL', replacesPickupId: 'failed1' }),
+    });
+  });
+
+  it('links nothing when the latest task completed or was already replaced', async () => {
+    for (const latest of [
+      { id: 'done1', status: 'COMPLETED', replacedBy: null },
+      { id: 'cancel1', status: 'CANCELLED', replacedBy: { id: 'p9' } },
+    ]) {
+      mockTx.pickupRequest.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(latest);
+      mockTx.pickupRequest.create.mockResolvedValue({ id: 'p3' });
+      await maybeCreateAutoPickup(mockTx, { id: 'm1', organizationId: 'o1' }, 'M1');
+      expect(mockTx.pickupRequest.create).toHaveBeenLastCalledWith({
+        data: expect.objectContaining({ replacesPickupId: null }),
+      });
+    }
+  });
+
   it('is idempotent when an open pickup already exists', async () => {
     mockTx.pickupRequest.findFirst.mockResolvedValue({ id: 'existing' });
 
