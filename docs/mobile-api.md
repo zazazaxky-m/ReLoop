@@ -348,15 +348,50 @@ Respons 200:
 - `approve` hanya untuk item yang sudah melewati titik penerimaan mesin
   (`ITEM_ACCEPTED_POINT`). Item yang sudah ada di antrean peninjauan sebelum
   titik itu (misalnya jenis sampah tidak dikenal) hanya dapat ditolak atau
-  menunggu mesin: `approve` dijawab 409 `Item belum melewati titik penerimaan
-  mesin. Tunggu hingga mesin menyelesaikan setoran, atau tolak item ini.`.
+  menunggu mesin selama sesinya masih berjalan: `approve` dijawab 409 `Item
+  belum melewati titik penerimaan mesin. Tunggu hingga mesin menyelesaikan
+  setoran, atau tolak item ini.`.
+- Baris lama (sebelum M04): item `REVIEW` tanpa event penerimaan, atau dengan
+  event penerimaan tanpa waktu penerimaan (`acceptedAt` kosong), tidak akan
+  pernah dilengkapi mesin bila sesinya sudah berakhir (`COMPLETED`,
+  `CANCELLED`, `EXPIRED`). `approve` biasa dijawab 409 `Catatan penerimaan
+  mesin untuk item ini tidak ada atau tidak lengkap, dan mesin tidak akan
+  melengkapinya lagi. Hanya superadmin yang dapat menyetujuinya sebagai setoran
+  lama, atau tolak item ini.` (tidak pernah menyuruh menunggu), dan item tidak
+  pernah dihargai dengan tarif saat persetujuan. Jalur penyelesaiannya satu:
+  **persetujuan setoran lama oleh superadmin**, `PATCH /api/deposit-reviews/{id}`
+  dengan `{ "action": "approve", "legacy": true, ... }` (ADMIN: 403
+  `Persetujuan setoran lama hanya dapat dilakukan oleh superadmin.`; sesi masih
+  berjalan: 409 `Sesi setoran ini masih berjalan. ...`; item yang sudah
+  tercatat diterima mesin: 422 `Item ini sudah tercatat diterima mesin. Gunakan
+  persetujuan biasa.`). Persetujuan ini memakai gerbang, lock, pemeriksaan berat
+  dan business key yang sama dengan `approve` biasa, menghitung harga dengan
+  resolusi tarif yang sudah diperbaiki pada waktu tercatat item (`acceptedAt`,
+  atau `createdAt` bila kosong; tarif yang tercatat pada baris lama dipakai
+  hanya bila jendelanya memuat waktu itu, dan baris lama tanpa tarif tercatat,
+  yang umumnya memang belum pernah dihargai, selalu ditentukan ulang pada waktu
+  itu), menulis penanda `acceptanceEventId =
+  legacy-approval:<superadminId>` bila item belum punya event penerimaan
+  (event asli tidak pernah ditimpa) dan mengisi `acceptedAt` dengan waktu
+  tercatat itu, serta dicatat di audit (`DEPOSIT_REVIEW_APPROVED` dengan
+  `legacyApproval: true`, `pricedAt`, `sessionStatus`, `measuredWeightGrams`).
+  Ulangan persetujuan (biasa atau lama) idempotent; `reject` tetap tersedia
+  untuk admin. Inventaris baris lama: `npm run reconcile:wallet`
+  (`reviewItemsWithoutAcceptance`, `acceptedItemsWithoutAcceptance`).
 - `approve` dihitung dari bukti yang sudah diverifikasi: jenis sampah cadangan
   (tidak dikenal) tidak pernah dapat disetujui (422 `Jenis sampah cadangan tidak
   dapat disetujui. Pilih jenis sampah yang sebenarnya.`), dan berat diperiksa
   ulang serta harga dihitung dengan tarif yang tercatat saat titik penerimaan
-  (walaupun tarif itu sudah diganti); bila saat itu tidak ada tarif, dipakai
-  batas dan reward bawaan jenisnya. Item yang diklasifikasi ulang memakai tarif
-  jenis baru yang berlaku pada waktu penerimaan.
+  **hanya bila jendela tarif itu (`effectiveFrom` <= `acceptedAt` <
+  `effectiveTo`, tanpa melihat `active`) memuat waktu penerimaan**, walaupun
+  tarif itu sudah dinonaktifkan atau diganti sesudahnya. Tarif tercatat yang
+  jendelanya tidak memuat waktu penerimaan (sisa bug EX-03 pada baris lama)
+  tidak dipakai: tarif ditentukan ulang dengan query yang sudah diperbaiki pada
+  waktu penerimaan, dan baris seperti itu tercantum di
+  `reviewItemsWithRateOutsideAcceptance` pada `npm run reconcile:wallet`. Bila
+  saat penerimaan tidak ada tarif tercatat, dipakai batas dan reward bawaan
+  jenisnya. Item yang diklasifikasi ulang memakai tarif jenis baru yang berlaku
+  pada waktu penerimaan.
   Setiap jenis sampah ditimbang: berat kosong tidak pernah valid (422 `Berat
   setoran tidak tercatat. Item tanpa berat tidak dapat disetujui; tolak item
   ini.`), berat di luar batas juga 422 (`Berat setoran di luar batas jenis

@@ -46,6 +46,27 @@
  *                                    stranded a PENDING hold (entries usually without a case).
  *                                  reconciliationCaseKeys lists the OPEN reward cases already
  *                                  tracking the item (informational)
+ *   reviewItemsWithoutAcceptance   REVIEW deposit items outside the acceptance contract (M04 fix
+ *                                  round 4): no acceptance event (problem NO_ACCEPTANCE_EVENT) or an
+ *                                  acceptance event without an acceptance time (NO_ACCEPTANCE_TIME).
+ *                                  Legacy shape from before M04 (the old route approved without an
+ *                                  acceptance check; the old fraud/anomaly paths reopened any item).
+ *                                  Such rows are never priced by an ordinary approval. sessionEnded
+ *                                  says whether the machine can still accept the item (false: the
+ *                                  session is still running, wait for it) or never will (true:
+ *                                  COMPLETED/CANCELLED/EXPIRED). Money sums as rejectedItemsWithMoney
+ *                                  (informational)
+ *   acceptedItemsWithoutAcceptance ACCEPTED deposit items with no acceptance event: fraud exposure,
+ *                                  a FRAUD_DETECTED/VANDALISM_DETECTED on them moves the row into
+ *                                  reviewItemsWithoutAcceptance (its earning becomes a PENDING hold).
+ *                                  Rows resolved by a superadmin legacy approval carry the marker
+ *                                  `legacy-approval:<actorId>` and are not listed (informational)
+ *   reviewItemsWithRateOutsideAcceptance
+ *                                  REVIEW items whose recorded rate (rewardRateId) window
+ *                                  [effectiveFrom, effectiveTo) does not contain acceptedAt: the
+ *                                  EX-03 spread query recorded expired rates before M04. Approval
+ *                                  ignores such a recorded rate and resolves the rate in effect at
+ *                                  acceptedAt with the fixed query (informational)
  * (userId+idempotencyKey and businessKey duplicates cannot exist: unique indexes.)
  *
  * Procedure before the enforce migrations (20261013122400_wallet_keys_enforce,
@@ -78,6 +99,19 @@
  * case log: if the rejection stands, recover the money with the user (a new
  * ledger entry or a reconciliation case, never by editing rows); if the item
  * was in fact valid, correct the item's status through a tracked case.
+ *
+ * reviewItemsWithoutAcceptance with sessionEnded = true are resolved only
+ * through the review API, never by editing rows: an ADMIN/SUPERADMIN `reject`
+ * (holds become REJECTED, available money is reversed under the decision key),
+ * or a SUPERADMIN legacy approval (`PATCH /api/deposit-reviews/<id>` with
+ * `{ "action": "approve", "legacy": true }`), which prices the item with the
+ * fixed rate resolution at its recorded time, releases the hold, writes the
+ * `legacy-approval:<actorId>` marker and is audited (docs/mobile-api.md).
+ * Rows with sessionEnded = false wait for the machine. acceptedItemsWithoutAcceptance
+ * need no action by themselves; they are listed so that a later fraud hold on
+ * them is understood as a legacy review row. reviewItemsWithRateOutsideAcceptance
+ * need no action either: the approval already re-resolves the rate; the list
+ * sizes the pre-M04 mispricing of holds (hold = 50% of the wrong rate).
  *
  * unclosedReviewedTrips also needs an operator decision per trip, recorded in
  * the case log: verify the bags physically/with the group, then close the trip
@@ -125,6 +159,19 @@ export interface WalletInventory {
   rejectedItemsWithMoney: {
     depositItemId: string; userId: string; validationReasonCode: string | null; netAvailable: number; pending: number;
     ledgerIds: string[]; reconciliationCaseKeys: string[];
+  }[];
+  reviewItemsWithoutAcceptance: {
+    depositItemId: string; userId: string; sessionId: string; sessionStatus: string; sessionEnded: boolean;
+    problem: "NO_ACCEPTANCE_EVENT" | "NO_ACCEPTANCE_TIME"; validationReasonCode: string | null; rewardAmount: number;
+    netAvailable: number; pending: number; ledgerIds: string[]; reconciliationCaseKeys: string[];
+  }[];
+  acceptedItemsWithoutAcceptance: {
+    depositItemId: string; userId: string; sessionId: string; sessionStatus: string; validationReasonCode: string | null;
+    rewardAmount: number; netAvailable: number; pending: number; ledgerIds: string[];
+  }[];
+  reviewItemsWithRateOutsideAcceptance: {
+    depositItemId: string; userId: string; rewardRateId: string; acceptedAt: Date; effectiveFrom: Date; effectiveTo: Date | null;
+    rateActive: boolean; rewardAmount: number; pending: number; ledgerIds: string[];
   }[];
   summary: Record<string, number> & { blocksEnforcement: number };
   clean: boolean;
@@ -304,6 +351,69 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
         OR COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'PENDING'), 0) <> 0
     ORDER BY i.id COLLATE "C"`).map((row) => ({ ...row, netAvailable: toNumber(row.netAvailable), pending: toNumber(row.pending) }));
 
+  // M04 fix round 4: rows outside the acceptance contract (lib/deposit-review-contract.ts).
+  // Items without any live ledger row are included (LEFT JOIN): unknown-type
+  // and pre-acceptance holds carry no money yet.
+  const reviewItemsWithoutAcceptance = (await db.$queryRaw<{
+    depositItemId: string; userId: string; sessionId: string; sessionStatus: string; sessionEnded: boolean;
+    problem: "NO_ACCEPTANCE_EVENT" | "NO_ACCEPTANCE_TIME"; validationReasonCode: string | null; rewardAmount: number;
+    netAvailable: bigint | number; pending: bigint | number; ledgerIds: string[]; reconciliationCaseKeys: string[];
+  }[]>`
+    SELECT i.id AS "depositItemId", s."userId", s.id AS "sessionId", s.status::text AS "sessionStatus",
+           (s.status IN ('COMPLETED', 'CANCELLED', 'EXPIRED')) AS "sessionEnded",
+           CASE WHEN i."acceptanceEventId" IS NULL THEN 'NO_ACCEPTANCE_EVENT' ELSE 'NO_ACCEPTANCE_TIME' END AS problem,
+           i."validationReasonCode", i."rewardAmount",
+           COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'AVAILABLE'), 0)::bigint AS "netAvailable",
+           COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'PENDING'), 0)::bigint AS pending,
+           COALESCE(array_agg(l.id ORDER BY l."createdAt", l.id) FILTER (WHERE l.id IS NOT NULL), '{}') AS "ledgerIds",
+           COALESCE((SELECT array_agg(c."businessKey" ORDER BY c."businessKey") FROM "RewardReconciliationCase" c
+                     WHERE c."depositItemId" = i.id AND c.status = 'OPEN'), '{}') AS "reconciliationCaseKeys"
+    FROM "DepositItem" i
+    JOIN "DepositSession" s ON s.id = i."sessionId"
+    LEFT JOIN "RewardLedger" l ON l."depositItemId" = i.id
+      AND l."entryType" IN ('EARN', 'ADJUST', 'REVERSE', 'PENALTY')
+      AND l.status IN ('AVAILABLE', 'PENDING')
+    WHERE i.status = 'REVIEW' AND (i."acceptanceEventId" IS NULL OR i."acceptedAt" IS NULL)
+    GROUP BY i.id, s.id
+    ORDER BY i.id COLLATE "C"`).map((row) => ({ ...row, netAvailable: toNumber(row.netAvailable), pending: toNumber(row.pending) }));
+
+  const acceptedItemsWithoutAcceptance = (await db.$queryRaw<{
+    depositItemId: string; userId: string; sessionId: string; sessionStatus: string; validationReasonCode: string | null;
+    rewardAmount: number; netAvailable: bigint | number; pending: bigint | number; ledgerIds: string[];
+  }[]>`
+    SELECT i.id AS "depositItemId", s."userId", s.id AS "sessionId", s.status::text AS "sessionStatus",
+           i."validationReasonCode", i."rewardAmount",
+           COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'AVAILABLE'), 0)::bigint AS "netAvailable",
+           COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'PENDING'), 0)::bigint AS pending,
+           COALESCE(array_agg(l.id ORDER BY l."createdAt", l.id) FILTER (WHERE l.id IS NOT NULL), '{}') AS "ledgerIds"
+    FROM "DepositItem" i
+    JOIN "DepositSession" s ON s.id = i."sessionId"
+    LEFT JOIN "RewardLedger" l ON l."depositItemId" = i.id
+      AND l."entryType" IN ('EARN', 'ADJUST', 'REVERSE', 'PENALTY')
+      AND l.status IN ('AVAILABLE', 'PENDING')
+    WHERE i.status = 'ACCEPTED' AND i."acceptanceEventId" IS NULL
+    GROUP BY i.id, s.id
+    ORDER BY i.id COLLATE "C"`).map((row) => ({ ...row, netAvailable: toNumber(row.netAvailable), pending: toNumber(row.pending) }));
+
+  // Same half-open window as lib/reward.ts rateWindowContains; `active` is ignored on purpose.
+  const reviewItemsWithRateOutsideAcceptance = (await db.$queryRaw<{
+    depositItemId: string; userId: string; rewardRateId: string; acceptedAt: Date; effectiveFrom: Date; effectiveTo: Date | null;
+    rateActive: boolean; rewardAmount: number; pending: bigint | number; ledgerIds: string[];
+  }[]>`
+    SELECT i.id AS "depositItemId", s."userId", r.id AS "rewardRateId", i."acceptedAt",
+           r."effectiveFrom", r."effectiveTo", r.active AS "rateActive", i."rewardAmount",
+           COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'PENDING'), 0)::bigint AS pending,
+           COALESCE(array_agg(l.id ORDER BY l."createdAt", l.id) FILTER (WHERE l.id IS NOT NULL), '{}') AS "ledgerIds"
+    FROM "DepositItem" i
+    JOIN "DepositSession" s ON s.id = i."sessionId"
+    JOIN "RewardRate" r ON r.id = i."rewardRateId"
+    LEFT JOIN "RewardLedger" l ON l."depositItemId" = i.id
+      AND l."entryType" = 'EARN' AND l.status IN ('AVAILABLE', 'PENDING')
+    WHERE i.status = 'REVIEW' AND i."acceptedAt" IS NOT NULL
+      AND NOT (r."effectiveFrom" <= i."acceptedAt" AND (r."effectiveTo" IS NULL OR r."effectiveTo" > i."acceptedAt"))
+    GROUP BY i.id, s."userId", r.id
+    ORDER BY i.id COLLATE "C"`).map((row) => ({ ...row, pending: toNumber(row.pending) }));
+
   const summary = {
     negativeBalances: negativeBalances.length,
     duplicateEarnPerDepositItem: duplicateEarnPerDepositItem.length,
@@ -314,6 +424,9 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
     reservesWithoutRequest: reservesWithoutRequest.length,
     requestsWithoutMatchingReserve: requestsWithoutMatchingReserve.length,
     rejectedItemsWithMoney: rejectedItemsWithMoney.length,
+    reviewItemsWithoutAcceptance: reviewItemsWithoutAcceptance.length,
+    acceptedItemsWithoutAcceptance: acceptedItemsWithoutAcceptance.length,
+    reviewItemsWithRateOutsideAcceptance: reviewItemsWithRateOutsideAcceptance.length,
     blocksEnforcement:
       duplicateEarnPerDepositItem.length + duplicateReservePerRedemption.length + duplicateTripEarn.length,
   };
@@ -329,6 +442,9 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
     reservesWithoutRequest,
     requestsWithoutMatchingReserve,
     rejectedItemsWithMoney,
+    reviewItemsWithoutAcceptance,
+    acceptedItemsWithoutAcceptance,
+    reviewItemsWithRateOutsideAcceptance,
     summary,
     clean: Object.entries(summary).every(([, count]) => count === 0),
   };

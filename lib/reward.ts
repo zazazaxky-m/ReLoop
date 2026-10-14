@@ -46,12 +46,22 @@ export const activeRateWindow = (now: Date): Prisma.RewardRateWhereInput => ({
   OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
 });
 
+/**
+ * Whether `at` lies in the rate's half-open window [effectiveFrom, effectiveTo).
+ * Ignores `active` on purpose: a deposit review asks whether the rate recorded
+ * at acceptance covered the acceptance instant, which a later deactivation
+ * does not change (M04 fix round 4, N1). Selection of a *current* rate adds
+ * the `active` check (`inRateWindow`).
+ */
+export function rateWindowContains(
+  rate: { effectiveFrom: Date; effectiveTo: Date | null; active?: boolean },
+  at: Date,
+): boolean {
+  return rate.effectiveFrom.getTime() <= at.getTime() && (rate.effectiveTo == null || rate.effectiveTo.getTime() > at.getTime());
+}
+
 function inRateWindow(rate: NonNullable<RewardRateRow>, now: Date): boolean {
-  return (
-    rate.active !== false &&
-    rate.effectiveFrom.getTime() <= now.getTime() &&
-    (rate.effectiveTo == null || rate.effectiveTo.getTime() > now.getTime())
-  );
+  return rate.active !== false && rateWindowContains(rate, now);
 }
 
 /**

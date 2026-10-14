@@ -2,6 +2,16 @@ import type { LedgerEntryType, LedgerStatus, Prisma, RewardLedger, RewardReconci
 import { logAudit } from "./audit";
 import { lockDepositItem, lockDepositSession, lockMachine, lockUser } from "./db-locks";
 import {
+  REVIEW_LEGACY_ROW,
+  REVIEW_LEGACY_SESSION_OPEN,
+  REVIEW_LEGACY_SUPERADMIN_ONLY,
+  REVIEW_NOT_ACCEPTED,
+  REVIEW_NOT_LEGACY,
+  isLegacyReviewRow,
+  isTerminalSession,
+  legacyAcceptanceMarker,
+} from "./deposit-review-contract";
+import {
   REVIEW_APPROVED_REASON,
   REVIEW_REJECTED_REASON,
   isFallbackWasteType,
@@ -10,7 +20,13 @@ import {
 } from "./machine-events/shared";
 import { prisma } from "./prisma";
 import { HttpError, assertOrgScope, type CurrentUser } from "./rbac";
-import { computeRewardAmount, computeWeightBasedRewardAmount, resolveRewardRate, validateWeight } from "./reward";
+import {
+  computeRewardAmount,
+  computeWeightBasedRewardAmount,
+  rateWindowContains,
+  resolveRewardRate,
+  validateWeight,
+} from "./reward";
 import { applyRewardEffect, type CreditEntryType } from "./reward-credit";
 import { campaignSupportsMachine, decideReward, machineRewardMode } from "./reward-policy";
 import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
@@ -37,13 +53,22 @@ import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
  *
  * Repeating the same decision is idempotent (no write, `idempotent: true`);
  * the opposite decision, or the same action with different parameters, is 409.
+ *
+ * Legacy rows (M04 fix round 4, lib/deposit-review-contract.ts): a REVIEW item
+ * without an acceptance event, or with one that recorded no acceptance time,
+ * predates the acceptance contract. It is never priced at approval time. While
+ * its session still runs the machine may still accept it (409 "wait"); once
+ * the session ended it can only be rejected, or approved by a SUPERADMIN with
+ * `legacy: true`: the same locks, weight check, settlement and business key,
+ * priced with the fixed rate resolution at the item's recorded time
+ * (`acceptedAt`, else `createdAt`), marked `legacy-approval:<actorId>` when it
+ * had no acceptance event, and audited with `legacyApproval: true`.
  */
 
 export const REVIEW_DECIDED_DIFFERENTLY = "Item sudah ditinjau dengan keputusan lain";
 const ITEM_CHANGED = "Item setoran berubah saat ditinjau. Muat ulang lalu ulangi.";
 const REWARD_TOO_LARGE = "Nilai reward melebihi batas yang diizinkan";
-export const REVIEW_NOT_ACCEPTED =
-  "Item belum melewati titik penerimaan mesin. Tunggu hingga mesin menyelesaikan setoran, atau tolak item ini.";
+export { REVIEW_NOT_ACCEPTED };
 export const REVIEW_FALLBACK_TYPE =
   "Jenis sampah cadangan tidak dapat disetujui. Pilih jenis sampah yang sebenarnya.";
 export const REVIEW_WEIGHT_MISSING =
@@ -66,6 +91,8 @@ export interface ReviewInput {
   wasteTypeId?: string;
   quantity?: number;
   note?: string;
+  /** SUPERADMIN only: approve a legacy row of an ended session (see module header). */
+  legacy?: boolean;
 }
 
 /** Test seams injected by the caller's process (never reachable over HTTP). */
@@ -164,27 +191,45 @@ function sameDecision(item: LockedItem, input: ReviewInput): boolean {
 }
 
 /**
- * R2: the rate the acceptance point used. Same waste type: the rate recorded
- * at acceptance (`rewardRateId`, even if it has since expired, been
- * deactivated or superseded); when acceptance recorded none, the type's own
- * window and default, exactly as acceptance priced it. A reclassified item
- * (or a recorded rate that no longer exists): the rate in effect for the new
- * type at the item's acceptance time.
+ * R2/N1: the rate the acceptance point used, as of `at` (the acceptance
+ * instant, or a legacy row's recorded time). Same waste type: the rate
+ * recorded at acceptance (`rewardRateId`) only while its window
+ * [effectiveFrom, effectiveTo) contains `at`, even if it has since been
+ * deactivated or superseded. A recorded rate whose window does not contain
+ * `at` (the EX-03 spread query recorded expired rates before M04) is ignored
+ * and the rate in effect at `at` is resolved with the fixed query. When the
+ * acceptance point (the fixed query) recorded none, the type's own window and
+ * default, exactly as acceptance priced it (a rate created later does not
+ * apply retroactively). A legacy row without a recorded rate was usually
+ * never priced at all (`legacyRow`), so it is always resolved at `at`. A
+ * reclassified item (or a recorded rate that no longer exists): the rate in
+ * effect for the new type at `at`.
  */
 async function acceptanceRate(
   tx: Prisma.TransactionClient,
   item: LockedItem,
   scope: { organizationId: string; campaignId: string | null; wasteTypeId: string },
+  at: Date,
+  legacyRow: boolean,
 ) {
   if (scope.wasteTypeId === item.wasteTypeId) {
-    if (item.rewardRateId === null) return null;
-    const recorded = await tx.rewardRate.findUnique({ where: { id: item.rewardRateId } });
-    if (recorded && recorded.wasteTypeId === scope.wasteTypeId) return recorded;
+    if (item.rewardRateId === null) {
+      if (!legacyRow) return null;
+    } else {
+      const recorded = await tx.rewardRate.findUnique({ where: { id: item.rewardRateId } });
+      if (recorded && recorded.wasteTypeId === scope.wasteTypeId && rateWindowContains(recorded, at)) return recorded;
+    }
   }
-  return resolveRewardRate({ ...scope, now: item.acceptedAt ?? undefined }, tx);
+  return resolveRewardRate({ ...scope, now: at }, tx);
 }
 
-async function approvalTarget(tx: Prisma.TransactionClient, item: LockedItem, input: ReviewInput) {
+async function approvalTarget(
+  tx: Prisma.TransactionClient,
+  item: LockedItem,
+  input: ReviewInput,
+  pricedAt: Date,
+  legacyRow: boolean,
+) {
   const organizationId = item.session.machine.organizationId;
   if (isUnknownWasteTypeItem(item) && !input.wasteTypeId) {
     throw new HttpError(422, "wasteTypeId wajib diisi untuk item tanpa jenis sampah");
@@ -205,11 +250,13 @@ async function approvalTarget(tx: Prisma.TransactionClient, item: LockedItem, in
   const campaign = item.session.campaign;
   const machineCampaign = campaign && campaignSupportsMachine(campaign) ? campaign : null;
   const mode = machineRewardMode({ campaign, organizationMode: item.session.machine.organization.machineRewardMode });
-  const rate = await acceptanceRate(tx, item, {
-    organizationId,
-    campaignId: machineCampaign?.id ?? null,
-    wasteTypeId: wasteType.id,
-  });
+  const rate = await acceptanceRate(
+    tx,
+    item,
+    { organizationId, campaignId: machineCampaign?.id ?? null, wasteTypeId: wasteType.id },
+    pricedAt,
+    legacyRow,
+  );
   // A2: the same weight check as the acceptance point, against the assigned
   // type's window (the acceptance rate's window over the type window). Rule:
   // every waste type is weighed, so a missing weight is never valid. Only
@@ -256,6 +303,11 @@ type TransactionOutcome =
       plan: ReviewSettlementPlan;
       previousReasonCode: string | null;
       wasteTypeId: string;
+      /** Instant the approval price was resolved at (null for a reject). */
+      pricedAt: Date | null;
+      legacyApproval: boolean;
+      sessionStatus: string;
+      measuredWeightGrams: number | null;
     };
 
 export async function decideDepositReview(
@@ -275,6 +327,8 @@ export async function decideDepositReview(
   });
   if (!ref) throw new HttpError(404, "Item setoran tidak ditemukan");
   assertOrgScope(actor, ref.session.machine.organizationId);
+  // A legacy approval is an explicit, operator-only action: refused before any lock.
+  if (input.legacy && actor.role !== "SUPERADMIN") throw new HttpError(403, REVIEW_LEGACY_SUPERADMIN_ONLY);
 
   const outcome = await runWalletTransaction(async (tx): Promise<TransactionOutcome> => {
     // 2. Global lock order, then re-read everything the decision depends on.
@@ -313,12 +367,25 @@ export async function decideDepositReview(
     let targetAmount = 0;
     let data: Prisma.DepositItemUncheckedUpdateManyInput;
     let wasteTypeId = item.wasteTypeId;
+    let pricedAt: Date | null = null;
     if (input.action === "approve") {
-      // R1: only an item that passed the acceptance point can be approved;
-      // before it, the item can only be rejected (or wait for the machine).
-      // Evidence freezes at exactly that point (recordItemEvidence).
-      if (item.acceptanceEventId === null) throw new HttpError(409, REVIEW_NOT_ACCEPTED);
-      const approval = await approvalTarget(tx, item, input);
+      // R1/N2/N4: only an item that passed the acceptance point, with its
+      // acceptance time, is approved by the ordinary path; evidence freezes at
+      // exactly that point (recordItemEvidence). A legacy row (no acceptance
+      // event, or one without a time) is never priced at approval time: while
+      // the machine may still accept it the reviewer waits or rejects; once
+      // the session ended only a SUPERADMIN legacy approval (or a reject) ends it.
+      const legacyRow = isLegacyReviewRow(item);
+      const machineMayStillAccept = item.acceptanceEventId === null && !isTerminalSession(item.session.status);
+      if (legacyRow && !input.legacy) {
+        throw new HttpError(409, machineMayStillAccept ? REVIEW_NOT_ACCEPTED : REVIEW_LEGACY_ROW);
+      }
+      if (!legacyRow && input.legacy) throw new HttpError(422, REVIEW_NOT_LEGACY);
+      if (legacyRow && machineMayStillAccept) throw new HttpError(409, REVIEW_LEGACY_SESSION_OPEN);
+      // The instant the price is resolved at: the acceptance time, or a legacy
+      // row's recorded time (never "now").
+      pricedAt = item.acceptedAt ?? item.createdAt;
+      const approval = await approvalTarget(tx, item, input, pricedAt, legacyRow);
       targetAmount = approval.target;
       wasteTypeId = approval.wasteType.id;
       data = {
@@ -331,7 +398,9 @@ export async function decideDepositReview(
         rewardRateId: approval.rate?.id ?? null,
         validationReasonCode: REVIEW_APPROVED_REASON,
         externalFraudFlag: false,
-        acceptedAt: item.acceptedAt ?? new Date(),
+        acceptedAt: pricedAt,
+        // The marker only fills a missing acceptance event; a real event id is never overwritten.
+        acceptanceEventId: item.acceptanceEventId ?? legacyAcceptanceMarker(actor.id),
       };
     } else {
       data = { status: "REJECTED", rewardAmount: 0, validationReasonCode: REVIEW_REJECTED_REASON };
@@ -385,6 +454,10 @@ export async function decideDepositReview(
       plan,
       previousReasonCode: item.validationReasonCode,
       wasteTypeId,
+      pricedAt,
+      legacyApproval: input.action === "approve" && input.legacy === true,
+      sessionStatus: item.session.status,
+      measuredWeightGrams: item.measuredWeightGrams,
     };
   });
 
@@ -399,7 +472,19 @@ export async function decideDepositReview(
         metadata: {
           note: input.note,
           previousReasonCode: outcome.previousReasonCode,
-          ...(approved ? { wasteTypeId: outcome.wasteTypeId, quantity: outcome.item.quantity } : {}),
+          ...(approved
+            ? {
+                wasteTypeId: outcome.wasteTypeId,
+                quantity: outcome.item.quantity,
+                // N2: a legacy approval is the audited record of who accepted a
+                // row the machine never did, and of the inputs it was priced from.
+                legacyApproval: outcome.legacyApproval,
+                // ISO text: the audit redactor walks plain objects, and a Date would be stored as {}.
+                pricedAt: outcome.pricedAt?.toISOString() ?? null,
+                sessionStatus: outcome.sessionStatus,
+                measuredWeightGrams: outcome.measuredWeightGrams,
+              }
+            : {}),
           rewardAmount: outcome.targetAmount,
           correction: outcome.plan.delta,
           releasedHolds: outcome.plan.releaseIds.length,

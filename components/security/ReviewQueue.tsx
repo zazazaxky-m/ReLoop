@@ -14,6 +14,7 @@ import {
   Select,
   type Column,
 } from "@/components/ui";
+import { REVIEW_LEGACY_ROW } from "@/lib/deposit-review-contract";
 import { formatDateTime, formatRupiah } from "@/lib/format";
 import { UNKNOWN_WASTE_TYPE_NAME } from "@/lib/machine-events/shared";
 
@@ -66,6 +67,9 @@ export function ReviewQueue({
   const [wasteTypeId, setWasteTypeId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [note, setNote] = useState("");
+  // Item the server refused as a legacy row (ended session, no usable acceptance
+  // record): a superadmin may approve it explicitly as "setoran lama" (M04).
+  const [legacyOfferId, setLegacyOfferId] = useState<string | null>(null);
 
   function openAction(row: ReviewQueueRow, kind: "approve" | "reject") {
     setActionId(row.id);
@@ -74,14 +78,16 @@ export function ReviewQueue({
     setQuantity(String(row.quantity));
     setNote("");
     setError(null);
+    setLegacyOfferId(null);
   }
 
   function closeAction() {
     setActionId(null);
     setActionKind(null);
+    setLegacyOfferId(null);
   }
 
-  async function run(id: string, action: "approve" | "reject") {
+  async function run(id: string, action: "approve" | "reject", legacy = false) {
     const row = items.find((i) => i.id === id);
     const isUnknown = row ? needsReclassification(row) : false;
     if (action === "approve" && isUnknown && !wasteTypeId) {
@@ -100,11 +106,13 @@ export function ReviewQueue({
           wasteTypeId: action === "approve" && wasteTypeId ? wasteTypeId : undefined,
           quantity: action === "approve" && quantity ? Number(quantity) : undefined,
           note: note || undefined,
+          legacy: action === "approve" && legacy ? true : undefined,
         }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setError(d?.error ?? "Gagal memproses peninjauan");
+        if (action === "approve" && !legacy && d?.error === REVIEW_LEGACY_ROW) setLegacyOfferId(id);
         return;
       }
       const result = await res.json().catch(() => null);
@@ -254,14 +262,25 @@ export function ReviewQueue({
                 />
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button disabled={busy} onClick={() => run(activeRow.id, actionKind)}>
                 {actionKind === "approve" ? "Konfirmasi Setujui" : "Konfirmasi Tolak"}
               </Button>
+              {actionKind === "approve" && legacyOfferId === activeRow.id ? (
+                <Button variant="secondary" disabled={busy} onClick={() => run(activeRow.id, "approve", true)}>
+                  Setujui sebagai setoran lama
+                </Button>
+              ) : null}
               <Button variant="ghost" onClick={closeAction}>
                 Batal
               </Button>
             </div>
+            {actionKind === "approve" && legacyOfferId === activeRow.id ? (
+              <p className="text-xs text-muted">
+                Setoran lama dihargai dengan tarif yang berlaku pada waktu setoran tercatat, dari berat yang tampil di atas,
+                dan dicatat di log audit atas nama Anda.
+              </p>
+            ) : null}
             <p className="text-xs text-muted">
               Menyetujui menghitung ulang reward penuh dan mencairkan saldo tertahan.
               Menolak menandai item REJECTED dan membatalkan reward yang tertahan.

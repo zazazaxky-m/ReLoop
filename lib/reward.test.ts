@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   validateWeight,
+  rateWindowContains,
   resolveRewardRate,
   computeRewardAmount,
   computeWeightBasedRewardAmount,
@@ -140,6 +141,20 @@ describe('lib/reward', () => {
           ],
         },
       ]);
+    });
+
+    it('rateWindowContains is the half-open [effectiveFrom, effectiveTo) test and ignores `active` (M04 fix round 4, N1)', () => {
+      const from = new Date('2026-10-01T00:00:00.000Z');
+      const to = new Date('2026-11-01T00:00:00.000Z');
+      const at = (iso: string) => new Date(iso);
+      expect(rateWindowContains({ effectiveFrom: from, effectiveTo: to }, at('2026-09-30T23:59:59.999Z'))).toBe(false);
+      expect(rateWindowContains({ effectiveFrom: from, effectiveTo: to }, from)).toBe(true);
+      expect(rateWindowContains({ effectiveFrom: from, effectiveTo: to }, at('2026-10-15T12:00:00.000Z'))).toBe(true);
+      expect(rateWindowContains({ effectiveFrom: from, effectiveTo: to }, at('2026-10-31T23:59:59.999Z'))).toBe(true);
+      expect(rateWindowContains({ effectiveFrom: from, effectiveTo: to }, to)).toBe(false);
+      expect(rateWindowContains({ effectiveFrom: from, effectiveTo: null }, at('2030-01-01T00:00:00.000Z'))).toBe(true);
+      // A deactivated rate still covered the acceptance instant: the recorded price stands (R2).
+      expect(rateWindowContains({ effectiveFrom: from, effectiveTo: null, active: false }, at('2026-10-15T00:00:00.000Z'))).toBe(true);
     });
 
     it('drops candidates outside the half-open window even if a mocked query returns them', async () => {

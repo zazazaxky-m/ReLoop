@@ -259,6 +259,75 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
     expect(inventory.snapshot.readOnly).toBe(true);
   });
 
+  it("inventories review and accepted items outside the acceptance contract, and recorded-rate drift (M04 fix round 4)", async () => {
+    const wasteType = await f.db.wasteType.findFirstOrThrow();
+    const DAY = 86_400_000;
+    const acceptedAt = new Date(Date.now() - DAY);
+    const session = async (status: "ACTIVE" | "COMPLETED") => f.db.depositSession.create({
+      data: { userId: f.ids.userA, machineId: f.ids.machineA, status, completedAt: status === "ACTIVE" ? null : new Date() } });
+    const item = async (sessionId: string, data: Partial<Prisma.DepositItemUncheckedCreateInput>) => f.db.depositItem.create({
+      data: { sessionId, wasteTypeId: wasteType.id, status: "REVIEW", measuredWeightGrams: 25, ...data } });
+    const rate = (data: Partial<Prisma.RewardRateUncheckedCreateInput>) => f.db.rewardRate.create({
+      data: { organizationId: f.ids.orgA, wasteTypeId: wasteType.id, unit: "ITEM", pointsPerItem: 900, active: true, ...data } });
+    const hold = (depositItemId: string, amount: number, status: "PENDING" | "AVAILABLE" = "PENDING") =>
+      f.db.rewardLedger.create({ data: { ...earn(depositItemId), amount, status } });
+
+    const ended = await session("COMPLETED");
+    const open = await session("ACTIVE");
+    // Legacy review rows: no acceptance event (ended and open sessions), and an event without a time.
+    const legacyHeld = await item(ended.id, { validationReasonCode: "ANOMALY_REVIEW" });
+    const legacyHold = await hold(legacyHeld.id, 1_000);
+    const stillOpen = await item(open.id, { validationReasonCode: "UNKNOWN_WASTE_TYPE" });
+    const noTime = await item(ended.id, { acceptanceEventId: "evt-no-time", acceptedAt: null, validationReasonCode: "STRING_PULL" });
+    await f.db.rewardReconciliationCase.create({ data: {
+      businessKey: `fraud:${noTime.id}:hold:v1`, userId: f.ids.userA, depositItemId: noTime.id, amount: 2_000,
+      entryType: "EARN", reasonCode: "ANOMALY_ALREADY_PAID_OUT" } });
+    // Accepted rows: legacy (no event, fraud exposure) and legacy-approved (marker), plus a contract row.
+    const legacyAccepted = await item(ended.id, { status: "ACCEPTED", acceptedAt, validationReasonCode: "ACCEPTED" });
+    const legacyEarn = await hold(legacyAccepted.id, 2_000, "AVAILABLE");
+    const resolved = await item(ended.id, { status: "ACCEPTED", acceptedAt, acceptanceEventId: "legacy-approval:sa1", validationReasonCode: "REVIEW_APPROVED" });
+    await hold(resolved.id, 2_000, "AVAILABLE");
+    await item(ended.id, { status: "ACCEPTED", acceptedAt, acceptanceEventId: "evt-ok", validationReasonCode: "ACCEPTED" });
+    // Recorded-rate drift: the window closed before acceptance (active or not) vs a covering, deactivated rate.
+    const expired = await rate({ effectiveFrom: new Date(Date.now() - 30 * DAY), effectiveTo: new Date(Date.now() - 10 * DAY) });
+    const notYet = await rate({ active: false, effectiveFrom: new Date() });
+    const covering = await rate({ active: false, effectiveFrom: new Date(Date.now() - 30 * DAY), effectiveTo: new Date(Date.now() - 1_000) });
+    const drifted = await item(ended.id, { acceptanceEventId: "evt-drift", acceptedAt, rewardRateId: expired.id, rewardAmount: 450 });
+    const driftHold = await hold(drifted.id, 450);
+    const early = await item(ended.id, { acceptanceEventId: "evt-early", acceptedAt, rewardRateId: notYet.id });
+    await item(ended.id, { acceptanceEventId: "evt-covered", acceptedAt, rewardRateId: covering.id });
+    // Not in review any more: never listed as drift.
+    await item(ended.id, { status: "ACCEPTED", acceptanceEventId: "evt-done", acceptedAt, rewardRateId: expired.id, validationReasonCode: "REVIEW_APPROVED" });
+
+    const inventory = await readOnlyInventory();
+    const byItem = <T extends { depositItemId: string }>(rows: T[]) => [...rows].sort((a, b) => (a.depositItemId < b.depositItemId ? -1 : 1));
+    expect(byItem(inventory.reviewItemsWithoutAcceptance)).toEqual(byItem([
+      { depositItemId: legacyHeld.id, userId: f.ids.userA, sessionId: ended.id, sessionStatus: "COMPLETED", sessionEnded: true,
+        problem: "NO_ACCEPTANCE_EVENT", validationReasonCode: "ANOMALY_REVIEW", rewardAmount: 0, netAvailable: 0, pending: 1_000,
+        ledgerIds: [legacyHold.id], reconciliationCaseKeys: [] },
+      { depositItemId: stillOpen.id, userId: f.ids.userA, sessionId: open.id, sessionStatus: "ACTIVE", sessionEnded: false,
+        problem: "NO_ACCEPTANCE_EVENT", validationReasonCode: "UNKNOWN_WASTE_TYPE", rewardAmount: 0, netAvailable: 0, pending: 0,
+        ledgerIds: [], reconciliationCaseKeys: [] },
+      { depositItemId: noTime.id, userId: f.ids.userA, sessionId: ended.id, sessionStatus: "COMPLETED", sessionEnded: true,
+        problem: "NO_ACCEPTANCE_TIME", validationReasonCode: "STRING_PULL", rewardAmount: 0, netAvailable: 0, pending: 0,
+        ledgerIds: [], reconciliationCaseKeys: [`fraud:${noTime.id}:hold:v1`] },
+    ]));
+    expect(inventory.acceptedItemsWithoutAcceptance).toEqual([
+      { depositItemId: legacyAccepted.id, userId: f.ids.userA, sessionId: ended.id, sessionStatus: "COMPLETED",
+        validationReasonCode: "ACCEPTED", rewardAmount: 0, netAvailable: 2_000, pending: 0, ledgerIds: [legacyEarn.id] },
+    ]);
+    expect(byItem(inventory.reviewItemsWithRateOutsideAcceptance)).toEqual(byItem([
+      { depositItemId: drifted.id, userId: f.ids.userA, rewardRateId: expired.id, acceptedAt, effectiveFrom: expired.effectiveFrom,
+        effectiveTo: expired.effectiveTo, rateActive: true, rewardAmount: 450, pending: 450, ledgerIds: [driftHold.id] },
+      { depositItemId: early.id, userId: f.ids.userA, rewardRateId: notYet.id, acceptedAt, effectiveFrom: notYet.effectiveFrom,
+        effectiveTo: null, rateActive: false, rewardAmount: 0, pending: 0, ledgerIds: [] },
+    ]));
+    expect(inventory.summary).toMatchObject({
+      reviewItemsWithoutAcceptance: 3, acceptedItemsWithoutAcceptance: 1, reviewItemsWithRateOutsideAcceptance: 2, blocksEnforcement: 0 });
+    expect(inventory.clean).toBe(false);
+    expect(inventory.snapshot.readOnly).toBe(true);
+  });
+
   it("CLI prints the JSON report and exits 0 when clean, 3 with findings, without writing", async () => {
     const clean = runCli();
     expect(clean.status, clean.stderr).toBe(0);

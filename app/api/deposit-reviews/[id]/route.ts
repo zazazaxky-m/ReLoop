@@ -11,6 +11,10 @@ const patchSchema = z.object({
   wasteTypeId: z.string().min(1).max(191).optional(),
   quantity: z.number().int().min(1).max(999).optional(),
   note: z.string().max(500).optional(),
+  // SUPERADMIN only: approve a legacy review row (no acceptance event, or no
+  // acceptance time) of a session that already ended. Priced at the item's
+  // recorded time, marked and audited (lib/deposit-review.ts).
+  legacy: z.boolean().optional(),
 });
 
 /**
