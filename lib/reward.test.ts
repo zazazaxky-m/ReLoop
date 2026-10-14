@@ -3,6 +3,7 @@ import {
   validateWeight,
   rateWindowContains,
   resolveRewardRate,
+  resolveRewardRateAt,
   computeRewardAmount,
   computeWeightBasedRewardAmount,
 } from './reward';
@@ -167,6 +168,38 @@ describe('lib/reward', () => {
       ] as any);
       const res = await resolveRewardRate({ organizationId: 'org1', campaignId: 'camp1', wasteTypeId: 'wt1', now });
       expect(res?.id).toBe('org');
+    });
+
+    it('resolveRewardRateAt (historical) selects by window containment only and ignores `active` (M04 fix round 5, L3)', async () => {
+      const at = new Date('2026-10-01T08:00:00.000Z');
+      vi.mocked(prisma.rewardRate.findMany).mockResolvedValue([] as any);
+      await resolveRewardRateAt({ organizationId: 'org1', campaignId: 'camp1', wasteTypeId: 'wt1', at });
+      const where = vi.mocked(prisma.rewardRate.findMany).mock.calls[0][0]!.where as any;
+      expect(Object.keys(where).sort()).toEqual(['AND', 'wasteTypeId']);
+      // The same half-open window as the live query, without the `active` condition.
+      expect(where.AND[0]).toEqual({ effectiveFrom: { lte: at }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }] });
+      expect(where.AND[1]).toEqual({ OR: [
+        { campaignId: 'camp1' }, { organizationId: 'org1', campaignId: null }, { organizationId: null, campaignId: null },
+      ] });
+
+      // The deactivated-then-replaced pattern: the old rate covered `at`, its
+      // replacement started later. Historical resolution keeps the old rate;
+      // live resolution at the same instant drops it (active is required).
+      const candidates = [
+        { id: 'replacement', campaignId: null, organizationId: 'org1', active: true,
+          effectiveFrom: new Date('2026-10-10T00:00:00.000Z'), effectiveTo: null },
+        { id: 'deactivated', campaignId: null, organizationId: 'org1', active: false,
+          effectiveFrom: new Date('2026-09-01T00:00:00.000Z'), effectiveTo: null },
+        { id: 'global', campaignId: null, organizationId: null, active: true,
+          effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: null },
+      ];
+      vi.mocked(prisma.rewardRate.findMany).mockResolvedValue(candidates as any);
+      expect((await resolveRewardRateAt({ organizationId: 'org1', campaignId: null, wasteTypeId: 'wt1', at }))?.id).toBe('deactivated');
+      vi.mocked(prisma.rewardRate.findMany).mockResolvedValue(candidates as any);
+      expect((await resolveRewardRate({ organizationId: 'org1', campaignId: null, wasteTypeId: 'wt1', now: at }))?.id).toBe('global');
+      // The live query still asks the database for active rates only.
+      const liveWhere = vi.mocked(prisma.rewardRate.findMany).mock.calls.at(-1)![0]!.where as any;
+      expect(liveWhere.AND[0].active).toBe(true);
     });
   });
 

@@ -351,33 +351,64 @@ Respons 200:
   menunggu mesin selama sesinya masih berjalan: `approve` dijawab 409 `Item
   belum melewati titik penerimaan mesin. Tunggu hingga mesin menyelesaikan
   setoran, atau tolak item ini.`.
-- Baris lama (sebelum M04): item `REVIEW` tanpa event penerimaan, atau dengan
-  event penerimaan tanpa waktu penerimaan (`acceptedAt` kosong), tidak akan
-  pernah dilengkapi mesin bila sesinya sudah berakhir (`COMPLETED`,
-  `CANCELLED`, `EXPIRED`). `approve` biasa dijawab 409 `Catatan penerimaan
-  mesin untuk item ini tidak ada atau tidak lengkap, dan mesin tidak akan
-  melengkapinya lagi. Hanya superadmin yang dapat menyetujuinya sebagai setoran
-  lama, atau tolak item ini.` (tidak pernah menyuruh menunggu), dan item tidak
-  pernah dihargai dengan tarif saat persetujuan. Jalur penyelesaiannya satu:
-  **persetujuan setoran lama oleh superadmin**, `PATCH /api/deposit-reviews/{id}`
-  dengan `{ "action": "approve", "legacy": true, ... }` (ADMIN: 403
-  `Persetujuan setoran lama hanya dapat dilakukan oleh superadmin.`; sesi masih
-  berjalan: 409 `Sesi setoran ini masih berjalan. ...`; item yang sudah
-  tercatat diterima mesin: 422 `Item ini sudah tercatat diterima mesin. Gunakan
-  persetujuan biasa.`). Persetujuan ini memakai gerbang, lock, pemeriksaan berat
-  dan business key yang sama dengan `approve` biasa, menghitung harga dengan
-  resolusi tarif yang sudah diperbaiki pada waktu tercatat item (`acceptedAt`,
-  atau `createdAt` bila kosong; tarif yang tercatat pada baris lama dipakai
-  hanya bila jendelanya memuat waktu itu, dan baris lama tanpa tarif tercatat,
-  yang umumnya memang belum pernah dihargai, selalu ditentukan ulang pada waktu
-  itu), menulis penanda `acceptanceEventId =
-  legacy-approval:<superadminId>` bila item belum punya event penerimaan
-  (event asli tidak pernah ditimpa) dan mengisi `acceptedAt` dengan waktu
-  tercatat itu, serta dicatat di audit (`DEPOSIT_REVIEW_APPROVED` dengan
-  `legacyApproval: true`, `pricedAt`, `sessionStatus`, `measuredWeightGrams`).
-  Ulangan persetujuan (biasa atau lama) idempotent; `reject` tetap tersedia
-  untuk admin. Inventaris baris lama: `npm run reconcile:wallet`
-  (`reviewItemsWithoutAcceptance`, `acceptedItemsWithoutAcceptance`).
+- Item `REVIEW` tanpa catatan penerimaan yang utuh (tanpa event penerimaan,
+  atau dengan event penerimaan tanpa `acceptedAt`) tidak pernah dihargai
+  dengan tarif saat persetujuan. Sesi yang sudah berakhir (`COMPLETED`,
+  `CANCELLED`, `EXPIRED`) bukan jaminan bahwa item itu selesai: **mesin tetap
+  dapat melengkapi item yang belum diputuskan setelah sesi berakhir, lewat
+  outbox-nya** (bacaan, event penerimaan, atau penolakan yang tertunda tetap
+  memutuskan item itu, R03). Yang berakhir adalah sisi manusia: **peninjau
+  hanya menyetujui item yang sudah melewati titik penerimaan**. Untuk item
+  seperti ini `approve` biasa dijawab 409, tanpa pernah menyuruh menunggu:
+  - item yang tercatat **setelah batas waktu M04** (termasuk item yang
+    ditahan R03 dengan alasan `SESSION_TIMEOUT`/`SESSION_CLOSED`): `Item belum
+    melewati titik penerimaan mesin dan sesi setorannya sudah berakhir,
+    sehingga tidak dapat disetujui. Item ini hanya dapat ditolak; catatan
+    penerimaan mesin yang masih tertunda, bila ada, akan memperbaruinya secara
+    otomatis.` Tidak ada jalur persetujuan oleh manusia; `reject` tetap
+    tersedia.
+  - item yang tercatat **sebelum batas waktu M04** (baris lama): `Catatan
+    penerimaan mesin untuk item ini tidak ada atau tidak lengkap, dan sesi
+    setorannya sudah berakhir. Item ini tercatat sebelum kebijakan penerimaan
+    saat ini berlaku: hanya superadmin yang dapat menyetujuinya sebagai setoran
+    lama, atau tolak item ini.`
+
+  Batas waktu M04 (`lib/reward-legacy-cutover.ts`) ditentukan secara
+  deterministik: `REWARD_LEGACY_CUTOVER_AT` (ISO-8601) bila diatur, selain itu
+  waktu penerapan migrasi `20261014013000_reward_policy` di
+  `_prisma_migrations`. Nilai yang tidak dapat dibaca, atau migrasi yang belum
+  diterapkan, berarti tidak ada baris yang memenuhi syarat (fail closed; 409
+  `Batas waktu setoran lama belum dapat ditentukan, ...`).
+
+  **Persetujuan setoran lama oleh superadmin** hanya untuk baris sebelum batas
+  waktu itu dan selalu diperiksa versinya: `PATCH /api/deposit-reviews/{id}`
+  dengan `{ "action": "approve", "legacy": true, "itemVersion": "<updatedAt
+  yang dilihat superadmin, ISO-8601>", ... }`. `itemVersion` wajib (422 `Versi
+  item yang Anda lihat wajib disertakan ...`; `GET /api/deposit-reviews`
+  mengembalikan `updatedAt` setiap item) dan dibandingkan di bawah lock item:
+  bila item berubah sejak dilihat (misalnya tanda fraud atau bacaan mesin yang
+  tertunda), 409 `Item setoran berubah sejak Anda melihatnya. Muat ulang
+  halaman, periksa kembali, lalu ulangi.` tanpa tulisan apa pun. Penolakan
+  lain: ADMIN 403 `Persetujuan setoran lama hanya dapat dilakukan oleh
+  superadmin.`; sesi masih berjalan 409 `Sesi setoran ini masih berjalan.
+  ...`; item sesudah batas waktu 409 `Item ini tercatat setelah kebijakan
+  penerimaan saat ini berlaku, ...`; item yang sudah tercatat diterima mesin
+  422 `Item ini sudah tercatat diterima mesin. Gunakan persetujuan biasa.`.
+  Persetujuan ini memakai gerbang, lock, pemeriksaan berat dan business key
+  yang sama dengan `approve` biasa, menghitung harga dengan resolusi tarif
+  historis pada waktu tercatat item (`acceptedAt`, atau `createdAt` bila
+  kosong; tarif yang tercatat pada baris lama dipakai hanya bila jendelanya
+  memuat waktu itu, dan baris lama tanpa tarif tercatat, yang umumnya memang
+  belum pernah dihargai, selalu ditentukan ulang pada waktu itu), menulis
+  penanda `acceptanceEventId = legacy-approval:<superadminId>` bila item belum
+  punya event penerimaan (event asli tidak pernah ditimpa) dan mengisi
+  `acceptedAt` dengan waktu tercatat itu, serta dicatat di audit
+  (`DEPOSIT_REVIEW_APPROVED` dengan `legacyApproval: true`, `pricedAt`,
+  `sessionStatus`, `measuredWeightGrams`, `itemVersion`, `legacyCutoverAt`,
+  `legacyCutoverSource`). Ulangan persetujuan (biasa atau lama) idempotent
+  apa pun versi yang dibawa; `reject` tetap tersedia untuk admin. Inventaris:
+  `npm run reconcile:wallet` (`reviewItemsWithoutAcceptance` dengan
+  `beforeCutover`, `acceptedItemsWithoutAcceptance`, dan `legacyCutover`).
 - `approve` dihitung dari bukti yang sudah diverifikasi: jenis sampah cadangan
   (tidak dikenal) tidak pernah dapat disetujui (422 `Jenis sampah cadangan tidak
   dapat disetujui. Pilih jenis sampah yang sebenarnya.`), dan berat diperiksa
@@ -386,12 +417,15 @@ Respons 200:
   `effectiveTo`, tanpa melihat `active`) memuat waktu penerimaan**, walaupun
   tarif itu sudah dinonaktifkan atau diganti sesudahnya. Tarif tercatat yang
   jendelanya tidak memuat waktu penerimaan (sisa bug EX-03 pada baris lama)
-  tidak dipakai: tarif ditentukan ulang dengan query yang sudah diperbaiki pada
-  waktu penerimaan, dan baris seperti itu tercantum di
-  `reviewItemsWithRateOutsideAcceptance` pada `npm run reconcile:wallet`. Bila
-  saat penerimaan tidak ada tarif tercatat, dipakai batas dan reward bawaan
-  jenisnya. Item yang diklasifikasi ulang memakai tarif jenis baru yang berlaku
-  pada waktu penerimaan.
+  tidak dipakai: tarif ditentukan ulang secara **historis** pada waktu
+  penerimaan (`resolveRewardRateAt`: hanya jendela tarif yang diperiksa,
+  `active` diabaikan, sama seperti aturan tarif tercatat, sehingga tarif yang
+  berlaku saat itu tetap dipakai walaupun kemudian dinonaktifkan dan diganti;
+  resolusi untuk penerimaan baru tetap mensyaratkan `active`), dan baris
+  seperti itu tercantum di `reviewItemsWithRateOutsideAcceptance` pada
+  `npm run reconcile:wallet`. Bila saat penerimaan tidak ada tarif tercatat,
+  dipakai batas dan reward bawaan jenisnya. Item yang diklasifikasi ulang dan
+  setoran lama memakai resolusi historis yang sama pada waktu tercatatnya.
   Setiap jenis sampah ditimbang: berat kosong tidak pernah valid (422 `Berat
   setoran tidak tercatat. Item tanpa berat tidak dapat disetujui; tolak item
   ini.`), berat di luar batas juga 422 (`Berat setoran di luar batas jenis
@@ -399,9 +433,14 @@ Respons 200:
   item seperti ini hanya dapat ditolak.
 - Berat, label AI, dan barcode hanya dicatat sebelum titik penerimaan
   (`WEIGHT_MEASURED`, `IMAGE_CLASSIFIED`, `BARCODE_READ` setelahnya diabaikan,
-  event tetap tersimpan), di bawah lock User -> DepositSession -> DepositItem.
-  Bukti membeku tepat saat persetujuan menjadi mungkin, sehingga bacaan mesin
-  yang terlambat tidak dapat mengubah nilai persetujuan.
+  event tetap tersimpan), di bawah lock User -> DepositSession -> DepositItem,
+  apa pun status sesinya: mesin adalah otoritas atas hasil fisik item di
+  outbox-nya, dan bacaan yang tertunda (misalnya setelah mesin tersambung
+  kembali) tetap dicatat untuk item yang belum diputuskan walaupun sesinya
+  sudah berakhir. Bukti membeku tepat saat persetujuan menjadi mungkin,
+  sehingga bacaan mesin yang terlambat tidak dapat mengubah nilai persetujuan;
+  persetujuan setoran lama membawa versi item yang dilihat superadmin, sehingga
+  bacaan yang masuk setelah itu membuatnya ditolak (409), bukan dihargai ulang.
   `COMPACTION_*` hanya dicatat untuk item yang sudah melewati titik penerimaan
   dan tidak ditolak.
 - Kasus terbuka tampil di `GET /api/reports/reconciliation`

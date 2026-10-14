@@ -38,12 +38,18 @@ function ratePriority(
 
 /**
  * Rates apply in the half-open UTC window [effectiveFrom, effectiveTo): a rate
- * ending at T and its successor starting at T never overlap.
+ * ending at T and its successor starting at T never overlap. `rateWindow` is
+ * the containment test alone (historical pricing); `activeRateWindow` adds
+ * the `active` flag (what a new acceptance may use).
  */
+export const rateWindow = (at: Date): Prisma.RewardRateWhereInput => ({
+  effectiveFrom: { lte: at },
+  OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }],
+});
+
 export const activeRateWindow = (now: Date): Prisma.RewardRateWhereInput => ({
   active: true,
-  effectiveFrom: { lte: now },
-  OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+  ...rateWindow(now),
 });
 
 /**
@@ -64,28 +70,28 @@ function inRateWindow(rate: NonNullable<RewardRateRow>, now: Date): boolean {
   return rate.active !== false && rateWindowContains(rate, now);
 }
 
+interface RateScope {
+  organizationId: string;
+  campaignId?: string | null;
+  wasteTypeId: string;
+}
+
 /**
- * Resolves the active reward rate for a machine deposit (campaign > org >
- * global; the newest effectiveFrom wins inside one scope).
+ * Shared selection: campaign > org > global; the newest effectiveFrom wins
+ * inside one scope.
  *
  * EX-03: the window and the scope are both `OR` conditions, so they are
  * combined with `AND` instead of spread into one object (the scope's `OR`
  * used to replace the window's and selected expired rates). Candidates are
  * re-checked against the window in memory as well.
  */
-export async function resolveRewardRate(
-  params: {
-    organizationId: string;
-    campaignId?: string | null;
-    wasteTypeId: string;
-    /** Evaluation instant (UTC); defaults to now. */
-    now?: Date;
-  },
-  tx?: Prisma.TransactionClient,
+async function selectRewardRate(
+  scope: RateScope,
+  at: Date,
+  requireActive: boolean,
+  db: Prisma.TransactionClient | typeof prisma,
 ) {
-  const now = params.now ?? new Date();
-  const { organizationId, campaignId, wasteTypeId } = params;
-  const db = tx ?? prisma;
+  const { organizationId, campaignId, wasteTypeId } = scope;
 
   const scopeOr: Prisma.RewardRateWhereInput[] = [
     { organizationId, campaignId: null },
@@ -97,10 +103,10 @@ export async function resolveRewardRate(
 
   const candidates = (
     await db.rewardRate.findMany({
-      where: { wasteTypeId, AND: [activeRateWindow(now), { OR: scopeOr }] },
+      where: { wasteTypeId, AND: [requireActive ? activeRateWindow(at) : rateWindow(at), { OR: scopeOr }] },
       orderBy: { effectiveFrom: "desc" },
     })
-  ).filter((rate) => inRateWindow(rate, now));
+  ).filter((rate) => (requireActive ? inRateWindow(rate, at) : rateWindowContains(rate, at)));
 
   if (candidates.length === 0) return null;
 
@@ -113,6 +119,39 @@ export async function resolveRewardRate(
   });
 
   return candidates[0];
+}
+
+/**
+ * Resolves the active reward rate for a new machine deposit: the rate an
+ * acceptance point records and prices from. Requires `active` inside the
+ * window (a deactivated rate is never used for new money).
+ */
+export async function resolveRewardRate(
+  params: RateScope & {
+    /** Evaluation instant (UTC); defaults to now. */
+    now?: Date;
+  },
+  tx?: Prisma.TransactionClient,
+) {
+  return selectRewardRate(params, params.now ?? new Date(), true, tx ?? prisma);
+}
+
+/**
+ * Resolves the rate that was in effect at a past instant: what a deposit
+ * review prices a held or legacy item from, at its recorded time (M04 fix
+ * round 5, L3). Window containment only, exactly like the recorded-rate rule
+ * (`rateWindowContains`): `active` is ignored, so a rate that covered `at`
+ * and was deactivated or replaced later still prices the item as it was
+ * priced then. Never used for a new acceptance.
+ */
+export async function resolveRewardRateAt(
+  params: RateScope & {
+    /** The recorded instant (UTC) to price at. */
+    at: Date;
+  },
+  tx?: Prisma.TransactionClient,
+) {
+  return selectRewardRate(params, params.at, false, tx ?? prisma);
 }
 
 export function computeRewardAmount(

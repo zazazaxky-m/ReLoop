@@ -12,9 +12,13 @@ const patchSchema = z.object({
   quantity: z.number().int().min(1).max(999).optional(),
   note: z.string().max(500).optional(),
   // SUPERADMIN only: approve a legacy review row (no acceptance event, or no
-  // acceptance time) of a session that already ended. Priced at the item's
-  // recorded time, marked and audited (lib/deposit-review.ts).
+  // acceptance time) of a session that already ended, created before the M04
+  // cutover. Priced at the item's recorded time, marked and audited
+  // (lib/deposit-review.ts).
   legacy: z.boolean().optional(),
+  // With `legacy`: the item version the superadmin saw (`updatedAt`, ISO-8601,
+  // as GET /api/deposit-reviews returns it). Required; 409 if the row changed.
+  itemVersion: z.string().datetime({ offset: true }).optional(),
 });
 
 /**

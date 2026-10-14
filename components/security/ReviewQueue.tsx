@@ -14,7 +14,7 @@ import {
   Select,
   type Column,
 } from "@/components/ui";
-import { REVIEW_LEGACY_ROW } from "@/lib/deposit-review-contract";
+import { REVIEW_LEGACY_ROW, REVIEW_LEGACY_VERSION_MISMATCH } from "@/lib/deposit-review-contract";
 import { formatDateTime, formatRupiah } from "@/lib/format";
 import { UNKNOWN_WASTE_TYPE_NAME } from "@/lib/machine-events/shared";
 
@@ -30,6 +30,8 @@ export interface ReviewQueueRow {
   aiConfidence: number | null;
   validationReasonCode: string | null;
   createdAt: string | Date;
+  /** Row version shown to the operator; sent back with a legacy approval (M04). */
+  updatedAt: string | Date;
   wasteType: { id: string; name: string; unit: string };
   pendingLedgerAmount: number;
   session: {
@@ -67,8 +69,9 @@ export function ReviewQueue({
   const [wasteTypeId, setWasteTypeId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [note, setNote] = useState("");
-  // Item the server refused as a legacy row (ended session, no usable acceptance
-  // record): a superadmin may approve it explicitly as "setoran lama" (M04).
+  // Item the server refused as a pre-cutover legacy row (ended session, no
+  // usable acceptance record): a superadmin may approve it explicitly as
+  // "setoran lama", for the row version shown here (M04).
   const [legacyOfferId, setLegacyOfferId] = useState<string | null>(null);
 
   function openAction(row: ReviewQueueRow, kind: "approve" | "reject") {
@@ -94,6 +97,11 @@ export function ReviewQueue({
       setError("Pilih jenis sampah sebelum menyetujui item ini.");
       return;
     }
+    const legacyApproval = action === "approve" && legacy;
+    if (legacyApproval && !row) {
+      setError("Item tidak lagi ada di antrean. Muat ulang halaman.");
+      return;
+    }
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -106,13 +114,20 @@ export function ReviewQueue({
           wasteTypeId: action === "approve" && wasteTypeId ? wasteTypeId : undefined,
           quantity: action === "approve" && quantity ? Number(quantity) : undefined,
           note: note || undefined,
-          legacy: action === "approve" && legacy ? true : undefined,
+          legacy: legacyApproval ? true : undefined,
+          // The row version the superadmin is looking at: the server refuses the
+          // approval if the item changed since (then the page must be reloaded).
+          itemVersion: legacyApproval && row ? new Date(row.updatedAt).toISOString() : undefined,
         }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setError(d?.error ?? "Gagal memproses peninjauan");
         if (action === "approve" && !legacy && d?.error === REVIEW_LEGACY_ROW) setLegacyOfferId(id);
+        if (legacyApproval && d?.error === REVIEW_LEGACY_VERSION_MISMATCH) {
+          setLegacyOfferId(null);
+          router.refresh();
+        }
         return;
       }
       const result = await res.json().catch(() => null);
@@ -278,7 +293,8 @@ export function ReviewQueue({
             {actionKind === "approve" && legacyOfferId === activeRow.id ? (
               <p className="text-xs text-muted">
                 Setoran lama dihargai dengan tarif yang berlaku pada waktu setoran tercatat, dari berat yang tampil di atas,
-                dan dicatat di log audit atas nama Anda.
+                dan dicatat di log audit atas nama Anda. Persetujuan berlaku untuk item persis seperti yang tampil sekarang;
+                bila item berubah sejak dimuat, persetujuan ditolak dan halaman perlu dimuat ulang.
               </p>
             ) : null}
             <p className="text-xs text-muted">

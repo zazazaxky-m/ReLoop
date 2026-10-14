@@ -728,9 +728,13 @@ async function main() {
   const b2 = await prisma.depositItem.create({
     data: { sessionId: sessionB.id, wasteTypeId: anorganik.id, quantity: 6, measuredWeightGrams: 140, rewardRateId: rateAnorganik.id, rewardAmount: 1500, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(1), createdAt: daysAgo(1) },
   });
-  // Anomaly item: the session was already under review at its acceptance
-  // point, so the policy held 50% of the base reward as EARN/PENDING
-  // (ANOMALY_REVIEW); the later FRAUD_DETECTED only flags it (the reason stays).
+  // Anomaly item (2.7 kg, inside the Anorganik window). Timeline, as the
+  // machine-event code produces it: the FRAUD_DETECTED below (a retrieval
+  // attempt, REVERSE_MOTION, at +25 s) put the session under review and
+  // flagged the still-pending item; at its acceptance point (+30 s) the policy
+  // then held 50% of the base reward as EARN/PENDING with reason
+  // ANOMALY_REVIEW (lib/machine-events/acceptance.ts overwrites the fraud
+  // reason at acceptance; the flag stays).
   const b3 = await prisma.depositItem.create({
     data: { sessionId: sessionB.id, wasteTypeId: anorganik.id, quantity: 1, measuredWeightGrams: 2700, rewardRateId: rateAnorganik.id, baseRewardAmount: 400, complianceMultiplier: 0.5, rewardAmount: 200, status: "REVIEW", source: "PYTHON_SIMULATOR", validationReasonCode: "ANOMALY_REVIEW", externalFraudFlag: true, acceptedAt: daysAgo(1), createdAt: daysAgo(1) },
   });
@@ -1022,18 +1026,22 @@ async function main() {
   });
 
   // --- Security events (fraud & vandalism for superadmin dashboard) ---
+  // b3's fraud signal: a retrieval attempt on the 2.7 kg item, reported
+  // before its acceptance point (see the b3 comment above). Same payload
+  // shape as rvm/controller.py report_fraud("REVERSE_MOTION", ...).
+  const b3FraudAt = new Date(daysAgo(1).getTime() + 25000);
   await prisma.machineEvent.create({
     data: {
       machineId: m1.id, sessionId: sessionB.id, depositItemId: b3.id,
       localEventId: localEvent("FRAUD-M1"),
       eventType: "FRAUD_DETECTED",
       payloadJson: {
-        reason: "WEIGHT_OVER_MAX_OR_STRING_PULL",
-        measuredWeightGrams: 90000,
-        maxWeightGrams: 50000,
+        reason: "REVERSE_MOTION",
+        retrievalAttempt: true,
+        measuredWeightGrams: 2700,
         confidence: 0.97,
       },
-      occurredAt: daysAgo(1), receivedAt: daysAgo(1),
+      occurredAt: b3FraudAt, receivedAt: new Date(b3FraudAt.getTime() + 500),
     },
   });
   await prisma.machineEvent.create({
@@ -1128,13 +1136,13 @@ async function main() {
       sessionId: sessionB.id,
       localCaptureId: "cap-m1-003",
       kind: "fraud_alert",
-      reason: "weight_anomaly",
+      reason: "reverse_motion",
       scenePath: `machines/${m1.machineCode}/captures/scene-003.jpg`,
       facePathsJson: [`machines/${m1.machineCode}/captures/face-003-a.jpg`, `machines/${m1.machineCode}/captures/face-003-b.jpg`],
-      metadataJson: { fraudType: "WEIGHT_OVER_MAX_OR_STRING_PULL", measuredWeight: 90000 },
+      metadataJson: { fraudType: "REVERSE_MOTION", retrievalAttempt: true, measuredWeight: 2700, depositItemId: b3.id },
       faceCount: 2,
       personDetected: true,
-      occurredAt: daysAgo(1),
+      occurredAt: b3FraudAt,
     },
   });
   await prisma.machineCapture.create({
@@ -1498,8 +1506,8 @@ async function main() {
     actorId: null,
     action: "FRAUD_DETECTED",
     entityType: "MachineEvent",
-    metadata: { machineCode: "RLP-001", reason: "WEIGHT_OVER_MAX_OR_STRING_PULL", sessionId: sessionB.id },
-    createdAt: daysAgo(1),
+    metadata: { machineCode: "RLP-001", reason: "REVERSE_MOTION", sessionId: sessionB.id, depositItemId: b3.id, measuredWeightGrams: 2700 },
+    createdAt: b3FraudAt,
   });
   await seedAuditLog({
     actorId: superadmin.id,

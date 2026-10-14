@@ -72,6 +72,8 @@ export type DepositReviewRow = {
   aiConfidence: number | null;
   validationReasonCode: string | null;
   createdAt: Date;
+  /** Row version: a superadmin legacy approval sends it back as `itemVersion` (M04 fix round 5). */
+  updatedAt: Date;
   wasteType: { id: string; name: string; unit: string };
   pendingLedgerAmount: number;
   session: {
@@ -149,6 +151,7 @@ export async function getDepositReviewQueue(options?: {
       aiConfidence: row.aiConfidence,
       validationReasonCode: row.validationReasonCode,
       createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
       wasteType: row.wasteType,
       pendingLedgerAmount: row.ledgerEntries[0]?.amount ?? 0,
       session: row.session,

@@ -2,11 +2,17 @@ import type { LedgerEntryType, LedgerStatus, Prisma, RewardLedger, RewardReconci
 import { logAudit } from "./audit";
 import { lockDepositItem, lockDepositSession, lockMachine, lockUser } from "./db-locks";
 import {
+  REVIEW_ENDED_SESSION_REJECT_ONLY,
+  REVIEW_LEGACY_CUTOVER_UNAVAILABLE,
+  REVIEW_LEGACY_NOT_ELIGIBLE,
   REVIEW_LEGACY_ROW,
   REVIEW_LEGACY_SESSION_OPEN,
   REVIEW_LEGACY_SUPERADMIN_ONLY,
+  REVIEW_LEGACY_VERSION_MISMATCH,
+  REVIEW_LEGACY_VERSION_REQUIRED,
   REVIEW_NOT_ACCEPTED,
   REVIEW_NOT_LEGACY,
+  isBeforeCutover,
   isLegacyReviewRow,
   isTerminalSession,
   legacyAcceptanceMarker,
@@ -24,10 +30,11 @@ import {
   computeRewardAmount,
   computeWeightBasedRewardAmount,
   rateWindowContains,
-  resolveRewardRate,
+  resolveRewardRateAt,
   validateWeight,
 } from "./reward";
 import { applyRewardEffect, type CreditEntryType } from "./reward-credit";
+import { resolveLegacyCutover, type LegacyCutover } from "./reward-legacy-cutover";
 import { campaignSupportsMachine, decideReward, machineRewardMode } from "./reward-policy";
 import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
 
@@ -54,15 +61,21 @@ import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
  * Repeating the same decision is idempotent (no write, `idempotent: true`);
  * the opposite decision, or the same action with different parameters, is 409.
  *
- * Legacy rows (M04 fix round 4, lib/deposit-review-contract.ts): a REVIEW item
- * without an acceptance event, or with one that recorded no acceptance time,
- * predates the acceptance contract. It is never priced at approval time. While
- * its session still runs the machine may still accept it (409 "wait"); once
- * the session ended it can only be rejected, or approved by a SUPERADMIN with
- * `legacy: true`: the same locks, weight check, settlement and business key,
- * priced with the fixed rate resolution at the item's recorded time
- * (`acceptedAt`, else `createdAt`), marked `legacy-approval:<actorId>` when it
- * had no acceptance event, and audited with `legacyApproval: true`.
+ * Humans approve only after the acceptance point (R1). A REVIEW item without
+ * an acceptance event, or with one that recorded no acceptance time, is never
+ * priced at approval time (lib/deposit-review-contract.ts `isLegacyReviewRow`).
+ * While its session still runs the machine may still accept it (409 "wait").
+ * Once the session ended the machine can still complete it from its outbox
+ * (R03: a queued reading, acceptance or rejection still decides an undecided
+ * item), but no reviewer approves it, with one fenced exception (fix rounds
+ * 4 and 5): a row created before the M04 cutover (lib/reward-legacy-cutover.ts)
+ * may be approved by a SUPERADMIN with `legacy: true` and the `itemVersion`
+ * (`updatedAt`) the superadmin saw, compared under the item lock. That legacy
+ * approval takes the same locks, weight check, settlement and business key,
+ * is priced with the historical rate resolution at the item's recorded time
+ * (`acceptedAt`, else `createdAt`), marks the item `legacy-approval:<actorId>`
+ * when it had no acceptance event, and is audited with `legacyApproval: true`.
+ * A later row of an ended session can only be rejected by a reviewer.
  */
 
 export const REVIEW_DECIDED_DIFFERENTLY = "Item sudah ditinjau dengan keputusan lain";
@@ -91,8 +104,14 @@ export interface ReviewInput {
   wasteTypeId?: string;
   quantity?: number;
   note?: string;
-  /** SUPERADMIN only: approve a legacy row of an ended session (see module header). */
+  /** SUPERADMIN only: approve a pre-cutover legacy row of an ended session (see module header). */
   legacy?: boolean;
+  /**
+   * With `legacy`: the item version the superadmin saw, `DepositItem.updatedAt`
+   * as ISO-8601. Required; the decision is refused (409) when the row changed
+   * since, checked under the item lock.
+   */
+  itemVersion?: string;
 }
 
 /** Test seams injected by the caller's process (never reachable over HTTP). */
@@ -191,13 +210,16 @@ function sameDecision(item: LockedItem, input: ReviewInput): boolean {
 }
 
 /**
- * R2/N1: the rate the acceptance point used, as of `at` (the acceptance
+ * R2/N1/L3: the rate the acceptance point used, as of `at` (the acceptance
  * instant, or a legacy row's recorded time). Same waste type: the rate
  * recorded at acceptance (`rewardRateId`) only while its window
  * [effectiveFrom, effectiveTo) contains `at`, even if it has since been
  * deactivated or superseded. A recorded rate whose window does not contain
  * `at` (the EX-03 spread query recorded expired rates before M04) is ignored
- * and the rate in effect at `at` is resolved with the fixed query. When the
+ * and the rate in effect at `at` is resolved historically
+ * (`resolveRewardRateAt`: window containment only, `active` ignored, the same
+ * rule as the recorded rate, so a rate that covered `at` and was deactivated
+ * and replaced later still prices the item as it was priced then). When the
  * acceptance point (the fixed query) recorded none, the type's own window and
  * default, exactly as acceptance priced it (a rate created later does not
  * apply retroactively). A legacy row without a recorded rate was usually
@@ -220,7 +242,7 @@ async function acceptanceRate(
       if (recorded && recorded.wasteTypeId === scope.wasteTypeId && rateWindowContains(recorded, at)) return recorded;
     }
   }
-  return resolveRewardRate({ ...scope, now: at }, tx);
+  return resolveRewardRateAt({ ...scope, at }, tx);
 }
 
 async function approvalTarget(
@@ -259,9 +281,11 @@ async function approvalTarget(
   );
   // A2: the same weight check as the acceptance point, against the assigned
   // type's window (the acceptance rate's window over the type window). Rule:
-  // every waste type is weighed, so a missing weight is never valid. Only
-  // items past the acceptance point are approvable (R1), and their evidence
-  // is frozen there (A3), so a late WEIGHT_MEASURED cannot re-price them.
+  // every waste type is weighed, so a missing weight is never valid. The
+  // evidence priced here is what the operator saw: an ordinary approval needs
+  // the acceptance point, where machine evidence freezes (R1, A3), and a
+  // legacy approval (pre-cutover row of an ended session) carries the item
+  // version the superadmin saw and is refused when the row changed since (L1).
   const weight = validateWeight(
     item.measuredWeightGrams,
     rate?.minWeightGrams ?? wasteType.minWeightGrams,
@@ -306,9 +330,20 @@ type TransactionOutcome =
       /** Instant the approval price was resolved at (null for a reject). */
       pricedAt: Date | null;
       legacyApproval: boolean;
+      /** The item version (`updatedAt`) a legacy approval was checked against. */
+      itemVersion: Date | null;
+      /** The cutover a legacy approval was fenced by. */
+      legacyCutover: LegacyCutover | null;
       sessionStatus: string;
       measuredWeightGrams: number | null;
     };
+
+/** `itemVersion` of a legacy request: the `updatedAt` the superadmin saw, as ISO-8601. */
+function parseItemVersion(raw: string | undefined): Date {
+  const at = raw ? new Date(raw) : null;
+  if (!at || Number.isNaN(at.getTime())) throw new HttpError(422, REVIEW_LEGACY_VERSION_REQUIRED);
+  return at;
+}
 
 export async function decideDepositReview(
   actor: CurrentUser,
@@ -329,6 +364,8 @@ export async function decideDepositReview(
   assertOrgScope(actor, ref.session.machine.organizationId);
   // A legacy approval is an explicit, operator-only action: refused before any lock.
   if (input.legacy && actor.role !== "SUPERADMIN") throw new HttpError(403, REVIEW_LEGACY_SUPERADMIN_ONLY);
+  // L1: it must name the item version the superadmin saw; compared under the item lock below.
+  const itemVersion = input.legacy ? parseItemVersion(input.itemVersion) : null;
 
   const outcome = await runWalletTransaction(async (tx): Promise<TransactionOutcome> => {
     // 2. Global lock order, then re-read everything the decision depends on.
@@ -368,20 +405,41 @@ export async function decideDepositReview(
     let data: Prisma.DepositItemUncheckedUpdateManyInput;
     let wasteTypeId = item.wasteTypeId;
     let pricedAt: Date | null = null;
+    let legacyCutover: LegacyCutover | null = null;
     if (input.action === "approve") {
-      // R1/N2/N4: only an item that passed the acceptance point, with its
+      // R1/N2/N4/L1: only an item that passed the acceptance point, with its
       // acceptance time, is approved by the ordinary path; evidence freezes at
       // exactly that point (recordItemEvidence). A legacy row (no acceptance
-      // event, or one without a time) is never priced at approval time: while
-      // the machine may still accept it the reviewer waits or rejects; once
-      // the session ended only a SUPERADMIN legacy approval (or a reject) ends it.
+      // event, or one without a time) is never priced at approval time. While
+      // the session runs the machine may still accept it: the reviewer waits
+      // or rejects. Once the session ended the machine can still complete it
+      // from its outbox, but no human approves it, except a SUPERADMIN legacy
+      // approval of a row created before the M04 cutover that carries the
+      // version the superadmin saw; every other such row is reject-only.
       const legacyRow = isLegacyReviewRow(item);
       const machineMayStillAccept = item.acceptanceEventId === null && !isTerminalSession(item.session.status);
+      let beforeCutover = false;
+      if (legacyRow && !machineMayStillAccept) {
+        // Immutable configuration (migration history or an explicit setting),
+        // read through the same client; the row itself was re-read under the locks.
+        legacyCutover = await resolveLegacyCutover(tx);
+        if (legacyCutover.at === null) console.warn(`[deposit-review] legacy cutover unavailable (${legacyCutover.source})`);
+        beforeCutover = isBeforeCutover(item.createdAt, legacyCutover.at);
+      }
       if (legacyRow && !input.legacy) {
-        throw new HttpError(409, machineMayStillAccept ? REVIEW_NOT_ACCEPTED : REVIEW_LEGACY_ROW);
+        throw new HttpError(
+          409,
+          machineMayStillAccept ? REVIEW_NOT_ACCEPTED : beforeCutover ? REVIEW_LEGACY_ROW : REVIEW_ENDED_SESSION_REJECT_ONLY,
+        );
       }
       if (!legacyRow && input.legacy) throw new HttpError(422, REVIEW_NOT_LEGACY);
       if (legacyRow && machineMayStillAccept) throw new HttpError(409, REVIEW_LEGACY_SESSION_OPEN);
+      if (input.legacy) {
+        if (!legacyCutover || legacyCutover.at === null) throw new HttpError(409, REVIEW_LEGACY_CUTOVER_UNAVAILABLE);
+        if (!beforeCutover) throw new HttpError(409, REVIEW_LEGACY_NOT_ELIGIBLE);
+        // The row the superadmin priced in their head is the row being approved.
+        if (item.updatedAt.getTime() !== itemVersion!.getTime()) throw new HttpError(409, REVIEW_LEGACY_VERSION_MISMATCH);
+      }
       // The instant the price is resolved at: the acceptance time, or a legacy
       // row's recorded time (never "now").
       pricedAt = item.acceptedAt ?? item.createdAt;
@@ -456,6 +514,8 @@ export async function decideDepositReview(
       wasteTypeId,
       pricedAt,
       legacyApproval: input.action === "approve" && input.legacy === true,
+      itemVersion: input.action === "approve" && input.legacy === true ? itemVersion : null,
+      legacyCutover: input.action === "approve" && input.legacy === true ? legacyCutover : null,
       sessionStatus: item.session.status,
       measuredWeightGrams: item.measuredWeightGrams,
     };
@@ -483,6 +543,14 @@ export async function decideDepositReview(
                 pricedAt: outcome.pricedAt?.toISOString() ?? null,
                 sessionStatus: outcome.sessionStatus,
                 measuredWeightGrams: outcome.measuredWeightGrams,
+                // L1: which row version a legacy approval was checked against, and the cutover that fenced it.
+                ...(outcome.legacyApproval
+                  ? {
+                      itemVersion: outcome.itemVersion?.toISOString() ?? null,
+                      legacyCutoverAt: outcome.legacyCutover?.at?.toISOString() ?? null,
+                      legacyCutoverSource: outcome.legacyCutover?.source ?? null,
+                    }
+                  : {}),
               }
             : {}),
           rewardAmount: outcome.targetAmount,

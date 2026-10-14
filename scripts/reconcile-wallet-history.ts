@@ -50,12 +50,18 @@
  *                                  round 4): no acceptance event (problem NO_ACCEPTANCE_EVENT) or an
  *                                  acceptance event without an acceptance time (NO_ACCEPTANCE_TIME).
  *                                  Legacy shape from before M04 (the old route approved without an
- *                                  acceptance check; the old fraud/anomaly paths reopened any item).
- *                                  Such rows are never priced by an ordinary approval. sessionEnded
- *                                  says whether the machine can still accept the item (false: the
- *                                  session is still running, wait for it) or never will (true:
- *                                  COMPLETED/CANCELLED/EXPIRED). Money sums as rejectedItemsWithMoney
- *                                  (informational)
+ *                                  acceptance check; the old fraud/anomaly paths reopened any item),
+ *                                  and after M04 the items a session ended on before the machine
+ *                                  decided them (R03: SESSION_TIMEOUT, SESSION_CLOSED). Such rows are
+ *                                  never priced by an ordinary approval. sessionEnded says whether the
+ *                                  session is still running (false) or ended (true:
+ *                                  COMPLETED/CANCELLED/EXPIRED); either way the machine can still
+ *                                  complete an undecided item from its outbox. beforeCutover says
+ *                                  whether the row was created before the M04 cutover (legacyCutover:
+ *                                  REWARD_LEGACY_CUTOVER_AT, else the applied time of migration
+ *                                  20261014013000_reward_policy; null = unresolved, nothing qualifies):
+ *                                  only such a row may be approved as legacy. Money sums as
+ *                                  rejectedItemsWithMoney (informational)
  *   acceptedItemsWithoutAcceptance ACCEPTED deposit items with no acceptance event: fraud exposure,
  *                                  a FRAUD_DETECTED/VANDALISM_DETECTED on them moves the row into
  *                                  reviewItemsWithoutAcceptance (its earning becomes a PENDING hold).
@@ -103,11 +109,17 @@
  * reviewItemsWithoutAcceptance with sessionEnded = true are resolved only
  * through the review API, never by editing rows: an ADMIN/SUPERADMIN `reject`
  * (holds become REJECTED, available money is reversed under the decision key),
- * or a SUPERADMIN legacy approval (`PATCH /api/deposit-reviews/<id>` with
- * `{ "action": "approve", "legacy": true }`), which prices the item with the
- * fixed rate resolution at its recorded time, releases the hold, writes the
- * `legacy-approval:<actorId>` marker and is audited (docs/mobile-api.md).
- * Rows with sessionEnded = false wait for the machine. acceptedItemsWithoutAcceptance
+ * or, only for rows with beforeCutover = true, a SUPERADMIN legacy approval
+ * (`PATCH /api/deposit-reviews/<id>` with `{ "action": "approve",
+ * "legacy": true, "itemVersion": "<updatedAt the superadmin saw>" }`), which
+ * prices the item with the historical rate resolution at its recorded time,
+ * releases the hold, writes the `legacy-approval:<actorId>` marker and is
+ * audited (docs/mobile-api.md); it is refused when the row changed since.
+ * Rows with beforeCutover = false follow the acceptance contract: humans
+ * approve only after the acceptance point, so they wait for the machine's
+ * outbox (a queued acceptance or rejection still decides them, whatever the
+ * session status) or are rejected. Rows with sessionEnded = false wait for the
+ * machine. acceptedItemsWithoutAcceptance
  * need no action by themselves; they are listed so that a later fraud hold on
  * them is understood as a legacy review row. reviewItemsWithRateOutsideAcceptance
  * need no action either: the approval already re-resolves the rate; the list
@@ -119,7 +131,9 @@
  * /api/manual-validations, CHECK_OUT), which pays at most once; or cancel it.
  */
 import type { ConditionStatus, Prisma } from "@prisma/client";
+import { isBeforeCutover } from "../lib/deposit-review-contract";
 import { computeBalance, type LedgerGroup } from "../lib/ledger";
+import { resolveLegacyCutover, type LegacyCutover } from "../lib/reward-legacy-cutover";
 import { evaluateTripBags } from "../lib/trip";
 
 type RawReader = Pick<Prisma.TransactionClient, "$queryRaw">;
@@ -160,10 +174,13 @@ export interface WalletInventory {
     depositItemId: string; userId: string; validationReasonCode: string | null; netAvailable: number; pending: number;
     ledgerIds: string[]; reconciliationCaseKeys: string[];
   }[];
+  /** The M04 cutover the legacy approval is fenced by (lib/reward-legacy-cutover.ts). */
+  legacyCutover: LegacyCutover;
   reviewItemsWithoutAcceptance: {
     depositItemId: string; userId: string; sessionId: string; sessionStatus: string; sessionEnded: boolean;
     problem: "NO_ACCEPTANCE_EVENT" | "NO_ACCEPTANCE_TIME"; validationReasonCode: string | null; rewardAmount: number;
     netAvailable: number; pending: number; ledgerIds: string[]; reconciliationCaseKeys: string[];
+    createdAt: Date; beforeCutover: boolean;
   }[];
   acceptedItemsWithoutAcceptance: {
     depositItemId: string; userId: string; sessionId: string; sessionStatus: string; validationReasonCode: string | null;
@@ -188,6 +205,7 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
   const [snapshot] = await db.$queryRaw<{ readOnly: string; isolation: string }[]>`
     SELECT current_setting('transaction_read_only') AS "readOnly",
            current_setting('transaction_isolation') AS isolation`;
+  const legacyCutover = await resolveLegacyCutover(db);
 
   const groups = await db.$queryRaw<{ userId: string; entryType: LedgerGroup["entryType"]; status: LedgerGroup["status"]; amount: bigint | null }[]>`
     SELECT "userId", "entryType"::text AS "entryType", status::text AS status, SUM(amount)::bigint AS amount
@@ -358,11 +376,12 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
     depositItemId: string; userId: string; sessionId: string; sessionStatus: string; sessionEnded: boolean;
     problem: "NO_ACCEPTANCE_EVENT" | "NO_ACCEPTANCE_TIME"; validationReasonCode: string | null; rewardAmount: number;
     netAvailable: bigint | number; pending: bigint | number; ledgerIds: string[]; reconciliationCaseKeys: string[];
+    createdAt: Date;
   }[]>`
     SELECT i.id AS "depositItemId", s."userId", s.id AS "sessionId", s.status::text AS "sessionStatus",
            (s.status IN ('COMPLETED', 'CANCELLED', 'EXPIRED')) AS "sessionEnded",
            CASE WHEN i."acceptanceEventId" IS NULL THEN 'NO_ACCEPTANCE_EVENT' ELSE 'NO_ACCEPTANCE_TIME' END AS problem,
-           i."validationReasonCode", i."rewardAmount",
+           i."validationReasonCode", i."rewardAmount", i."createdAt",
            COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'AVAILABLE'), 0)::bigint AS "netAvailable",
            COALESCE(SUM(l.amount) FILTER (WHERE l.status = 'PENDING'), 0)::bigint AS pending,
            COALESCE(array_agg(l.id ORDER BY l."createdAt", l.id) FILTER (WHERE l.id IS NOT NULL), '{}') AS "ledgerIds",
@@ -375,7 +394,10 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
       AND l.status IN ('AVAILABLE', 'PENDING')
     WHERE i.status = 'REVIEW' AND (i."acceptanceEventId" IS NULL OR i."acceptedAt" IS NULL)
     GROUP BY i.id, s.id
-    ORDER BY i.id COLLATE "C"`).map((row) => ({ ...row, netAvailable: toNumber(row.netAvailable), pending: toNumber(row.pending) }));
+    ORDER BY i.id COLLATE "C"`).map((row) => ({
+    ...row, netAvailable: toNumber(row.netAvailable), pending: toNumber(row.pending),
+    beforeCutover: isBeforeCutover(row.createdAt, legacyCutover.at),
+  }));
 
   const acceptedItemsWithoutAcceptance = (await db.$queryRaw<{
     depositItemId: string; userId: string; sessionId: string; sessionStatus: string; validationReasonCode: string | null;
@@ -433,6 +455,7 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
   return {
     generatedAt: new Date().toISOString(),
     snapshot: { readOnly: snapshot.readOnly === "on", isolation: snapshot.isolation },
+    legacyCutover,
     negativeBalances,
     duplicateEarnPerDepositItem,
     duplicateReservePerRedemption,

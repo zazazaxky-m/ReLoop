@@ -1,16 +1,26 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { PATCH } from '@/app/api/deposit-reviews/[id]/route';
 import { planReviewSettlement } from '@/lib/deposit-review';
+import {
+  REVIEW_ENDED_SESSION_REJECT_ONLY,
+  REVIEW_LEGACY_CUTOVER_UNAVAILABLE,
+  REVIEW_LEGACY_NOT_ELIGIBLE,
+  REVIEW_LEGACY_ROW,
+  REVIEW_LEGACY_VERSION_MISMATCH,
+  REVIEW_LEGACY_VERSION_REQUIRED,
+} from '@/lib/deposit-review-contract';
 import { prisma } from '@/lib/prisma';
 import * as audit from '@/lib/audit';
 import * as locks from '@/lib/db-locks';
 import * as credit from '@/lib/reward-credit';
+import * as cutover from '@/lib/reward-legacy-cutover';
 import * as rbac from '@/lib/rbac';
 import * as reward from '@/lib/reward';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: { depositItem: { findUnique: vi.fn() } },
 }));
+vi.mock('@/lib/reward-legacy-cutover', () => ({ resolveLegacyCutover: vi.fn() }));
 vi.mock('@/lib/rbac', () => ({
   requireApiUser: vi.fn(),
   assertOrgScope: vi.fn(),
@@ -36,6 +46,7 @@ vi.mock('@/lib/reward', async (importOriginal) => {
     validateWeight: original.validateWeight,
     rateWindowContains: original.rateWindowContains,
     resolveRewardRate: vi.fn(),
+    resolveRewardRateAt: vi.fn(),
     computeRewardAmount: vi.fn(),
     computeWeightBasedRewardAmount: vi.fn(),
   };
@@ -57,9 +68,14 @@ const admin = { id: 'a1', role: 'ADMIN', organizationId: 'org1' };
 const ref = { id: 'di1', sessionId: 's1', session: { userId: 'u1', machineId: 'm1', machine: { organizationId: 'org1' } } };
 const ACCEPTED_AT = new Date('2026-10-01T08:00:00.000Z');
 const CREATED_AT = new Date('2026-10-01T07:59:00.000Z');
+/** The row version the operator saw (DepositItem.updatedAt), sent back as `itemVersion` with a legacy approval. */
+const UPDATED_AT = new Date('2026-10-01T08:05:00.000Z');
+const ITEM_VERSION = UPDATED_AT.toISOString();
+/** M04 cutover: the reward-policy migration was applied after the rows above were created. */
+const CUTOVER = new Date('2026-10-14T01:30:00.000Z');
 const lockedItem = (extra: Record<string, unknown> = {}) => ({
   id: 'di1', sessionId: 's1', status: 'REVIEW', wasteTypeId: 'wt1', quantity: 1, measuredWeightGrams: 25,
-  validationReasonCode: 'REVERSE_MOTION', acceptedAt: ACCEPTED_AT, createdAt: CREATED_AT,
+  validationReasonCode: 'REVERSE_MOTION', acceptedAt: ACCEPTED_AT, createdAt: CREATED_AT, updatedAt: UPDATED_AT,
   // Passed the acceptance point (fix round 3, R1); no rate recorded there (type defaults).
   acceptanceEventId: 'evt1', rewardRateId: null,
   wasteType: { id: 'wt1', name: 'Plastik', defaultRewardPerItem: 100, unit: 'ITEM', organizationId: null,
@@ -72,9 +88,7 @@ const lockedItem = (extra: Record<string, unknown> = {}) => ({
 });
 const endedSession = (status = 'COMPLETED') => ({ ...lockedItem().session, status });
 const superadmin = { id: 'sa1', role: 'SUPERADMIN', organizationId: null };
-const LEGACY_ROW =
-  'Catatan penerimaan mesin untuk item ini tidak ada atau tidak lengkap, dan mesin tidak akan melengkapinya lagi. ' +
-  'Hanya superadmin yang dapat menyetujuinya sebagai setoran lama, atau tolak item ini.';
+const LEGACY_ROW = REVIEW_LEGACY_ROW;
 const NOT_ACCEPTED =
   'Item belum melewati titik penerimaan mesin. Tunggu hingga mesin menyelesaikan setoran, atau tolak item ini.';
 const pendingEarn = { id: 'le1', entryType: 'EARN', status: 'PENDING', amount: 50, userId: 'u1' };
@@ -91,9 +105,11 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     mockTx.rewardLedger.updateMany.mockResolvedValue({ count: 1 });
     mockTx.rewardLedger.findUnique.mockResolvedValue(null);
     mockTx.rewardReconciliationCase.findUnique.mockResolvedValue(null);
-    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr1', pointsPerItem: 100, unit: 'ITEM' } as any);
+    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr-live', pointsPerItem: 999, unit: 'ITEM' } as any);
+    vi.mocked(reward.resolveRewardRateAt).mockResolvedValue({ id: 'rr1', pointsPerItem: 100, unit: 'ITEM' } as any);
     vi.mocked(reward.computeRewardAmount).mockReturnValue(100);
     vi.mocked(credit.applyRewardEffect).mockResolvedValue({ outcome: 'CREDITED', entry: { id: 'adj1' }, reconciliationCase: null } as any);
+    vi.mocked(cutover.resolveLegacyCutover).mockResolvedValue({ at: CUTOVER, source: 'migration' });
   });
 
   it('returns 403 when not authorized', async () => {
@@ -265,23 +281,27 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ rewardRateId: 'rr-acc', measuredWeightGrams: 50 }));
     mockTx.rewardRate.findUnique.mockResolvedValue({ id: 'rr-acc', wasteTypeId: 'wt1', pointsPerItem: 100, unit: 'ITEM', minWeightGrams: 10, maxWeightGrams: 100,
       effectiveFrom: new Date('2026-09-01T00:00:00.000Z'), effectiveTo: null });
-    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr-now', pointsPerItem: 300, unit: 'ITEM', minWeightGrams: 60, maxWeightGrams: 100 } as any);
+    vi.mocked(reward.resolveRewardRateAt).mockResolvedValue({ id: 'rr-now', pointsPerItem: 300, unit: 'ITEM', minWeightGrams: 60, maxWeightGrams: 100 } as any);
     expect((await patch({ action: 'approve' })).status).toBe(200);
     expect(mockTx.rewardRate.findUnique).toHaveBeenCalledWith({ where: { id: 'rr-acc' } });
+    expect(reward.resolveRewardRateAt).not.toHaveBeenCalled();
     expect(reward.resolveRewardRate).not.toHaveBeenCalled();
     expect(reward.computeRewardAmount).toHaveBeenCalledWith(100, 1, 1);
     expect(mockTx.depositItem.updateMany.mock.calls[0][0].data).toMatchObject({ rewardRateId: 'rr-acc' });
   });
 
-  it('a reclassified item is priced from the rate in effect at its acceptance (R2)', async () => {
+  it('a reclassified item is priced from the rate in effect at its acceptance, by the historical resolver (R2, L3)', async () => {
     const acceptedAt = new Date('2026-10-01T08:00:00.000Z');
     mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ rewardRateId: 'rr-acc', acceptedAt }));
     mockTx.wasteType.findUnique.mockResolvedValue({ id: 'wt2', name: 'Kaca', organizationId: null, unit: 'ITEM', defaultRewardPerItem: 5 });
-    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr-wt2', pointsPerItem: 200, unit: 'ITEM' } as any);
+    vi.mocked(reward.resolveRewardRateAt).mockResolvedValue({ id: 'rr-wt2', pointsPerItem: 200, unit: 'ITEM' } as any);
     expect((await patch({ action: 'approve', wasteTypeId: 'wt2' })).status).toBe(200);
     expect(mockTx.rewardRate.findUnique).not.toHaveBeenCalled();
-    expect(reward.resolveRewardRate).toHaveBeenCalledWith(
-      { organizationId: 'org1', campaignId: null, wasteTypeId: 'wt2', now: acceptedAt }, mockTx);
+    expect(reward.resolveRewardRateAt).toHaveBeenCalledWith(
+      { organizationId: 'org1', campaignId: null, wasteTypeId: 'wt2', at: acceptedAt }, mockTx);
+    // The live resolver (active rates only) is never what a review prices from.
+    expect(reward.resolveRewardRate).not.toHaveBeenCalled();
+    expect(mockTx.depositItem.updateMany.mock.calls[0][0].data).toMatchObject({ rewardRateId: 'rr-wt2', rewardAmount: 100 });
   });
 
   it('uses the recorded rate only when its window contains acceptedAt; otherwise resolves at acceptedAt (N1)', async () => {
@@ -289,10 +309,11 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ rewardRateId: 'rr-expired', measuredWeightGrams: 50 }));
     mockTx.rewardRate.findUnique.mockResolvedValue({ id: 'rr-expired', wasteTypeId: 'wt1', pointsPerItem: 900, unit: 'ITEM', active: true,
       effectiveFrom: new Date('2026-01-01T00:00:00.000Z'), effectiveTo: new Date('2026-09-01T00:00:00.000Z') });
-    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr-fixed', pointsPerItem: 100, unit: 'ITEM' } as any);
+    vi.mocked(reward.resolveRewardRateAt).mockResolvedValue({ id: 'rr-fixed', pointsPerItem: 100, unit: 'ITEM' } as any);
     expect((await patch({ action: 'approve' })).status).toBe(200);
-    expect(reward.resolveRewardRate).toHaveBeenCalledWith(
-      { organizationId: 'org1', campaignId: null, wasteTypeId: 'wt1', now: ACCEPTED_AT }, mockTx);
+    expect(reward.resolveRewardRateAt).toHaveBeenCalledWith(
+      { organizationId: 'org1', campaignId: null, wasteTypeId: 'wt1', at: ACCEPTED_AT }, mockTx);
+    expect(reward.resolveRewardRate).not.toHaveBeenCalled();
     expect(reward.computeRewardAmount).toHaveBeenCalledWith(100, 1, 1);
     expect(mockTx.depositItem.updateMany.mock.calls[0][0].data).toMatchObject({ rewardRateId: 'rr-fixed', acceptedAt: ACCEPTED_AT });
 
@@ -309,6 +330,7 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
       effectiveFrom: new Date('2026-09-01T00:00:00.000Z'), effectiveTo: null });
     vi.mocked(reward.computeRewardAmount).mockReturnValue(100);
     expect((await patch({ action: 'approve' })).status).toBe(200);
+    expect(reward.resolveRewardRateAt).not.toHaveBeenCalled();
     expect(reward.resolveRewardRate).not.toHaveBeenCalled();
     expect(mockTx.depositItem.updateMany.mock.calls[0][0].data).toMatchObject({ rewardRateId: 'rr-acc' });
   });
@@ -350,10 +372,13 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     expect(implicit.status).toBe(409);
     expect((await implicit.json()).error).toBe(LEGACY_ROW);
 
-    const res = await patch({ action: 'approve', legacy: true, note: 'sesi lama' });
+    const res = await patch({ action: 'approve', legacy: true, itemVersion: ITEM_VERSION, note: 'sesi lama' });
     expect(res.status).toBe(200);
-    expect(reward.resolveRewardRate).toHaveBeenCalledWith(
-      { organizationId: 'org1', campaignId: null, wasteTypeId: 'wt1', now: CREATED_AT }, mockTx);
+    expect(reward.resolveRewardRateAt).toHaveBeenCalledWith(
+      { organizationId: 'org1', campaignId: null, wasteTypeId: 'wt1', at: CREATED_AT }, mockTx);
+    expect(reward.resolveRewardRate).not.toHaveBeenCalled();
+    // The cutover is read through the same transaction client as the row.
+    expect(cutover.resolveLegacyCutover).toHaveBeenCalledWith(mockTx);
     expect(mockTx.depositItem.updateMany).toHaveBeenCalledWith({
       where: { id: 'di1', status: 'REVIEW' },
       data: expect.objectContaining({ status: 'ACCEPTED', rewardAmount: 100, validationReasonCode: 'REVIEW_APPROVED',
@@ -362,7 +387,10 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     expect(effect()).toEqual(expect.objectContaining({ businessKey: 'review:di1:decision:v1', amount: 50, entryType: 'ADJUST', actorId: 'sa1' }));
     expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({
       action: 'DEPOSIT_REVIEW_APPROVED',
-      metadata: expect.objectContaining({ legacyApproval: true, pricedAt: CREATED_AT.toISOString(), sessionStatus: 'COMPLETED', measuredWeightGrams: 25 }),
+      metadata: expect.objectContaining({
+        legacyApproval: true, pricedAt: CREATED_AT.toISOString(), sessionStatus: 'COMPLETED', measuredWeightGrams: 25,
+        itemVersion: ITEM_VERSION, legacyCutoverAt: CUTOVER.toISOString(), legacyCutoverSource: 'migration',
+      }),
     }));
     const body = await res.json();
     expect(body).toMatchObject({ idempotent: false, targetAmount: 100 });
@@ -372,25 +400,110 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue(superadmin as any);
     // N4 row: the acceptance event exists but recorded no time; the marker never overwrites the event id.
     mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ acceptedAt: null, session: endedSession('CANCELLED') }));
-    expect((await patch({ action: 'approve', legacy: true })).status).toBe(200);
-    expect(reward.resolveRewardRate).toHaveBeenCalledWith(expect.objectContaining({ now: CREATED_AT }), mockTx);
+    expect((await patch({ action: 'approve', legacy: true, itemVersion: ITEM_VERSION })).status).toBe(200);
+    expect(reward.resolveRewardRateAt).toHaveBeenCalledWith(expect.objectContaining({ at: CREATED_AT }), mockTx);
     expect(mockTx.depositItem.updateMany.mock.calls[0][0].data).toMatchObject({ acceptanceEventId: 'evt1', acceptedAt: CREATED_AT });
 
     vi.clearAllMocks();
     vi.mocked(rbac.requireApiUser).mockResolvedValue(superadmin as any);
     vi.mocked(prisma.depositItem.findUnique).mockResolvedValue(ref as any);
     mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ acceptanceEventId: null, session: endedSession('REVIEW') }));
-    const open = await patch({ action: 'approve', legacy: true });
+    const open = await patch({ action: 'approve', legacy: true, itemVersion: ITEM_VERSION });
     expect(open.status).toBe(409);
     expect((await open.json()).error).toBe(
       'Sesi setoran ini masih berjalan. Tunggu hingga sesi berakhir sebelum menyetujuinya sebagai setoran lama, atau tolak item ini.');
 
     mockTx.depositItem.findUnique.mockResolvedValue(lockedItem());
-    const ordinary = await patch({ action: 'approve', legacy: true });
+    const ordinary = await patch({ action: 'approve', legacy: true, itemVersion: ITEM_VERSION });
     expect(ordinary.status).toBe(422);
     expect((await ordinary.json()).error).toBe('Item ini sudah tercatat diterima mesin. Gunakan persetujuan biasa.');
     expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
     expect(credit.applyRewardEffect).not.toHaveBeenCalled();
+  });
+
+  it('legacy approval is fenced to rows created before the M04 cutover; later rows of an ended session are reject-only (L1)', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue(superadmin as any);
+    // The cutover (the applied reward-policy migration) predates this row: it follows the acceptance contract.
+    vi.mocked(cutover.resolveLegacyCutover).mockResolvedValue({ at: new Date('2026-09-01T00:00:00.000Z'), source: 'migration' });
+    // R03's late items (reported after the session ended, or undecided at its timeout) are exactly this shape.
+    for (const reason of ['SESSION_CLOSED', 'SESSION_TIMEOUT', 'UNKNOWN_WASTE_TYPE']) {
+      mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({
+        acceptanceEventId: null, acceptedAt: null, validationReasonCode: reason, session: endedSession('EXPIRED') }));
+      const fenced = await patch({ action: 'approve', legacy: true, itemVersion: ITEM_VERSION });
+      expect(fenced.status).toBe(409);
+      expect((await fenced.json()).error).toBe(REVIEW_LEGACY_NOT_ELIGIBLE);
+      // An ordinary approval neither offers the legacy path nor says to wait.
+      const ordinary = await patch({ action: 'approve' });
+      expect(ordinary.status).toBe(409);
+      expect((await ordinary.json()).error).toBe(REVIEW_ENDED_SESSION_REJECT_ONLY);
+      expect(REVIEW_ENDED_SESSION_REJECT_ONLY).not.toMatch(/tunggu|tidak akan/i);
+    }
+    expect(reward.resolveRewardRateAt).not.toHaveBeenCalled();
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+    expect(credit.applyRewardEffect).not.toHaveBeenCalled();
+    // A row created exactly at the cutover is not "before" it.
+    vi.mocked(cutover.resolveLegacyCutover).mockResolvedValue({ at: CREATED_AT, source: 'env' });
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ acceptanceEventId: null, acceptedAt: null, session: endedSession() }));
+    expect((await patch({ action: 'approve', legacy: true, itemVersion: ITEM_VERSION })).status).toBe(409);
+    // Rejecting stays available.
+    expect((await patch({ action: 'reject' })).status).toBe(200);
+  });
+
+  it('fails closed when no cutover can be resolved: no legacy approval, and the ordinary 409 does not offer one (L1)', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue(superadmin as any);
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ acceptanceEventId: null, acceptedAt: null, session: endedSession() }));
+    for (const unresolved of [{ at: null, source: 'migration-missing' }, { at: null, source: 'env-invalid' }] as const) {
+      vi.mocked(cutover.resolveLegacyCutover).mockResolvedValue(unresolved);
+      const refused = await patch({ action: 'approve', legacy: true, itemVersion: ITEM_VERSION });
+      expect(refused.status).toBe(409);
+      expect((await refused.json()).error).toBe(REVIEW_LEGACY_CUTOVER_UNAVAILABLE);
+      const ordinary = await patch({ action: 'approve' });
+      expect(ordinary.status).toBe(409);
+      expect((await ordinary.json()).error).toBe(REVIEW_ENDED_SESSION_REJECT_ONLY);
+    }
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+    expect(credit.applyRewardEffect).not.toHaveBeenCalled();
+    // The cutover never matters for an ordinary row or a running session.
+    vi.mocked(cutover.resolveLegacyCutover).mockClear();
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem());
+    expect((await patch({ action: 'approve' })).status).toBe(200);
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ acceptanceEventId: null, acceptedAt: null }));
+    expect((await patch({ action: 'approve' })).status).toBe(409);
+    expect(cutover.resolveLegacyCutover).not.toHaveBeenCalled();
+  });
+
+  it('a legacy approval carries the item version the superadmin saw: required up front, compared under the item lock (L1)', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue(superadmin as any);
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ acceptanceEventId: null, acceptedAt: null, session: endedSession() }));
+
+    const missing = await patch({ action: 'approve', legacy: true });
+    expect(missing.status).toBe(422);
+    expect((await missing.json()).error).toBe(REVIEW_LEGACY_VERSION_REQUIRED);
+    expect((await patch({ action: 'approve', legacy: true, itemVersion: 'kemarin' })).status).toBe(422);
+    expect(locks.lockUser).not.toHaveBeenCalled();
+
+    // The row changed after the operator looked at it (a fraud flag, a late reading): nothing is written.
+    const stale = await patch({ action: 'approve', legacy: true, itemVersion: new Date('2026-10-01T08:04:59.999Z').toISOString() });
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error).toBe(REVIEW_LEGACY_VERSION_MISMATCH);
+    expect(locks.lockDepositItem).toHaveBeenCalledWith(mockTx, 'di1');
+    expect(mockTx.depositItem.findUnique.mock.invocationCallOrder.at(-1)).toBeGreaterThan(vi.mocked(locks.lockDepositItem).mock.invocationCallOrder[0]);
+    expect(reward.resolveRewardRateAt).not.toHaveBeenCalled();
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+    expect(credit.applyRewardEffect).not.toHaveBeenCalled();
+    expect(audit.logAudit).not.toHaveBeenCalled();
+
+    // The same instant in another offset is the same version.
+    const ok = await patch({ action: 'approve', legacy: true, itemVersion: '2026-10-01T15:05:00.000+07:00' });
+    expect(ok.status).toBe(200);
+    expect(mockTx.depositItem.updateMany).toHaveBeenCalledTimes(1);
+    // A replay of the same decision stays idempotent whatever version it carries.
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ status: 'ACCEPTED', validationReasonCode: 'REVIEW_APPROVED',
+      acceptanceEventId: 'legacy-approval:sa1', updatedAt: new Date('2026-10-02T00:00:00.000Z'), session: endedSession() }));
+    const replay = await patch({ action: 'approve', legacy: true, itemVersion: ITEM_VERSION });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).idempotent).toBe(true);
+    expect(mockTx.depositItem.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it('requires a valid replacement waste type for unknown items', async () => {
@@ -403,7 +516,7 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
 
     mockTx.wasteType.findUnique.mockResolvedValue({ id: 'wt2', organizationId: null, unit: 'KG', defaultRewardPerItem: 5 });
-    vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'rr2', pointsPerItem: 10, unit: 'KG' } as any);
+    vi.mocked(reward.resolveRewardRateAt).mockResolvedValue({ id: 'rr2', pointsPerItem: 10, unit: 'KG' } as any);
     vi.mocked(reward.computeWeightBasedRewardAmount).mockReturnValue(15);
     expect((await patch({ action: 'approve', wasteTypeId: 'wt2' })).status).toBe(200);
     expect(reward.computeWeightBasedRewardAmount).toHaveBeenCalled();

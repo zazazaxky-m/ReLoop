@@ -8,7 +8,15 @@ import type { SessionStatus } from "@prisma/client";
  * or network access, so client components may import it.
  */
 
-/** A session that will never produce another machine event for its items. */
+/**
+ * A session that has ended: the owner finished or cancelled it, or the
+ * timeout policy closed it (R03). This is not a promise that nothing else
+ * happens to its items: the machine stays the authority on the physical
+ * outcome of the items in its outbox, and its queued readings, acceptance or
+ * rejection events still complete an undecided item after the session ended.
+ * What ends is the human side: an ended session's pre-acceptance items are
+ * never approved by a reviewer unless they predate the M04 cutover.
+ */
 export const TERMINAL_SESSION_STATUSES: readonly SessionStatus[] = ["COMPLETED", "CANCELLED", "EXPIRED"];
 
 export function isTerminalSession(status: SessionStatus | string | null | undefined): boolean {
@@ -19,11 +27,22 @@ export function isTerminalSession(status: SessionStatus | string | null | undefi
  * A review row the acceptance contract (M04) never produced: no acceptance
  * event, or an acceptance event without an acceptance time. Such rows come
  * from before M04 (the old route approved without an acceptance check, and
- * the old fraud path reopened any item). They are never priced by the
- * ordinary approval; see `legacy` in lib/deposit-review.ts.
+ * the old fraud path reopened any item), and, after M04, from items a session
+ * ended on before the machine decided them (R03: SESSION_TIMEOUT,
+ * SESSION_CLOSED). They are never priced by the ordinary approval; see
+ * `legacy` in lib/deposit-review.ts.
  */
 export function isLegacyReviewRow(item: { acceptanceEventId: string | null; acceptedAt: Date | null }): boolean {
   return item.acceptanceEventId === null || item.acceptedAt === null;
+}
+
+/**
+ * M04 cutover rule (fix round 5, L1): only a row created strictly before the
+ * cutover (lib/reward-legacy-cutover.ts) may be approved as a legacy row. No
+ * cutover means no row qualifies (fail closed).
+ */
+export function isBeforeCutover(createdAt: Date, cutoverAt: Date | null): boolean {
+  return cutoverAt !== null && createdAt.getTime() < cutoverAt.getTime();
 }
 
 /**
@@ -50,10 +69,23 @@ export function isLegacyAcceptanceMarker(acceptanceEventId: string | null): bool
 export const REVIEW_NOT_ACCEPTED =
   "Item belum melewati titik penerimaan mesin. Tunggu hingga mesin menyelesaikan setoran, atau tolak item ini.";
 
-/** 409: a legacy row (no or incomplete acceptance record) that the machine will never complete. */
+/**
+ * 409: a pre-cutover legacy row (no or incomplete acceptance record) of an
+ * ended session. It is the only 409 that offers the legacy approval, so the
+ * review queue shows that action exactly when the server would accept it.
+ */
 export const REVIEW_LEGACY_ROW =
-  "Catatan penerimaan mesin untuk item ini tidak ada atau tidak lengkap, dan mesin tidak akan melengkapinya lagi. " +
-  "Hanya superadmin yang dapat menyetujuinya sebagai setoran lama, atau tolak item ini.";
+  "Catatan penerimaan mesin untuk item ini tidak ada atau tidak lengkap, dan sesi setorannya sudah berakhir. " +
+  "Item ini tercatat sebelum kebijakan penerimaan saat ini berlaku: hanya superadmin yang dapat menyetujuinya " +
+  "sebagai setoran lama, atau tolak item ini.";
+
+/**
+ * 409: a pre-acceptance row of an ended session created after the cutover.
+ * No human approves it; the machine may still complete it from its outbox.
+ */
+export const REVIEW_ENDED_SESSION_REJECT_ONLY =
+  "Item belum melewati titik penerimaan mesin dan sesi setorannya sudah berakhir, sehingga tidak dapat disetujui. " +
+  "Item ini hanya dapat ditolak; catatan penerimaan mesin yang masih tertunda, bila ada, akan memperbaruinya secara otomatis.";
 
 /** 409: a legacy approval was requested while the session can still produce the acceptance. */
 export const REVIEW_LEGACY_SESSION_OPEN =
@@ -64,3 +96,21 @@ export const REVIEW_LEGACY_SUPERADMIN_ONLY = "Persetujuan setoran lama hanya dap
 
 /** 422: a legacy approval was requested for a row the machine accepted normally. */
 export const REVIEW_NOT_LEGACY = "Item ini sudah tercatat diterima mesin. Gunakan persetujuan biasa.";
+
+/** 409: a legacy approval was requested for a row created after the cutover. */
+export const REVIEW_LEGACY_NOT_ELIGIBLE =
+  "Item ini tercatat setelah kebijakan penerimaan saat ini berlaku, sehingga tidak dapat disetujui sebagai setoran lama. " +
+  "Item ini hanya dapat ditolak.";
+
+/** 409: the cutover is unset or unreadable, so no row qualifies (fail closed). */
+export const REVIEW_LEGACY_CUTOVER_UNAVAILABLE =
+  "Batas waktu setoran lama belum dapat ditentukan, sehingga persetujuan setoran lama tidak tersedia. " +
+  "Tolak item ini atau hubungi administrator sistem.";
+
+/** 422: a legacy approval must carry the item version (`updatedAt`) the superadmin saw. */
+export const REVIEW_LEGACY_VERSION_REQUIRED =
+  "Versi item yang Anda lihat wajib disertakan untuk persetujuan setoran lama. Muat ulang halaman lalu ulangi.";
+
+/** 409: the row changed after the superadmin looked at it (checked under the item lock). */
+export const REVIEW_LEGACY_VERSION_MISMATCH =
+  "Item setoran berubah sejak Anda melihatnya. Muat ulang halaman, periksa kembali, lalu ulangi.";

@@ -6,14 +6,24 @@ import { signMachinePayload } from "@/lib/machine-auth";
 import { ingestMachineEvent } from "@/lib/machine-events/ingest";
 import { UNKNOWN_WASTE_TYPE_NAME } from "@/lib/machine-events/shared";
 import { resolveRewardRate } from "@/lib/reward";
+import { decideDepositReview } from "@/lib/deposit-review";
 import {
   LEGACY_ACCEPTANCE_PREFIX,
+  REVIEW_ENDED_SESSION_REJECT_ONLY,
+  REVIEW_LEGACY_CUTOVER_UNAVAILABLE,
+  REVIEW_LEGACY_NOT_ELIGIBLE,
   REVIEW_LEGACY_ROW,
   REVIEW_LEGACY_SESSION_OPEN,
   REVIEW_LEGACY_SUPERADMIN_ONLY,
+  REVIEW_LEGACY_VERSION_MISMATCH,
+  REVIEW_LEGACY_VERSION_REQUIRED,
   REVIEW_NOT_ACCEPTED,
   REVIEW_NOT_LEGACY,
+  isBeforeCutover,
 } from "@/lib/deposit-review-contract";
+import type { CurrentUser } from "@/lib/rbac";
+import { LEGACY_CUTOVER_ENV, REWARD_POLICY_MIGRATION, resolveLegacyCutover } from "@/lib/reward-legacy-cutover";
+import type { AppRole } from "@/lib/roles";
 import { collectWalletInventory } from "@/scripts/reconcile-wallet-history";
 import { f, type ActorKey } from "../support/audit-fixture";
 import { InjectedFault, deferred, isStillPending, waitForBlockedBy } from "../support/race-probe";
@@ -934,60 +944,67 @@ describe("approval needs the acceptance point and its recorded rate (M04 fix rou
   });
 });
 
-describe("legacy review rows and recorded-rate drift (M04 fix round 4)", () => {
-  const review = (as: ActorKey, id: string, body: Record<string, unknown>) =>
-    call(as, "PATCH", `/api/deposit-reviews/${id}`, body);
-  const itemOf = (id: string) => f.db.depositItem.findUniqueOrThrow({ where: { id } });
-  const ledgerOf = async (itemId: string) =>
-    (await f.db.rewardLedger.findMany({ where: { depositItemId: itemId }, orderBy: { createdAt: "asc" } }))
-      .map((row) => ({ entryType: row.entryType, status: row.status, amount: row.amount, businessKey: row.businessKey }));
-  const inventory = () =>
-    f.db.$transaction(async (tx) => {
-      await tx.$executeRaw`SET TRANSACTION READ ONLY`;
-      return collectWalletInventory(tx);
-    }, { isolationLevel: "RepeatableRead" });
-  const send = async (sessionId: string, eventType: string, payload: Record<string, unknown>, depositItemId?: string) => {
-    const event = edgeEvent(sessionId, eventType, payload);
-    if (depositItemId) event.depositItemId = depositItemId;
-    expect((await postBatch([event])).body.results[0].status).toBe("accepted");
-  };
-  const DAY = 86_400_000;
+// --- Shared by the legacy-row rounds (fix rounds 4 and 5) ---------------------
+const review = (as: ActorKey, id: string, body: Record<string, unknown>) =>
+  call(as, "PATCH", `/api/deposit-reviews/${id}`, body);
+const itemOf = (id: string) => f.db.depositItem.findUniqueOrThrow({ where: { id } });
+/** The row version the operator saw: a legacy approval must send it back as `itemVersion` (fix round 5). */
+const versionOf = async (id: string) => (await itemOf(id)).updatedAt.toISOString();
+const legacyApprove = async (id: string, extra: Record<string, unknown> = {}) =>
+  review("superadmin", id, { action: "approve", legacy: true, itemVersion: await versionOf(id), ...extra });
+const ledgerOf = async (itemId: string) =>
+  (await f.db.rewardLedger.findMany({ where: { depositItemId: itemId }, orderBy: { createdAt: "asc" } }))
+    .map((row) => ({ entryType: row.entryType, status: row.status, amount: row.amount, businessKey: row.businessKey }));
+const inventory = () =>
+  f.db.$transaction(async (tx) => {
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    return collectWalletInventory(tx);
+  }, { isolationLevel: "RepeatableRead" });
+const send = async (sessionId: string, eventType: string, payload: Record<string, unknown>, depositItemId?: string) => {
+  const event = edgeEvent(sessionId, eventType, payload);
+  if (depositItemId) event.depositItemId = depositItemId;
+  expect((await postBatch([event])).body.results[0].status).toBe("accepted");
+};
+const DAY = 86_400_000;
 
-  /**
-   * A row shaped like production data from before M04: in REVIEW without the
-   * acceptance contract's fields. `earn` is the hold or earning it carries.
-   */
-  async function legacyRow(options: {
-    sessionStatus?: "ACTIVE" | "COMPLETED" | "EXPIRED" | "CANCELLED";
-    status?: "REVIEW" | "ACCEPTED";
-    acceptanceEventId?: string | null;
-    acceptedAt?: Date | null;
-    rewardRateId?: string | null;
-    campaignId?: string | null;
-    earn?: { amount: number; status: "PENDING" | "AVAILABLE" } | null;
-    createdAt?: Date;
-  } = {}) {
-    const wasteTypeId = await fixtureWasteTypeId();
-    const sessionStatus = options.sessionStatus ?? "COMPLETED";
-    const session = await openSession({ data: {
-      userId: f.ids.userA, machineId: f.ids.machineA, status: sessionStatus, campaignId: options.campaignId ?? null,
-      completedAt: sessionStatus === "ACTIVE" ? null : new Date() } });
-    const earn = options.earn === undefined ? { amount: 50, status: "PENDING" as const } : options.earn;
-    const item = await f.db.depositItem.create({ data: {
-      sessionId: session.id, wasteTypeId, quantity: 1, measuredWeightGrams: 25, status: options.status ?? "REVIEW",
-      validationReasonCode: "ANOMALY_REVIEW", complianceMultiplier: 0.5, baseRewardAmount: 100,
-      rewardAmount: earn?.amount ?? 0, source: "MACHINE", createdAt: options.createdAt ?? new Date(Date.now() - 2 * DAY),
-      acceptanceEventId: options.acceptanceEventId ?? null, acceptedAt: options.acceptedAt ?? null,
-      rewardRateId: options.rewardRateId ?? null } });
-    if (earn) {
-      await f.db.rewardLedger.create({ data: {
-        userId: f.ids.userA, organizationId: f.ids.orgA, sessionId: session.id, depositItemId: item.id,
-        entryType: "EARN", amount: earn.amount, status: earn.status, reasonCode: "ANOMALY_REVIEW",
-        referenceType: "DepositItem", referenceId: item.id, businessKey: earnKey(item.id) } });
-    }
-    return { session, item };
+/**
+ * A row shaped like production data from before M04: in REVIEW without the
+ * acceptance contract's fields, created days ago (before the cutover, which
+ * in the harness is the time `prisma migrate deploy` applied the reward-policy
+ * migration). `earn` is the hold or earning it carries.
+ */
+async function legacyRow(options: {
+  sessionStatus?: "ACTIVE" | "COMPLETED" | "EXPIRED" | "CANCELLED";
+  status?: "REVIEW" | "ACCEPTED";
+  acceptanceEventId?: string | null;
+  acceptedAt?: Date | null;
+  rewardRateId?: string | null;
+  campaignId?: string | null;
+  earn?: { amount: number; status: "PENDING" | "AVAILABLE" } | null;
+  createdAt?: Date;
+} = {}) {
+  const wasteTypeId = await fixtureWasteTypeId();
+  const sessionStatus = options.sessionStatus ?? "COMPLETED";
+  const session = await openSession({ data: {
+    userId: f.ids.userA, machineId: f.ids.machineA, status: sessionStatus, campaignId: options.campaignId ?? null,
+    completedAt: sessionStatus === "ACTIVE" ? null : new Date() } });
+  const earn = options.earn === undefined ? { amount: 50, status: "PENDING" as const } : options.earn;
+  const item = await f.db.depositItem.create({ data: {
+    sessionId: session.id, wasteTypeId, quantity: 1, measuredWeightGrams: 25, status: options.status ?? "REVIEW",
+    validationReasonCode: "ANOMALY_REVIEW", complianceMultiplier: 0.5, baseRewardAmount: 100,
+    rewardAmount: earn?.amount ?? 0, source: "MACHINE", createdAt: options.createdAt ?? new Date(Date.now() - 2 * DAY),
+    acceptanceEventId: options.acceptanceEventId ?? null, acceptedAt: options.acceptedAt ?? null,
+    rewardRateId: options.rewardRateId ?? null } });
+  if (earn) {
+    await f.db.rewardLedger.create({ data: {
+      userId: f.ids.userA, organizationId: f.ids.orgA, sessionId: session.id, depositItemId: item.id,
+      entryType: "EARN", amount: earn.amount, status: earn.status, reasonCode: "ANOMALY_REVIEW",
+      referenceType: "DepositItem", referenceId: item.id, businessKey: earnKey(item.id) } });
   }
+  return { session, item };
+}
 
+describe("legacy review rows and recorded-rate drift (M04 fix round 4)", () => {
   it("N1: a legacy hold recorded at an expired campaign rate is approved at the rate in effect at acceptance, and the drift is inventoried", async () => {
     await warmUp();
     const campaignId = await machineCampaignId();
@@ -1032,7 +1049,7 @@ describe("legacy review rows and recorded-rate drift (M04 fix round 4)", () => {
     // While the session is still running the machine may still accept the item.
     const open = await legacyRow({ sessionStatus: "ACTIVE" });
     expect((await review("adminA", open.item.id, { action: "approve" })).body.error).toBe(REVIEW_NOT_ACCEPTED);
-    const tooEarly = await review("superadmin", open.item.id, { action: "approve", legacy: true });
+    const tooEarly = await legacyApprove(open.item.id);
     expect(tooEarly.status).toBe(409);
     expect(tooEarly.body.error).toBe(REVIEW_LEGACY_SESSION_OPEN);
 
@@ -1055,11 +1072,11 @@ describe("legacy review rows and recorded-rate drift (M04 fix round 4)", () => {
 
     const listed = await inventory();
     expect(listed.reviewItemsWithoutAcceptance).toEqual([expect.objectContaining({
-      depositItemId: item.id, userId: f.ids.userA, sessionStatus: "EXPIRED", sessionEnded: true,
+      depositItemId: item.id, userId: f.ids.userA, sessionStatus: "EXPIRED", sessionEnded: true, beforeCutover: true,
       problem: "NO_ACCEPTANCE_EVENT", pending: 50, netAvailable: 0 })]);
 
     expect((await review("superadmin", item.id, { action: "approve" })).body.error).toBe(REVIEW_LEGACY_ROW);
-    const approved = await review("superadmin", item.id, { action: "approve", legacy: true, note: "sesi lama" });
+    const approved = await legacyApprove(item.id, { note: "sesi lama" });
     expect(approved.status).toBe(200);
     expect(approved.body.targetAmount).toBe(100);
     expect(approved.body.item).toMatchObject({
@@ -1079,7 +1096,7 @@ describe("legacy review rows and recorded-rate drift (M04 fix round 4)", () => {
     expect(new Date((audits[0].metadataJson as Json).pricedAt).getTime()).toBe(createdAt.getTime());
 
     // Replays are idempotent for either approval; the opposite decision is refused; nothing is listed any more.
-    expect((await review("superadmin", item.id, { action: "approve", legacy: true })).body.idempotent).toBe(true);
+    expect((await legacyApprove(item.id)).body.idempotent).toBe(true);
     expect((await review("adminA", item.id, { action: "approve" })).body.idempotent).toBe(true);
     expect((await review("adminA", item.id, { action: "reject" })).status).toBe(409);
     expect(await f.db.auditLog.count({ where: { entityType: "DepositItem", entityId: item.id } })).toBe(1);
@@ -1088,7 +1105,7 @@ describe("legacy review rows and recorded-rate drift (M04 fix round 4)", () => {
     expect(after.acceptedItemsWithoutAcceptance).toEqual([]);
     // An ordinary accepted row cannot be approved "as legacy".
     const held = await deposit({ anomaly: true });
-    const ordinary = await review("superadmin", held.item.id, { action: "approve", legacy: true });
+    const ordinary = await legacyApprove(held.item.id);
     expect(ordinary.status).toBe(422);
     expect(ordinary.body.error).toBe(REVIEW_NOT_LEGACY);
   });
@@ -1102,13 +1119,13 @@ describe("legacy review rows and recorded-rate drift (M04 fix round 4)", () => {
     const { item } = await legacyRow({ sessionStatus: "COMPLETED", acceptanceEventId: eventId, acceptedAt: null, createdAt, earn: null });
 
     expect((await inventory()).reviewItemsWithoutAcceptance).toEqual([expect.objectContaining({
-      depositItemId: item.id, problem: "NO_ACCEPTANCE_TIME", sessionEnded: true, pending: 0, ledgerIds: [] })]);
+      depositItemId: item.id, problem: "NO_ACCEPTANCE_TIME", sessionEnded: true, beforeCutover: true, pending: 0, ledgerIds: [] })]);
     const refused = await review("adminA", item.id, { action: "approve" });
     expect(refused.status).toBe(409);
     expect(refused.body.error).toBe(REVIEW_LEGACY_ROW);
     expect(await ledgerOf(item.id)).toEqual([]);
 
-    const approved = await review("superadmin", item.id, { action: "approve", legacy: true });
+    const approved = await legacyApprove(item.id);
     expect(approved.status).toBe(200);
     expect(approved.body.targetAmount).toBe(100);
     // The real event id is kept; only the missing time is filled with the time the price was resolved at.
@@ -1137,10 +1154,207 @@ describe("legacy review rows and recorded-rate drift (M04 fix round 4)", () => {
       depositItemId: item.id, problem: "NO_ACCEPTANCE_EVENT", sessionEnded: true, pending: 100 })]);
 
     expect((await review("adminA", item.id, { action: "approve" })).body.error).toBe(REVIEW_LEGACY_ROW);
-    const approved = await review("superadmin", item.id, { action: "approve", legacy: true });
+    const approved = await legacyApprove(item.id);
     expect(approved.status).toBe(200);
     expect(approved.body.targetAmount).toBe(100);
     expect(await ledgerOf(item.id)).toEqual([{ entryType: "EARN", status: "AVAILABLE", amount: 100, businessKey: earnKey(item.id) }]);
     expect(await getWalletBalance(f.ids.userA)).toMatchObject({ available: 100, pending: 0 });
+  });
+});
+
+describe("legacy approval is fenced to pre-cutover rows the operator saw (M04 fix round 5)", () => {
+  const patchSession = (id: string, action: "finish" | "cancel") => call("userA", "PATCH", `/api/sessions/${id}`, { action });
+  async function actorOf(key: "superadmin" | "adminA"): Promise<CurrentUser> {
+    const user = await f.db.user.findUniqueOrThrow({ where: { id: f.ids[key] } });
+    return {
+      id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role as AppRole,
+      organizationId: user.organizationId, organizationName: null, payoutEligible: false, status: user.status,
+    };
+  }
+  /** Status and message of a refused in-process decision. */
+  const refusal = (promise: Promise<unknown>) =>
+    promise.then(
+      () => { throw new Error("expected the decision to be refused"); },
+      (error: { status?: number; message: string }) => ({ status: error.status, message: error.message }),
+    );
+  const backdateOrgRate = async () => {
+    const orgRate = await f.db.rewardRate.findFirstOrThrow({ where: { organizationId: f.ids.orgA, campaignId: null } });
+    await f.db.rewardRate.update({ where: { id: orgRate.id }, data: { effectiveFrom: new Date(Date.now() - 30 * DAY) } });
+    return orgRate;
+  };
+
+  it("L1: the cutover is the applied reward-policy migration; an explicit setting wins and an unparsable one fails closed", async () => {
+    const cutover = await resolveLegacyCutover(f.db);
+    expect(cutover.source).toBe("migration");
+    const [applied] = await f.db.$queryRaw<{ finishedAt: Date }[]>`
+      SELECT finished_at AS "finishedAt" FROM "_prisma_migrations" WHERE migration_name = ${REWARD_POLICY_MIGRATION}`;
+    expect(cutover.at).toEqual(applied.finishedAt);
+    // Round 4's legacy rows (created days ago) predate it; a row created now does not.
+    expect(isBeforeCutover(new Date(Date.now() - 2 * DAY), cutover.at)).toBe(true);
+    expect(isBeforeCutover(new Date(), cutover.at)).toBe(false);
+    expect(await resolveLegacyCutover(f.db, { [LEGACY_CUTOVER_ENV]: "2026-01-01T00:00:00Z" }))
+      .toEqual({ at: new Date("2026-01-01T00:00:00.000Z"), source: "env" });
+    expect(await resolveLegacyCutover(f.db, { [LEGACY_CUTOVER_ENV]: "bukan-tanggal" })).toEqual({ at: null, source: "env-invalid" });
+  });
+
+  it("L1: R03's late items, like every post-cutover pre-acceptance row of an ended session, are reject-only and never approvable as legacy", async () => {
+    await warmUp();
+    const wasteTypeId = await fixtureWasteTypeId();
+    // (1) An item the machine reported after the owner finished the session (R03: REVIEW/SESSION_CLOSED).
+    const finished = await openSession({ data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
+    expect((await patchSession(finished.id, "finish")).status).toBe(200);
+    await send(finished.id, "ITEM_DETECTED", { wasteTypeId, quantity: 1, inputBeam: true });
+    const late = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: finished.id } });
+    expect(late).toMatchObject({ status: "REVIEW", validationReasonCode: "SESSION_CLOSED", acceptanceEventId: null });
+    // (2) An item still undecided when the session timed out (R03: REVIEW/SESSION_TIMEOUT).
+    const stuck = await openSession({ data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
+    await send(stuck.id, "ITEM_DETECTED", { wasteTypeId, quantity: 1, inputBeam: true });
+    await send(stuck.id, "WEIGHT_MEASURED", { weightGrams: 25, stable: true });
+    await f.db.depositSession.update({ where: { id: stuck.id }, data: { timeoutAt: new Date(Date.now() - 1_000) } });
+    expect((await patchSession(stuck.id, "finish")).body.session.status).toBe("EXPIRED");
+    const timedOut = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: stuck.id } });
+    expect(timedOut).toMatchObject({ status: "REVIEW", validationReasonCode: "SESSION_TIMEOUT", acceptanceEventId: null });
+
+    for (const item of [late, timedOut]) {
+      const refused = await review("adminA", item.id, { action: "approve" });
+      expect(refused.status).toBe(409);
+      expect(refused.body.error).toBe(REVIEW_ENDED_SESSION_REJECT_ONLY);
+      expect(refused.body.error).not.toMatch(/tunggu|tidak akan/i);
+      const fenced = await legacyApprove(item.id);
+      expect(fenced.status).toBe(409);
+      expect(fenced.body.error).toBe(REVIEW_LEGACY_NOT_ELIGIBLE);
+      expect(await itemOf(item.id)).toMatchObject({ status: "REVIEW", acceptanceEventId: null });
+    }
+    expect(await f.db.rewardLedger.count({ where: { userId: f.ids.userA } })).toBe(0);
+    const listed = await inventory();
+    expect(listed.legacyCutover.source).toBe("migration");
+    expect(listed.reviewItemsWithoutAcceptance.map((row) => [row.depositItemId, row.sessionEnded, row.beforeCutover]).sort())
+      .toEqual([[late.id, true, false], [timedOut.id, true, false]].sort());
+
+    // Rejecting stays available to reviewers.
+    expect((await review("adminA", late.id, { action: "reject" })).status).toBe(200);
+    expect(await ledgerOf(late.id)).toEqual([]);
+    // The machine stays the authority on its outbox (R03): its queued acceptance point still decides the other item.
+    await send(stuck.id, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }, timedOut.id);
+    const decided = await itemOf(timedOut.id);
+    expect(decided.acceptanceEventId).not.toBeNull();
+    expect(decided.status).not.toBe("REJECTED");
+    expect(decided.rewardAmount).toBeGreaterThan(0);
+  });
+
+  it("L1: a legacy approval carries the item version the superadmin saw and is refused once the row changed", async () => {
+    await warmUp();
+    await backdateOrgRate();
+    const { session, item } = await legacyRow({ sessionStatus: "COMPLETED" });
+    const seen = item.updatedAt.toISOString();
+
+    const missing = await review("superadmin", item.id, { action: "approve", legacy: true });
+    expect(missing.status).toBe(422);
+    expect(missing.body.error).toBe(REVIEW_LEGACY_VERSION_REQUIRED);
+    expect((await review("superadmin", item.id, { action: "approve", legacy: true, itemVersion: "kemarin" })).status).toBe(422);
+
+    // The machine flags the item after the operator looked at it (a queued fraud event): the row version moves on.
+    await send(session.id, "FRAUD_DETECTED", { reason: "STRING_PULL" }, item.id);
+    const changed = await itemOf(item.id);
+    expect(changed).toMatchObject({ status: "REVIEW", externalFraudFlag: true, validationReasonCode: "ANOMALY_REVIEW" });
+    expect(changed.updatedAt.getTime()).toBeGreaterThan(item.updatedAt.getTime());
+    const stale = await review("superadmin", item.id, { action: "approve", legacy: true, itemVersion: seen });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toBe(REVIEW_LEGACY_VERSION_MISMATCH);
+    expect(await itemOf(item.id)).toMatchObject({ status: "REVIEW", acceptanceEventId: null, updatedAt: changed.updatedAt });
+    expect(await ledgerOf(item.id)).toEqual([{ entryType: "EARN", status: "PENDING", amount: 50, businessKey: earnKey(item.id) }]);
+    expect(await f.db.auditLog.count({ where: { action: "DEPOSIT_REVIEW_APPROVED", entityId: item.id } })).toBe(0);
+
+    // Looked again: the version now on screen is accepted, and the audit records which version was approved.
+    const fresh = await review("superadmin", item.id, { action: "approve", legacy: true, itemVersion: changed.updatedAt.toISOString() });
+    expect(fresh.status).toBe(200);
+    expect(fresh.body.targetAmount).toBe(100);
+    expect(fresh.body.item.acceptanceEventId).toBe(`${LEGACY_ACCEPTANCE_PREFIX}${f.ids.superadmin}`);
+    const audits = await f.db.auditLog.findMany({ where: { action: "DEPOSIT_REVIEW_APPROVED", entityId: item.id } });
+    expect(audits).toHaveLength(1);
+    expect(audits[0].metadataJson).toMatchObject({
+      legacyApproval: true, itemVersion: changed.updatedAt.toISOString(), legacyCutoverSource: "migration" });
+    expect(new Date((audits[0].metadataJson as Json).legacyCutoverAt).getTime()).toBe((await resolveLegacyCutover(f.db)).at!.getTime());
+    // A replay is the same decision whatever version it carries.
+    expect((await review("superadmin", item.id, { action: "approve", legacy: true, itemVersion: seen })).body.idempotent).toBe(true);
+    expect(await getWalletBalance(f.ids.userA)).toMatchObject({ available: 100, pending: 0 });
+  });
+
+  it("L1: fails closed when no cutover can be resolved, and honours an explicit cutover setting", async () => {
+    await backdateOrgRate();
+    const createdAt = new Date(Date.now() - 3 * DAY);
+    const { item } = await legacyRow({ sessionStatus: "EXPIRED", createdAt });
+    const superadmin = await actorOf("superadmin");
+    const admin = await actorOf("adminA");
+    const legacy = async () =>
+      decideDepositReview(superadmin, item.id, { action: "approve", legacy: true, itemVersion: await versionOf(item.id) });
+    const previous = process.env[LEGACY_CUTOVER_ENV];
+    try {
+      process.env[LEGACY_CUTOVER_ENV] = "bukan-tanggal";
+      expect(await refusal(legacy())).toEqual({ status: 409, message: REVIEW_LEGACY_CUTOVER_UNAVAILABLE });
+      expect(await refusal(decideDepositReview(admin, item.id, { action: "approve" })))
+        .toEqual({ status: 409, message: REVIEW_ENDED_SESSION_REJECT_ONLY });
+      // An explicit cutover before the row: not approvable as legacy.
+      process.env[LEGACY_CUTOVER_ENV] = new Date(Date.now() - 5 * DAY).toISOString();
+      expect(await refusal(legacy())).toEqual({ status: 409, message: REVIEW_LEGACY_NOT_ELIGIBLE });
+      expect(await refusal(decideDepositReview(admin, item.id, { action: "approve" })))
+        .toEqual({ status: 409, message: REVIEW_ENDED_SESSION_REJECT_ONLY });
+      expect(await ledgerOf(item.id)).toEqual([{ entryType: "EARN", status: "PENDING", amount: 50, businessKey: earnKey(item.id) }]);
+      // An explicit cutover after the row: approvable, priced at its recorded time.
+      process.env[LEGACY_CUTOVER_ENV] = new Date(Date.now() - DAY).toISOString();
+      expect(await refusal(decideDepositReview(admin, item.id, { action: "approve" }))).toEqual({ status: 409, message: REVIEW_LEGACY_ROW });
+      const approved = await legacy();
+      expect(approved.targetAmount).toBe(100);
+      expect(approved.item).toMatchObject({ acceptanceEventId: `${LEGACY_ACCEPTANCE_PREFIX}${f.ids.superadmin}`, acceptedAt: createdAt });
+    } finally {
+      if (previous === undefined) delete process.env[LEGACY_CUTOVER_ENV];
+      else process.env[LEGACY_CUTOVER_ENV] = previous;
+    }
+    expect(await ledgerOf(item.id)).toEqual([
+      { entryType: "EARN", status: "AVAILABLE", amount: 50, businessKey: earnKey(item.id) },
+      { entryType: "ADJUST", status: "AVAILABLE", amount: 50, businessKey: `review:${item.id}:decision:v1` },
+    ]);
+    const audits = await f.db.auditLog.findMany({ where: { action: "DEPOSIT_REVIEW_APPROVED", entityId: item.id } });
+    expect(audits).toHaveLength(1);
+    expect(audits[0].metadataJson).toMatchObject({ legacyApproval: true, legacyCutoverSource: "env" });
+  });
+
+  it("L3: the N1 fallback and a legacy approval price from the rate that covered the recorded time, even if it was deactivated and replaced since", async () => {
+    await warmUp();
+    const wasteTypeId = await fixtureWasteTypeId();
+    const campaignId = await machineCampaignId();
+    const acceptedAt = new Date(Date.now() - DAY);
+    const createdAt = new Date(Date.now() - 3 * DAY);
+    const orgRate = (data: { pointsPerItem: number; effectiveFrom: Date }) => f.db.rewardRate.create({ data: {
+      organizationId: f.ids.orgA, wasteTypeId, unit: "ITEM", active: true, ...data } });
+    // The organization's rate in force at both recorded times, deactivated afterwards and replaced from now on.
+    const covering = await orgRate({ pointsPerItem: 700, effectiveFrom: new Date(Date.now() - 30 * DAY) });
+    const replacement = await orgRate({ pointsPerItem: 300, effectiveFrom: new Date() });
+    await f.db.rewardRate.update({ where: { id: covering.id }, data: { active: false } });
+    // Live resolution (what a new acceptance uses) still requires `active`: it picks the replacement.
+    expect((await resolveRewardRate({ organizationId: f.ids.orgA, campaignId: null, wasteTypeId }))?.id).toBe(replacement.id);
+
+    // N1 fallback: the recorded campaign rate had expired before the acceptance, so pricing falls to the rate in force at acceptedAt.
+    const expired = await f.db.rewardRate.create({ data: {
+      organizationId: f.ids.orgA, campaignId, wasteTypeId, unit: "ITEM", pointsPerItem: 900, active: true,
+      effectiveFrom: new Date(Date.now() - 30 * DAY), effectiveTo: new Date(Date.now() - 10 * DAY) } });
+    const held = await legacyRow({
+      campaignId, acceptanceEventId: `evt-${randomUUID()}`, acceptedAt, rewardRateId: expired.id, earn: { amount: 450, status: "PENDING" } });
+    const fallback = await review("adminA", held.item.id, { action: "approve" });
+    expect(fallback.status).toBe(200);
+    expect(fallback.body.targetAmount).toBe(700);
+    expect(fallback.body.item).toMatchObject({ rewardRateId: covering.id, rewardAmount: 700 });
+    expect(await ledgerOf(held.item.id)).toEqual([
+      { entryType: "EARN", status: "AVAILABLE", amount: 450, businessKey: earnKey(held.item.id) },
+      { entryType: "ADJUST", status: "AVAILABLE", amount: 250, businessKey: `review:${held.item.id}:decision:v1` },
+    ]);
+
+    // Legacy approval: priced at createdAt from the same deactivated rate.
+    const legacy = await legacyRow({ sessionStatus: "EXPIRED", createdAt });
+    const approved = await legacyApprove(legacy.item.id);
+    expect(approved.status).toBe(200);
+    expect(approved.body.targetAmount).toBe(700);
+    expect(approved.body.item).toMatchObject({ rewardRateId: covering.id, rewardAmount: 700, acceptedAt: createdAt.toISOString() });
+    expect(await getWalletBalance(f.ids.userA)).toMatchObject({ available: 1_400, pending: 0 });
   });
 });

@@ -279,6 +279,9 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
     const legacyHold = await hold(legacyHeld.id, 1_000);
     const stillOpen = await item(open.id, { validationReasonCode: "UNKNOWN_WASTE_TYPE" });
     const noTime = await item(ended.id, { acceptanceEventId: "evt-no-time", acceptedAt: null, validationReasonCode: "STRING_PULL" });
+    // Fix round 5 (L1): only a row created before the M04 cutover (here: when the harness applied the
+    // reward-policy migration) may be approved as legacy; the rows above were created after it.
+    const preCutover = await item(ended.id, { validationReasonCode: "ANOMALY_REVIEW", createdAt: new Date(Date.now() - 2 * DAY) });
     await f.db.rewardReconciliationCase.create({ data: {
       businessKey: `fraud:${noTime.id}:hold:v1`, userId: f.ids.userA, depositItemId: noTime.id, amount: 2_000,
       entryType: "EARN", reasonCode: "ANOMALY_ALREADY_PAID_OUT" } });
@@ -301,16 +304,20 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
 
     const inventory = await readOnlyInventory();
     const byItem = <T extends { depositItemId: string }>(rows: T[]) => [...rows].sort((a, b) => (a.depositItemId < b.depositItemId ? -1 : 1));
+    expect(inventory.legacyCutover).toMatchObject({ source: "migration", at: expect.any(Date) });
     expect(byItem(inventory.reviewItemsWithoutAcceptance)).toEqual(byItem([
       { depositItemId: legacyHeld.id, userId: f.ids.userA, sessionId: ended.id, sessionStatus: "COMPLETED", sessionEnded: true,
         problem: "NO_ACCEPTANCE_EVENT", validationReasonCode: "ANOMALY_REVIEW", rewardAmount: 0, netAvailable: 0, pending: 1_000,
-        ledgerIds: [legacyHold.id], reconciliationCaseKeys: [] },
+        ledgerIds: [legacyHold.id], reconciliationCaseKeys: [], createdAt: legacyHeld.createdAt, beforeCutover: false },
       { depositItemId: stillOpen.id, userId: f.ids.userA, sessionId: open.id, sessionStatus: "ACTIVE", sessionEnded: false,
         problem: "NO_ACCEPTANCE_EVENT", validationReasonCode: "UNKNOWN_WASTE_TYPE", rewardAmount: 0, netAvailable: 0, pending: 0,
-        ledgerIds: [], reconciliationCaseKeys: [] },
+        ledgerIds: [], reconciliationCaseKeys: [], createdAt: stillOpen.createdAt, beforeCutover: false },
       { depositItemId: noTime.id, userId: f.ids.userA, sessionId: ended.id, sessionStatus: "COMPLETED", sessionEnded: true,
         problem: "NO_ACCEPTANCE_TIME", validationReasonCode: "STRING_PULL", rewardAmount: 0, netAvailable: 0, pending: 0,
-        ledgerIds: [], reconciliationCaseKeys: [`fraud:${noTime.id}:hold:v1`] },
+        ledgerIds: [], reconciliationCaseKeys: [`fraud:${noTime.id}:hold:v1`], createdAt: noTime.createdAt, beforeCutover: false },
+      { depositItemId: preCutover.id, userId: f.ids.userA, sessionId: ended.id, sessionStatus: "COMPLETED", sessionEnded: true,
+        problem: "NO_ACCEPTANCE_EVENT", validationReasonCode: "ANOMALY_REVIEW", rewardAmount: 0, netAvailable: 0, pending: 0,
+        ledgerIds: [], reconciliationCaseKeys: [], createdAt: preCutover.createdAt, beforeCutover: true },
     ]));
     expect(inventory.acceptedItemsWithoutAcceptance).toEqual([
       { depositItemId: legacyAccepted.id, userId: f.ids.userA, sessionId: ended.id, sessionStatus: "COMPLETED",
@@ -323,7 +330,7 @@ describe("scripts/reconcile-wallet-history.ts (read-only inventory)", () => {
         effectiveTo: null, rateActive: false, rewardAmount: 0, pending: 0, ledgerIds: [] },
     ]));
     expect(inventory.summary).toMatchObject({
-      reviewItemsWithoutAcceptance: 3, acceptedItemsWithoutAcceptance: 1, reviewItemsWithRateOutsideAcceptance: 2, blocksEnforcement: 0 });
+      reviewItemsWithoutAcceptance: 4, acceptedItemsWithoutAcceptance: 1, reviewItemsWithRateOutsideAcceptance: 2, blocksEnforcement: 0 });
     expect(inventory.clean).toBe(false);
     expect(inventory.snapshot.readOnly).toBe(true);
   });
