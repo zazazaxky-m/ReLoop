@@ -11,9 +11,12 @@
 --   * the timeout policy closes a session only after its deadline (every lease
 --     issued for it has expired) and moves its undecided items to REVIEW.
 -- This step only reports, during deploy, how many machines the enforce step
--- (20261014120100_one_active_machine_session_enforce) would refuse, so the
--- operator can reconcile before it runs:
---   npx tsx scripts/reconcile-active-sessions.ts   (read-only dry run)
+-- would refuse, so the operator can reconcile before it runs:
+--   npm run reconcile:sessions   (scripts/reconcile-active-sessions.ts, read-only dry run)
+-- The enforce step is staged in
+-- prisma/migrations-enforce/one_active_machine_session_enforce/migration.sql
+-- and is added to prisma/migrations only in a later release, after the dry run
+-- exits 0 against production (procedure in that file's header).
 
 DO $$
 DECLARE
@@ -27,7 +30,7 @@ BEGIN
   ) duplicates;
 
   IF conflicted_machines > 0 THEN
-    RAISE NOTICE 'one_active_machine_session: % machine(s) with more than one active deposit session (% sessions). These machines get no lease until reconciled; the enforce migration will refuse to run. See "npx tsx scripts/reconcile-active-sessions.ts".',
+    RAISE NOTICE 'one_active_machine_session: % machine(s) with more than one active deposit session (% sessions). These machines get no lease until reconciled; the staged enforce migration would refuse to run. See "npm run reconcile:sessions".',
       conflicted_machines, conflicted_sessions;
   END IF;
 END $$;

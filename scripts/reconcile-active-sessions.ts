@@ -6,14 +6,15 @@
  *
  * Prints one JSON report on stdout. Exit code 0 = nothing blocks the enforce
  * migration, 3 = enforce-blocking findings present, 1 = the inventory itself
- * failed. It runs in a single READ ONLY, REPEATABLE
- * READ transaction, so every section describes the same snapshot, and it can
- * never write: there is no apply/close/delete mode.
+ * failed. It runs in a single READ ONLY, REPEATABLE READ transaction, so every
+ * section describes the same snapshot, and it can never write: there is no
+ * apply/close/delete mode.
  *
  * Sections:
  *   duplicateActiveSessions  machines with more than one session in RESERVED,
- *                            ACTIVE, PROCESSING_ITEM or REVIEW (blocks the enforce
- *                            migration 20261014120100_one_active_machine_session_enforce).
+ *                            ACTIVE, PROCESSING_ITEM or REVIEW (blocks the staged
+ *                            enforce migration,
+ *                            prisma/migrations-enforce/one_active_machine_session_enforce).
  *                            Per session, oldest first: owner, status, times, the
  *                            deadline the timeout policy uses and whether it has
  *                            passed, item counts by status, the undecided items
@@ -22,31 +23,46 @@
  *                            evidence (count, first and last event).
  *   activeWithoutTimeout     active sessions without timeoutAt (legacy rows, e.g.
  *                            REVIEW sessions created before R03). Their deadline is
- *                            updatedAt + the machine's idle timeout; the timeout
- *                            policy closes them on the next machine poll or scan
- *                            after that (informational, does not block).
+ *                            startedAt + the machine's idle timeout (no later update
+ *                            moves it); the timeout policy closes them on the next
+ *                            machine poll, scan or owner finish/cancel after that
+ *                            (informational, does not block).
  *
- * Procedure before the enforce migration and for any finding:
+ * Release order (I2): the expand release (application code + migration
+ * 20261014120000_one_active_machine_session) runs first and keeps every
+ * machine exclusive with the Machine row lock. The enforce migration is staged
+ * outside prisma/migrations and is added only in a LATER release, after this
+ * script exits 0 against production (procedure in the staged file's header).
+ *
+ * Procedure for any finding:
  *   1. Run this script against the target database and keep the JSON with the case.
  *   2. Never pick the newest session and never edit rows. While a machine has
  *      several live sessions it gets no lease (the RVM stops) and every scan on
  *      it is refused, so no new item enters any of them. Each session then ends
  *      through the normal paths only:
  *        - its owner finishes or cancels it in the app (refused while the
- *          machine still decides one of its items), or
+ *          machine still decides one of its items, until its deadline), or
  *        - the timeout policy closes it once `deadlinePassed` is true (on the
- *          next machine poll or scan): undecided items move to REVIEW with
- *          reason SESSION_TIMEOUT. With the lease withheld, every session
- *          reaches its deadline within the machine's idle timeout.
- *      Items now in REVIEW are decided in the review queue (reject, or a
- *      superadmin legacy approval) or by a late acceptance/rejection event of
- *      the same session; the session/owner evidence below tells the reviewer
- *      which deposit each belongs to. Record each decision in the case log.
- *   3. Re-run this script until `summary.blocksEnforcement` is 0.
- *   4. If `prisma migrate deploy` already failed on the enforce migration, mark
- *      it rolled back (its guard runs before any DDL, so nothing was applied):
- *        npx prisma migrate resolve --rolled-back 20261014120100_one_active_machine_session_enforce
- *      then run `npx prisma migrate deploy` again.
+ *          next machine poll, scan, or owner finish/cancel): undecided items
+ *          move to REVIEW with reason SESSION_TIMEOUT. With the lease withheld,
+ *          every session reaches its deadline within the machine's idle timeout.
+ *   3. Items in REVIEW for SESSION_TIMEOUT / SESSION_CLOSED are created after
+ *      the M04 cutover, so they are never approved by a human before their
+ *      acceptance point: the legacy approval is limited to rows created before
+ *      the cutover (version-checked, lib/deposit-review.ts). Such an item is
+ *      decided by the machine's queued event of the same session (rejection;
+ *      or an acceptance point, which follows the normal policy when the machine
+ *      made it before the session's end, and otherwise becomes a held review:
+ *      acceptance recorded, EARN PENDING, approved or rejected by a reviewer
+ *      under the post-acceptance rule), or rejected by a reviewer. Use the
+ *      session/owner/event evidence below to tell which deposit each belongs
+ *      to, and record every decision in the case log.
+ *   4. Re-run this script until `summary.blocksEnforcement` is 0, then ship the
+ *      enforce migration in the next release. If `prisma migrate deploy` then
+ *      fails on it (duplicates reappeared), mark it rolled back (its guard runs
+ *      before any DDL, so nothing was applied):
+ *        npx prisma migrate resolve --rolled-back <enforce migration name>
+ *      and repeat from step 1.
  */
 import type { Prisma } from "@prisma/client";
 
@@ -60,7 +76,7 @@ export interface ActiveSessionEvidence {
   startedAt: Date;
   updatedAt: Date;
   timeoutAt: Date | null;
-  /** timeoutAt, or updatedAt + the machine's idle timeout (lib/deposit-session-service.ts sessionDeadline). */
+  /** timeoutAt, or startedAt + the machine's idle timeout (lib/deposit-session-deadline.ts sessionDeadline). */
   deadline: Date;
   deadlinePassed: boolean;
   items: Record<string, number>;
@@ -82,7 +98,8 @@ export interface ActiveSessionInventory {
     sessions: ActiveSessionEvidence[];
   }[];
   activeWithoutTimeout: {
-    sessionId: string; machineId: string; userId: string; status: string; updatedAt: Date; deadline: Date; deadlinePassed: boolean;
+    sessionId: string; machineId: string; userId: string; status: string; startedAt: Date; updatedAt: Date; deadline: Date;
+    deadlinePassed: boolean;
   }[];
   summary: { machinesWithDuplicates: number; duplicateActiveSessions: number; activeWithoutTimeout: number; blocksEnforcement: number };
   clean: boolean;
@@ -106,7 +123,7 @@ export async function collectActiveSessionConflicts(db: RawReader): Promise<Acti
     SELECT s.id AS "sessionId", s."machineId", m."machineCode", m."organizationId",
            m."sessionIdleTimeoutMinutes" AS "idleTimeoutMinutes", s."userId", s.status::text AS status,
            s."campaignId", s."startedAt", s."updatedAt", s."timeoutAt",
-           COALESCE(s."timeoutAt", s."updatedAt" + make_interval(mins => m."sessionIdleTimeoutMinutes")) AS deadline
+           COALESCE(s."timeoutAt", s."startedAt" + make_interval(mins => m."sessionIdleTimeoutMinutes")) AS deadline
     FROM "DepositSession" s
     JOIN "Machine" m ON m.id = s."machineId"
     WHERE s.status::text IN ('RESERVED', 'ACTIVE', 'PROCESSING_ITEM', 'REVIEW')
@@ -161,13 +178,13 @@ export async function collectActiveSessionConflicts(db: RawReader): Promise<Acti
   const duplicateActiveSessions = [...groups.values()];
 
   const withoutTimeout = await db.$queryRaw<{
-    sessionId: string; machineId: string; userId: string; status: string; updatedAt: Date; deadline: Date;
+    sessionId: string; machineId: string; userId: string; status: string; startedAt: Date; updatedAt: Date; deadline: Date;
   }[]>`
-    SELECT s.id AS "sessionId", s."machineId", s."userId", s.status::text AS status, s."updatedAt",
-           s."updatedAt" + make_interval(mins => m."sessionIdleTimeoutMinutes") AS deadline
+    SELECT s.id AS "sessionId", s."machineId", s."userId", s.status::text AS status, s."startedAt", s."updatedAt",
+           s."startedAt" + make_interval(mins => m."sessionIdleTimeoutMinutes") AS deadline
     FROM "DepositSession" s JOIN "Machine" m ON m.id = s."machineId"
     WHERE s.status::text IN ('RESERVED', 'ACTIVE', 'PROCESSING_ITEM', 'REVIEW') AND s."timeoutAt" IS NULL
-    ORDER BY s."machineId", s."updatedAt", s.id`;
+    ORDER BY s."machineId", s."startedAt", s.id`;
   const activeWithoutTimeout = withoutTimeout.map((row) => ({
     ...row, deadlinePassed: row.deadline.getTime() <= now.getTime(),
   }));

@@ -22,6 +22,7 @@ import { flagAnomaly, holdItemForFraud, notifyOrgAdmins } from "./fraud";
 import { maybeCreateAutoPickup } from "./pickup";
 import { handleAcceptance, handleItemRejected, recordItemEvidence } from "./acceptance";
 import { isTerminalSession } from "../deposit-review-contract";
+import { sessionDeadline } from "../deposit-session-deadline";
 import type { DepositItemCache } from "./item-cache";
 
 /** Work that must run only after the event transaction commits (notifications, pushes). */
@@ -149,11 +150,16 @@ export async function processEventSideEffects(
       // finish/timeout): the item stays in that session and goes to review;
       // the session is not reopened or extended.
       const sessionClosed = isTerminalSession(session.status);
+      // Past its deadline every lease has expired and the session is over even
+      // if no poll closed it yet (R03 I1): it is neither extended nor touched,
+      // and the item stays PENDING until the timeout policy moves it to REVIEW.
+      const now = Date.now();
+      const pastDeadline = sessionDeadline(session, machine.sessionIdleTimeoutMinutes).getTime() <= now;
 
-      if (!sessionClosed) {
+      if (!sessionClosed && !pastDeadline) {
         // The deadline only moves later: every lease issued for the session
-        // stays within it (lib/deposit-session-service.ts sessionDeadline).
-        const extended = new Date(Date.now() + machine.sessionIdleTimeoutMinutes * 60 * 1000);
+        // stays within it (lib/deposit-session-deadline.ts).
+        const extended = new Date(now + machine.sessionIdleTimeoutMinutes * 60 * 1000);
         if (!session.timeoutAt || session.timeoutAt.getTime() < extended.getTime()) {
           await tx.depositSession.update({
             where: { id: session.id },
@@ -236,7 +242,7 @@ export async function processEventSideEffects(
         data: { depositItemId: item.id },
       });
 
-      if (session.status === "ACTIVE") {
+      if (session.status === "ACTIVE" && !pastDeadline) {
         await tx.depositSession.update({
           where: { id: session.id },
           data: { status: "PROCESSING_ITEM" },

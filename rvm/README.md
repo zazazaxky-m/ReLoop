@@ -228,15 +228,30 @@ berarti "tidak ada sesi: berhenti". Aturan server di baliknya:
   mesin berhenti sampai operator merekonsiliasi
   (`scripts/reconcile-active-sessions.ts`).
 - `expiresAt` tidak pernah melewati batas waktu sesi (`timeoutAt`, atau
-  `updatedAt` + idle timeout untuk sesi tanpa `timeoutAt`) dan tidak pernah
-  lebih dari 300 s setelah `issuedAt`. Karena itu, setelah batas waktu lewat,
-  setiap lease untuk sesi itu sudah kedaluwarsa, dan server menutup sesi
-  lewat kebijakan timeout: item yang belum diputuskan mesin menjadi `REVIEW`
-  (`SESSION_TIMEOUT`), tidak ada yang dihapus.
-- Event terlambat (antrean outbox) tetap milik sesi yang dibawanya. Item yang
-  dilaporkan setelah sesinya berakhir ditahan untuk ditinjau di sesi itu
-  (`SESSION_CLOSED`), dan event yang menyebut item dari sesi lain tidak
-  memengaruhi item mana pun.
+  `startedAt` + idle timeout untuk sesi tanpa `timeoutAt`) dan tidak pernah
+  lebih dari 300 s setelah `issuedAt`. Batas waktu hanya diperpanjang oleh
+  `ITEM_DETECTED` selama belum lewat; event terlambat tidak pernah
+  menghidupkan sesi yang batasnya sudah lewat. Karena itu, setelah batas waktu
+  lewat, setiap lease untuk sesi itu sudah kedaluwarsa, dan server menutup
+  sesi lewat kebijakan timeout: item yang belum diputuskan mesin menjadi
+  `REVIEW` (`SESSION_TIMEOUT`), tidak ada yang dihapus.
+- **Asumsi jam mesin.** `expiresAt` adalah waktu unix absolut yang diperiksa
+  runtime terhadap jamnya sendiri (`activate_lease`). Pernyataan "batas lewat ⇒
+  semua lease kedaluwarsa" tepat bila jam mesin sama dengan jam server (NTP).
+  Karena request mesin diterima dengan selisih jam hingga 300 s, mesin yang
+  jamnya tertinggal dapat memakai lease hingga 300 s setelah batas server.
+  Apa yang dilakukan mesin di jendela itu tetap tercatat pada sesinya, dan
+  titik penerimaan dengan `occurredAt` setelah akhir sesi ditahan untuk
+  ditinjau (di bawah).
+- Event terlambat (antrean outbox) tetap milik sesi yang dibawanya, dan mesin
+  tetap menentukan hasil fisik item yang belum punya titik penerimaan, apa pun
+  status sesinya. Item yang dilaporkan setelah sesinya berakhir ditahan untuk
+  ditinjau di sesi itu (`SESSION_CLOSED`). Titik penerimaan dengan
+  `occurredAt` (jam mesin) setelah akhir sesi, atau untuk item
+  `SESSION_CLOSED`, menjadi review tertahan (penerimaan tercatat, EARN
+  `PENDING`, tidak pernah `AVAILABLE`) yang diputuskan peninjau; yang sebelum
+  akhir sesi mengikuti kebijakan biasa. Event yang menyebut item dari sesi lain
+  tidak memengaruhi item mana pun.
 
 **Jendela replay.** Tanda tangan diterima selama
 |jam server − `x-reloop-timestamp`| ≤ 300 s (`MACHINE_SIG_MAX_SKEW_SECONDS`), jadi
@@ -255,10 +270,14 @@ masih berlaku (sebelumnya nonce kedaluwarsa setelah 360 s).
   rotasi secret dan tidak ada perubahan di mesin.
 - **Belum dilakukan (upgrade protokol terpisah):** method dan path request
   belum ikut ditandatangani (string kanonik tetap
-  `timestamp.nonce.rawBody`). Mengikatnya memerlukan versi tanda tangan baru
-  yang dikirim mesin secara eksplisit (mis. header versi) dan masa transisi
-  di mana server menerima keduanya; mengubah string kanonik diam-diam akan
-  menolak semua mesin yang sudah terpasang.
+  `timestamp.nonce.rawBody`), dan lease memakai waktu kedaluwarsa absolut.
+  Upgrade berikutnya menandatangani method/path dan menambah durasi lease
+  relatif (detik sejak diterima mesin, dihitung dengan jam monotonic mesin)
+  agar selisih jam tidak lagi memperpanjang lease. Keduanya memerlukan versi
+  protokol yang dikirim mesin secara eksplisit (mis. header versi) dan masa
+  transisi di mana server menerima keduanya; mengubah string kanonik atau arti
+  `expiresAt` diam-diam akan menolak atau mengubah perilaku semua mesin yang
+  sudah terpasang.
 
 ## Kamera, deteksi orang, dan bukti wajah
 

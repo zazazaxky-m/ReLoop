@@ -30,12 +30,14 @@ const mockTx = {
   depositSession: { findUnique: vi.fn(), update: vi.fn() },
   depositItem: { findUnique: vi.fn(), updateMany: vi.fn() },
   machine: { findUnique: vi.fn() },
+  machineEvent: { findUnique: vi.fn() },
   rewardLedger: { count: vi.fn() },
 } as any;
 const machine = { id: 'm1', organizationId: 'o1', hasCompactor: false };
 
 const session = (extra: Record<string, unknown> = {}) => ({
-  id: 's1', userId: 'u1', status: 'PROCESSING_ITEM', campaignId: null, campaign: null, ...extra,
+  id: 's1', userId: 'u1', status: 'PROCESSING_ITEM', campaignId: null, campaign: null,
+  startedAt: new Date(Date.now() - 60_000), timeoutAt: new Date(Date.now() + 60_000), completedAt: null, ...extra,
 });
 const item = (extra: Record<string, unknown> = {}) => ({
   id: 'd1', sessionId: 's1', wasteTypeId: 'w1', measuredWeightGrams: 50, quantity: 1, status: 'PENDING',
@@ -60,7 +62,81 @@ describe('handleAcceptance', () => {
     mockTx.depositSession.findUnique.mockResolvedValue(session());
     mockTx.depositItem.findUnique.mockResolvedValue(item());
     mockTx.depositItem.updateMany.mockResolvedValue({ count: 1 });
-    mockTx.machine.findUnique.mockResolvedValue({ materialVerification: 'WEIGHT_ONLY', organization: { machineRewardMode: 'MONEY_REWARD' } });
+    mockTx.machine.findUnique.mockResolvedValue({
+      materialVerification: 'WEIGHT_ONLY', sessionIdleTimeoutMinutes: 3, organization: { machineRewardMode: 'MONEY_REWARD' } });
+    mockTx.machineEvent.findUnique.mockResolvedValue({ occurredAt: new Date() });
+  });
+
+  describe('R03 C1: acceptance after the session ended', () => {
+    const deadline = () => new Date(Date.now() - 60_000);
+    const held = (reason: string) => {
+      expect(itemUpdate().data).toMatchObject({ status: 'REVIEW', validationReasonCode: reason, acceptanceEventId: 'evt1',
+        complianceMultiplier: 0.5, rewardAmount: 100 });
+      expect(credited()).toMatchObject({ status: 'PENDING', amount: 100, reasonCode: reason });
+    };
+
+    it('holds an acceptance made after the deadline for review, keeping SESSION_TIMEOUT, never AVAILABLE', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ status: 'EXPIRED', timeoutAt: deadline(), completedAt: new Date() }));
+      mockTx.depositItem.findUnique.mockResolvedValue(item({ status: 'REVIEW', validationReasonCode: 'SESSION_TIMEOUT' }));
+      mockTx.machineEvent.findUnique.mockResolvedValue({ occurredAt: new Date(deadline().getTime() + 5_000) });
+      await run();
+      expect(mockTx.machineEvent.findUnique).toHaveBeenCalledWith({ where: { id: 'evt1' }, select: { occurredAt: true } });
+      held('SESSION_TIMEOUT');
+    });
+
+    it('holds a late acceptance of a still-open session past its deadline (not yet closed by a poll)', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ status: 'PROCESSING_ITEM', timeoutAt: deadline() }));
+      await run();
+      held('SESSION_TIMEOUT');
+    });
+
+    it('uses start + idle timeout as the deadline of a session without timeoutAt', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ timeoutAt: null, startedAt: new Date(Date.now() - 4 * 60_000) }));
+      await run();
+      held('SESSION_TIMEOUT');
+    });
+
+    it('holds an item reported after the session ended (SESSION_CLOSED) whatever the acceptance time', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ status: 'COMPLETED', completedAt: new Date(Date.now() - 1_000) }));
+      mockTx.depositItem.findUnique.mockResolvedValue(item({ status: 'REVIEW', validationReasonCode: 'SESSION_CLOSED' }));
+      mockTx.machineEvent.findUnique.mockResolvedValue({ occurredAt: new Date(Date.now() - 30_000) });
+      await run();
+      held('SESSION_CLOSED');
+    });
+
+    it('treats an acceptance after the owner ended the session as late, even before the deadline', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ status: 'COMPLETED', completedAt: new Date(Date.now() - 10_000) }));
+      await run();
+      held('SESSION_TIMEOUT');
+    });
+
+    it('applies the normal policy to an acceptance made before the deadline (may pay)', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ status: 'EXPIRED', timeoutAt: deadline(), completedAt: new Date() }));
+      mockTx.depositItem.findUnique.mockResolvedValue(item({ status: 'REVIEW', validationReasonCode: 'SESSION_TIMEOUT' }));
+      mockTx.machineEvent.findUnique.mockResolvedValue({ occurredAt: new Date(deadline().getTime() - 5_000) });
+      await run();
+      expect(itemUpdate().data).toMatchObject({ status: 'ACCEPTED', rewardAmount: 200 });
+      expect(credited()).toMatchObject({ status: 'AVAILABLE', amount: 200 });
+    });
+
+    it('keeps the unknown-type reason and hard zero on a late unknown-type item', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ status: 'EXPIRED', timeoutAt: deadline(), completedAt: new Date() }));
+      mockTx.depositItem.findUnique.mockResolvedValue(item({
+        status: 'REVIEW', validationReasonCode: UNKNOWN_WASTE_TYPE_REASON,
+        wasteType: { name: UNKNOWN_WASTE_TYPE_NAME, organizationId: null, unit: 'ITEM', defaultRewardPerItem: 0,
+          minWeightGrams: null, maxWeightGrams: null, aiAcceptedLabels: [] } }));
+      await run();
+      expect(itemUpdate().data).toMatchObject({ status: 'REVIEW', validationReasonCode: UNKNOWN_WASTE_TYPE_REASON, rewardAmount: 0 });
+    });
+
+    it('rejects a late item with an invalid weight, with no money', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ status: 'PROCESSING_ITEM', timeoutAt: deadline() }));
+      mockTx.depositItem.findUnique.mockResolvedValue(item({ measuredWeightGrams: null,
+        wasteType: { unit: 'ITEM', defaultRewardPerItem: 10, minWeightGrams: 10, maxWeightGrams: 100, aiAcceptedLabels: [] } }));
+      await run();
+      expect(itemUpdate().data).toMatchObject({ status: 'REJECTED', rewardAmount: 0 });
+      expect(credit.creditReward).not.toHaveBeenCalled();
+    });
   });
 
   it('exits early without locks or writes if the session or item does not exist', async () => {

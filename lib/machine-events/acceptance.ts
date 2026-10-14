@@ -21,7 +21,13 @@ import {
   verifyMaterial,
   type MaterialVerificationPolicy,
 } from "../reward-policy";
-import { UNKNOWN_WASTE_TYPE_REASON, isUnknownWasteTypeItem } from "./shared";
+import { sessionEnd } from "../deposit-session-deadline";
+import {
+  SESSION_CLOSED_REASON,
+  SESSION_TIMEOUT_REASON,
+  UNKNOWN_WASTE_TYPE_REASON,
+  isUnknownWasteTypeItem,
+} from "./shared";
 
 /** Largest rupiah value a ledger row can hold (PostgreSQL `integer`). */
 const MAX_RUPIAH = 2_147_483_647;
@@ -49,6 +55,16 @@ class DepositItemChangedError extends Error {
  *
  * An item that already has an acceptance event or left PENDING/REVIEW
  * (accepted, rejected, or decided by a reviewer) is never priced again.
+ *
+ * R03 (controller ruling C1): the machine stays the authority on the items in
+ * its outbox, so an undecided item is decided here whatever its session's
+ * status. But an acceptance point whose event `occurredAt` (machine clock)
+ * lies after the session's end (its deadline, or the earlier finish/cancel/
+ * timeout), or of an item reported after the session ended (SESSION_CLOSED),
+ * was made when the machine's lease should already have ended: it becomes a
+ * held REVIEW (acceptance event set, evidence frozen, EARN PENDING, never
+ * AVAILABLE) with SESSION_CLOSED / SESSION_TIMEOUT as its reason, and a human
+ * approves or rejects it under the post-acceptance review rule.
  */
 export async function handleAcceptance(
   tx: Prisma.TransactionClient,
@@ -79,8 +95,23 @@ export async function handleAcceptance(
 
   const config = await tx.machine.findUnique({
     where: { id: machine.id },
-    select: { materialVerification: true, organization: { select: { machineRewardMode: true } } },
+    select: {
+      materialVerification: true,
+      sessionIdleTimeoutMinutes: true,
+      organization: { select: { machineRewardMode: true } },
+    },
   });
+
+  // C1: acted after the session ended? Fails closed (late) when the event time
+  // cannot be read.
+  const acceptanceEvent = await tx.machineEvent.findUnique({
+    where: { id: acceptanceEventId },
+    select: { occurredAt: true },
+  });
+  const reportedAfterEnd = item.validationReasonCode === SESSION_CLOSED_REASON;
+  const endedAt = sessionEnd(session, config?.sessionIdleTimeoutMinutes ?? 0);
+  const late =
+    reportedAfterEnd || !acceptanceEvent || acceptanceEvent.occurredAt.getTime() > endedAt.getTime();
 
   const campaign = session.campaign;
   const machineCampaign = campaign && campaignSupportsMachine(campaign) ? campaign : null;
@@ -139,7 +170,7 @@ export async function handleAcceptance(
   const baseAmount = unknownWasteType || outOfRange ? 0 : computed;
 
   const hasAnomaly = Boolean(
-    sensorAnomaly || item.externalFraudFlag || session.status === "REVIEW" || outOfRange,
+    sensorAnomaly || item.externalFraudFlag || session.status === "REVIEW" || outOfRange || late,
   );
   const decision = decideReward({
     mode,
@@ -155,7 +186,11 @@ export async function handleAcceptance(
   else if (decision.status === "REVIEW") {
     reason = unknownWasteType
       ? UNKNOWN_WASTE_TYPE_REASON
-      : sensorAnomaly ?? (outOfRange ? "REWARD_OUT_OF_RANGE" : hasAnomaly ? "ANOMALY_REVIEW" : material!.reason);
+      : late
+        ? reportedAfterEnd
+          ? SESSION_CLOSED_REASON
+          : SESSION_TIMEOUT_REASON
+        : sensorAnomaly ?? (outOfRange ? "REWARD_OUT_OF_RANGE" : hasAnomaly ? "ANOMALY_REVIEW" : material!.reason);
   }
   const complianceMultiplier =
     decision.status === "ACCEPTED" ? 1.0 : decision.status === "REVIEW" && !unknownWasteType ? REVIEW_HOLD_RATIO : 0.0;

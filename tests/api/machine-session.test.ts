@@ -52,7 +52,7 @@ describe('GET /api/machine-session/[code]', () => {
     vi.mocked(mAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
   };
   const candidate = (over: Record<string, unknown>) => ({
-    id: 'sess1', userId: 'u1', timeoutAt: new Date(Date.now() + 60_000), updatedAt: new Date(), ...over,
+    id: 'sess1', userId: 'u1', timeoutAt: new Date(Date.now() + 60_000), startedAt: new Date(), ...over,
   });
   const fullSession = (over: Record<string, unknown>) => ({
     id: 'sess1', status: 'ACTIVE', timeoutAt: new Date(Date.now() + 60_000), updatedAt: new Date(), startedAt: new Date(),
@@ -123,7 +123,7 @@ describe('GET /api/machine-session/[code]', () => {
     const stale = candidate({ timeoutAt: new Date(Date.now() - 60_000) });
     db.depositSession.findMany.mockResolvedValue([stale]);
     db.depositSession.findUnique.mockResolvedValue({ ...stale, status: 'ACTIVE' });
-    db.depositItem.findMany.mockResolvedValue([{ id: 'i1' }]);
+    db.depositItem.findMany.mockResolvedValue([{ id: 'i1', sessionId: 'sess1' }]);
     db.depositItem.findUnique.mockResolvedValue({ status: 'PENDING', acceptanceEventId: null, validationReasonCode: null });
     db.depositItem.updateMany.mockResolvedValue({ count: 1 });
 
@@ -180,25 +180,25 @@ describe('GET /api/machine-session/[code]', () => {
     expect((await GET(makeReq(), { params: Promise.resolve({ code: 'm1' }) })).status).toBe(401);
   });
 
-  it('uses updatedAt + idle timeout as the deadline when a session has no timeoutAt', async () => {
+  it('uses startedAt + idle timeout as the deadline when a session has no timeoutAt (a later update never moves it)', async () => {
     authorized();
-    const updatedAt = new Date(Date.now() - 60_000);
-    db.depositSession.findMany.mockResolvedValue([candidate({ timeoutAt: null, updatedAt })]);
-    db.depositSession.findUnique.mockResolvedValue(fullSession({ status: 'REVIEW', timeoutAt: null, updatedAt }));
+    const startedAt = new Date(Date.now() - 60_000);
+    db.depositSession.findMany.mockResolvedValue([candidate({ timeoutAt: null, startedAt })]);
+    db.depositSession.findUnique.mockResolvedValue(fullSession({ status: 'REVIEW', timeoutAt: null, startedAt, updatedAt: new Date() }));
 
     const res = await GET(makeReq(), { params: Promise.resolve({ code: 'm1' }) });
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.lease.expiresAt).toBeGreaterThan(data.lease.issuedAt);
-    expect(data.lease.expiresAt).toBeLessThanOrEqual(Math.floor((updatedAt.getTime() + 3 * 60_000) / 1000));
+    expect(data.lease.expiresAt).toBeLessThanOrEqual(Math.floor((startedAt.getTime() + 3 * 60_000) / 1000));
   });
 
-  it('closes an idle REVIEW session without timeoutAt instead of leasing it forever', async () => {
+  it('closes a REVIEW session without timeoutAt past start + idle instead of leasing it forever, even if just updated', async () => {
     authorized();
-    const updatedAt = new Date(Date.now() - 4 * 60_000);
-    const stale = candidate({ timeoutAt: null, updatedAt });
+    const startedAt = new Date(Date.now() - 4 * 60_000);
+    const stale = candidate({ timeoutAt: null, startedAt });
     db.depositSession.findMany.mockResolvedValue([stale]);
-    db.depositSession.findUnique.mockResolvedValue({ ...stale, status: 'REVIEW' });
+    db.depositSession.findUnique.mockResolvedValue({ ...stale, status: 'REVIEW', updatedAt: new Date() });
     const data = await (await GET(makeReq(), { params: Promise.resolve({ code: 'm1' }) })).json();
     expect(data.lease).toBeNull();
     expect(db.depositSession.update).toHaveBeenCalledWith({

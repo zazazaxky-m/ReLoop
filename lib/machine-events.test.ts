@@ -115,7 +115,7 @@ describe('lib/machine-events', () => {
 
       const { mockTx } = await import('./prisma') as any;
       mockTx.machineEvent.create.mockResolvedValue({ id: 'evt_new' });
-      mockTx.depositSession.findUnique.mockResolvedValue({ id: 'sess1', status: 'ACTIVE' });
+      mockTx.depositSession.findUnique.mockResolvedValue({ id: 'sess1', status: 'ACTIVE', startedAt: new Date() });
       mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
       mockTx.depositItem.create.mockResolvedValue({ id: 'item1' });
 
@@ -146,7 +146,7 @@ describe('lib/machine-events', () => {
 
       const { mockTx } = await import('./prisma') as any;
       mockTx.machineEvent.create.mockResolvedValue({ id: 'evt_new' });
-      mockTx.depositSession.findUnique.mockResolvedValue({ id: 'sess1', status: 'ACTIVE' });
+      mockTx.depositSession.findUnique.mockResolvedValue({ id: 'sess1', status: 'ACTIVE', startedAt: new Date() });
       mockTx.wasteType.findFirst.mockResolvedValue(null);
       mockTx.wasteType.create.mockResolvedValue({ id: 'wt-unknown' });
       mockTx.depositItem.create.mockResolvedValue({ id: 'item1' });

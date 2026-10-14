@@ -69,6 +69,13 @@ async function postBatch(events: EdgeEvent[]) {
 }
 
 let clock = 0;
+/**
+ * Machine clock for the events: strictly increasing from the start of this run.
+ * R03 C1 compares an acceptance point's occurredAt with its session deadline,
+ * so event times must stay within the sessions these tests open (a fixed
+ * calendar date would read as "after the deadline" on the day it lies ahead).
+ */
+const EVENT_CLOCK_BASE = Date.now();
 function edgeEvent(sessionId: string, eventType: string, payload: Record<string, unknown>): EdgeEvent {
   clock += 1;
   return {
@@ -77,7 +84,7 @@ function edgeEvent(sessionId: string, eventType: string, payload: Record<string,
     payload,
     sessionId,
     depositItemId: null,
-    occurredAt: new Date(Date.UTC(2026, 9, 14, 8, 0, 0, clock)).toISOString(),
+    occurredAt: new Date(EVENT_CLOCK_BASE + clock).toISOString(),
   };
 }
 
@@ -1235,11 +1242,19 @@ describe("legacy approval is fenced to pre-cutover rows the operator saw (M04 fi
     expect((await review("adminA", late.id, { action: "reject" })).status).toBe(200);
     expect(await ledgerOf(late.id)).toEqual([]);
     // The machine stays the authority on its outbox (R03): its queued acceptance point still decides the other item.
-    await send(stuck.id, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }, timedOut.id);
+    // R03 C1: this acceptance was made after the session deadline, so it is a held review keeping its
+    // decisive reason (never AVAILABLE); one made before the deadline follows the normal policy
+    // (tests/integration/machine-session-race.test.ts).
+    const accept = edgeEvent(stuck.id, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true });
+    accept.depositItemId = timedOut.id;
+    accept.occurredAt = new Date().toISOString();
+    expect((await postBatch([accept])).body.results[0].status).toBe("accepted");
     const decided = await itemOf(timedOut.id);
     expect(decided.acceptanceEventId).not.toBeNull();
     expect(decided.status).not.toBe("REJECTED");
     expect(decided.rewardAmount).toBeGreaterThan(0);
+    expect(decided).toMatchObject({ status: "REVIEW", validationReasonCode: "SESSION_TIMEOUT" });
+    expect((await ledgerOf(timedOut.id)).map((row) => [row.entryType, row.status])).toEqual([["EARN", "PENDING"]]);
   });
 
   it("L1: a legacy approval carries the item version the superadmin saw and is refused once the row changed", async () => {

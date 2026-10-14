@@ -628,10 +628,12 @@ model Campaign {
 
 // One active session per machine (R03, EX-04): the hand-written partial unique
 // index "DepositSession_one_active_per_machine" on ("machineId") WHERE status IN
-// (RESERVED, ACTIVE, PROCESSING_ITEM, REVIEW), created by migration
-// 20261014120100_one_active_machine_session_enforce. Prisma 6 cannot express
-// partial indexes; remove any generated DROP INDEX for it. Writers go through
-// lib/deposit-session-service.ts (User -> Machine row locks).
+// (RESERVED, ACTIVE, PROCESSING_ITEM, REVIEW). Staged in
+// prisma/migrations-enforce/one_active_machine_session_enforce and moved into
+// prisma/migrations in a later release, after `npm run reconcile:sessions`
+// exits 0. Prisma 6 cannot express partial indexes; remove any generated DROP
+// INDEX for it. Writers go through lib/deposit-session-service.ts (User ->
+// Machine row locks), which keep exclusivity without the index.
 model DepositSession {
   id           String        @id @default(cuid())
   userId       String

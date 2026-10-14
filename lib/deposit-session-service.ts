@@ -9,6 +9,9 @@ import { SESSION_CLOSED_REASON, SESSION_TIMEOUT_REASON } from "./machine-events/
 import { HttpError, type CurrentUser } from "./rbac";
 import { campaignSupportsMachine } from "./reward-policy";
 import { runWalletTransaction } from "./wallet-service";
+import { MACHINE_LEASE_MAX_SECONDS, machineLeaseExpiry, sessionDeadline, sessionEnd } from "./deposit-session-deadline";
+
+export { MACHINE_LEASE_MAX_SECONDS, machineLeaseExpiry, sessionDeadline, sessionEnd };
 
 /**
  * Deposit sessions on a machine (task R03, finding EX-04).
@@ -18,17 +21,19 @@ import { runWalletTransaction } from "./wallet-service";
  * ReadCommitted transaction that locks the User, then the Machine row
  * (lib/db-locks.ts order: User -> RewardFundingAccount -> Campaign -> Machine ->
  * DepositSession -> DepositItem), and only then re-reads the machine, its
- * sessions and the campaign. The partial unique index
- * "DepositSession_one_active_per_machine" (migration
- * 20261014120100_one_active_machine_session_enforce) is the database backstop
- * for writers that skip the lock; its unique violation is answered as a resume
- * (same owner) or 409 (anyone else), never as a 500.
+ * sessions and the campaign. The lock alone keeps exclusivity in the expand
+ * release. The partial unique index "DepositSession_one_active_per_machine"
+ * is the database backstop of the later enforce release (staged in
+ * prisma/migrations-enforce/one_active_machine_session_enforce, deployed only
+ * after `npm run reconcile:sessions` exits 0); its unique violation is
+ * answered as a resume (same owner) or 409 (anyone else), never as a 500.
  *
  * Release. A session leaves its machine only by
  *  - finish/cancel by its owner, refused while the machine still decides an
  *    item (`undecided`: PENDING, no acceptance point), or
- *  - the timeout policy (`expireIfTimedOut`): only after the session's deadline,
- *    when every lease the server issued for it has expired. Undecided items go
+ *  - the timeout policy (`expireTimedOutSessions`): only after the session's
+ *    deadline, when every lease the server issued for it has expired (see the
+ *    clock assumption in lib/deposit-session-deadline.ts). Undecided items go
  *    to REVIEW (reason SESSION_TIMEOUT); nothing is deleted and no money moves.
  * A newer scan never overwrites or replaces a live session, and the machine
  * lease never chooses between several live sessions.
@@ -55,22 +60,6 @@ export const CAMPAIGN_NOT_FOR_MACHINE = "Campaign ini tidak berlaku untuk setora
 
 export { SESSION_CLOSED_REASON, SESSION_TIMEOUT_REASON };
 
-/** Upper bound of a machine lease (seconds), independent of the session deadline. */
-export const MACHINE_LEASE_MAX_SECONDS = 300;
-
-/**
- * The last moment a lease issued for `session` can be valid: `timeoutAt`, or
- * for a session without one (legacy rows, e.g. REVIEW sessions created before
- * R03) `updatedAt` + the machine's idle timeout. It never moves earlier:
- * `timeoutAt` is only extended (ITEM_DETECTED) and `updatedAt` only grows.
- */
-export function sessionDeadline(
-  session: { timeoutAt: Date | null; updatedAt: Date },
-  idleTimeoutMinutes: number,
-): Date {
-  return session.timeoutAt ?? new Date(session.updatedAt.getTime() + idleTimeoutMinutes * 60_000);
-}
-
 /** Items the machine has not decided yet: physically still in the machine. */
 export function undecidedItemsWhere(sessionId: string): Prisma.DepositItemWhereInput {
   return { sessionId, status: "PENDING", acceptanceEventId: null };
@@ -84,34 +73,43 @@ export interface ExpiredSession {
 
 /**
  * The timeout policy, inside the caller's transaction. The caller already
- * holds the Machine lock (after a User lock). Locks the session, re-reads it,
- * and closes it only when it is still active and its deadline has passed:
- * every lease issued for it expired then (leases never outlive the deadline,
- * see `machineLeaseExpiry`), so the machine is no longer running it. Each
- * undecided item is locked (id order) and moved to REVIEW with reason
- * SESSION_TIMEOUT (an existing reason is kept): it is decided by a late
- * acceptance/rejection event of this same session or through the review queue.
- * Returns null when the session stays.
+ * holds the Machine lock (after a User lock). Locks every given session, then
+ * every undecided item of those still to close, each class in id order (the
+ * global lock order: all DepositSession rows before any DepositItem row),
+ * re-reading each row after its lock. A session closes only when it is still
+ * active and its deadline has passed: every lease issued for it expired then
+ * (`machineLeaseExpiry`), so the machine is no longer running it. Each
+ * undecided item moves to REVIEW with reason SESSION_TIMEOUT (an existing
+ * reason is kept): a later acceptance/rejection event of this same session
+ * still decides it (an acceptance made after the deadline is held for review,
+ * lib/machine-events/acceptance.ts), or the review queue does. Returns the
+ * sessions it closed.
  */
-export async function expireIfTimedOut(
+export async function expireTimedOutSessions(
   tx: Prisma.TransactionClient,
-  sessionId: string,
+  sessionIds: string[],
   idleTimeoutMinutes: number,
   now: Date,
-): Promise<ExpiredSession | null> {
-  await lockDepositSession(tx, sessionId);
-  const session = await tx.depositSession.findUnique({ where: { id: sessionId } });
-  if (!session || !isActiveSession(session.status)) return null;
-  if (sessionDeadline(session, idleTimeoutMinutes).getTime() > now.getTime()) return null;
+): Promise<ExpiredSession[]> {
+  const ids = [...new Set(sessionIds)].sort();
+  for (const id of ids) await lockDepositSession(tx, id);
+  const closing: { id: string; userId: string }[] = [];
+  for (const id of ids) {
+    const session = await tx.depositSession.findUnique({ where: { id } });
+    if (!session || !isActiveSession(session.status)) continue;
+    if (sessionDeadline(session, idleTimeoutMinutes).getTime() > now.getTime()) continue;
+    closing.push({ id, userId: session.userId });
+  }
+  if (closing.length === 0) return [];
 
   const undecided = await tx.depositItem.findMany({
-    where: undecidedItemsWhere(sessionId),
-    select: { id: true },
+    where: { sessionId: { in: closing.map((s) => s.id) }, status: "PENDING", acceptanceEventId: null },
+    select: { id: true, sessionId: true },
     orderBy: { id: "asc" },
   });
-  const heldItemIds: string[] = [];
-  for (const { id } of undecided) {
-    await lockDepositItem(tx, id);
+  const held = new Map<string, string[]>(closing.map((s) => [s.id, []]));
+  for (const { id } of undecided) await lockDepositItem(tx, id);
+  for (const { id, sessionId } of undecided) {
     const item = await tx.depositItem.findUnique({
       where: { id },
       select: { status: true, acceptanceEventId: true, validationReasonCode: true },
@@ -121,13 +119,25 @@ export async function expireIfTimedOut(
       where: { id, status: "PENDING", acceptanceEventId: null },
       data: { status: "REVIEW", validationReasonCode: item.validationReasonCode ?? SESSION_TIMEOUT_REASON },
     });
-    if (count === 1) heldItemIds.push(id);
+    if (count === 1) held.get(sessionId)?.push(id);
   }
-  await tx.depositSession.update({
-    where: { id: sessionId },
-    data: { status: "EXPIRED", completedAt: now },
-  });
-  return { sessionId, userId: session.userId, heldItemIds };
+  for (const { id } of closing) {
+    await tx.depositSession.update({
+      where: { id },
+      data: { status: "EXPIRED", completedAt: now },
+    });
+  }
+  return closing.map((s) => ({ sessionId: s.id, userId: s.userId, heldItemIds: held.get(s.id) ?? [] }));
+}
+
+/** The timeout policy for one session (`expireTimedOutSessions`); null when it stays. */
+export async function expireIfTimedOut(
+  tx: Prisma.TransactionClient,
+  sessionId: string,
+  idleTimeoutMinutes: number,
+  now: Date,
+): Promise<ExpiredSession | null> {
+  return (await expireTimedOutSessions(tx, [sessionId], idleTimeoutMinutes, now))[0] ?? null;
 }
 
 async function auditExpired(expired: ExpiredSession[], closedBy: "scan" | "machine-poll" | "owner") {
@@ -226,12 +236,10 @@ async function decideStart(
   const campaignId = input.campaignId ?? null;
   if (live.length === 0 && campaignId) await assertCampaignForMachine(tx, actor.id, machine.organizationId, campaignId);
 
-  const expired: ExpiredSession[] = [];
-  for (const session of timedOut) {
-    const closed = await expireIfTimedOut(tx, session.id, idle, now);
-    if (closed) expired.push(closed);
-    else live.push(session);
-  }
+  // All timed-out sessions together: sessions, then items, each in id order (M1).
+  const expired = await expireTimedOutSessions(tx, timedOut.map((s) => s.id), idle, now);
+  const closedIds = new Set(expired.map((e) => e.sessionId));
+  for (const session of timedOut) if (!closedIds.has(session.id)) live.push(session);
 
   if (live.length > 1) return { kind: "conflict", sessionIds: live.map((s) => s.id), expired };
   if (live.length === 1) {
@@ -454,7 +462,7 @@ export async function currentMachineSession(machine: {
   const idle = machine.sessionIdleTimeoutMinutes;
   const candidates = await prisma.depositSession.findMany({
     where: { machineId: machine.id, status: { in: [...ACTIVE_SESSION_STATUSES] } },
-    select: { id: true, userId: true, timeoutAt: true, updatedAt: true },
+    select: { id: true, userId: true, timeoutAt: true, startedAt: true },
     orderBy: [{ startedAt: "asc" }, { id: "asc" }],
   });
   const live: string[] = [];
@@ -482,15 +490,4 @@ export async function currentMachineSession(machine: {
     return { sessionId: null, conflict: true, liveSessionIds: live };
   }
   return { sessionId: live[0] ?? null, conflict: false, liveSessionIds: live };
-}
-
-/**
- * Lease expiry (unix seconds): at most MACHINE_LEASE_MAX_SECONDS after issue
- * and never after the session deadline, which is what lets the timeout policy
- * treat "deadline passed" as "every lease expired". Null when the deadline is
- * already reached (no lease).
- */
-export function machineLeaseExpiry(deadline: Date, issuedAtSeconds: number): number | null {
-  const expiresAt = Math.min(Math.floor(deadline.getTime() / 1000), issuedAtSeconds + MACHINE_LEASE_MAX_SECONDS);
-  return expiresAt > issuedAtSeconds ? expiresAt : null;
 }

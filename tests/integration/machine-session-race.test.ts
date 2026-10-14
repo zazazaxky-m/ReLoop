@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
@@ -23,8 +23,15 @@ import { deferred, isStillPending } from "../support/race-probe";
 
 const ROOT = path.resolve(__dirname, "../..");
 const ACTIVE = ["RESERVED", "ACTIVE", "PROCESSING_ITEM", "REVIEW"] as const;
-const ENFORCE_MIGRATION = "prisma/migrations/20261014120100_one_active_machine_session_enforce/migration.sql";
+/**
+ * I2 (fix round 1): the enforce step is staged outside prisma/migrations, so
+ * `prisma migrate deploy` (and the harness) runs the expand release without
+ * the index; tests that need the index apply the staged SQL and remove it.
+ */
+const ENFORCE_STAGED = "prisma/migrations-enforce/one_active_machine_session_enforce/migration.sql";
 const ACTIVE_INDEX = "DepositSession_one_active_per_machine";
+const SESSION_TIMEOUT = "SESSION_TIMEOUT";
+const SESSION_CLOSED = "SESSION_CLOSED";
 
 const MACHINE_IN_USE = "Mesin sedang digunakan. Silakan coba lagi nanti atau gunakan mesin lain.";
 const MACHINE_UNAVAILABLE = "Mesin sedang tidak dapat digunakan. Silakan gunakan mesin lain.";
@@ -90,8 +97,33 @@ async function postEvents(events: EdgeEvent[]) {
 }
 
 function edgeEvent(sessionId: string | null, eventType: string, payload: Record<string, unknown> = {},
-  depositItemId: string | null = null): EdgeEvent {
-  return { localEventId: randomUUID(), eventType, payload, sessionId, depositItemId, occurredAt: new Date().toISOString() };
+  depositItemId: string | null = null, occurredAt: Date = new Date()): EdgeEvent {
+  return { localEventId: randomUUID(), eventType, payload, sessionId, depositItemId, occurredAt: occurredAt.toISOString() };
+}
+
+function enforceSql() {
+  const sql = readFileSync(path.join(ROOT, ENFORCE_STAGED), "utf8");
+  const guard = sql.match(/DO \$\$[\s\S]*?END \$\$;/)![0];
+  const createIndex = sql.match(/CREATE UNIQUE INDEX "DepositSession_one_active_per_machine"[\s\S]*?;/)![0];
+  return { sql, guard, createIndex };
+}
+
+async function indexExists() {
+  const rows = await f.db.$queryRaw<{ indexname: string }[]>`SELECT indexname FROM pg_indexes WHERE indexname = ${ACTIVE_INDEX}`;
+  return rows.length === 1;
+}
+
+/** Runs `fn` as the enforce release would: staged guard + index applied, removed afterwards (test state only). */
+async function withStagedEnforce(fn: () => Promise<void>) {
+  const { guard, createIndex } = enforceSql();
+  expect(await indexExists()).toBe(false);
+  await f.db.$executeRawUnsafe(guard);
+  await f.db.$executeRawUnsafe(createIndex);
+  try {
+    await fn();
+  } finally {
+    await f.db.$executeRawUnsafe(`DROP INDEX IF EXISTS "${ACTIVE_INDEX}"`);
+  }
 }
 
 async function wasteTypeId() {
@@ -250,8 +282,9 @@ describe("one active deposit session per machine (EX-04)", () => {
     expect(await activeCount()).toBe(1);
   });
 
-  it("maps a unique-index race (a writer that skipped the machine lock) to 409 for another user and to a resume for the owner", async () => {
+  it("enforce release: maps a unique-index race (a writer that skipped the machine lock) to 409 for another user and to a resume for the owner", async () => {
     const { startOrResumeDeposit } = await import("@/lib/deposit-session-service");
+    await withStagedEnforce(async () => {
     const other = await f.connection();
     const later = () => new Date(Date.now() + 5 * 60_000);
 
@@ -278,6 +311,7 @@ describe("one active deposit session per machine (EX-04)", () => {
     expect(resumed.resumed).toBe(true);
     expect(resumed.session.id).toBe(mine);
     expect(await activeCount()).toBe(1);
+    });
   });
 
   it("gives the owner a read-only active-session summary and another user nothing", async () => {
@@ -412,27 +446,28 @@ describe("session release only through finish/cancel or the timeout policy", () 
     expect(audit?.metadataJson).toMatchObject({ reason: "TIMEOUT", heldItemIds: [i1.id] });
   });
 
-  it("a late acceptance event of the previous session pays that session's item and owner, never the next user's", async () => {
+  it("a queued acceptance the machine made before the deadline pays that session's item and owner, never the next user's (C1: normal policy)", async () => {
     await warmUp();
     const typeId = await wasteTypeId();
     const s1 = (await scan("userA", { machineCode: f.ids.machineCode, token: await f.machineQrToken() })).body.session.id as string;
     await postEvents([edgeEvent(s1, "ITEM_DETECTED", { wasteTypeId: typeId, quantity: 1 }), edgeEvent(s1, "WEIGHT_MEASURED", { weightGrams: 25 })]);
     const i1 = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: s1 } });
-    // The machine went quiet (offline); its lease ran out and s1 timed out.
-    await f.db.depositSession.update({ where: { id: s1 }, data: { timeoutAt: new Date(Date.now() - 1_000) } });
+    // The machine went offline right after accepting the item; its lease ran out and s1 timed out.
+    const deadline = new Date(Date.now() - 1_000);
+    await f.db.depositSession.update({ where: { id: s1 }, data: { timeoutAt: deadline } });
 
     // The next user scans: the timeout policy closes s1 (never overwrites it) and starts s2.
     const second = await scan("userB", { machineCode: f.ids.machineCode, token: await f.machineQrToken() });
     expect(second.status).toBe(201);
     const s2 = second.body.session.id as string;
     expect((await f.db.depositSession.findUniqueOrThrow({ where: { id: s1 } })).status).toBe("EXPIRED");
-    expect((await f.db.depositItem.findUniqueOrThrow({ where: { id: i1.id } })).status).toBe("REVIEW");
+    expect(await f.db.depositItem.findUniqueOrThrow({ where: { id: i1.id } })).toMatchObject({ status: "REVIEW", validationReasonCode: SESSION_TIMEOUT });
     expect((await machineSession()).body.lease.sessionId).toBe(s2);
     await postEvents([edgeEvent(s2, "ITEM_DETECTED", { wasteTypeId: typeId, quantity: 1 })]);
     const i2 = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: s2 } });
 
     // An inconsistent late event (s1 naming s2's item) is recorded but touches no item.
-    const crossed = edgeEvent(s1, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }, i2.id);
+    const crossed = edgeEvent(s1, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }, i2.id, new Date(deadline.getTime() - 5_000));
     await postEvents([crossed]);
     expect(await f.db.depositItem.findUniqueOrThrow({ where: { id: i1.id } })).toMatchObject({ status: "REVIEW", acceptanceEventId: null });
     expect(await f.db.depositItem.findUniqueOrThrow({ where: { id: i2.id } })).toMatchObject({ status: "PENDING", acceptanceEventId: null });
@@ -440,9 +475,9 @@ describe("session release only through finish/cancel or the timeout policy", () 
     expect(crossedRow.depositItemId).toBeNull();
     expect(crossedRow.payloadJson).toMatchObject({ orphanedReferences: { depositItemId: i2.id } });
 
-    // The queued acceptance point of s1 arrives: s1's item and s1's owner.
+    // s1's queued acceptance point, made by the machine while its lease was still valid.
     const before = { a: await getWalletBalance(f.ids.userA), b: await getWalletBalance(f.ids.userB) };
-    const accepted = edgeEvent(s1, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true });
+    const accepted = edgeEvent(s1, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }, null, new Date(deadline.getTime() - 2_000));
     await postEvents([accepted]);
     const acceptedRow = await f.db.machineEvent.findFirstOrThrow({ where: { localEventId: accepted.localEventId } });
     const priced = await f.db.depositItem.findUniqueOrThrow({ where: { id: i1.id } });
@@ -457,14 +492,92 @@ describe("session release only through finish/cancel or the timeout policy", () 
     expect((await f.db.depositSession.findUniqueOrThrow({ where: { id: s1 } })).status).toBe("EXPIRED");
   });
 
-  it("a REVIEW session without timeoutAt stops blocking the machine once idle; items and money are kept", async () => {
+  it("C1: an acceptance made after the deadline, or of an item reported after the session ended, is a held review with its decisive reason, never available", async () => {
+    await warmUp();
+    const typeId = await wasteTypeId();
+    // (a) Undecided at the timeout; the machine (clock-consistent with its lease) accepted it only after the deadline.
+    const s1 = (await scan("userA", { machineCode: f.ids.machineCode, token: await f.machineQrToken() })).body.session.id as string;
+    await postEvents([edgeEvent(s1, "ITEM_DETECTED", { wasteTypeId: typeId, quantity: 1 }), edgeEvent(s1, "WEIGHT_MEASURED", { weightGrams: 25 })]);
+    const timedOut = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: s1 } });
+    const deadline = new Date(Date.now() - 10_000);
+    await f.db.depositSession.update({ where: { id: s1 }, data: { timeoutAt: deadline } });
+    expect((await machineSession()).body.lease).toBeNull();
+    const lateAccept = edgeEvent(s1, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true }, null, new Date(deadline.getTime() + 1_000));
+    await postEvents([lateAccept]);
+    const lateRow = await f.db.machineEvent.findFirstOrThrow({ where: { localEventId: lateAccept.localEventId } });
+    expect(await f.db.depositItem.findUniqueOrThrow({ where: { id: timedOut.id } })).toMatchObject({
+      status: "REVIEW", validationReasonCode: SESSION_TIMEOUT, acceptanceEventId: lateRow.id });
+    // Evidence is frozen once the acceptance point is recorded.
+    await postEvents([edgeEvent(s1, "WEIGHT_MEASURED", { weightGrams: 900 }, timedOut.id)]);
+    expect((await f.db.depositItem.findUniqueOrThrow({ where: { id: timedOut.id } })).measuredWeightGrams).toBe(25);
+
+    // (b) Reported after the owner finished: SESSION_CLOSED, even with an acceptance time before any deadline.
+    const s2 = (await scan("userA", { machineCode: f.ids.machineCode, token: await f.machineQrToken() })).body.session.id as string;
+    expect((await patchSession("userA", s2, "finish")).status).toBe(200);
+    await postEvents([edgeEvent(s2, "ITEM_DETECTED", { wasteTypeId: typeId, quantity: 1 }), edgeEvent(s2, "WEIGHT_MEASURED", { weightGrams: 25 })]);
+    const closedItem = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: s2 } });
+    await postEvents([edgeEvent(s2, "ITEM_ACCEPTED_POINT", { acceptanceBeam: true })]);
+    expect(await f.db.depositItem.findUniqueOrThrow({ where: { id: closedItem.id } })).toMatchObject({
+      status: "REVIEW", validationReasonCode: SESSION_CLOSED });
+    expect((await f.db.depositItem.findUniqueOrThrow({ where: { id: closedItem.id } })).acceptanceEventId).not.toBeNull();
+
+    // Held, never available: one PENDING earning per item, nothing spendable.
+    for (const item of [timedOut, closedItem]) {
+      const rows = await f.db.rewardLedger.findMany({ where: { depositItemId: item.id } });
+      expect(rows.map((row) => [row.entryType, row.status])).toEqual([["EARN", "PENDING"]]);
+      expect(rows[0].amount).toBeGreaterThan(0);
+    }
+    expect((await getWalletBalance(f.ids.userA)).available).toBe(0);
+
+    // A human then decides per M04's post-acceptance rule.
+    const approved = await call("adminA", "PATCH", `/api/deposit-reviews/${timedOut.id}`, { action: "approve" });
+    expect(approved.status).toBe(200);
+    expect((await f.db.depositItem.findUniqueOrThrow({ where: { id: timedOut.id } })).status).toBe("ACCEPTED");
+    expect((await getWalletBalance(f.ids.userA)).available).toBeGreaterThan(0);
+  });
+
+  it("I1: a late ITEM_DETECTED never extends or revives a session past its deadline; the next poll ends it", async () => {
+    await warmUp();
+    const typeId = await wasteTypeId();
+    const s1 = (await scan("userA", { machineCode: f.ids.machineCode, token: await f.machineQrToken() })).body.session.id as string;
+    const deadline = new Date(Date.now() - 1_000);
+    await f.db.depositSession.update({ where: { id: s1 }, data: { timeoutAt: deadline } });
+    // The machine reports an item before its next poll ran the timeout policy.
+    await postEvents([edgeEvent(s1, "ITEM_DETECTED", { wasteTypeId: typeId, quantity: 1 })]);
+    const pending = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: s1 } });
+    expect(pending.status).toBe("PENDING");
+    const untouched = await f.db.depositSession.findUniqueOrThrow({ where: { id: s1 } });
+    expect(untouched).toMatchObject({ status: "ACTIVE", timeoutAt: deadline });
+
+    expect((await machineSession()).body).toMatchObject({ lease: null, session: null });
+    expect((await f.db.depositSession.findUniqueOrThrow({ where: { id: s1 } })).status).toBe("EXPIRED");
+    expect(await f.db.depositItem.findUniqueOrThrow({ where: { id: pending.id } }))
+      .toMatchObject({ status: "REVIEW", validationReasonCode: SESSION_TIMEOUT });
+
+    // A legacy session without timeoutAt past its deadline (start + idle): late events that touch the
+    // session (an item, an anomaly) never bring it back either.
+    const machine = await f.db.machine.findUniqueOrThrow({ where: { id: f.ids.machineA } });
+    const startedAt = new Date(Date.now() - machine.sessionIdleTimeoutMinutes * 60_000 - 60_000);
+    const legacy = await f.db.depositSession.create({ data: {
+      userId: f.ids.userB, machineId: f.ids.machineA, status: "REVIEW", timeoutAt: null, startedAt } });
+    await postEvents([
+      edgeEvent(legacy.id, "ITEM_DETECTED", { wasteTypeId: typeId, quantity: 1 }),
+      edgeEvent(legacy.id, "FRAUD_DETECTED", { reason: "REVERSE_MOTION" }),
+    ]);
+    expect((await f.db.depositSession.findUniqueOrThrow({ where: { id: legacy.id } })).timeoutAt).toBeNull();
+    expect((await machineSession()).body).toMatchObject({ lease: null, session: null });
+    expect((await f.db.depositSession.findUniqueOrThrow({ where: { id: legacy.id } })).status).toBe("EXPIRED");
+  });
+
+  it("a REVIEW session without timeoutAt stops blocking the machine after start + idle timeout; items and money are kept", async () => {
     await warmUp();
     const machine = await f.db.machine.findUniqueOrThrow({ where: { id: f.ids.machineA } });
     const idleMs = machine.sessionIdleTimeoutMinutes * 60_000;
     const typeId = await wasteTypeId();
-    const reviewSession = async (updatedAt: Date) => {
+    const reviewSession = async (startedAt: Date) => {
+      const updatedAt = startedAt;
       const session = await f.db.depositSession.create({ data: {
-        userId: f.ids.userA, machineId: f.ids.machineA, status: "REVIEW", timeoutAt: null, startedAt: updatedAt, updatedAt } });
+        userId: f.ids.userA, machineId: f.ids.machineA, status: "REVIEW", timeoutAt: null, startedAt, updatedAt } });
       const item = await f.db.depositItem.create({ data: {
         sessionId: session.id, wasteTypeId: typeId, quantity: 1, measuredWeightGrams: 25, status: "REVIEW",
         validationReasonCode: "REVERSE_MOTION", acceptedAt: updatedAt, acceptanceEventId: `evt-${randomUUID()}`,
@@ -476,15 +589,16 @@ describe("session release only through finish/cancel or the timeout policy", () 
       return { session, item };
     };
 
-    // Recently active: still the owner's, leased only up to updatedAt + idle.
+    // Recently started: still the owner's, leased only up to startedAt + idle.
     const fresh = await reviewSession(new Date(Date.now() - 30_000));
     expect((await scan("userB", { machineCode: f.ids.machineCode, token: await f.machineQrToken() })).status).toBe(409);
     const lease = (await machineSession()).body.lease;
     expect(lease.sessionId).toBe(fresh.session.id);
-    expect(lease.expiresAt * 1000).toBeLessThanOrEqual(fresh.session.updatedAt.getTime() + idleMs);
+    expect(lease.expiresAt * 1000).toBeLessThanOrEqual(fresh.session.startedAt.getTime() + idleMs);
 
-    // Idle past the machine's idle timeout: the poll closes it through the timeout policy.
-    await f.db.depositSession.update({ where: { id: fresh.session.id }, data: { updatedAt: new Date(Date.now() - idleMs - 1_000) } });
+    // Past start + idle timeout: the poll closes it through the timeout policy, even though the
+    // row was just updated (an update never moves the deadline).
+    await f.db.depositSession.update({ where: { id: fresh.session.id }, data: { startedAt: new Date(Date.now() - idleMs - 1_000), anomalyCount: 1 } });
     expect((await machineSession()).body).toMatchObject({ lease: null, session: null });
     expect((await f.db.depositSession.findUniqueOrThrow({ where: { id: fresh.session.id } })).status).toBe("EXPIRED");
     expect(await f.db.depositItem.findUniqueOrThrow({ where: { id: fresh.item.id } }))
@@ -503,37 +617,41 @@ describe("session release only through finish/cancel or the timeout policy", () 
 });
 
 describe("legacy duplicates: no ambiguous lease, dry-run reconcile, guarded enforce", () => {
-  function enforceSql() {
-    const sql = readFileSync(path.join(ROOT, ENFORCE_MIGRATION), "utf8");
-    const guard = sql.match(/DO \$\$[\s\S]*?END \$\$;/)![0];
-    const createIndex = sql.match(/CREATE UNIQUE INDEX "DepositSession_one_active_per_machine"[\s\S]*?;/)![0];
-    return { sql, guard, createIndex };
-  }
-
-  it("the enforce migration is guarded, never writes rows, and builds exactly the brief's partial unique index", async () => {
-    const { sql, guard } = enforceSql();
+  it("I2: the enforce step is staged outside prisma/migrations (never deployed with expand), guarded, never writes rows, and builds exactly the brief's partial unique index", async () => {
+    const { sql, guard, createIndex } = enforceSql();
+    // Not deployable in the expand release: not a Prisma migration, not applied, no index.
+    expect(existsSync(path.join(ROOT, ENFORCE_STAGED))).toBe(true);
+    expect(readdirSync(path.join(ROOT, "prisma/migrations")).filter((name) => /one_active_machine_session_enforce/.test(name))).toEqual([]);
+    expect(await f.db.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM _prisma_migrations WHERE migration_name LIKE '%one_active_machine_session_enforce%'`).toEqual([{ n: 0 }]);
+    expect(await indexExists()).toBe(false);
+    expect(sql).toMatch(/npm run reconcile:sessions/);
     const statements = sql.replace(/--.*$/gm, "");
     expect(statements).not.toMatch(/\b(UPDATE|DELETE|DROP|TRUNCATE|INSERT)\b/i);
     expect(sql).toContain("scripts/reconcile-active-sessions.ts");
-    const [index] = await f.db.$queryRaw<{ indexdef: string }[]>`
-      SELECT indexdef FROM pg_indexes WHERE indexname = ${ACTIVE_INDEX}`;
-    expect(index.indexdef).toBe(
-      `CREATE UNIQUE INDEX "${ACTIVE_INDEX}" ON public."DepositSession" USING btree ("machineId") WHERE ` +
-      `(status = ANY (ARRAY['RESERVED'::"SessionStatus", 'ACTIVE'::"SessionStatus", 'PROCESSING_ITEM'::"SessionStatus", 'REVIEW'::"SessionStatus"]))`);
-    // Clean database: the guard passes.
+    // Applied as the enforce release would (clean database: the guard passes).
     await f.db.$executeRawUnsafe(guard);
-    // A second active session on the machine is refused by the database itself.
-    await f.db.depositSession.create({ data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
-    await expect(f.db.depositSession.create({ data: { userId: f.ids.userB, machineId: f.ids.machineA, status: "REVIEW" } }))
-      .rejects.toMatchObject({ code: "P2002" });
-    await f.db.depositSession.create({ data: { userId: f.ids.userB, machineId: f.ids.machineA, status: "COMPLETED" } });
+    await f.db.$executeRawUnsafe(createIndex);
+    try {
+      const [index] = await f.db.$queryRaw<{ indexdef: string }[]>`
+        SELECT indexdef FROM pg_indexes WHERE indexname = ${ACTIVE_INDEX}`;
+      expect(index.indexdef).toBe(
+        `CREATE UNIQUE INDEX "${ACTIVE_INDEX}" ON public."DepositSession" USING btree ("machineId") WHERE ` +
+        `(status = ANY (ARRAY['RESERVED'::"SessionStatus", 'ACTIVE'::"SessionStatus", 'PROCESSING_ITEM'::"SessionStatus", 'REVIEW'::"SessionStatus"]))`);
+      // A second active session on the machine is refused by the database itself.
+      await f.db.depositSession.create({ data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
+      await expect(f.db.depositSession.create({ data: { userId: f.ids.userB, machineId: f.ids.machineA, status: "REVIEW" } }))
+        .rejects.toMatchObject({ code: "P2002" });
+      await f.db.depositSession.create({ data: { userId: f.ids.userB, machineId: f.ids.machineA, status: "COMPLETED" } });
+    } finally {
+      await f.db.$executeRawUnsafe(`DROP INDEX IF EXISTS "${ACTIVE_INDEX}"`);
+    }
   });
 
   it("expand phase (no index yet): the machine row lock alone keeps concurrent scans exclusive", async () => {
     await warmUp();
-    const { createIndex } = enforceSql();
-    await f.db.$executeRawUnsafe(`DROP INDEX "${ACTIVE_INDEX}"`);
-    try {
+    expect(await indexExists()).toBe(false);
+    {
       const body = { machineCode: f.ids.machineCode, token: await f.machineQrToken() };
       const [a, b] = await inOrder(() => scan("userA", body), () => scan("userB", body));
       expect([a.status, b.status]).toEqual([201, 409]);
@@ -542,29 +660,21 @@ describe("legacy duplicates: no ambiguous lease, dry-run reconcile, guarded enfo
       expect([c.status, d.status]).toEqual([200, 200]);
       expect([c.body.session.id, d.body.session.id]).toEqual([a.body.session.id, a.body.session.id]);
       expect(await activeCount()).toBe(1);
-    } finally {
-      // Test cleanup only: if the lock failed, keep the first session so the index can be rebuilt.
-      const open = await f.db.depositSession.findMany({
-        where: { machineId: f.ids.machineA, status: { in: [...ACTIVE] } }, orderBy: [{ startedAt: "asc" }, { id: "asc" }] });
-      await f.db.depositSession.updateMany({ where: { id: { in: open.slice(1).map((s) => s.id) } }, data: { status: "CANCELLED" } });
-      await f.db.$executeRawUnsafe(createIndex);
     }
   });
 
   it("stops the lease and refuses scans for a machine with two live sessions, lists them read-only, and lets the timeout policy resolve them", async () => {
     await warmUp();
     const { collectActiveSessionConflicts } = await import("@/scripts/reconcile-active-sessions");
-    const { guard, createIndex } = enforceSql();
-    const created: string[] = [];
-    // Simulate a database from before the enforce migration (restored in finally).
-    await f.db.$executeRawUnsafe(`DROP INDEX "${ACTIVE_INDEX}"`);
-    try {
+    const { guard } = enforceSql();
+    // The expand release runs without the index: legacy duplicates can still exist.
+    expect(await indexExists()).toBe(false);
+    {
       const soon = new Date(Date.now() + 2 * 60_000);
       const older = await f.db.depositSession.create({ data: {
         userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE", startedAt: new Date(Date.now() - 60_000), timeoutAt: soon } });
       const newer = await f.db.depositSession.create({ data: {
         userId: f.ids.userB, machineId: f.ids.machineA, status: "PROCESSING_ITEM", startedAt: new Date(), timeoutAt: soon } });
-      created.push(older.id, newer.id);
       const pending = await f.db.depositItem.create({ data: { sessionId: newer.id, wasteTypeId: await wasteTypeId(), status: "PENDING" } });
       const evidence = await f.db.machineEvent.create({ data: {
         machineId: f.ids.machineA, sessionId: newer.id, depositItemId: pending.id, localEventId: `evt-${randomUUID()}`,
@@ -605,11 +715,6 @@ describe("legacy duplicates: no ambiguous lease, dry-run reconcile, guarded enfo
       const resolved = await machineSession();
       expect(resolved.body.lease.sessionId).toBe(newer.id);
       expect((await f.db.depositSession.findUniqueOrThrow({ where: { id: older.id } })).status).toBe("EXPIRED");
-    } finally {
-      // Test cleanup only: restore the enforced state for the rest of the run.
-      await f.db.depositSession.updateMany({
-        where: { id: { in: created }, status: { in: [...ACTIVE] } }, data: { status: "CANCELLED" } });
-      await f.db.$executeRawUnsafe(createIndex);
     }
   });
 });

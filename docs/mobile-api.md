@@ -491,22 +491,43 @@ lock User -> Machine -> DepositSession:
 **Kebijakan timeout.** Sesi yang ditinggalkan hanya ditutup oleh kebijakan
 timeout, tidak pernah ditimpa sesi baru. Batas waktu sesi adalah `timeoutAt`,
 atau untuk sesi tanpa `timeoutAt` (baris lama, termasuk sesi `REVIEW`)
-`updatedAt` + `sessionIdleTimeoutMinutes` mesin; batas ini hanya dapat
-diperpanjang (oleh `ITEM_DETECTED`), tidak pernah dipercepat. Lease
-mesin tidak pernah melewati batas ini, jadi saat batas lewat setiap lease untuk
-sesi itu sudah kedaluwarsa. Poll mesin berikutnya atau scan berikutnya lalu
-menutup sesi menjadi `EXPIRED` dan memindahkan item yang belum diputuskan mesin
-ke `REVIEW` dengan alasan `SESSION_TIMEOUT` (tidak ada item atau uang yang
-dihapus; audit `DEPOSIT_SESSION_EXPIRE` mencatat item yang ditahan). Item itu
-diputuskan oleh event penerimaan/penolakan terlambat dari sesi yang sama, atau
-lewat antrean peninjauan. Sesi `REVIEW` tanpa `timeoutAt` (mis. `sessionB` di
-seed) karenanya berhenti menahan mesin setelah idle, bukan selamanya.
+`startedAt` + `sessionIdleTimeoutMinutes` mesin. Batas ini hanya diperpanjang
+oleh `ITEM_DETECTED` selama belum lewat, tidak pernah dipercepat, dan setelah
+lewat tidak ada event mesin yang membukanya lagi (event terlambat tidak
+memperpanjang atau menghidupkan sesi). Lease mesin tidak pernah melewati batas
+ini, jadi saat batas lewat setiap lease untuk sesi itu sudah kedaluwarsa (dengan
+asumsi jam mesin sinkron, lihat `rvm/README.md`). Poll mesin berikutnya, scan
+berikutnya, atau finish/cancel pemiliknya lalu menutup sesi menjadi `EXPIRED`
+dan memindahkan item yang belum diputuskan mesin ke `REVIEW` dengan alasan
+`SESSION_TIMEOUT` (tidak ada item atau uang yang dihapus; audit
+`DEPOSIT_SESSION_EXPIRE` mencatat item yang ditahan). Sesi `REVIEW` tanpa
+`timeoutAt` (mis. `sessionB` di seed) karenanya berhenti menahan mesin setelah
+batas itu, bukan selamanya.
 
-**Event terlambat.** Event mesin selalu dicatat pada sesi yang dibawanya.
-Item yang dilaporkan setelah sesinya berakhir dibuat di sesi itu dengan status
-`REVIEW` (alasan `SESSION_CLOSED`), tanpa membuka ulang atau memperpanjang
-sesi. Event yang menyebut item dari sesi lain tidak memengaruhi item mana pun
-(referensi dicatat di `payload.orphanedReferences`).
+**Event terlambat.** Event mesin selalu dicatat pada sesi yang dibawanya, dan
+mesin tetap menjadi penentu hasil fisik item di antreannya: bukti (berat, AI,
+barcode) dan penerimaan/penolakan tetap diproses untuk item yang belum punya
+titik penerimaan, apa pun status sesinya.
+
+- Item yang dilaporkan setelah sesinya berakhir dibuat di sesi itu dengan
+  status `REVIEW` (alasan `SESSION_CLOSED`), tanpa membuka ulang atau
+  memperpanjang sesi. Item yang dilaporkan untuk sesi yang batasnya sudah
+  lewat tetapi belum ditutup tetap `PENDING` sampai kebijakan timeout
+  memindahkannya ke `REVIEW` (`SESSION_TIMEOUT`).
+- Titik penerimaan (`ITEM_ACCEPTED_POINT`) yang `occurredAt`-nya (jam mesin)
+  tidak melewati akhir sesi (batas waktu, atau finish/cancel/timeout yang lebih
+  awal) mengikuti kebijakan reward biasa dan boleh membayar.
+- Titik penerimaan yang `occurredAt`-nya setelah akhir sesi, atau untuk item
+  `SESSION_CLOSED`, menjadi **review tertahan**: titik penerimaan tercatat,
+  bukti dibekukan, EARN `PENDING` (50% hold, tidak pernah `AVAILABLE`), dan
+  alasannya tetap terlihat (`SESSION_TIMEOUT` atau `SESSION_CLOSED`).
+  Peninjau lalu menyetujui atau menolaknya dengan aturan pasca-penerimaan M04.
+- Sebelum titik penerimaannya, item `SESSION_TIMEOUT`/`SESSION_CLOSED` tidak
+  dapat disetujui manusia: item ini dibuat setelah cutover M04, sehingga
+  persetujuan legacy (hanya untuk baris sebelum cutover, dengan `itemVersion`)
+  tidak berlaku; peninjau hanya dapat menolaknya, atau menunggu event mesin.
+- Event yang menyebut item dari sesi lain tidak memengaruhi item mana pun
+  (referensi dicatat di `payload.orphanedReferences`).
 
 `getActiveDepositForUser(userId, machineCode?)` di service yang sama
 mengembalikan ringkasan sesi aktif milik pengguna sendiri saja (read-only:
@@ -515,12 +536,22 @@ dengan lebih dari satu sesi, `session` bernilai `null` dan klien harus meminta
 pengguna memilih dari `sessions`. Route publiknya (`GET /api/sessions/active`)
 dibuat di U01.
 
-Rollout: expand (kode ini + migration `20261014120000_one_active_machine_session`,
-yang hanya melaporkan jumlah duplikat), dry run
-`npm run reconcile:sessions`, lalu enforce
-`20261014120100_one_active_machine_session_enforce` (berhenti dengan jumlah
-duplikat bila masih ada, tanpa menutup atau menghapus apa pun). Prosedur
-lengkap ada di header `scripts/reconcile-active-sessions.ts`. Perubahan
+Rollout dalam dua rilis:
+
+1. **Rilis expand**: kode ini + migration
+   `20261014120000_one_active_machine_session` (hanya melaporkan jumlah
+   duplikat). Eksklusivitas dijaga lock baris Machine; mesin dengan beberapa
+   sesi aktif tidak mendapat lease.
+2. Jalankan `npm run reconcile:sessions` terhadap produksi sampai exit 0
+   (prosedur di header `scripts/reconcile-active-sessions.ts`).
+3. **Rilis berikutnya (enforce)**: SQL yang disiapkan di
+   `prisma/migrations-enforce/one_active_machine_session_enforce/migration.sql`
+   disalin ke `prisma/migrations/<timestamp baru>_one_active_machine_session_enforce/`.
+   File ini sengaja tidak berada di `prisma/migrations`, karena `web` baru
+   start setelah `prisma migrate deploy` berhasil: bila dikirim bersama expand,
+   guard-nya akan menghentikan deploy saat duplikat masih ada dan kode baru
+   tidak pernah berjalan untuk merekonsiliasinya. Guard tetap berhenti dengan
+   jumlah duplikat bila masih ada, tanpa menutup atau menghapus apa pun. Perubahan
 perilaku mesin (lease ditahan saat konflik, sesi ditutup setelah batas waktu)
 tidak dirilis sebelum uji mock dan uji hardware terkendali di gate Z01.
 

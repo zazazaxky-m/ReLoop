@@ -141,7 +141,7 @@ describe('/api/sessions/[id]', () => {
     it('refuses finish and cancel while the machine still decides an item (409), changing nothing', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1' } as any);
       vi.mocked(prisma.depositSession.findUnique).mockResolvedValue({
-        id: 'sess1', userId: 'u1', machineId: 'm1', status: 'PROCESSING_ITEM', timeoutAt: new Date(Date.now() + 60_000), updatedAt: new Date() } as any);
+        id: 'sess1', userId: 'u1', machineId: 'm1', status: 'PROCESSING_ITEM', timeoutAt: new Date(Date.now() + 60_000), startedAt: new Date() } as any);
       db.depositItem.count.mockResolvedValue(1);
       for (const action of ['finish', 'cancel']) {
         const res = await PATCH(makeReq('PATCH', { action }), { params: Promise.resolve({ id: 'sess1' }) });
@@ -154,10 +154,10 @@ describe('/api/sessions/[id]', () => {
 
     it('after the deadline (every lease expired) closes through the timeout policy instead of waiting forever', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1' } as any);
-      const stale = { id: 'sess1', userId: 'u1', machineId: 'm1', status: 'PROCESSING_ITEM', timeoutAt: new Date(Date.now() - 1_000), updatedAt: new Date() };
+      const stale = { id: 'sess1', userId: 'u1', machineId: 'm1', status: 'PROCESSING_ITEM', timeoutAt: new Date(Date.now() - 1_000), startedAt: new Date(Date.now() - 600_000) };
       vi.mocked(prisma.depositSession.findUnique).mockResolvedValue(stale as any);
       db.depositItem.count.mockResolvedValue(1);
-      db.depositItem.findMany.mockResolvedValue([{ id: 'i1' }]);
+      db.depositItem.findMany.mockResolvedValue([{ id: 'i1', sessionId: 'sess1' }]);
       db.depositItem.findUnique.mockResolvedValue({ status: 'PENDING', acceptanceEventId: null, validationReasonCode: null });
       db.depositItem.updateMany.mockResolvedValue({ count: 1 });
       vi.mocked(ledger.getWalletBalance).mockResolvedValue({ available: 0 } as any);

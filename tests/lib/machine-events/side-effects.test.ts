@@ -66,7 +66,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('handles CHAMBER_OPENED transitions session', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', startedAt: new Date() });
     vi.mocked(machineState.transitionSession).mockReturnValue('START_ITEM' as any);
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'CHAMBER_OPENED', sessionId: 's1' } as any, 'evt1');
     expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'START_ITEM' } }));
@@ -110,7 +110,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('skips CHAMBER_OPENED when session is not ACTIVE/RESERVED', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'COMPLETED' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'COMPLETED', startedAt: new Date() });
     await processEventSideEffects(
       mockTx,
       mockMachine,
@@ -121,14 +121,14 @@ describe('processEventSideEffects', () => {
   });
 
   it('handles CHAMBER_TIMEOUT transitions session to ITEM_DONE', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'PROCESSING_ITEM' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'PROCESSING_ITEM', startedAt: new Date() });
     vi.mocked(machineState.transitionSession).mockReturnValue('ITEM_DONE' as any);
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'CHAMBER_TIMEOUT', sessionId: 's1' } as any, 'evt1');
     expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ITEM_DONE' } }));
   });
 
   it('handles ITEM_DETECTED creates deposit item', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', startedAt: new Date() });
     vi.mocked(item.resolveOrCreateUnknownWasteType).mockResolvedValue('wt1');
     mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
     
@@ -306,7 +306,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('handles SAFE_STATE_ENTERED updates machine and session', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', startedAt: new Date() });
     vi.mocked(machineState.transitionSession).mockReturnValue('SAFE_STATE' as any);
     
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'SAFE_STATE_ENTERED', sessionId: 's1' } as any, 'evt1');
@@ -316,7 +316,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('ITEM_DETECTED trusts linked wasteTypeId from kiosk', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', startedAt: new Date() });
     mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
     mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
     const onItemCreated = vi.fn();
@@ -343,7 +343,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('ITEM_DETECTED resolves wasteTypeName and wasteTypeKey fallbacks', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'RESERVED' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'RESERVED', startedAt: new Date() });
     mockTx.machineWasteType.findFirst.mockResolvedValue(null);
     mockTx.wasteType.findFirst
       .mockResolvedValueOnce(null)
@@ -370,7 +370,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('ITEM_DETECTED uses wasteTypeName when lookup finds a row', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', startedAt: new Date() });
     mockTx.wasteType.findFirst.mockResolvedValue({ id: 'wt-by-name' });
     mockTx.depositItem.create.mockResolvedValue({ id: 'd-name' });
 
@@ -393,7 +393,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('ITEM_DETECTED clears unlinked wasteTypeId then maps anorganik key', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', startedAt: new Date() });
     mockTx.machineWasteType.findFirst.mockResolvedValue(null);
     mockTx.wasteType.findFirst.mockResolvedValue({ id: 'wt-anorganik' });
     mockTx.depositItem.create.mockResolvedValue({ id: 'd3' });
@@ -417,7 +417,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('ITEM_DETECTED maps unknown wasteTypeKey to Anorganik default', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', startedAt: new Date() });
     mockTx.machineWasteType.findFirst.mockResolvedValue(null);
     mockTx.wasteType.findFirst.mockResolvedValue({ id: 'wt-default' });
     mockTx.depositItem.create.mockResolvedValue({ id: 'd4' });
@@ -453,7 +453,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('ITEM_DETECTED locks the session row, then re-reads it, and extends an open session\'s deadline', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', timeoutAt: new Date(Date.now() + 1_000) });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', timeoutAt: new Date(Date.now() + 1_000), startedAt: new Date() });
     mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
     mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: { wasteTypeId: 'wt1' } } as any, 'evt1');
@@ -465,9 +465,24 @@ describe('processEventSideEffects', () => {
     expect(mockTx.depositItem.create).toHaveBeenCalledWith({ data: expect.objectContaining({ status: 'PENDING' }) });
   });
 
+  it('ITEM_DETECTED never extends or revives a session whose deadline passed (I1); the item stays PENDING for the timeout policy', async () => {
+    for (const stale of [
+      { id: 's1', status: 'ACTIVE', timeoutAt: new Date(Date.now() - 1_000), startedAt: new Date(Date.now() - 10 * 60_000) },
+      { id: 's1', status: 'REVIEW', timeoutAt: null, startedAt: new Date(Date.now() - 10 * 60_000), updatedAt: new Date() },
+    ]) {
+      vi.clearAllMocks();
+      mockTx.depositSession.findUnique.mockResolvedValue(stale);
+      mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
+      mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
+      await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: { wasteTypeId: 'wt1' } } as any, 'evt1');
+      expect(mockTx.depositSession.update, stale.status).not.toHaveBeenCalled();
+      expect(mockTx.depositItem.create, stale.status).toHaveBeenCalledWith({ data: expect.objectContaining({ status: 'PENDING' }) });
+    }
+  });
+
   it('ITEM_DETECTED never moves a session deadline earlier', async () => {
     const later = new Date(Date.now() + 60 * 60_000);
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'PROCESSING_ITEM', timeoutAt: later });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'PROCESSING_ITEM', timeoutAt: later, startedAt: new Date() });
     mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
     mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: { wasteTypeId: 'wt1' } } as any, 'evt1');
@@ -477,7 +492,7 @@ describe('processEventSideEffects', () => {
   it('ITEM_DETECTED for an ended session holds the item for review there, without reopening or extending it', async () => {
     for (const status of ['COMPLETED', 'CANCELLED', 'EXPIRED']) {
       vi.clearAllMocks();
-      mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status, timeoutAt: new Date(Date.now() - 1_000) });
+      mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status, timeoutAt: new Date(Date.now() - 1_000), startedAt: new Date() });
       mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
       mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
       await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: { wasteTypeId: 'wt1' } } as any, 'evt1');
@@ -489,7 +504,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('ITEM_DETECTED keeps the unknown-type reason for an item reported after the session ended', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'COMPLETED', timeoutAt: null });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'COMPLETED', timeoutAt: null, startedAt: new Date() });
     vi.mocked(item.resolveOrCreateUnknownWasteType).mockResolvedValue('wt-unknown');
     mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: {} } as any, 'evt1');
@@ -517,7 +532,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('ITEM_DETECTED falls through when wasteTypeName and wasteTypeKey lookups miss', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', startedAt: new Date() });
     mockTx.wasteType.findFirst.mockResolvedValue(null);
     vi.mocked(item.resolveOrCreateUnknownWasteType).mockResolvedValue('wt-unknown');
     mockTx.depositItem.create.mockResolvedValue({ id: 'd5' });
@@ -542,7 +557,7 @@ describe('processEventSideEffects', () => {
   });
 
   it('ITEM_DETECTED writes deposit item id into cache when provided', async () => {
-    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE' });
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', startedAt: new Date() });
     mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
     mockTx.depositItem.create.mockResolvedValue({ id: 'd-cache' });
     const cache = new Map<string, string | null>();

@@ -267,7 +267,7 @@ describe("/api/scan", () => {
     const stale = session({ id: "sess-old", userId: "u2", timeoutAt: new Date(Date.now() - 1_000) });
     db.depositSession.findMany.mockResolvedValue([stale]);
     db.depositSession.findUnique.mockResolvedValue(stale);
-    db.depositItem.findMany.mockResolvedValue([{ id: "item-1" }]);
+    db.depositItem.findMany.mockResolvedValue([{ id: "item-1", sessionId: "sess-old" }]);
     db.depositItem.findUnique.mockResolvedValue({ id: "item-1", status: "PENDING", acceptanceEventId: null, validationReasonCode: null });
     db.depositItem.updateMany.mockResolvedValue({ count: 1 });
     db.depositSession.create.mockResolvedValue({ id: "sess-new", status: "ACTIVE" });
@@ -287,6 +287,43 @@ describe("/api/scan", () => {
       action: "DEPOSIT_SESSION_EXPIRE", entityId: "sess-old",
       metadata: expect.objectContaining({ reason: "TIMEOUT", heldItemIds: ["item-1"] }),
     }));
+  });
+
+  it("expires several timed-out sessions locking all sessions, then all their items, each class in id order (M1)", async () => {
+    db.machine.findUnique.mockResolvedValue(baseMachine);
+    const past = new Date(Date.now() - 1_000);
+    const sessions: Record<string, any> = {
+      "s-b": session({ id: "s-b", userId: "u2", timeoutAt: past, startedAt: new Date(Date.now() - 600_000) }),
+      "s-a": session({ id: "s-a", userId: "u3", timeoutAt: past, startedAt: new Date(Date.now() - 300_000) }),
+    };
+    const items: Record<string, any> = {
+      "i-2": { id: "i-2", sessionId: "s-a", status: "PENDING", acceptanceEventId: null, validationReasonCode: null },
+      "i-1": { id: "i-1", sessionId: "s-b", status: "PENDING", acceptanceEventId: null, validationReasonCode: null },
+    };
+    db.depositSession.findMany.mockResolvedValue([sessions["s-b"], sessions["s-a"]]); // startedAt order
+    db.depositSession.findUnique.mockImplementation(async ({ where }: any) => sessions[where.id]);
+    db.depositItem.findMany.mockImplementation(async ({ where }: any) => {
+      const wanted: string[] = typeof where.sessionId === "string" ? [where.sessionId] : where.sessionId.in;
+      return Object.values(items).filter((i) => wanted.includes(i.sessionId))
+        .sort((a, b) => a.id.localeCompare(b.id)).map(({ id, sessionId }) => ({ id, sessionId }));
+    });
+    db.depositItem.findUnique.mockImplementation(async ({ where }: any) => items[where.id]);
+    db.depositItem.updateMany.mockResolvedValue({ count: 1 });
+    db.depositSession.create.mockResolvedValue({ id: "sess-new", status: "ACTIVE" });
+
+    const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+    expect(res.status).toBe(201);
+    const locks = db.$queryRaw.mock.calls.map((call: unknown[]) =>
+      [(call[0] as TemplateStringsArray).join("?").match(/FROM "(\w+)"/)?.[1], call[1]]);
+    expect(locks).toEqual([
+      ["User", "u1"], ["Machine", "m1"],
+      ["DepositSession", "s-a"], ["DepositSession", "s-b"],
+      ["DepositItem", "i-1"], ["DepositItem", "i-2"],
+    ]);
+    const expired = vi.mocked(audit.logAudit).mock.calls.map((call) => call[0])
+      .filter((entry) => entry.action === "DEPOSIT_SESSION_EXPIRE")
+      .map((entry) => [entry.entityId, (entry.metadata as any).heldItemIds]);
+    expect(expired.sort()).toEqual([["s-a", ["i-2"]], ["s-b", ["i-1"]]]);
   });
 
   it("never picks one of two live sessions on a machine (legacy duplicates)", async () => {
