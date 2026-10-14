@@ -41,7 +41,6 @@ vi.mock('@/lib/db-locks', () => ({
 vi.mock('@/lib/reward-funding', () => ({
   lockFundingAccountForOrganization: vi.fn(),
   settleOrCommitReward: vi.fn(async () => null),
-  sessionAdmissionKey: (id: string) => `session:${id}:admission`,
 }));
 vi.mock('@/lib/wallet-service', () => ({
   runWalletTransaction: vi.fn((fn: (tx: unknown) => unknown) => fn(mockTx)),
@@ -181,7 +180,7 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
   it('settles the funding obligation to the approved target, releases it on reject, and keeps it when a case opened (B01)', async () => {
     expect((await patch({ action: 'approve' })).status).toBe(200);
     expect(funding.settleOrCommitReward).toHaveBeenCalledWith(mockTx, {
-      businessKey: 'deposit-item:di1:earn', reservationKey: 'session:s1:admission', targetRupiah: 100, reviewPending: false });
+      businessKey: 'deposit-item:di1:earn', source: { sourceType: 'SESSION', sourceId: 's1' }, targetRupiah: 100, reviewPending: false });
     expect(effect()).toEqual(expect.objectContaining({ funding: { settledByCaller: true } }));
 
     vi.clearAllMocks();

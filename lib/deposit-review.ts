@@ -35,7 +35,7 @@ import {
   validateWeight,
 } from "./reward";
 import { applyRewardEffect, type CreditEntryType } from "./reward-credit";
-import { lockFundingAccountForOrganization, sessionAdmissionKey, settleOrCommitReward } from "./reward-funding";
+import { lockFundingAccountForOrganization, settleOrCommitReward } from "./reward-funding";
 import { resolveLegacyCutover, type LegacyCutover } from "./reward-legacy-cutover";
 import { campaignSupportsMachine, decideReward, machineRewardMode } from "./reward-policy";
 import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
@@ -513,11 +513,13 @@ export async function decideDepositReview(
     }
     // 5. B01: the review hold held the approvable ceiling; the decision
     // settles the obligation to the target (approve) or releases it (reject).
+    // An item without a commit (admitted without money) is committed against
+    // its session's reservation, late if need be, exactly like an acceptance.
     // A correction refused into a reconciliation case keeps the obligation:
     // the money is still out there until an operator settles the case.
     const fundingCommit = await settleOrCommitReward(tx, {
       businessKey: depositItemEarnKey(itemId),
-      reservationKey: sessionAdmissionKey(item.sessionId),
+      source: { sourceType: "SESSION", sourceId: item.sessionId },
       targetRupiah: reconciliationCase ? null : targetAmount,
       reviewPending: false,
     });

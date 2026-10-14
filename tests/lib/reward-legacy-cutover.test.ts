@@ -1,5 +1,37 @@
 import { describe, expect, it, vi } from 'vitest';
-import { LEGACY_CUTOVER_ENV, REWARD_POLICY_MIGRATION, resolveLegacyCutover } from '@/lib/reward-legacy-cutover';
+import { LEGACY_CUTOVER_ENV, REWARD_POLICY_MIGRATION, resolveLegacyCutover, resolveMigrationCutover } from '@/lib/reward-legacy-cutover';
+
+describe('resolveMigrationCutover combine modes (B01a fix round 2, C3)', () => {
+  const finishedAt = new Date('2026-10-14T15:00:00.000Z');
+  const withMigration = () => {
+    const db = { $queryRaw: vi.fn() };
+    db.$queryRaw.mockResolvedValueOnce([{ present: true }]).mockResolvedValueOnce([{ finishedAt }]);
+    return db;
+  };
+  const options = { migration: 'm', envName: 'X' };
+
+  it('env-wins (the default, M04): an explicit setting replaces the migration time, even a later one', async () => {
+    const db = withMigration();
+    expect(await resolveMigrationCutover(db as never, { ...options, env: { X: '2026-10-20T00:00:00Z' } }))
+      .toEqual({ at: new Date('2026-10-20T00:00:00.000Z'), source: 'env' });
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+    expect(await resolveMigrationCutover(withMigration() as never, { ...options, env: { X: '2026-10-20T00:00:00Z' }, combine: 'env-wins' }))
+      .toEqual({ at: new Date('2026-10-20T00:00:00.000Z'), source: 'env' });
+  });
+
+  it('earliest (funding): the earlier of the setting and the migration; an unparsable setting fails closed', async () => {
+    expect(await resolveMigrationCutover(withMigration() as never, { ...options, env: { X: '2026-10-20T00:00:00Z' }, combine: 'earliest' }))
+      .toEqual({ at: finishedAt, source: 'migration' });
+    expect(await resolveMigrationCutover(withMigration() as never, { ...options, env: { X: '2026-10-10T00:00:00Z' }, combine: 'earliest' }))
+      .toEqual({ at: new Date('2026-10-10T00:00:00.000Z'), source: 'env' });
+    expect(await resolveMigrationCutover(withMigration() as never, { ...options, env: { X: finishedAt.toISOString() }, combine: 'earliest' }))
+      .toEqual({ at: finishedAt, source: 'env' });
+    expect(await resolveMigrationCutover(withMigration() as never, { ...options, env: { X: 'bukan-tanggal' }, combine: 'earliest' }))
+      .toEqual({ at: null, source: 'env-invalid' });
+    expect(await resolveMigrationCutover(withMigration() as never, { ...options, env: {}, combine: 'earliest' }))
+      .toEqual({ at: finishedAt, source: 'migration' });
+  });
+});
 
 /** `$queryRaw` is a tagged template: call[0] is the strings array, call[1..] the values. */
 const reader = () => ({ $queryRaw: vi.fn() }) as unknown as { $queryRaw: ReturnType<typeof vi.fn> };

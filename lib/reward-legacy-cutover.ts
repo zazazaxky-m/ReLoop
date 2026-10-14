@@ -33,30 +33,46 @@ type RawReader = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 /**
  * Deterministic cutover of one migration (the pattern above, reused by the
- * B01a funding cutover in lib/reward-funding.ts): the explicit `envName`
- * value wins and fails closed when unparsable; otherwise the applied
- * `finished_at` of `migration`.
+ * B01a funding cutover in lib/reward-funding.ts). An unparsable `envName`
+ * value always fails closed (none). `combine`:
+ * - `"env-wins"` (default, M04's semantics): the explicit value, when set,
+ *   replaces the migration time;
+ * - `"earliest"` (funding, C3): the earlier of the explicit value and the
+ *   applied `finished_at` when both exist, so a setting later than the
+ *   migration can never widen the legacy window.
  */
 export async function resolveMigrationCutover(
   db: RawReader,
-  options: { migration: string; envName: string; env?: Record<string, string | undefined> },
+  options: {
+    migration: string;
+    envName: string;
+    env?: Record<string, string | undefined>;
+    combine?: "env-wins" | "earliest";
+  },
 ): Promise<LegacyCutover> {
   const env = options.env ?? process.env;
   const configured = env[options.envName]?.trim();
+  let fromEnv: Date | null = null;
   if (configured) {
     const at = new Date(configured);
-    return Number.isNaN(at.getTime()) ? { at: null, source: "env-invalid" } : { at, source: "env" };
+    if (Number.isNaN(at.getTime())) return { at: null, source: "env-invalid" };
+    if ((options.combine ?? "env-wins") === "env-wins") return { at, source: "env" };
+    fromEnv = at;
   }
   // Probe first: a query against a missing table would abort the enclosing transaction.
   const [{ present }] = await db.$queryRaw<{ present: boolean }[]>`
     SELECT to_regclass('"_prisma_migrations"') IS NOT NULL AS present`;
-  if (!present) return { at: null, source: "migration-missing" };
-  const rows = await db.$queryRaw<{ finishedAt: Date | null }[]>`
-    SELECT finished_at AS "finishedAt" FROM "_prisma_migrations"
-    WHERE migration_name = ${options.migration} AND rolled_back_at IS NULL AND finished_at IS NOT NULL
-    ORDER BY finished_at ASC LIMIT 1`;
-  const at = rows[0]?.finishedAt ?? null;
-  return at ? { at, source: "migration" } : { at: null, source: "migration-missing" };
+  const fromMigration = present
+    ? ((await db.$queryRaw<{ finishedAt: Date | null }[]>`
+        SELECT finished_at AS "finishedAt" FROM "_prisma_migrations"
+        WHERE migration_name = ${options.migration} AND rolled_back_at IS NULL AND finished_at IS NOT NULL
+        ORDER BY finished_at ASC LIMIT 1`)[0]?.finishedAt ?? null)
+    : null;
+  if (fromEnv && fromMigration) {
+    return fromEnv.getTime() <= fromMigration.getTime() ? { at: fromEnv, source: "env" } : { at: fromMigration, source: "migration" };
+  }
+  if (fromEnv) return { at: fromEnv, source: "env" };
+  return fromMigration ? { at: fromMigration, source: "migration" } : { at: null, source: "migration-missing" };
 }
 
 export async function resolveLegacyCutover(

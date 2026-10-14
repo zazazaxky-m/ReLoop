@@ -13,8 +13,10 @@ import {
   FUNDING_INSUFFICIENT,
   ORGANIZATION_HAS_OPEN_SESSIONS,
   PROGRAM_HAS_OPEN_SOURCES,
+  fundingCashKey,
   guardOrganizationModeChange,
   guardProgramRewardChange,
+  resolveFundingCutover,
   sessionAdmissionKey,
   tripIssuanceKey,
 } from "@/lib/reward-funding";
@@ -689,7 +691,7 @@ describe("confirmed funding (operator topup)", () => {
     expect(first.status).toBe(201);
     expect(first.body).toMatchObject({ idempotent: false, account: { confirmedRupiah: 10_000, heldRupiah: 0 },
       entry: { kind: "CONFIRMED_TOPUP", amount: 10_000, reference: "BANK-1", note, verifiedById: f.ids.superadmin,
-        businessKey: "topup:BANK-1" } });
+        businessKey: "cash:BANK-1" } });
     const replay = await call("superadmin", "POST", path, { amount: 10_000, reference: "BANK-1", note });
     expect(replay.status).toBe(200);
     expect(replay.body).toMatchObject({ idempotent: true, entry: { id: first.body.entry.id } });
@@ -857,7 +859,11 @@ describe("fix round 1: enforcement bypasses on reopen, mode change and zero ceil
     const machine = await f.db.machine.findUniqueOrThrow({ where: { id: f.ids.machineA }, include: { organization: true } });
     const input = (event: EdgeEvent) => ({ ...event, machineCode: f.ids.machineCode }) as Parameters<typeof ingestMachineEvent>[0];
 
-    // Cutover set after the session started: the session is a legacy source (B02 backfills it).
+    // A session started before the funding cutover (the applied migration; a later setting can never move it, C3)
+    // without a reservation is a legacy source: B02 backfills it, nothing is held here.
+    const [{ finishedAt: migrationAt }] = await f.db.$queryRaw<{ finishedAt: Date }[]>`
+      SELECT finished_at AS "finishedAt" FROM "_prisma_migrations" WHERE migration_name = '20261014150000_reward_funding'`;
+    await f.db.depositSession.update({ where: { id: sessionId }, data: { startedAt: new Date(migrationAt.getTime() - 60_000) } });
     const [detected, weighed, accepted] = await depositEvents(sessionId);
     await ingestMachineEvent(input(detected), { machine });
     await ingestMachineEvent(input(weighed), { machine });
@@ -884,13 +890,18 @@ describe("fix round 1: enforcement bypasses on reopen, mode change and zero ceil
     await warmUp();
     await setMachineCeiling(f.ids.machineA, 10_000);
     await f.confirmFunding(100_000);
-    const guard = (campaignId: string, current: { rewardMode: string; rewardMultiplier: number | null }, next: typeof current) =>
-      withEnforced(() => runWalletTransaction((tx) => guardProgramRewardChange(tx, { campaignId, current, next })));
+    type Shape = { rewardMode: string; rewardMultiplier: number | null; campaignType?: string; supportsMachine?: boolean };
+    const guard = (campaignId: string, current: Shape, next: Shape, campaignType = "MACHINE_DEPOSIT") =>
+      withEnforced(() => runWalletTransaction((tx) => guardProgramRewardChange(tx, {
+        campaignId,
+        current: { campaignType, supportsMachine: false, ...current },
+        next: { campaignType, supportsMachine: false, ...next },
+      })));
 
     // A compliance machine program with an open session: it cannot turn to money.
     const program = await moneyCampaign({ rewardMode: "COMPLIANCE_ONLY", rewardBudgetRupiah: 50_000, maxRewardPerSessionRupiah: 5_000 });
-    const compliance = { rewardMode: "COMPLIANCE_ONLY", rewardMultiplier: null };
-    const money = { rewardMode: "MONEY_REWARD", rewardMultiplier: null };
+    const compliance = { rewardMode: "COMPLIANCE_ONLY", rewardMultiplier: null, campaignType: "MACHINE_DEPOSIT", supportsMachine: false };
+    const money = { ...compliance, rewardMode: "MONEY_REWARD" };
     const session = (await scan("userA", { campaignId: program.id })).body.session.id as string;
     await expect(guard(program.id, compliance, money)).rejects.toMatchObject({ status: 409, message: PROGRAM_HAS_OPEN_SOURCES });
     // Shadow mode allows it (bookkept late at the first earning).
@@ -903,14 +914,14 @@ describe("fix round 1: enforcement bypasses on reopen, mode change and zero ceil
     const trip = await f.trip({ bagCount: 0 });
     const m1 = { rewardMode: "MONEY_REWARD", rewardMultiplier: 1 };
     const m2 = { rewardMode: "MONEY_REWARD", rewardMultiplier: 2 };
-    await expect(guard(trips.id, m1, m2)).resolves.toBeUndefined();
+    await expect(guard(trips.id, m1, m2, "TRASH_BAG")).resolves.toBeUndefined();
     expect((await call("adminA", "POST", "/api/trash-bags", { tripId: trip.id, bagCount: 1 })).status).toBe(201);
-    await expect(guard(trips.id, m1, m2)).rejects.toMatchObject({ status: 409, message: PROGRAM_HAS_OPEN_SOURCES });
-    await expect(guard(trips.id, { ...m1, rewardMultiplier: null }, { ...m2, rewardMultiplier: 1.5 })).rejects.toMatchObject({ status: 409 });
-    await expect(guard(trips.id, m2, m1)).resolves.toBeUndefined();
-    await expect(guard(trips.id, m1, { rewardMode: "COMPLIANCE_ONLY", rewardMultiplier: 5 })).resolves.toBeUndefined();
+    await expect(guard(trips.id, m1, m2, "TRASH_BAG")).rejects.toMatchObject({ status: 409, message: PROGRAM_HAS_OPEN_SOURCES });
+    await expect(guard(trips.id, { ...m1, rewardMultiplier: null }, { ...m2, rewardMultiplier: 1.5 }, "TRASH_BAG")).rejects.toMatchObject({ status: 409 });
+    await expect(guard(trips.id, m2, m1, "TRASH_BAG")).resolves.toBeUndefined();
+    await expect(guard(trips.id, m1, { rewardMode: "COMPLIANCE_ONLY", rewardMultiplier: 5 }, "TRASH_BAG")).resolves.toBeUndefined();
     expect((await call("adminA", "PATCH", `/api/trips/${trip.id}`, { status: "CANCELLED" })).status).toBe(200);
-    await expect(guard(trips.id, m1, m2)).resolves.toBeUndefined();
+    await expect(guard(trips.id, m1, m2, "TRASH_BAG")).resolves.toBeUndefined();
 
     // The organization's machine mode with an open campaign-less session.
     await f.db.organization.update({ where: { id: f.ids.orgA }, data: { machineRewardMode: "COMPLIANCE_ONLY" } });
@@ -1019,7 +1030,7 @@ describe("fix round 1: enforcement bypasses on reopen, mode change and zero ceil
 
     const first = await call("superadmin", "POST", pathA, { amount: 1_000, reference: "BANK-001", note: NOTE });
     expect(first.status).toBe(201);
-    expect(first.body.entry).toMatchObject({ businessKey: "topup:BANK-001", note: NOTE });
+    expect(first.body.entry).toMatchObject({ businessKey: "cash:BANK-001", note: NOTE });
     // The same bank transfer cannot confirm cash for a second organization.
     const elsewhere = await call("superadmin", "POST", pathB, { amount: 1_000, reference: "BANK-001", note: NOTE });
     expect(elsewhere.status).toBe(409);
@@ -1032,6 +1043,134 @@ describe("fix round 1: enforcement bypasses on reopen, mode change and zero ceil
     expect(replay.body.idempotent).toBe(true);
     expect(await f.db.fundingEntry.count()).toBe(1);
     expect(await account()).toMatchObject({ confirmedRupiah: 1_000 });
+  });
+});
+
+describe("fix round 2: effective reward mode, review late reservation, cutover and cash references", () => {
+  const NOTE = "Transfer BCA 14-10-2026 rek 1234567890 a.n. Yayasan";
+  type ProgramShape = { rewardMode: string; rewardMultiplier: number | null; campaignType: string; supportsMachine: boolean };
+  const guard = (campaignId: string, current: ProgramShape, next: ProgramShape) =>
+    withEnforced(() => runWalletTransaction((tx) => guardProgramRewardChange(tx, { campaignId, current, next })));
+
+  it("I2-a: the guard follows the EFFECTIVE mode: a money trip program turned into an EVENT and back cannot bypass the reservation of its issued bags", async () => {
+    await warmUp();
+    await f.confirmFunding(1_000_000);
+    const adminA = await actorOf(f.ids.adminA);
+    const trip = await f.trip({ bagCount: 0 });
+    const program = await f.db.campaign.findUniqueOrThrow({ where: { id: (await f.db.trip.findUniqueOrThrow({ where: { id: trip.id } })).campaignId } });
+    await f.db.campaign.update({ where: { id: program.id }, data: { rewardBudgetRupiah: 1_000_000 } });
+    const asTrashBag: ProgramShape = { rewardMode: "MONEY_REWARD", rewardMultiplier: null, campaignType: "TRASH_BAG", supportsMachine: false };
+    const asEvent: ProgramShape = { ...asTrashBag, campaignType: "EVENT" };
+
+    // 1. TRASH_BAG money -> EVENT: the raw mode is unchanged (money), the effective trip mode drops to compliance. Allowed.
+    await expect(guard(program.id, asTrashBag, asEvent)).resolves.toBeUndefined();
+    await f.db.campaign.update({ where: { id: program.id }, data: { campaignType: "EVENT" } });
+    // 2. Issue 50 bags under the EVENT program: no money, so no reservation is taken.
+    await withEnforced(async () => {
+      expect(await issueTrashBags(adminA, { tripId: trip.id, bagCount: 50 })).toHaveLength(50);
+    });
+    expect(await f.db.rewardBudgetReservation.count()).toBe(0);
+    // 3. EVENT -> TRASH_BAG while that trip holds 50 unreserved bags: the effective trip mode turns to money -> refused.
+    await expect(guard(program.id, asEvent, asTrashBag)).rejects.toMatchObject({ status: 409, message: PROGRAM_HAS_OPEN_SOURCES });
+    // A machine program the same way: MACHINE_DEPOSIT money -> EVENT (no machines) and back, with an open session.
+    const machineProgram = await moneyCampaign({ rewardBudgetRupiah: 50_000, maxRewardPerSessionRupiah: 5_000 });
+    await setMachineCeiling(f.ids.machineA, 5_000);
+    const asMachine: ProgramShape = { rewardMode: "MONEY_REWARD", rewardMultiplier: null, campaignType: "MACHINE_DEPOSIT", supportsMachine: false };
+    const asEventWithMachines: ProgramShape = { ...asMachine, campaignType: "EVENT", supportsMachine: true };
+    const sessionId = (await scan("userA", { campaignId: machineProgram.id })).body.session.id as string;
+    await expect(guard(machineProgram.id, asMachine, { ...asMachine, campaignType: "EVENT" })).resolves.toBeUndefined();
+    await expect(guard(machineProgram.id, { ...asMachine, campaignType: "EVENT" }, asEventWithMachines)).rejects.toMatchObject({ status: 409 });
+    await expect(guard(machineProgram.id, { ...asMachine, campaignType: "EVENT" }, asMachine)).rejects.toMatchObject({ status: 409 });
+    expect((await finishSession("userA", sessionId)).status).toBe(200);
+    // Once the trip is cancelled (its bags can no longer earn) the change is allowed again.
+    expect((await call("adminA", "PATCH", `/api/trips/${trip.id}`, { status: "CANCELLED" })).status).toBe(200);
+    await expect(guard(program.id, asEvent, asTrashBag)).resolves.toBeUndefined();
+  });
+
+  it("I2-b: a review approval of an item whose source was admitted without a reservation is held late (uncovered) like an acceptance", async () => {
+    await warmUp();
+    await setMachineCeiling(f.ids.machineA, 10_000);
+    await f.db.organization.update({ where: { id: f.ids.orgA }, data: { machineRewardMode: "COMPLIANCE_ONLY" } });
+    const sessionId = (await scan("userA")).body.session.id as string;
+    const held = await deposit(sessionId, { anomaly: true });
+    expect(held.item).toMatchObject({ status: "REVIEW", rewardAmount: 0 });
+    expect(held.ledger).toEqual([]);
+    expect(await f.db.rewardBudgetReservation.count()).toBe(0);
+    await f.db.organization.update({ where: { id: f.ids.orgA }, data: { machineRewardMode: "MONEY_REWARD" } });
+
+    const approved = await call("adminA", "PATCH", `/api/deposit-reviews/${held.item.id}`, { action: "approve" });
+    expect(approved.status).toBe(200);
+    expect(approved.body.targetAmount).toBe(100);
+    expect(await getWalletBalance(f.ids.userA)).toMatchObject({ available: 100 });
+    expect(await commitOf(earnKey(held.item.id))).toMatchObject({ heldRupiah: 100, uncoveredRupiah: 100, reviewPending: false });
+    expect(await reservationOf(sessionAdmissionKey(sessionId))).toMatchObject({ lateReservation: true, ceilingRupiah: 0 });
+    expect(await account()).toMatchObject({ heldRupiah: 100 });
+    const org = (await call("superadmin", "GET", "/api/reports/reconciliation")).body.report.funding.organizations
+      .find((row: Json) => row.organizationId === f.ids.orgA);
+    expect(org.staleHolds).toEqual([expect.objectContaining({ sourceId: sessionId, reasons: ["ADMITTED_WITHOUT_RESERVATION"] })]);
+  });
+
+  it("C3: the funding cutover is the earlier of the setting and the applied migration, and fails closed on an unparsable setting", async () => {
+    const applied = await f.db.$queryRaw<{ finishedAt: Date }[]>`
+      SELECT finished_at AS "finishedAt" FROM "_prisma_migrations" WHERE migration_name = '20261014150000_reward_funding'`;
+    const migrationAt = applied[0].finishedAt;
+    expect(await resolveFundingCutover(f.db, {})).toEqual({ at: migrationAt, source: "migration" });
+    const later = new Date(migrationAt.getTime() + 86_400_000).toISOString();
+    expect((await resolveFundingCutover(f.db, { [FUNDING_CUTOVER_ENV]: later })).at).toEqual(migrationAt);
+    const earlier = new Date(migrationAt.getTime() - 86_400_000);
+    expect(await resolveFundingCutover(f.db, { [FUNDING_CUTOVER_ENV]: earlier.toISOString() })).toEqual({ at: earlier, source: "env" });
+    expect((await resolveFundingCutover(f.db, { [FUNDING_CUTOVER_ENV]: "bukan-tanggal" })).at).toBeNull();
+  });
+
+  it("C4: every cash-confirming entry shares one case-normalised reference space across organizations, and a concurrent duplicate is a 409", async () => {
+    await warmUp();
+    const pathA = `/api/organizations/${f.ids.orgA}/funding`;
+    const pathB = `/api/organizations/${f.ids.orgB}/funding`;
+    const first = await call("superadmin", "POST", pathA, { amount: 1_000, reference: "BANK-C4", note: NOTE });
+    expect(first.status).toBe(201);
+    // A positive correction with the same reference (other case, other organization) confirms no cash twice.
+    const reused = await call("superadmin", "POST", pathB, { kind: "CORRECTION", amount: 500, reference: " bank-c4 ", note: NOTE });
+    expect(reused.status).toBe(409);
+    expect(reused.body.error).toMatch(/organisasi lain/);
+    expect(await f.db.fundingEntry.count()).toBe(1);
+    // The same organization and amount, other case: idempotent.
+    const replay = await call("superadmin", "POST", pathA, { amount: 1_000, reference: "bank-c4", note: NOTE });
+    expect(replay.status).toBe(200);
+    expect(replay.body.idempotent).toBe(true);
+    // A negative correction references the transfer it reverses; it is not a cash confirmation.
+    const reversal = await call("superadmin", "POST", pathA, { kind: "CORRECTION", amount: -200, reference: "BANK-C4", note: NOTE });
+    expect(reversal.status).toBe(201);
+    expect(await account()).toMatchObject({ confirmedRupiah: 800 });
+
+    // Deterministic race: organization B's entry with the same reference is inserted but not yet committed by
+    // another session; organization A's request waits on the unique index and ends as a 409, never a 500.
+    const connection = await f.connection();
+    const observer = await f.connection();
+    const accountB = await f.db.rewardFundingAccount.upsert({
+      where: { organizationId: f.ids.orgB }, update: {}, create: { organizationId: f.ids.orgB } });
+    const locked = deferred<number>();
+    const release = deferred();
+    const holder = connection.$transaction(async (tx) => {
+      const [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+      await tx.fundingEntry.create({ data: {
+        accountId: accountB.id, businessKey: fundingCashKey("BANK-RACE"), kind: "CONFIRMED_TOPUP", amount: 1_000,
+        reference: "BANK-RACE", note: NOTE, verifiedById: f.ids.superadmin } });
+      locked.resolve(pid);
+      await release.promise;
+    }, { maxWait: 10_000, timeout: 60_000 });
+    holder.catch((error) => locked.reject(error));
+    const holderPid = await locked.promise;
+    const racing = call("superadmin", "POST", pathA, { amount: 1_000, reference: "BANK-RACE", note: NOTE });
+    racing.catch(() => {});
+    await waitForBlockedBy(observer, { holderPid, timeoutMs: 15_000 });
+    expect(await isStillPending(racing, 100)).toBe(true);
+    release.resolve();
+    await holder;
+    const raced = await racing;
+    expect(raced.status).toBe(409);
+    expect(raced.body.error).toMatch(/organisasi lain/);
+    expect(await f.db.fundingEntry.count({ where: { reference: "BANK-RACE" } })).toBe(1);
+    expect(await account()).toMatchObject({ confirmedRupiah: 800 });
   });
 });
 

@@ -400,7 +400,7 @@ export function RewardFundingPanel({ organizations }: { organizations: Option[] 
                 <FormField
                   label="Referensi bukti"
                   htmlFor="funding-reference"
-                  hint="Nomor referensi transfer/bukti bank, minimal 6 karakter. Satu referensi hanya dicatat sekali, untuk satu organisasi."
+                  hint="Nomor referensi transfer/bukti bank, minimal 6 karakter (huruf besar/kecil dianggap sama). Satu referensi mengonfirmasi kas sekali: untuk satu organisasi, satu nominal, satu jenis."
                   required
                   className="sm:col-span-2"
                 >

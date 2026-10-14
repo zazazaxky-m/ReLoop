@@ -1,17 +1,18 @@
 import { randomUUID } from "node:crypto";
-import type {
-  FundingEntry,
-  FundingEntryKind,
+import {
   Prisma,
-  RewardBudgetCommit,
-  RewardBudgetReservation,
-  RewardFundingAccount,
-  RewardReservationSource,
+  type FundingEntry,
+  type FundingEntryKind,
+  type RewardBudgetCommit,
+  type RewardBudgetReservation,
+  type RewardFundingAccount,
+  type RewardReservationSource,
 } from "@prisma/client";
 import { lockCampaign, lockFundingAccount } from "./db-locks";
 import { prisma } from "./prisma";
 import { HttpError } from "./rbac";
 import { resolveMigrationCutover, type LegacyCutover } from "./reward-legacy-cutover";
+import { machineRewardMode, tripRewardMode } from "./reward-policy";
 import { TRASH_BAG_REWARD_PER_BAG } from "./trip";
 
 /**
@@ -106,8 +107,9 @@ export function fundingPolicy(env: Record<string, string | undefined> = process.
  * program turned to money after admission) gets a zero-ceiling reservation at
  * its first earning and is held uncovered. Resolution is deterministic and
  * fails closed (an unresolvable cutover treats every source as post-cutover,
- * i.e. holds it): `REWARD_FUNDING_CUTOVER_AT` when set (unparsable = none),
- * else the applied time of the funding migration.
+ * i.e. holds it): the earlier of `REWARD_FUNDING_CUTOVER_AT` (unparsable =
+ * none) and the applied time of the funding migration (C3: a setting later
+ * than the migration never widens the legacy window).
  */
 export const REWARD_FUNDING_MIGRATION = "20261014150000_reward_funding";
 export const FUNDING_CUTOVER_ENV = "REWARD_FUNDING_CUTOVER_AT";
@@ -116,7 +118,9 @@ export async function resolveFundingCutover(
   db: Pick<Prisma.TransactionClient, "$queryRaw">,
   env: Record<string, string | undefined> = process.env,
 ): Promise<LegacyCutover> {
-  return resolveMigrationCutover(db, { migration: REWARD_FUNDING_MIGRATION, envName: FUNDING_CUTOVER_ENV, env });
+  return resolveMigrationCutover(db, {
+    migration: REWARD_FUNDING_MIGRATION, envName: FUNDING_CUTOVER_ENV, env, combine: "earliest",
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +132,7 @@ export const CAMPAIGN_BUDGET_INSUFFICIENT = "Kuota reward program tidak mencukup
 export const FUNDING_KEY_CONFLICT =
   "Kunci pendanaan ini sudah tercatat dengan nilai berbeda. Hubungi tim keuangan untuk rekonsiliasi.";
 export const FUNDING_REFERENCE_CONFLICT =
-  "Referensi ini sudah tercatat dengan nominal atau jenis berbeda. Periksa bukti pendanaan sebelum mencatat ulang.";
+  "Referensi ini sudah tercatat untuk organisasi lain atau dengan nominal/jenis berbeda. Periksa bukti pendanaan sebelum mencatat ulang.";
 export const FUNDING_REFERENCE_REQUIRED = "Referensi bukti pendanaan wajib diisi (minimal 6 karakter)";
 export const FUNDING_NOTE_REQUIRED =
   "Catatan bukti pendanaan wajib diisi (minimal 10 karakter: sumber dana, tanggal, dan rekening)";
@@ -150,9 +154,25 @@ export const ORGANIZATION_HAS_OPEN_SESSIONS =
 
 export const sessionAdmissionKey = (sessionId: string) => `session:${sessionId}:admission`;
 export const tripIssuanceKey = (tripId: string) => `trip:${tripId}:issuance`;
-/** Evidence references are unique per kind across organizations: one bank transfer confirms cash once. */
-export const fundingTopupKey = (reference: string) => `topup:${reference}`;
-export const fundingCorrectionKey = (reference: string) => `correction:${reference}`;
+/** Evidence references compare trimmed and case-insensitively (C4). */
+export const normalizeFundingReference = (reference: string) => reference.trim().toUpperCase();
+/**
+ * One key space for every cash-confirming entry (a topup or a positive
+ * correction), across organizations: one bank transfer confirms cash once
+ * (C4). A negative correction references the transfer it reverses in its
+ * own space. Keys of the earlier formats (`topup:<org>:<ref>`,
+ * `topup:<ref>`) exist only on this unreleased branch: no backfill.
+ */
+export const fundingCashKey = (reference: string) => `cash:${normalizeFundingReference(reference)}`;
+export const fundingCorrectionKey = (reference: string) => `correction:${normalizeFundingReference(reference)}`;
+
+/** The unique-index race on a cash reference (two organizations, same reference, concurrently): a 409, never a 500. */
+export function isFundingReferenceConflict(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") return false;
+  const meta = (error.meta ?? {}) as { target?: unknown; modelName?: unknown };
+  const target = Array.isArray(meta.target) ? meta.target.join(",") : String(meta.target ?? "");
+  return meta.modelName === "FundingEntry" || /FundingEntry|businessKey/.test(target);
+}
 export const payoutFundingKey = (redemptionId: string, accountId: string) =>
   `redemption:${redemptionId}:payout:${accountId}`;
 export const FUNDING_REFERENCE_MIN = 6;
@@ -249,27 +269,51 @@ export async function hasOpenProgramSources(tx: Prisma.TransactionClient, campai
   return trips > 0;
 }
 
+export interface ProgramRewardShape {
+  rewardMode: string;
+  rewardMultiplier: number | null;
+  campaignType: string;
+  supportsMachine: boolean;
+}
+
 /**
- * I2: under enforcement a program with open sources cannot turn to money or
- * raise its multiplier: its sources were admitted (and reserved) under the
- * old terms, so the change would create obligations nothing reserved for.
- * The caller holds the Campaign lock (admission and issuance take it too, so
- * no source can slip in between the count and the update). Shadow mode
- * allows the change; a later earning is then held late and reported.
+ * The modes a program EFFECTIVELY pays in (lib/reward-policy.ts): trips
+ * follow `tripRewardMode` (only trip program types pay), machines
+ * `machineRewardMode` (only machine program types, or EVENT/SCHOOL_PROGRAM
+ * with `supportsMachine`). Both depend on `campaignType` and
+ * `supportsMachine`, not only on `rewardMode`.
+ */
+export function effectiveProgramModes(program: ProgramRewardShape): { trips: boolean; machines: boolean } {
+  return {
+    trips: tripRewardMode(program) === "MONEY_REWARD",
+    // The organization mode only applies to sessions without a campaign.
+    machines: machineRewardMode({ campaign: program, organizationMode: "COMPLIANCE_ONLY" }) === "MONEY_REWARD",
+  };
+}
+
+/**
+ * I2: under enforcement a program with open sources cannot start paying
+ * money or raise its multiplier: its sources were admitted (and reserved)
+ * under the old terms, so the change would create obligations nothing
+ * reserved for. "Starts paying" is judged on the EFFECTIVE modes (I2-a), so a
+ * change of `campaignType` or `supportsMachine` that turns trips or machines
+ * to money counts, and a program parked as an EVENT while its bags were
+ * issued cannot be turned back into a money trip program. The caller holds
+ * the Campaign lock (admission and issuance take it too, so no source can
+ * slip in between the count and the update). Shadow mode allows the change;
+ * a later earning is then held late and reported.
  */
 export async function guardProgramRewardChange(
   tx: Prisma.TransactionClient,
-  input: {
-    campaignId: string;
-    current: { rewardMode: string; rewardMultiplier: number | null };
-    next: { rewardMode: string; rewardMultiplier: number | null };
-  },
+  input: { campaignId: string; current: ProgramRewardShape; next: ProgramRewardShape },
   policy: FundingPolicy = fundingPolicy(),
 ): Promise<void> {
   if (!policy.enforced) return;
-  const turnsToMoney = input.current.rewardMode !== "MONEY_REWARD" && input.next.rewardMode === "MONEY_REWARD";
+  const current = effectiveProgramModes(input.current);
+  const next = effectiveProgramModes(input.next);
+  const turnsToMoney = (!current.trips && next.trips) || (!current.machines && next.machines);
   const raisesMultiplier =
-    input.next.rewardMode === "MONEY_REWARD" &&
+    (next.trips || next.machines) &&
     effectiveMultiplier(input.next.rewardMultiplier) > effectiveMultiplier(input.current.rewardMultiplier);
   if (!turnsToMoney && !raisesMultiplier) return;
   if (await hasOpenProgramSources(tx, input.campaignId)) throw new HttpError(409, PROGRAM_HAS_OPEN_SOURCES);
@@ -711,14 +755,22 @@ export async function settleCommittedReward(
 /**
  * Review settlement entry point: settles the earning's commit when it has
  * one; otherwise (an item held with ceiling 0, e.g. the unknown-type fallback
- * a reviewer reclassified) commits the target against the source reservation
- * when that exists. `targetRupiah: null` keeps the held amount and only
- * clears `reviewPending` (the decision was refused into a reconciliation
- * case, so the money is still out there). Null when the source is legacy.
+ * a reviewer reclassified, or a source admitted without money whose program
+ * pays now) commits the target against the source's reservation resolved
+ * exactly like an acceptance (`resolveSourceReservation`, I2-b): the
+ * admission reservation, or a late zero-ceiling one (held uncovered and
+ * reported); nothing for a legacy source. `targetRupiah: null` keeps the
+ * held amount and only clears `reviewPending` (the decision was refused into
+ * a reconciliation case, so the money is still out there).
  */
 export async function settleOrCommitReward(
   tx: Prisma.TransactionClient,
-  input: { businessKey: string; reservationKey: string; targetRupiah: number | null; reviewPending: boolean },
+  input: {
+    businessKey: string;
+    source: { sourceType: RewardReservationSource; sourceId: string };
+    targetRupiah: number | null;
+    reviewPending: boolean;
+  },
 ): Promise<RewardBudgetCommit | null> {
   const existing = await tx.rewardBudgetCommit.findUnique({ where: { businessKey: input.businessKey } });
   if (existing) {
@@ -728,9 +780,9 @@ export async function settleOrCommitReward(
     });
   }
   if (!input.targetRupiah || input.targetRupiah <= 0) return null;
-  const reservation = await findReservationByKey(tx, input.reservationKey);
-  if (!reservation) return null;
-  const { commitId } = await commitRewardAgainstBudget(tx, reservation.id, input.businessKey, input.targetRupiah, {
+  const resolved = await resolveSourceReservation(tx, input.source);
+  if (resolved.kind !== "RESERVATION") return null;
+  const { commitId } = await commitRewardAgainstBudget(tx, resolved.reservation.id, input.businessKey, input.targetRupiah, {
     reviewPending: input.reviewPending,
   });
   return tx.rewardBudgetCommit.findUniqueOrThrow({ where: { id: commitId } });
@@ -866,9 +918,13 @@ export interface RecordFundingEntryInput {
 
 /**
  * Records confirmed cash with evidence. Never moves real money. Idempotent by
- * reference: the same reference for the same organization and amount returns
- * the existing entry; the same reference for another organization or amount
- * is 409 (one bank transfer confirms cash once).
+ * reference: the same reference (trimmed, case-insensitive) for the same
+ * organization, amount and kind returns the existing entry; the same
+ * reference for another organization, amount or kind is 409 (one bank
+ * transfer confirms cash once). Two organizations recording the same
+ * reference concurrently race on the unique index: the loser's transaction
+ * fails with P2002, which callers map to the same 409
+ * (`isFundingReferenceConflict`).
  */
 export async function recordFundingEntry(
   tx: Prisma.TransactionClient,
@@ -883,10 +939,12 @@ export async function recordFundingEntry(
     assertRupiah(Math.abs(input.amount), "nominal koreksi", { min: 1 });
   }
   const account = await lockFundingAccountForOrganization(tx, input.organizationId);
-  const businessKey = input.kind === "CONFIRMED_TOPUP" ? fundingTopupKey(reference) : fundingCorrectionKey(reference);
+  // C4: a topup and a positive correction both confirm cash and share one
+  // reference space; only a negative correction (a reversal) has its own.
+  const businessKey = input.amount > 0 ? fundingCashKey(reference) : fundingCorrectionKey(reference);
   const existing = await tx.fundingEntry.findUnique({ where: { businessKey } });
   if (existing) {
-    if (existing.accountId !== account.id || existing.amount !== input.amount) {
+    if (existing.accountId !== account.id || existing.amount !== input.amount || existing.kind !== input.kind) {
       throw new HttpError(409, FUNDING_REFERENCE_CONFLICT);
     }
     return { entry: existing, account, idempotent: true };

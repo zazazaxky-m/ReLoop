@@ -6,10 +6,12 @@ import { logAudit } from "@/lib/audit";
 import {
   FUNDING_NOTE_MIN,
   FUNDING_NOTE_REQUIRED,
+  FUNDING_REFERENCE_CONFLICT,
   FUNDING_REFERENCE_MIN,
   FUNDING_REFERENCE_REQUIRED,
   MAX_FUNDING_RUPIAH,
   getOrganizationFunding,
+  isFundingReferenceConflict,
   recordFundingEntry,
   releaseResidualReservation,
 } from "@/lib/reward-funding";
@@ -125,16 +127,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return jsonOk({ reservation: outcome.reservation, released: outcome.released, idempotent: outcome.idempotent });
     }
 
-    const outcome = await runWalletTransaction((tx) =>
-      recordFundingEntry(tx, {
-        organizationId: id,
-        kind: body.kind,
-        amount: body.amount,
-        reference: body.reference,
-        note: body.note,
-        verifiedById: user.id,
-      }),
-    );
+    let outcome: Awaited<ReturnType<typeof recordFundingEntry>>;
+    try {
+      outcome = await runWalletTransaction((tx) =>
+        recordFundingEntry(tx, {
+          organizationId: id,
+          kind: body.kind,
+          amount: body.amount,
+          reference: body.reference,
+          note: body.note,
+          verifiedById: user.id,
+        }),
+      );
+    } catch (error) {
+      // C4: another organization committed the same reference while this
+      // transaction waited on the unique index; nothing was written here.
+      if (isFundingReferenceConflict(error)) throw new HttpError(409, FUNDING_REFERENCE_CONFLICT);
+      throw error;
+    }
     if (!outcome.idempotent) {
       await afterCommitSafely("audit REWARD_FUNDING_ENTRY", () =>
         logAudit({

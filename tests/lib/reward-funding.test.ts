@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import {
   CAMPAIGN_BUDGET_REQUIRED_FOR_ACTIVATION,
@@ -12,9 +13,12 @@ import {
   configuredCap,
   effectiveMultiplier,
   fundingPolicy,
+  fundingCashKey,
   fundingCorrectionKey,
-  fundingTopupKey,
+  effectiveProgramModes,
   isRewardFundingEnforced,
+  isFundingReferenceConflict,
+  normalizeFundingReference,
   resolveFundingCutover,
   resolveSessionCeiling,
   tripIssuanceCeiling,
@@ -121,26 +125,59 @@ describe("assertMoneyProgramConfigured", () => {
 });
 
 describe("evidence keys and the funding cutover", () => {
-  it("evidence references are unique per kind across organizations (C2)", () => {
-    expect(fundingTopupKey("BANK-001")).toBe("topup:BANK-001");
-    expect(fundingCorrectionKey("BANK-001")).toBe("correction:BANK-001");
+  it("every cash-confirming entry shares one trimmed, case-insensitive reference space; reversals have their own (C2, C4)", () => {
+    expect(normalizeFundingReference(" bank-001 ")).toBe("BANK-001");
+    expect(fundingCashKey("BANK-001")).toBe("cash:BANK-001");
+    expect(fundingCashKey(" bank-001 ")).toBe("cash:BANK-001");
+    expect(fundingCorrectionKey("Bank-001")).toBe("correction:BANK-001");
+    const race = new Prisma.PrismaClientKnownRequestError("unique", {
+      code: "P2002", clientVersion: "6", meta: { modelName: "FundingEntry", target: ["businessKey"] } });
+    expect(isFundingReferenceConflict(race)).toBe(true);
+    expect(isFundingReferenceConflict(new Prisma.PrismaClientKnownRequestError("unique", {
+      code: "P2002", clientVersion: "6", meta: { modelName: "RewardLedger", target: ["businessKey"] } }))).toBe(true);
+    expect(isFundingReferenceConflict(new Prisma.PrismaClientKnownRequestError("other", {
+      code: "P2002", clientVersion: "6", meta: { modelName: "Redemption", target: ["userId", "idempotencyKey"] } }))).toBe(false);
+    expect(isFundingReferenceConflict(new Error("x"))).toBe(false);
   });
 
-  it("resolves the funding cutover from the explicit setting, else the applied funding migration, and fails closed", async () => {
+  it("the effective modes follow campaignType and supportsMachine, not only rewardMode (I2-a)", () => {
+    const money = { rewardMode: "MONEY_REWARD", rewardMultiplier: null, supportsMachine: false };
+    expect(effectiveProgramModes({ ...money, campaignType: "TRASH_BAG" })).toEqual({ trips: true, machines: false });
+    expect(effectiveProgramModes({ ...money, campaignType: "TOURISM_PROGRAM" })).toEqual({ trips: true, machines: false });
+    expect(effectiveProgramModes({ ...money, campaignType: "MACHINE_DEPOSIT" })).toEqual({ trips: false, machines: true });
+    expect(effectiveProgramModes({ ...money, campaignType: "EVENT" })).toEqual({ trips: false, machines: false });
+    expect(effectiveProgramModes({ ...money, campaignType: "EVENT", supportsMachine: true })).toEqual({ trips: false, machines: true });
+    expect(effectiveProgramModes({ ...money, campaignType: "TRASH_BAG", rewardMode: "COMPLIANCE_ONLY" })).toEqual({ trips: false, machines: false });
+  });
+
+  it("resolves the funding cutover as the earlier of the explicit setting and the applied migration, failing closed (C3)", async () => {
     const reader = () => ({ $queryRaw: vi.fn() });
-    const db = reader();
     const finishedAt = new Date("2026-10-14T15:00:00.000Z");
-    db.$queryRaw.mockResolvedValueOnce([{ present: true }]).mockResolvedValueOnce([{ finishedAt }]);
+    const withMigration = () => {
+      const db = reader();
+      db.$queryRaw.mockResolvedValueOnce([{ present: true }]).mockResolvedValueOnce([{ finishedAt }]);
+      return db;
+    };
+    const db = withMigration();
     expect(await resolveFundingCutover(db as never, {})).toEqual({ at: finishedAt, source: "migration" });
     expect(db.$queryRaw.mock.calls[1][1]).toBe(REWARD_FUNDING_MIGRATION);
     expect(REWARD_FUNDING_MIGRATION).toBe("20261014150000_reward_funding");
 
-    const explicit = reader();
-    expect(await resolveFundingCutover(explicit as never, { [FUNDING_CUTOVER_ENV]: "2026-10-20T00:00:00Z" }))
-      .toEqual({ at: new Date("2026-10-20T00:00:00.000Z"), source: "env" });
-    expect(explicit.$queryRaw).not.toHaveBeenCalled();
-    expect(await resolveFundingCutover(explicit as never, { [FUNDING_CUTOVER_ENV]: "bukan-tanggal" }))
+    // A setting later than the migration never widens the legacy window: the migration wins.
+    expect(await resolveFundingCutover(withMigration() as never, { [FUNDING_CUTOVER_ENV]: "2026-10-20T00:00:00Z" }))
+      .toEqual({ at: finishedAt, source: "migration" });
+    // An earlier setting narrows it.
+    expect(await resolveFundingCutover(withMigration() as never, { [FUNDING_CUTOVER_ENV]: "2026-10-10T00:00:00Z" }))
+      .toEqual({ at: new Date("2026-10-10T00:00:00.000Z"), source: "env" });
+    // Setting only (migration not applied), unparsable setting (closed, even with a migration), nothing.
+    const notApplied = reader();
+    notApplied.$queryRaw.mockResolvedValueOnce([{ present: true }]).mockResolvedValueOnce([]);
+    expect(await resolveFundingCutover(notApplied as never, { [FUNDING_CUTOVER_ENV]: "2026-10-10T00:00:00Z" }))
+      .toEqual({ at: new Date("2026-10-10T00:00:00.000Z"), source: "env" });
+    const invalid = withMigration();
+    expect(await resolveFundingCutover(invalid as never, { [FUNDING_CUTOVER_ENV]: "bukan-tanggal" }))
       .toEqual({ at: null, source: "env-invalid" });
+    expect(invalid.$queryRaw).not.toHaveBeenCalled();
     const missing = reader();
     missing.$queryRaw.mockResolvedValueOnce([{ present: false }]);
     expect(await resolveFundingCutover(missing as never, {})).toEqual({ at: null, source: "migration-missing" });
