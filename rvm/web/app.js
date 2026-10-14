@@ -48,10 +48,18 @@ function renderWastePicker(d){
   }
 }
 
-function renderItems(session){
+function boundText(bound){
+  if(!bound)return "Tanpa batas";
+  const parts=[];
+  if(bound.remainingRupiah!=null)parts.push(`${rupiah(bound.remainingRupiah)} tersisa`);
+  if(bound.remainingItems!=null)parts.push(`${bound.remainingItems} item tersisa`);
+  return bound.exhausted?"Tercapai":parts.join(" · ");
+}
+function renderItems(session,bound){
   const list=clear($("itemList")),items=session?.items||[];
   $("totalItems").textContent=session?.totalQuantity||0;
   $("totalReward").textContent=rupiah(session?.totalReward||0);
+  $("sessionBound").textContent=boundText(bound);
   if(!items.length){list.append(el("div",{className:"empty"},"Belum ada item. Masukkan sampah pertama Anda."));return}
   const grouped=new Map();
   for(const item of items){
@@ -135,8 +143,9 @@ function render(d){
   $("temperature").textContent=Number(sensors.temperature_c).toFixed(1)+"°C";$("queue").textContent=server.queueDepth;
   $("network").classList.toggle("online",server.online);$("network").querySelector("span").textContent=server.online?"Server terhubung":"Mode offline lokal";
   $("simulatorLauncher").hidden=d.simulation?.available!==true;
-  $("sessionSummary").hidden=!session;$("userName").textContent=session?.userName||"Pengguna ReLoop";renderItems(session);renderWastePicker(d);
-  const needsWasteTypeChoice=d.runtimeState==="SESSION_ACTIVE"&&(d.wasteTypes||[]).length>0&&!d.selectedWasteTypeId;
+  const bound=d.sessionBound||null,boundReached=Boolean(session&&bound&&bound.exhausted);
+  $("sessionSummary").hidden=!session;$("userName").textContent=session?.userName||"Pengguna ReLoop";renderItems(session,bound);renderWastePicker(d);
+  const needsWasteTypeChoice=d.runtimeState==="SESSION_ACTIVE"&&(d.wasteTypes||[]).length>0&&!d.selectedWasteTypeId&&!boundReached;
 
   const timeout=session?.timeoutAt?new Date(session.timeoutAt).getTime()-Date.now():0;
   const seconds=Math.max(0,Math.ceil(timeout/1000));
@@ -159,8 +168,8 @@ function render(d){
   const displayView=activeAlert?[alertKickers[d.alert.category]||(d.alert.severity==="CRITICAL"?"Mesin diamankan":"Peringatan mesin"),activeAlert[0],activeAlert[1]]:view;
   $("visualIcon").textContent=activeAlert?"!":"♻";
   $("visualKicker").textContent=displayView[0];$("visualTitle").textContent=showQr?"Scan untuk mulai":displayView[1];$("visualText").textContent=showQr?"Buka aplikasi ReLoop dan arahkan kamera ke QR":displayView[2];
-  $("headline").textContent=activeAlert?activeAlert[0]:needsWasteTypeChoice?"Pilih jenis sampah di panel kanan.":(session?`${session.totalQuantity||0} item sudah masuk.`:"Scan QR untuk mulai menyetor.");
-  $("message").textContent=activeAlert?activeAlert[1]:needsWasteTypeChoice?"Ketuk salah satu jenis sampah, lalu masukkan item ke chamber.":(session?`Reward sementara ${rupiah(session.totalReward)}. Masukkan item berikutnya atau tekan Selesai di HP.`:"Setorkan botol atau kaleng satu per satu dan lihat reward bertambah langsung.");
+  $("headline").textContent=activeAlert?activeAlert[0]:boundReached?"Batas sesi tercapai.":needsWasteTypeChoice?"Pilih jenis sampah di panel kanan.":(session?`${session.totalQuantity||0} item sudah masuk.`:"Scan QR untuk mulai menyetor.");
+  $("message").textContent=activeAlert?activeAlert[1]:boundReached?"Mesin tidak menerima item lagi untuk sesi ini. Tekan Selesai di HP untuk menutup sesi.":needsWasteTypeChoice?"Ketuk salah satu jenis sampah, lalu masukkan item ke chamber.":(session?`Reward sementara ${rupiah(session.totalReward)}.${bound&&!bound.exhausted?` Batas sesi: ${boundText(bound)}.`:""} Masukkan item berikutnya atau tekan Selesai di HP.`:"Setorkan botol atau kaleng satu per satu dan lihat reward bertambah langsung.");
   $("eyebrow").textContent=activeAlert?(d.alert.category==="VANDALISM"?"Peringatan vandalisme":d.alert.category==="FRAUD"?"Peringatan fraud":"Peringatan operasional"):(session?"Setoran berlangsung":"Reverse vending machine");
   $("stepScan").classList.toggle("active",!session);$("stepDeposit").classList.toggle("active",Boolean(session));$("stepReward").classList.toggle("active",Boolean(session?.totalQuantity));
 

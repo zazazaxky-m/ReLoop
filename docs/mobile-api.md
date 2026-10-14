@@ -586,6 +586,54 @@ Rollout dalam dua rilis:
 perilaku mesin (lease ditahan saat konflik, sesi ditutup setelah batas waktu)
 tidak dirilis sebelum uji mock dan uji hardware terkendali di gate Z01.
 
+## Batas sesi, lease v2, dan close watermark (B01b)
+
+**Batas sesi terlihat sebelum item pertama.** `POST /api/scan` (201 dan 200
+resume) dan `GET /api/sessions/:id` memuat field aditif `limits`
+(kontrak `scan-session.v1`, field `limits`; model `SessionLimits` di
+`mobile/lib/core/models.dart`):
+
+```json
+"limits": { "maxRewardRupiah": 20000, "maxItems": 10 }
+```
+
+- `maxRewardRupiah`: reward maksimal yang dapat diperoleh sesi ini (batas per
+  sesi program, atau mesin), `null` untuk sesi `COMPLIANCE_ONLY` atau bila
+  belum dikonfigurasi (mode bayangan). `maxItems`: jumlah item maksimal
+  (`Machine.maxItemsPerSession`), `null` bila tidak ada.
+- Nilai ini dibekukan saat sesi dibuat (snapshot admisi) dan ditandatangani ke
+  lease mesin: mesin **berhenti menerima item** begitu batas tercapai (item
+  berikutnya ditolak dengan alasan `SESSION_BOUND_REACHED`, gate tidak dibuka
+  lagi) dan kiosk menampilkan "Batas sesi tercapai". Aplikasi menampilkan batas
+  sebelum item pertama ("Batas sesi ini: reward maksimal Rp20.000 dan maksimal
+  10 item. Mesin berhenti menerima item setelah batas tercapai.") dan tetap
+  memberi tombol Selesai.
+- Tarif, multiplier, dan mode reward sesi juga dibekukan saat admisi: item yang
+  masuk (termasuk batch offline/terlambat dari mesin dan keputusan peninjauan)
+  dihargai dengan tarif saat admisi, bukan konfigurasi yang diubah kemudian.
+  Program yang berubah menjadi berhadiah setelah sesi dibuat tidak membayar
+  item sesi itu.
+
+**Lease mesin v2** (`GET /api/machine-session/:code`, bukan API mobile): worker
+RVM yang mengirim header `x-reloop-lease-protocol: 2` menerima lease v2 dengan
+`reservationId`, `policyVersion`, `ceilingRupiah`, `maxItems` dan snapshot
+`policy` yang terikat HMAC (`lib/machine-lease.ts`, kontrak
+`tests/fixtures/contracts/machine-lease.v2.json`). Worker tanpa header tetap
+mendapat lease v1 untuk sesi kepatuhan dan, selama `REWARD_FUNDING_ENFORCED`
+belum `true`, sesi berhadiah; saat penegakan aktif sesi berhadiah **ditolak**
+untuk worker v1 (`lease: null`, `leaseRefused: "LEASE_PROTOCOL_V2_REQUIRED"`).
+Respons `session` kini juga memuat `limits`. Urutan rollout: backend, lalu
+worker mesin, baru flag (`rvm/README.md`, "Lease v2").
+
+**Close watermark.** Sisa reservasi dana sebuah sesi dilepas hanya setelah
+mesin mengirim `SESSION_CLOSE_WATERMARK` (event protokol v2 biasa, setelah
+server mengakhiri sesi dan semua event sesi ter-ACK). Koneksi mesin yang hilang
+berarti sisa tetap ditahan dan tampil di laporan rekonsiliasi
+(`SOURCE_CLOSED_AWAITING_WATERMARK`) sampai mesin kembali atau superadmin
+melepasnya secara eksplisit; tidak ada timeout yang membebaskan dana. Tidak ada
+perubahan pada API mobile selain `limits`. Perubahan perilaku mesin ini belum
+diuji pada hardware (gate Z01).
+
 ## Penghapusan akun (A04)
 
 `DELETE /api/user/data` (role USER, sesi aktif = verifikasi pemilik) selalu

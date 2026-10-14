@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import logging
 import secrets
@@ -14,6 +12,7 @@ from .config import RvmConfig
 from .database import EdgeDatabase
 from .fraud import RvmFraudMixin
 from .hardware import GpioHardware, HardwareAdapter, MockHardware, SensorSnapshot
+from .lease import bound_state, item_block_reason, item_cap, item_caps, verify_lease_v2
 from .remote import RvmRemoteMixin
 from .simulation import RvmSimulationMixin
 from .states import (
@@ -253,6 +252,14 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                         self.set_state(MachineState.IDLE, "server-session-ended")
                     # After the state change, so a failed stop's latch wins.
                     self._safe_all_stop()
+                # B01b: every session the server no longer runs is closed
+                # locally; its close watermark follows once its outbox is
+                # synced (rvm/sync.py). A conflict (`sessionConflict`) is not
+                # an end: the session may resume once it is resolved.
+                if not payload.get("sessionConflict"):
+                    current = str(lease["sessionId"]) if isinstance(lease, dict) and lease.get("sessionId") else None
+                    for closed in self.db.close_sessions_except(current):
+                        self.db.audit("SESSION_CLOSED_BY_SERVER", {"sessionId": closed})
 
         if self.state == MachineState.IDLE and time.time() - self._last_display_poll >= 5:
             self._last_display_poll = time.time()
@@ -400,35 +407,50 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             if self.state != MachineState.PROCESSING:
                 self.report_fraud("IMPOSSIBLE_ACCEPTANCE_SEQUENCE", {})
             else:
-                blocked = self._guarded_output(lambda: self.hardware.set_conveyor("FORWARD"))
-                if blocked:
+                session_id = self.session_id()
+                waste_type_id = self._selected_waste_type_id
+                # B01b: the signed session bound (ceiling, item bound) is
+                # checked before any actuator moves. An item it cannot cover
+                # is rejected like an interlock refusal: every output off, no
+                # ITEM_ACCEPTED_POINT, the gate stays shut.
+                bound = self._item_bound_block(waste_type_id)
+                blocked: str | None = None
+                if bound:
+                    self._safe_all_stop()
+                    self.emit(
+                        "ITEM_REJECTED",
+                        {"reason": "SESSION_BOUND_REACHED", "bound": bound},
+                        session_id,
+                    )
+                    self.db.audit("SESSION_BOUND_REACHED", {"bound": bound, "wasteTypeId": waste_type_id})
+                elif (blocked := self._guarded_output(lambda: self.hardware.set_conveyor("FORWARD"))):
                     # The server credits on ITEM_ACCEPTED_POINT: an item the
                     # conveyor never moved is rejected, never accepted.
                     self.emit(
                         "ITEM_REJECTED",
                         {"reason": "ACTUATION_BLOCKED", "blockedBy": blocked},
-                        self.session_id(),
+                        session_id,
                     )
                 else:
                     self._sensor_sequence.extend(["CONVEYOR_FORWARD", "ACCEPTANCE_POINT"])
-                    self.emit("SENSOR_SEQUENCE", {"steps": self._sensor_sequence}, self.session_id())
-                    self.emit("CONVEYOR_STARTED", {"direction": "FORWARD"}, self.session_id())
-                    self.emit("ITEM_ACCEPTED_POINT", {"acceptanceBeam": True}, self.session_id())
+                    self.emit("SENSOR_SEQUENCE", {"steps": self._sensor_sequence}, session_id)
+                    self.emit("CONVEYOR_STARTED", {"direction": "FORWARD"}, session_id)
+                    self._emit_accepted(session_id, waste_type_id)
                     self._close_output(lambda: self.hardware.set_conveyor("STOPPED"))
                     if (
                         self.config.compactor_enabled
                         and self._guarded_output(lambda: self.hardware.set_compactor(True)) is None
                     ):
-                        self.emit("COMPACTION_STARTED", {}, self.session_id())
+                        self.emit("COMPACTION_STARTED", {}, session_id)
                         time.sleep(0.15)
                         self._close_output(lambda: self.hardware.set_compactor(False))
-                        self.emit("COMPACTION_COMPLETED", {}, self.session_id())
+                        self.emit("COMPACTION_COMPLETED", {}, session_id)
                 self._processing_started_at = None
                 self._sensor_sequence = []
                 self._reset_waste_type_selection()
                 self.set_state(
                     MachineState.SESSION_ACTIVE,
-                    "item-actuation-blocked" if blocked else "item-accepted",
+                    "item-bound-reached" if bound else "item-actuation-blocked" if blocked else "item-accepted",
                 )
         # Level-triggered enforcement: while latched, or while any physical
         # hazard is present, every tick drives all outputs off again, whatever
@@ -545,22 +567,20 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                     event_type="ERROR",
                 )
 
+    def lease_refusal(self, lease: Any) -> str | None:
+        """Why a lease is not a valid lease v2 for this machine (rvm/lease.py),
+        or None. A v1 lease (no `version`) is refused: a reward cap that is
+        not signed never gets a permissive fallback."""
+        return verify_lease_v2(self.config.machine_secret, lease, self.config.machine_code)
+
     def verify_lease(self, lease: dict[str, Any]) -> bool:
-        required = {"id", "sessionId", "issuedAt", "expiresAt", "signature"}
-        if not required.issubset(lease):
-            return False
-        canonical = ".".join(
-            str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
-        )
-        expected = hmac.new(
-            self.config.machine_secret.encode(), canonical.encode(), hashlib.sha256
-        ).hexdigest()
-        return hmac.compare_digest(expected, str(lease["signature"]))
+        return self.lease_refusal(lease) is None
 
     def activate_lease(self, lease: dict[str, Any]) -> bool:
-        if not self.verify_lease(lease) or float(lease["expiresAt"]) <= time.time():
+        refusal = self.lease_refusal(lease)
+        if refusal or float(lease["expiresAt"]) <= time.time():
             # Pre-scan lease (QR display data), save as display
-            if lease.get("qrDataUrl"):
+            if isinstance(lease, dict) and lease.get("qrDataUrl"):
                 self.db.set_json(
                     "display",
                     {
@@ -570,13 +590,31 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                         "updatedAt": time.time(),
                     }
                 )
+            elif refusal:
+                self.db.audit("LEASE_REFUSED", {"reason": refusal})
             return False
         lease = {**lease, "status": "ACTIVE"}
+        session_id = str(lease["sessionId"])
+        opened = False
 
         def start_session() -> None:
+            nonlocal opened
+            # The durable consumed counter is keyed by session: a renewal (same
+            # session, fresh expiry) or a restart never resets it.
+            self.db.ensure_session(session_id)
             self.db.save_lease(lease)
             self.set_state(MachineState.SESSION_ACTIVE, "lease-activated")
+            # B01b: at an exhausted bound the session runs, but the gate stays
+            # shut: the machine accepts nothing more for it.
+            bound = self._gate_bound_block()
+            if bound:
+                self.db.audit(
+                    "ACTUATION_BLOCKED",
+                    {"output": "input_gate", "reason": "lease-activated", "blockedBy": bound},
+                )
+                return
             self.hardware.set_input_gate(True)
+            opened = True
 
         with self._lock:
             # A session starts only from a stopped machine: every output is
@@ -590,10 +628,76 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             # saved and the state/latch stay exactly as they were.
             if self._guarded_output(start_session) is not None:
                 return False
-        self.emit("CHAMBER_OPENED", {"leaseActivated": True}, lease["sessionId"])
-        if self.config.camera_capture_session_start:
-            self._capture_camera_evidence("SESSION_START", "SESSION_ACTIVATED", lease["sessionId"])
+        if opened:
+            self.emit("CHAMBER_OPENED", {"leaseActivated": True}, session_id)
+            if self.config.camera_capture_session_start:
+                self._capture_camera_evidence("SESSION_START", "SESSION_ACTIVATED", session_id)
         return True
+
+    # ------------------------------------------------------------------ #
+    # session bound (B01b): signed ceiling / item bound, durable counter
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _lease_bounds(lease: dict[str, Any]) -> tuple[int | None, int | None, dict[str, Any] | None]:
+        """(ceiling, max items, policy) of a stored lease row or a server lease."""
+        if "ceiling_rupiah" in lease:
+            raw = lease.get("policy_json")
+            policy = json.loads(raw) if raw else None
+            return lease.get("ceiling_rupiah"), lease.get("max_items"), policy
+        return lease.get("ceilingRupiah"), lease.get("maxItems"), lease.get("policy")
+
+    def session_bound(self) -> dict[str, Any] | None:
+        """The active session's bound as the kiosk shows it (None: no bound)."""
+        lease = self.db.active_lease()
+        if not lease:
+            return None
+        ceiling, max_items, policy = self._lease_bounds(lease)
+        consumption = self.db.session_consumption(str(lease["session_id"])) or {}
+        return bound_state(
+            ceiling=ceiling,
+            max_items=max_items,
+            policy=policy,
+            consumed_rupiah=int(consumption.get("consumed_rupiah") or 0),
+            consumed_items=int(consumption.get("consumed_items") or 0),
+            max_item_weight_grams=self.config.max_item_weight_grams,
+        )
+
+    def _gate_bound_block(self) -> str | None:
+        """Why the input gate must not open for another item (the bound is
+        exhausted), or None. Not an interlock: it never touches outputs."""
+        bound = self.session_bound()
+        return bound["reason"] if bound and bound["exhausted"] else None
+
+    def _item_bound_block(self, waste_type_id: str | None) -> str | None:
+        """Why the item now at the acceptance beam must not be accepted."""
+        lease = self.db.active_lease()
+        if not lease:
+            return None
+        ceiling, max_items, policy = self._lease_bounds(lease)
+        consumption = self.db.session_consumption(str(lease["session_id"])) or {}
+        return item_block_reason(
+            ceiling=ceiling,
+            max_items=max_items,
+            policy=policy,
+            consumed_rupiah=int(consumption.get("consumed_rupiah") or 0),
+            consumed_items=int(consumption.get("consumed_items") or 0),
+            waste_type_id=waste_type_id,
+            max_item_weight_grams=self.config.max_item_weight_grams,
+        )
+
+    def _emit_accepted(self, session_id: str | None, waste_type_id: str | None) -> str:
+        """ITEM_ACCEPTED_POINT plus the session's consumed counter (the most
+        the server can pay for this item under the signed snapshot), in one
+        SQLite transaction."""
+        payload: dict[str, Any] = {"acceptanceBeam": True}
+        lease = self.db.active_lease()
+        if session_id is None or not lease:
+            return self.emit("ITEM_ACCEPTED_POINT", payload, session_id)
+        ceiling, _max_items, policy = self._lease_bounds(lease)
+        cap = item_cap(item_caps(policy, self.config.max_item_weight_grams), waste_type_id, ceiling)
+        if ceiling is None:
+            cap = max(0, cap)
+        return self.db.enqueue_with_consumption("ITEM_ACCEPTED_POINT", payload, iso_now(), session_id, None, cap)
 
     def _physical_hazards(self, snapshot: SensorSnapshot) -> list[str]:
         """Conditions under which no actuator may move at all. An unresolved
@@ -741,6 +845,14 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 raise
 
     def try_open_input_gate(self, reason: str) -> bool:
+        # B01b: at an exhausted session bound the gate stays shut; the bound
+        # is not a hazard, so nothing else changes.
+        bound = self._gate_bound_block()
+        if bound:
+            self.db.audit(
+                "ACTUATION_BLOCKED", {"output": "input_gate", "reason": reason, "blockedBy": bound}
+            )
+            return False
         blocked = self._guarded_output(lambda: self.hardware.set_input_gate(True))
         self.db.audit(
             "INPUT_GATE_OPENED" if blocked is None else "ACTUATION_BLOCKED",
@@ -900,6 +1012,8 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             },
             "activeSession": bool(self.db.active_lease()),
             "session": self._server_session,
+            # B01b: the signed session bound and the durable consumed counter.
+            "sessionBound": self.session_bound(),
             "idleTimeoutMinutes": self._idle_timeout_minutes,
             "wasteTypes": self.db.get_json("waste_types", []),
             "selectedWasteTypeId": self._selected_waste_type_id,

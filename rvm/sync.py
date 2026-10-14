@@ -17,6 +17,7 @@ from typing import Any
 
 from .config import RvmConfig
 from .database import EdgeDatabase
+from .lease import LEASE_PROTOCOL_HEADER, LEASE_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,11 @@ class SyncWorker:
         """Sends one batch (one HTTP request, bounded by its 5 s timeout) and
         applies the per-event results. True only when every sent event was
         durably acknowledged (or nothing was due)."""
+        # B01b: a session the server closed whose events are all ACKed gets its
+        # close watermark queued now (pure SQLite, no network), so it leaves
+        # with this batch, after everything it vouches for.
+        for mark in self.db.enqueue_close_watermarks():
+            logger.info("close watermark queued for session %s (%d events)", mark["sessionId"], mark["eventCount"])
         isolating = time.time() < self._isolate_until
         rows = self.db.pending(1 if isolating else self.config.batch_size)
         if not rows:
@@ -301,6 +307,10 @@ class SyncWorker:
                 "x-reloop-timestamp": timestamp,
                 "x-reloop-nonce": nonce,
                 "x-reloop-signature": signature,
+                # B01b: this worker verifies signed reward caps; the server
+                # answers with a lease v2 (and refuses money sessions to
+                # workers that do not announce it, once funding is enforced).
+                LEASE_PROTOCOL_HEADER: str(LEASE_PROTOCOL_VERSION),
             },
         )
         try:

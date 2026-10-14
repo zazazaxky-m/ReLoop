@@ -21,6 +21,7 @@ import urllib.request
 from rvm.api import LocalApiServer
 from rvm.camera import CameraStatus, CameraWorker
 from rvm.config import RvmConfig
+from rvm.lease import policy_version, sign_lease_v2
 from rvm.controller import MachineState, RvmController
 from rvm.database import EdgeDatabase
 from rvm.fraud import RvmFraudMixin
@@ -44,16 +45,16 @@ def controller_in(tmp: str, **overrides) -> RvmController:
     return RvmController(RvmConfig(**base))
 
 
-def signed_lease(secret: str, session_id: str = "session-1", expires: int | None = None):
+def signed_lease(secret, session_id="session-1", expires=None, machine_code="TEST-001"):
+    """A signed lease v2 without a money bound (B01b; the v1 form is refused by the worker)."""
     now = int(time.time())
-    lease = {
-        "id": f"lease-{session_id}",
-        "sessionId": session_id,
-        "issuedAt": now,
-        "expiresAt": expires if expires is not None else now + 60,
-    }
-    canonical = ".".join(str(lease[k]) for k in ("id", "sessionId", "issuedAt", "expiresAt"))
-    lease["signature"] = hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+    policy = {"version": 1, "mode": "COMPLIANCE_ONLY", "multiplierBps": 10000, "wasteTypes": []}
+    lease = sign_lease_v2(secret, {
+        "id": f"lease-{session_id}", "machineCode": machine_code, "sessionId": session_id, "userRef": None,
+        "issuedAt": now, "expiresAt": int(expires) if expires is not None else now + 60, "reservationId": None,
+        "policyVersion": policy_version(policy), "ceilingRupiah": None, "maxItems": None,
+    })
+    lease["policy"] = policy
     return lease
 
 

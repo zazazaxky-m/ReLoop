@@ -16,7 +16,10 @@ import {
   fundingCashKey,
   fundingCorrectionKey,
   effectiveProgramModes,
+  hasOpenProgramSources,
   isRewardFundingEnforced,
+  openSessionWhere,
+  sessionCloseWatermarkKey,
   isFundingReferenceConflict,
   normalizeFundingReference,
   resolveFundingCutover,
@@ -213,5 +216,48 @@ describe("classifyHold (stale-hold monitoring)", () => {
     expect(late.reconciliation).toMatch(/tanpa reservasi/);
     expect(classifyHold({ ...row, sourceType: "TRIP", ceilingRupiah: 0, remainingRupiah: 0, lateReservation: true }, now)?.reasons)
       .toEqual(["ADMITTED_WITHOUT_RESERVATION"]);
+  });
+});
+
+describe("open sources (B01b: open until the close watermark)", () => {
+  const OPEN = ["RESERVED", "ACTIVE", "PROCESSING_ITEM", "REVIEW"];
+  const TERMINAL = ["COMPLETED", "CANCELLED", "EXPIRED"];
+
+  it("an ended session stays open while it has no watermark and still holds undecided items or an active reservation", () => {
+    expect(openSessionWhere({ campaignId: "c1" })).toEqual({
+      campaignId: "c1",
+      OR: [
+        { status: { in: OPEN } },
+        { status: { in: TERMINAL }, closeWatermarkAt: null, items: { some: { status: { in: ["PENDING", "REVIEW"] } } } },
+      ],
+    });
+    expect(openSessionWhere({ campaignId: null, organizationId: "o1" })).toMatchObject({ campaignId: null, machine: { organizationId: "o1" } });
+  });
+
+  it("hasOpenProgramSources counts open-status sessions, ended sessions awaiting the watermark with held items or an active reservation, then trips", async () => {
+    const tx = { depositSession: { count: vi.fn() }, trip: { count: vi.fn() }, $queryRaw: vi.fn() } as any;
+    tx.depositSession.count.mockResolvedValue(1);
+    expect(await hasOpenProgramSources(tx, "c1")).toBe(true);
+    expect(tx.depositSession.count).toHaveBeenCalledWith({ where: openSessionWhere({ campaignId: "c1" }) });
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+
+    tx.depositSession.count.mockResolvedValue(0);
+    tx.$queryRaw.mockResolvedValue([{ count: 1n }]);
+    expect(await hasOpenProgramSources(tx, "c1")).toBe(true);
+    const sql = (tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join("?");
+    expect(sql).toMatch(/RewardBudgetReservation/);
+    expect(sql).toMatch(/closeWatermarkAt" IS NULL/);
+    expect(sql).toMatch(/'ACTIVE'/);
+    expect(tx.trip.count).not.toHaveBeenCalled();
+
+    tx.$queryRaw.mockResolvedValue([{ count: 0n }]);
+    tx.trip.count.mockResolvedValue(0);
+    expect(await hasOpenProgramSources(tx, "c1")).toBe(false);
+    tx.trip.count.mockResolvedValue(2);
+    expect(await hasOpenProgramSources(tx, "c1")).toBe(true);
+  });
+
+  it("the watermark release is keyed per session", () => {
+    expect(sessionCloseWatermarkKey("s1")).toBe("session:s1:close-watermark");
   });
 });

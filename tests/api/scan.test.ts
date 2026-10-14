@@ -7,6 +7,7 @@ import * as machineState from "@/lib/machine-state";
 import * as campaign from "@/lib/campaign";
 import * as audit from "@/lib/audit";
 import * as rateLimit from "@/lib/rate-limit";
+import { sessionPolicyVersion } from "@/lib/session-policy";
 
 /**
  * POST /api/scan runs through startOrResumeDeposit (lib/deposit-session-service.ts):
@@ -26,6 +27,8 @@ const db = vi.hoisted(() => {
     rewardFundingAccount: { findUniqueOrThrow: vi.fn(), update: vi.fn() },
     rewardBudgetReservation: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
     rewardBudgetCommit: { aggregate: vi.fn() },
+    // B01b: the admission snapshot resolves the rate of every machine waste type.
+    rewardRate: { findMany: vi.fn() },
     $queryRaw: vi.fn(),
     $executeRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -96,6 +99,7 @@ describe("/api/scan", () => {
     db.campaign.findUniqueOrThrow.mockImplementation(async ({ where }: any) => ({
       id: where.id, organizationId: "org1", rewardBudgetRupiah: null, heldRupiah: 0, spentRupiah: 0 }));
     db.campaign.update.mockResolvedValue({});
+    db.rewardRate.findMany.mockResolvedValue([]);
     vi.mocked(rateLimit.checkRateLimit).mockResolvedValue({
       allowed: true,
       remaining: 19,
@@ -506,5 +510,71 @@ describe("/api/scan", () => {
     db.campaign.findUnique.mockResolvedValue(null);
     const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok", campaignId: "c1" }));
     expect(res.status).toBe(422);
+  });
+
+  describe("B01b: admission snapshot and the user-visible limit", () => {
+    it("binds the rate, multiplier, mode and bounds at admission and tells the user the limit before the first item", async () => {
+      db.machine.findUnique.mockResolvedValue({
+        ...baseMachine, maxItemsPerSession: 3,
+        wasteTypes: [{ id: "link1", active: true, wasteType: { id: "w1", name: "Plastik", unit: "ITEM", defaultRewardPerItem: 10, minWeightGrams: null, maxWeightGrams: null } }],
+      });
+      db.rewardRate.findMany.mockResolvedValue([{
+        id: "r1", wasteTypeId: "w1", organizationId: "org1", campaignId: null, pointsPerItem: 250, unit: "ITEM",
+        minWeightGrams: 5, maxWeightGrams: 500, active: true, effectiveFrom: new Date(Date.now() - 86_400_000), effectiveTo: null,
+      }]);
+      db.depositSession.create.mockImplementation(async ({ data }: any) => ({ id: "sess1", ...data }));
+
+      const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+      expect(res.status).toBe(201);
+      const data = await res.json();
+      expect(data.limits).toEqual({ maxRewardRupiah: 20_000, maxItems: 3 });
+      const created = db.depositSession.create.mock.calls[0][0].data;
+      expect(created.policyVersion).toMatch(/^[0-9a-f]{64}$/);
+      expect(created.policySnapshotJson).toMatchObject({
+        version: 1, mode: "MONEY_REWARD", multiplierBps: 10000, ceilingRupiah: 20_000, maxItems: 3,
+        wasteTypes: [{ id: "w1", unit: "ITEM", rewardPerUnit: 250, maxRewardRupiah: 250, rewardRateId: "r1", minWeightGrams: 5, maxWeightGrams: 500 }],
+      });
+      // The snapshot is what the lease signs: the machine view hashes to the stored version.
+      expect(sessionPolicyVersion(created.policySnapshotJson)).toBe(created.policyVersion);
+      // Rates are resolved inside the transaction (after the locks), at admission.
+      expect(db.rewardRate.findMany.mock.invocationCallOrder[0]).toBeGreaterThan(db.$queryRaw.mock.invocationCallOrder[2]);
+    });
+
+    it("a campaign session snapshots the campaign multiplier and ceiling; a compliance session has no money bound", async () => {
+      db.machine.findUnique.mockResolvedValue({ ...baseMachine, maxItemsPerSession: null });
+      db.campaign.findUnique.mockResolvedValue({
+        id: "c1", organizationId: "org1", campaignType: "MACHINE_DEPOSIT", rewardMode: "MONEY_REWARD", supportsMachine: false,
+        status: "ACTIVE", rewardMultiplier: 1.5, maxRewardPerSessionRupiah: 7_500, rewardBudgetRupiah: 100_000, heldRupiah: 0, spentRupiah: 0,
+        allowedEmailDomainsJson: null, visibility: "PUBLIC",
+      });
+      db.campaign.findUniqueOrThrow.mockResolvedValue({ id: "c1", organizationId: "org1", rewardBudgetRupiah: 100_000, heldRupiah: 0, spentRupiah: 0 });
+      vi.mocked(campaign.isCampaignEligible).mockReturnValue({ eligible: true } as any);
+      db.depositSession.create.mockImplementation(async ({ data }: any) => ({ id: "sess1", ...data }));
+      const money = await (await POST(makeReq({ machineCode: "RVM-001", token: "tok", campaignId: "c1" }))).json();
+      expect(money.limits).toEqual({ maxRewardRupiah: 7_500, maxItems: null });
+      expect(db.depositSession.create.mock.calls[0][0].data.policySnapshotJson).toMatchObject({
+        mode: "MONEY_REWARD", multiplierBps: 15000, ceilingRupiah: 7_500,
+        wasteTypes: [{ id: "w1", rewardPerUnit: 0, maxRewardRupiah: 0, rewardRateId: null }],
+      });
+
+      vi.clearAllMocks();
+      db.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(db));
+      db.$queryRaw.mockResolvedValue([{ id: "locked" }]);
+      db.user.findUnique.mockResolvedValue({ email: "user@example.com" });
+      db.depositSession.findMany.mockResolvedValue([]);
+      db.rewardRate.findMany.mockResolvedValue([]);
+      db.rewardFundingAccount.findUniqueOrThrow.mockResolvedValue({ id: "acct1", organizationId: "org1", confirmedRupiah: 0, heldRupiah: 0, version: 0 });
+      vi.mocked(rateLimit.checkRateLimit).mockResolvedValue({ allowed: true, remaining: 19, resetAt: Date.now() + 60_000 });
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: "u1", email: "user@example.com", role: "USER" } as any);
+      vi.mocked(qr.isTokenValid).mockReturnValue(true);
+      vi.mocked(machineState.machineAcceptsSessions).mockReturnValue(true);
+      db.machine.findUnique.mockResolvedValue({
+        ...baseMachine, maxItemsPerSession: 4, organization: { ...baseMachine.organization, machineRewardMode: "COMPLIANCE_ONLY" } });
+      db.depositSession.create.mockImplementation(async ({ data }: any) => ({ id: "sess2", ...data }));
+      const compliance = await (await POST(makeReq({ machineCode: "RVM-001", token: "tok" }))).json();
+      expect(compliance.limits).toEqual({ maxRewardRupiah: null, maxItems: 4 });
+      expect(db.depositSession.create.mock.calls[0][0].data.policySnapshotJson).toMatchObject({ mode: "COMPLIANCE_ONLY", ceilingRupiah: null, maxItems: 4 });
+      expect(db.rewardBudgetReservation.create).not.toHaveBeenCalled();
+    });
   });
 });

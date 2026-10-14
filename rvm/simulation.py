@@ -5,14 +5,13 @@ the mock hardware driver."""
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import threading
 import time
 import uuid
 from typing import Any
 
 from .hardware import MockHardware
+from .lease import policy_version, sign_lease_v2
 from .states import (
     MachineState,
     SESSION_SIMULATION_SCENARIOS,
@@ -66,22 +65,24 @@ class RvmSimulationMixin:
             self.emit("STATUS_CHANGED", {"status": "ONLINE", "source": "maintenance"})
 
     def _simulation_lease(self, seconds: int = 180) -> None:
-        now = time.time()
-        lease = {
+        # A local lease v2 without a money bound (the interactive simulator
+        # never represents a server session); signed with the machine secret
+        # exactly like the server's lease.
+        now = int(time.time())
+        policy = {"version": 1, "mode": "COMPLIANCE_ONLY", "multiplierBps": 10000, "wasteTypes": []}
+        lease = sign_lease_v2(self.config.machine_secret, {
             "id": str(uuid.uuid4()),
+            "machineCode": self.config.machine_code,
             "sessionId": f"interactive-{uuid.uuid4()}",
             "userRef": "interactive-simulator",
             "issuedAt": now,
             "expiresAt": now + seconds,
-        }
-        canonical = ".".join(
-            str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
-        )
-        lease["signature"] = hmac.new(
-            self.config.machine_secret.encode(),
-            canonical.encode(),
-            hashlib.sha256,
-        ).hexdigest()
+            "reservationId": None,
+            "policyVersion": policy_version(policy),
+            "ceilingRupiah": None,
+            "maxItems": None,
+        })
+        lease["policy"] = policy
         if not self.activate_lease(lease):
             raise RuntimeError("Gagal membuat sesi simulasi")
 

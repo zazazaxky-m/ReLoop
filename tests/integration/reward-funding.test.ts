@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { startOrResumeDeposit } from "@/lib/deposit-session-service";
 import { getWalletBalance } from "@/lib/ledger";
@@ -85,6 +85,17 @@ const withEnforced = <T,>(fn: () => Promise<T>) => withEnv("REWARD_FUNDING_ENFOR
 
 const setMachineCeiling = (machineId: string, maxRewardPerSessionRupiah: number | null) =>
   f.db.machine.update({ where: { id: machineId }, data: { maxRewardPerSessionRupiah } });
+
+/**
+ * B01b froze a session's reward mode, rate and multiplier at admission
+ * (DepositSession.policySnapshotJson): a session admitted under
+ * COMPLIANCE_ONLY pays nothing even after its organization or program turns
+ * to money (tests/integration/lease-v2-watermark.test.ts). The late-reservation
+ * path these B01a tests exercise still applies to sessions admitted before
+ * B01b, which carry no snapshot; this makes a fresh session one of those.
+ */
+const asPreB01bSession = (sessionId: string) =>
+  f.db.depositSession.update({ where: { id: sessionId }, data: { policyVersion: null, policySnapshotJson: Prisma.DbNull } });
 
 /** A second machine of organization A, so a second user can deposit at the same time. */
 async function createMachineB() {
@@ -855,6 +866,7 @@ describe("fix round 1: enforcement bypasses on reopen, mode change and zero ceil
     await f.db.organization.update({ where: { id: f.ids.orgA }, data: { machineRewardMode: "COMPLIANCE_ONLY" } });
     const started = await scan("userA");
     const sessionId = started.body.session.id as string;
+    await asPreB01bSession(sessionId);
     await f.db.organization.update({ where: { id: f.ids.orgA }, data: { machineRewardMode: "MONEY_REWARD" } });
     const machine = await f.db.machine.findUniqueOrThrow({ where: { id: f.ids.machineA }, include: { organization: true } });
     const input = (event: EdgeEvent) => ({ ...event, machineCode: f.ids.machineCode }) as Parameters<typeof ingestMachineEvent>[0];
@@ -950,6 +962,13 @@ describe("fix round 1: enforcement bypasses on reopen, mode change and zero ceil
     // Shadow mode allows the flip while the session is open; the hole must still be bookkept.
     await f.db.organization.update({ where: { id: f.ids.orgA }, data: { machineRewardMode: "MONEY_REWARD" } });
 
+    // B01b: a session admitted with a snapshot keeps its admission mode: nothing is paid, nothing is held.
+    const frozen = await deposit(sessionId);
+    expect(frozen.item).toMatchObject({ status: "ACCEPTED", rewardAmount: 0, baseRewardAmount: 0 });
+    expect(frozen.ledger).toEqual([]);
+    expect(await f.db.rewardBudgetReservation.count()).toBe(0);
+    // A session admitted before B01b (no snapshot) is priced live and held late, as B01a specified.
+    await asPreB01bSession(sessionId);
     const { item, ledger } = await deposit(sessionId);
     expect(ledger).toEqual([expect.objectContaining({ entryType: "EARN", status: "AVAILABLE", amount: 100 })]);
     expect(await commitOf(earnKey(item.id))).toMatchObject({ heldRupiah: 100, uncoveredRupiah: 100 });
@@ -1092,6 +1111,7 @@ describe("fix round 2: effective reward mode, review late reservation, cutover a
     await setMachineCeiling(f.ids.machineA, 10_000);
     await f.db.organization.update({ where: { id: f.ids.orgA }, data: { machineRewardMode: "COMPLIANCE_ONLY" } });
     const sessionId = (await scan("userA")).body.session.id as string;
+    await asPreB01bSession(sessionId);
     const held = await deposit(sessionId, { anomaly: true });
     expect(held.item).toMatchObject({ status: "REVIEW", rewardAmount: 0 });
     expect(held.ledger).toEqual([]);

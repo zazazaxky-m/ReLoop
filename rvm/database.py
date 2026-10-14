@@ -9,6 +9,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from .states import iso_now
+
 
 # Outbox delivery states (column `delivery_status`, added by the protocol v2
 # upgrade). Only `pending` rows are sent; `dead_letter` rows are kept for the
@@ -69,7 +71,23 @@ CREATE TABLE IF NOT EXISTS leases (
   issued_at REAL NOT NULL,
   expires_at REAL NOT NULL,
   status TEXT NOT NULL,
-  signature TEXT NOT NULL
+  signature TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  machine_code TEXT,
+  reservation_id TEXT,
+  policy_version TEXT,
+  ceiling_rupiah INTEGER,
+  max_items INTEGER,
+  policy_json TEXT
+);
+CREATE TABLE IF NOT EXISTS session_consumption (
+  session_id TEXT PRIMARY KEY,
+  consumed_rupiah INTEGER NOT NULL DEFAULT 0,
+  consumed_items INTEGER NOT NULL DEFAULT 0,
+  started_at REAL NOT NULL,
+  closed_at REAL,
+  watermark_event_id TEXT,
+  updated_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS capture_outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,6 +123,24 @@ OUTBOX_V2_INDEXES = (
     "CREATE INDEX IF NOT EXISTS outbox_session_idx ON outbox(session_id, delivery_status, id)",
 )
 
+# Additive upgrade of a lease table created before lease protocol v2 (B01b):
+# the signed cap fields are stored next to the lease; existing rows keep
+# version 1 and no bound. Same backup-before-DDL pattern as the outbox.
+LEASE_V2_COLUMNS = (
+    ("version", "ALTER TABLE leases ADD COLUMN version INTEGER NOT NULL DEFAULT 1"),
+    ("machine_code", "ALTER TABLE leases ADD COLUMN machine_code TEXT"),
+    ("reservation_id", "ALTER TABLE leases ADD COLUMN reservation_id TEXT"),
+    ("policy_version", "ALTER TABLE leases ADD COLUMN policy_version TEXT"),
+    ("ceiling_rupiah", "ALTER TABLE leases ADD COLUMN ceiling_rupiah INTEGER"),
+    ("max_items", "ALTER TABLE leases ADD COLUMN max_items INTEGER"),
+    ("policy_json", "ALTER TABLE leases ADD COLUMN policy_json TEXT"),
+)
+
+# The close watermark event (B01b): "every event of session S up to
+# localEventId N is synced" (lib/machine-events/watermark.ts).
+SESSION_CLOSE_WATERMARK = "SESSION_CLOSE_WATERMARK"
+SESSION_CONSUMPTION_RETENTION_SECONDS = 30 * 24 * 3600
+
 
 class EdgeDatabase:
     def __init__(self, path: str):
@@ -119,11 +155,20 @@ class EdgeDatabase:
         if legacy and "delivery_status" not in legacy:
             # Copy the untouched pre-v2 database aside before any schema change.
             self.backup_path = self._backup("pre-outbox-v2")
+        leases = self._table_columns("leases")
+        if leases and "version" not in leases:
+            # Lease protocol v2 (B01b): the same backup-before-DDL rule.
+            self.backup_path = self._backup("pre-lease-v2")
         self._conn.executescript(SCHEMA)
         self._upgrade_outbox()
+        self._upgrade_leases()
+        self.prune_session_consumption()
+
+    def _table_columns(self, table: str) -> set[str]:
+        return {row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})")}
 
     def _outbox_columns(self) -> set[str]:
-        return {row["name"] for row in self._conn.execute("PRAGMA table_info(outbox)")}
+        return self._table_columns("outbox")
 
     def _backup(self, label: str) -> str:
         """Consistent copy (WAL included) via the SQLite backup API, verified
@@ -161,6 +206,22 @@ class EdgeDatabase:
                         "UPDATE outbox SET delivery_status='sent' WHERE sent_at IS NOT NULL"
                     )
                 for ddl in OUTBOX_V2_INDEXES:
+                    self._conn.execute(ddl)
+                self._conn.execute("COMMIT")
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.execute("ROLLBACK")
+                raise
+
+    def _upgrade_leases(self) -> None:
+        columns = self._table_columns("leases")
+        missing = [ddl for name, ddl in LEASE_V2_COLUMNS if name not in columns]
+        if not missing:
+            return
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                for ddl in missing:
                     self._conn.execute(ddl)
                 self._conn.execute("COMMIT")
             except BaseException:
@@ -425,11 +486,16 @@ class EdgeDatabase:
         return int(row["count"])
 
     def save_lease(self, lease: dict[str, Any]) -> None:
+        """Stores the lease with its signed fields (B01b): a renewal of the
+        same session replaces the row; the consumed counter lives in
+        `session_consumption`, keyed by session, and is never reset here."""
+        policy = lease.get("policy")
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO leases"
-                "(id,session_id,user_ref,issued_at,expires_at,status,signature)"
-                " VALUES(?,?,?,?,?,?,?)",
+                "(id,session_id,user_ref,issued_at,expires_at,status,signature,"
+                "version,machine_code,reservation_id,policy_version,ceiling_rupiah,max_items,policy_json)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     lease["id"],
                     lease["sessionId"],
@@ -438,6 +504,13 @@ class EdgeDatabase:
                     lease["expiresAt"],
                     lease["status"],
                     lease["signature"],
+                    int(lease.get("version") or 1),
+                    lease.get("machineCode"),
+                    lease.get("reservationId"),
+                    lease.get("policyVersion"),
+                    lease.get("ceilingRupiah"),
+                    lease.get("maxItems"),
+                    json.dumps(policy, separators=(",", ":"), ensure_ascii=False) if policy is not None else None,
                 ),
             )
 
@@ -456,3 +529,163 @@ class EdgeDatabase:
             self._conn.execute(
                 "UPDATE leases SET status='CANCELLED' WHERE status='ACTIVE'"
             )
+
+    # ------------------------------------------------------------------ #
+    # session bound and close watermark (B01b)
+    # ------------------------------------------------------------------ #
+    def ensure_session(self, session_id: str) -> None:
+        """The durable per-session counter row (created at the first lease of
+        the session, kept across renewals and restarts). A session the server
+        hands back while it was marked closed locally (never watermarked)
+        runs again."""
+        now = time.time()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO session_consumption(session_id,started_at,updated_at) VALUES(?,?,?)",
+                (session_id, now, now),
+            )
+            self._conn.execute(
+                "UPDATE session_consumption SET closed_at=NULL,updated_at=? "
+                "WHERE session_id=? AND closed_at IS NOT NULL AND watermark_event_id IS NULL",
+                (now, session_id),
+            )
+
+    def session_consumption(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM session_consumption WHERE session_id=?", (session_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def enqueue_with_consumption(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        occurred_at: str,
+        session_id: str,
+        deposit_item_id: str | None,
+        consumed_rupiah: int,
+        consumed_items: int = 1,
+    ) -> str:
+        """Enqueues an acceptance event and advances the session's consumed
+        counter in the same SQLite transaction, so a crash in between can never
+        leave an accepted item uncounted."""
+        event_id = str(uuid.uuid4())
+        now = time.time()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO outbox"
+                "(local_event_id,event_type,payload_json,session_id,deposit_item_id,occurred_at)"
+                " VALUES(?,?,?,?,?,?)",
+                (event_id, event_type, json.dumps(payload, separators=(",", ":")), session_id, deposit_item_id, occurred_at),
+            )
+            self._conn.execute(
+                "INSERT OR IGNORE INTO session_consumption(session_id,started_at,updated_at) VALUES(?,?,?)",
+                (session_id, now, now),
+            )
+            self._conn.execute(
+                "UPDATE session_consumption SET consumed_rupiah=consumed_rupiah+?,consumed_items=consumed_items+?,updated_at=? "
+                "WHERE session_id=?",
+                (int(consumed_rupiah), int(consumed_items), now, session_id),
+            )
+            self._conn.execute(
+                "INSERT INTO audit(action,data_json,created_at) VALUES(?,?,?)",
+                ("EVENT_QUEUED", json.dumps({"id": event_id, "type": event_type, "consumedRupiah": int(consumed_rupiah)},
+                                            separators=(",", ":")), now),
+            )
+        return event_id
+
+    def close_sessions_except(self, active_session_id: str | None) -> list[str]:
+        """Marks every running session other than the server's current one as
+        closed by the server (the watermark follows once its outbox is
+        synced). Returns the session ids closed now."""
+        now = time.time()
+        with self._lock, self._conn:
+            rows = self._conn.execute(
+                "SELECT session_id FROM session_consumption WHERE closed_at IS NULL AND session_id IS NOT ?",
+                (active_session_id,),
+            ).fetchall()
+            closed = [row["session_id"] for row in rows]
+            if closed:
+                marks = ",".join("?" for _ in closed)
+                self._conn.execute(
+                    f"UPDATE session_consumption SET closed_at=?,updated_at=? WHERE session_id IN ({marks})",
+                    (now, now, *closed),
+                )
+        return closed
+
+    def session_outbox_summary(self, session_id: str) -> dict[str, Any]:
+        """Delivery state of a session's events (the watermark itself excluded)."""
+        with self._lock:
+            return self._session_outbox_summary_unlocked(session_id)
+
+    def enqueue_close_watermarks(self) -> list[dict[str, Any]]:
+        """For every session the server closed whose events are all durably
+        ACKed (nothing pending, nothing dead-lettered), enqueues exactly one
+        SESSION_CLOSE_WATERMARK event and records it on the session, in one
+        transaction. Called before each flush; a session with a pending or
+        dead-lettered event waits (the hold stays on the server)."""
+        queued: list[dict[str, Any]] = []
+        with self._lock, self._conn:
+            rows = self._conn.execute(
+                "SELECT * FROM session_consumption WHERE closed_at IS NOT NULL AND watermark_event_id IS NULL ORDER BY closed_at"
+            ).fetchall()
+            for row in rows:
+                session_id = row["session_id"]
+                summary = self._session_outbox_summary_unlocked(session_id)
+                if summary["pending"] or summary["dead_letter"]:
+                    continue
+                event_id = str(uuid.uuid4())
+                payload = {
+                    "eventCount": summary["sent"],
+                    "lastLocalEventId": summary["last_sent_local_event_id"],
+                    "consumedRupiah": int(row["consumed_rupiah"]),
+                    "consumedItems": int(row["consumed_items"]),
+                }
+                self._conn.execute(
+                    "INSERT INTO outbox(local_event_id,event_type,payload_json,session_id,deposit_item_id,occurred_at)"
+                    " VALUES(?,?,?,?,?,?)",
+                    (event_id, SESSION_CLOSE_WATERMARK, json.dumps(payload, separators=(",", ":")), session_id, None, iso_now()),
+                )
+                now = time.time()
+                self._conn.execute(
+                    "UPDATE session_consumption SET watermark_event_id=?,updated_at=? WHERE session_id=?",
+                    (event_id, now, session_id),
+                )
+                self._conn.execute(
+                    "INSERT INTO audit(action,data_json,created_at) VALUES(?,?,?)",
+                    ("SESSION_CLOSE_WATERMARK_QUEUED",
+                     json.dumps({"sessionId": session_id, "localEventId": event_id, **payload}, separators=(",", ":")), now),
+                )
+                queued.append({"sessionId": session_id, "localEventId": event_id, **payload})
+        return queued
+
+    def _session_outbox_summary_unlocked(self, session_id: str) -> dict[str, Any]:
+        rows = self._conn.execute(
+            "SELECT delivery_status, COUNT(*) AS count FROM outbox "
+            "WHERE session_id=? AND event_type<>? GROUP BY delivery_status",
+            (session_id, SESSION_CLOSE_WATERMARK),
+        ).fetchall()
+        last = self._conn.execute(
+            f"SELECT local_event_id FROM outbox WHERE session_id=? AND event_type<>? AND delivery_status='{SENT}' "
+            "ORDER BY id DESC LIMIT 1",
+            (session_id, SESSION_CLOSE_WATERMARK),
+        ).fetchone()
+        counts = {row["delivery_status"]: int(row["count"]) for row in rows}
+        return {
+            "pending": counts.get(PENDING, 0),
+            "sent": counts.get(SENT, 0),
+            "dead_letter": counts.get(DEAD_LETTER, 0),
+            "last_sent_local_event_id": last["local_event_id"] if last else None,
+        }
+
+    def prune_session_consumption(self, retention_seconds: float = SESSION_CONSUMPTION_RETENTION_SECONDS) -> int:
+        """Drops counter rows of sessions whose watermark was queued long ago
+        (the outbox keeps the events themselves). Never a running or
+        unconfirmed session."""
+        cutoff = time.time() - retention_seconds
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "DELETE FROM session_consumption WHERE watermark_event_id IS NOT NULL AND updated_at<?", (cutoff,)
+            )
+        return int(cursor.rowcount or 0)

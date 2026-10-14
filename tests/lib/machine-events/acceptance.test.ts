@@ -54,6 +54,53 @@ const itemUpdate = () => mockTx.depositItem.updateMany.mock.calls[0]?.[0];
 const credited = () => vi.mocked(credit.creditReward).mock.calls[0]?.[1];
 
 describe('handleAcceptance', () => {
+  describe('B01b: admission snapshot (rate/multiplier/mode bound at admission)', () => {
+    const snapshot = (over: Record<string, unknown> = {}) => ({
+      version: 1, mode: 'MONEY_REWARD', multiplierBps: 20000, ceilingRupiah: 1_000, maxItems: null,
+      capturedAt: new Date().toISOString(),
+      wasteTypes: [{ id: 'w1', unit: 'ITEM', rewardPerUnit: 50, maxRewardRupiah: 100, rewardRateId: 'r-admit', minWeightGrams: 10, maxWeightGrams: 200 }],
+      ...over,
+    });
+
+    it('prices from the snapshot: the admission rate and multiplier, never a later rate change', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ policySnapshotJson: snapshot() }));
+      await run();
+      expect(reward.resolveRewardRate).not.toHaveBeenCalled();
+      expect(reward.computeRewardAmount).toHaveBeenCalledWith(50, 1, 2);
+      expect(itemUpdate().data).toMatchObject({ status: 'ACCEPTED', rewardRateId: 'r-admit', rewardAmount: 200, baseRewardAmount: 200 });
+      expect(credited()).toMatchObject({ amount: 200, status: 'AVAILABLE', funding: { ceilingRupiah: 200, reviewPending: false } });
+    });
+
+    it('applies the snapshot weight window (a weight outside it rejects, as at admission)', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ policySnapshotJson: snapshot() }));
+      mockTx.depositItem.findUnique.mockResolvedValue(item({ measuredWeightGrams: 5 }));
+      await run();
+      expect(itemUpdate().data).toMatchObject({ status: 'REJECTED', validationReasonCode: 'WEIGHT_BELOW_MIN', rewardAmount: 0 });
+      expect(credit.creditReward).not.toHaveBeenCalled();
+    });
+
+    it('keeps the admission mode: a COMPLIANCE_ONLY snapshot pays nothing even if the organization pays money now', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ policySnapshotJson: snapshot({ mode: 'COMPLIANCE_ONLY', ceilingRupiah: null }) }));
+      await run();
+      expect(itemUpdate().data).toMatchObject({ status: 'ACCEPTED', rewardAmount: 0, baseRewardAmount: 0 });
+      expect(credited()).toMatchObject({ amount: 0, funding: { ceilingRupiah: 0 } });
+    });
+
+    it('a type the snapshot does not know falls back to the live rate under the snapshot multiplier', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ policySnapshotJson: snapshot({ wasteTypes: [] }) }));
+      await run();
+      expect(reward.resolveRewardRate).toHaveBeenCalledTimes(1);
+      expect(reward.computeRewardAmount).toHaveBeenCalledWith(200, 1, 2);
+    });
+
+    it('a session without a snapshot (admitted before B01b) is priced live, as before', async () => {
+      mockTx.depositSession.findUnique.mockResolvedValue(session({ policySnapshotJson: null }));
+      await run();
+      expect(reward.resolveRewardRate).toHaveBeenCalledTimes(1);
+      expect(reward.computeRewardAmount).toHaveBeenCalledWith(200, 1, 1);
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(reward.resolveRewardRate).mockResolvedValue({ id: 'r1', pointsPerItem: 200, unit: 'ITEM' } as any);

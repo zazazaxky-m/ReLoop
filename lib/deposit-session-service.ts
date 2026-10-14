@@ -16,6 +16,14 @@ import {
   sessionAdmissionKey,
 } from "./reward-funding";
 import { campaignSupportsMachine, machineRewardMode } from "./reward-policy";
+import {
+  buildSessionPolicy,
+  parseSessionPolicy,
+  sessionLimits,
+  sessionPolicyColumns,
+  type SessionLimits,
+  type SessionPolicySnapshot,
+} from "./session-policy";
 import { runWalletTransaction } from "./wallet-service";
 import { MACHINE_LEASE_MAX_SECONDS, machineLeaseExpiry, sessionDeadline, sessionEnd } from "./deposit-session-deadline";
 
@@ -210,7 +218,7 @@ async function assertCampaignForMachine(
  */
 async function reserveSessionCeiling(
   tx: Prisma.TransactionClient,
-  session: DepositSession,
+  session: Pick<DepositSession, "id" | "userId">,
   machine: { id: string; organizationId: string; maxRewardPerSessionRupiah: number | null; organization: { machineRewardMode: string } },
   campaign: Campaign | null,
 ): Promise<{ ceilingRupiah: number; reservationId: string } | null> {
@@ -267,7 +275,8 @@ async function decideStart(
     where: { id: machineId },
     include: {
       organization: { select: { status: true, machineRewardMode: true } },
-      wasteTypes: { where: { active: true }, select: { id: true } },
+      // B01b: the admission snapshot prices every active type of the machine.
+      wasteTypes: { where: { active: true }, include: { wasteType: true } },
     },
   });
   if (!machine) throw new HttpError(404, "Mesin tidak ditemukan");
@@ -314,6 +323,11 @@ async function decideStart(
   }
 
   await hooks?.beforeCreate?.(tx);
+  // B01b: the admission snapshot (rates, multiplier, mode, bounds) is fixed
+  // under the locks before the session exists; the lease signs its version.
+  const policy = await buildSessionPolicy(tx, {
+    machine, campaign, ceilingRupiah: resolveSessionCeiling({ campaign, machine }), now,
+  });
   const session = await tx.depositSession.create({
     data: {
       userId: actor.id,
@@ -322,11 +336,59 @@ async function decideStart(
       status: "ACTIVE",
       startedAt: now,
       timeoutAt: new Date(now.getTime() + idle * 60_000),
+      ...sessionPolicyColumns(policy),
     },
   });
   // B01: reserve the reward ceiling before the admission is committed.
   await reserveSessionCeiling(tx, session, machine, campaign);
   return { kind: "created", session, expired, campaignId };
+}
+
+/** The limit the user sees (scan/session responses) from the session's admission snapshot. */
+export function sessionLimitsOf(session: { policySnapshotJson: unknown }): SessionLimits {
+  return sessionLimits(parseSessionPolicy(session.policySnapshotJson));
+}
+
+/**
+ * B01b: the admission snapshot of a session, created now for a session
+ * admitted before the snapshot existed (its first lease v2 poll), under the
+ * admission locks (User -> account -> Campaign -> Machine -> DepositSession)
+ * with the row re-read so two polls never write two snapshots. Returns null
+ * when the session is gone.
+ */
+export async function ensureSessionPolicy(sessionId: string): Promise<SessionPolicySnapshot | null> {
+  const current = await prisma.depositSession.findUnique({
+    where: { id: sessionId },
+    select: { userId: true, campaignId: true, policySnapshotJson: true, machine: { select: { id: true, organizationId: true } } },
+  });
+  if (!current) return null;
+  const parsed = parseSessionPolicy(current.policySnapshotJson);
+  if (parsed) return parsed;
+  return runWalletTransaction(async (tx) => {
+    await lockUser(tx, current.userId);
+    await lockFundingAccountForOrganization(tx, current.machine.organizationId);
+    if (current.campaignId) await lockCampaign(tx, current.campaignId);
+    await lockMachine(tx, current.machine.id);
+    await lockDepositSession(tx, sessionId);
+    const session = await tx.depositSession.findUnique({ where: { id: sessionId }, include: { campaign: true } });
+    if (!session) return null;
+    const existing = parseSessionPolicy(session.policySnapshotJson);
+    if (existing) return existing;
+    const machine = await tx.machine.findUnique({
+      where: { id: session.machineId },
+      include: {
+        organization: { select: { machineRewardMode: true } },
+        wasteTypes: { where: { active: true }, include: { wasteType: true } },
+      },
+    });
+    if (!machine) return null;
+    const campaign = session.campaign;
+    const policy = await buildSessionPolicy(tx, {
+      machine, campaign, ceilingRupiah: resolveSessionCeiling({ campaign, machine }), now: new Date(),
+    });
+    await tx.depositSession.update({ where: { id: sessionId }, data: sessionPolicyColumns(policy) });
+    return policy;
+  });
 }
 
 /**

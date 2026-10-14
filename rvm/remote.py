@@ -90,6 +90,8 @@ class RvmRemoteMixin:
                 raise ValueError("Gate hanya dapat dibuka saat sesi aktif")
             if self._active_alert:
                 raise ValueError("Gate tidak dapat dibuka selama alert aktif")
+            if self._gate_bound_block():
+                raise ValueError("Gate tidak dapat dibuka: batas sesi sudah tercapai")
             if not self.try_open_input_gate("remote-open-gate"):
                 raise ValueError("Gate tidak dapat dibuka: interlock keselamatan aktif")
         elif command == "CLOSE_GATE":

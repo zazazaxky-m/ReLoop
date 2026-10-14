@@ -8,6 +8,7 @@ from pathlib import Path
 from rvm.config import RvmConfig
 from rvm.controller import RvmController, MachineState
 from rvm.hardware import SensorSnapshot
+from rvm.lease import policy_version, sign_lease_v2
 from rvm.states import iso_now
 
 class SafetyTest(unittest.TestCase):
@@ -20,11 +21,13 @@ class SafetyTest(unittest.TestCase):
                 controller.hardware.patch(service_panel_open=True)
                 controller.enter_safe_state("SERVICE_PANEL_FORCED_OPEN", {})
                 now = int(time.time())
-                lease = {"id":"lease-test","sessionId":"session-test",
-                         "issuedAt":now,"expiresAt":now+60}
-                canonical = ".".join(str(lease[k]) for k in
-                                     ("id","sessionId","issuedAt","expiresAt"))
-                lease["signature"] = hmac.new(b"test-secret",canonical.encode(),hashlib.sha256).hexdigest()
+                # B01b: the lease is a valid v2 lease (the interlock is what refuses it).
+                policy = {"version":1,"mode":"COMPLIANCE_ONLY","multiplierBps":10000,"wasteTypes":[]}
+                lease = sign_lease_v2("test-secret",{"id":"lease-test","machineCode":"TEST-001",
+                         "sessionId":"session-test","userRef":None,"issuedAt":now,"expiresAt":now+60,
+                         "reservationId":None,"policyVersion":policy_version(policy),"ceilingRupiah":None,"maxItems":None})
+                lease["policy"] = policy
+                self.assertTrue(controller.verify_lease(lease))
                 self.assertFalse(controller.activate_lease(lease))
                 self.assertEqual(controller.state, MachineState.SAFE_STATE)
                 self.assertFalse(controller.hardware.input_gate_open)
@@ -56,16 +59,16 @@ def make_controller(tmp: str, **overrides) -> RvmController:
 
 
 def signed_lease(session_id: str = "session-safety", *, lease_id: str | None = None,
-                 ttl: int = 60) -> dict:
+                 ttl: int = 60, machine_code: str = "TEST-001") -> dict:
+    """A signed lease v2 without a money bound (B01b); the v1 form is refused by the worker."""
     now = int(time.time())
-    lease = {
-        "id": lease_id or f"lease-{session_id}",
-        "sessionId": session_id,
-        "issuedAt": now,
-        "expiresAt": now + ttl,
-    }
-    canonical = ".".join(str(lease[k]) for k in ("id", "sessionId", "issuedAt", "expiresAt"))
-    lease["signature"] = hmac.new(SECRET.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+    policy = {"version": 1, "mode": "COMPLIANCE_ONLY", "multiplierBps": 10000, "wasteTypes": []}
+    lease = sign_lease_v2(SECRET, {
+        "id": lease_id or f"lease-{session_id}", "machineCode": machine_code, "sessionId": session_id, "userRef": None,
+        "issuedAt": now, "expiresAt": now + ttl, "reservationId": None,
+        "policyVersion": policy_version(policy), "ceilingRupiah": None, "maxItems": None,
+    })
+    lease["policy"] = policy
     return lease
 
 

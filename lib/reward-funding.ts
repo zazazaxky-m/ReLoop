@@ -44,9 +44,12 @@ import { TRASH_BAG_REWARD_PER_BAG } from "./trip";
  *      the user's spendable balance and changes nothing here: the obligation
  *      still exists.
  *   4. Residue: a trip's reservation is closed when the trip closes. A
- *      session's residue is retained until the RVM close watermark (B01b) or
- *      an explicit, audited SUPERADMIN release (`releaseResidualReservation`);
- *      never a timeout, which would free money a late event still needs.
+ *      session's residue is retained until the RVM close watermark (B01b,
+ *      lib/machine-events/watermark.ts: the machine confirmed that every event
+ *      of the session is synced; the release is keyed
+ *      `session:<id>:close-watermark`) or an explicit, audited SUPERADMIN
+ *      release (`releaseResidualReservation`); never a timeout, which would
+ *      free money a late event still needs. A lost connection keeps the hold.
  *
  * Enforcement is behind REWARD_FUNDING_ENFORCED (server env only; anything but
  * `true` is not enforced). Shadow mode records every reservation, commit,
@@ -154,6 +157,9 @@ export const ORGANIZATION_HAS_OPEN_SESSIONS =
 
 export const sessionAdmissionKey = (sessionId: string) => `session:${sessionId}:admission`;
 export const tripIssuanceKey = (tripId: string) => `trip:${tripId}:issuance`;
+/** B01b: the keyed release of a session's residue after the RVM close watermark (one per session, ever). */
+export const sessionCloseWatermarkKey = (sessionId: string) => `session:${sessionId}:close-watermark`;
+export const CLOSE_WATERMARK_RELEASE_REASON = "CLOSE_WATERMARK";
 /** Evidence references compare trimmed and case-insensitively (C4). */
 export const normalizeFundingReference = (reference: string) => reference.trim().toUpperCase();
 /**
@@ -258,11 +264,72 @@ export function effectiveMultiplier(value: number | null | undefined): number {
 }
 
 const OPEN_SESSION_STATUSES = ["RESERVED", "ACTIVE", "PROCESSING_ITEM", "REVIEW"] as const;
+const TERMINAL_SESSION_STATUSES = ["COMPLETED", "CANCELLED", "EXPIRED"] as const;
+const UNDECIDED_ITEM_STATUSES = ["PENDING", "REVIEW"] as const;
 
-/** Sources the program admitted that can still earn: open sessions, and PLANNED/ACTIVE trips with issued bags. */
+/**
+ * B01b (open until watermarked): a session can still create reward
+ * obligations after it ended, until the RVM's close watermark confirmed that
+ * every machine event of the session is synced (a lost connection, a late
+ * acceptance in the outbox). For the program guards a session is therefore
+ * open while its status is open, or while it ended without a watermark and
+ * still holds undecided items (a reviewer could approve them) or an ACTIVE
+ * reservation (`hasOpenProgramSources` adds that part by SQL). Ended sessions
+ * with every item decided and no live reservation are closed even without a
+ * watermark (legacy rows, dead machines), and an explicit operator release
+ * (`releaseResidualReservation`) closes the reservation part.
+ */
+export function openSessionWhere(scope: { campaignId?: string | null; organizationId?: string }): Prisma.DepositSessionWhereInput {
+  return {
+    ...(scope.campaignId !== undefined ? { campaignId: scope.campaignId } : {}),
+    ...(scope.organizationId ? { machine: { organizationId: scope.organizationId } } : {}),
+    OR: [
+      { status: { in: [...OPEN_SESSION_STATUSES] } },
+      {
+        status: { in: [...TERMINAL_SESSION_STATUSES] },
+        closeWatermarkAt: null,
+        items: { some: { status: { in: [...UNDECIDED_ITEM_STATUSES] } } },
+      },
+    ],
+  };
+}
+
+/** Ended, not watermarked sessions of the scope whose admission reservation is still ACTIVE. */
+async function countHeldEndedSessions(
+  tx: Prisma.TransactionClient,
+  scope: { campaignId: string } | { organizationId: string },
+): Promise<number> {
+  const rows =
+    "campaignId" in scope
+      ? await tx.$queryRaw<{ count: bigint }[]>`
+          SELECT COUNT(*)::bigint AS count
+          FROM "RewardBudgetReservation" r
+          JOIN "DepositSession" s ON s.id = r."sourceId"
+          WHERE r."sourceType" = 'SESSION' AND r.status = 'ACTIVE'
+            AND s."closeWatermarkAt" IS NULL
+            AND s.status IN ('COMPLETED', 'CANCELLED', 'EXPIRED')
+            AND s."campaignId" = ${scope.campaignId}`
+      : await tx.$queryRaw<{ count: bigint }[]>`
+          SELECT COUNT(*)::bigint AS count
+          FROM "RewardBudgetReservation" r
+          JOIN "DepositSession" s ON s.id = r."sourceId"
+          JOIN "Machine" m ON m.id = s."machineId"
+          WHERE r."sourceType" = 'SESSION' AND r.status = 'ACTIVE'
+            AND s."closeWatermarkAt" IS NULL
+            AND s.status IN ('COMPLETED', 'CANCELLED', 'EXPIRED')
+            AND s."campaignId" IS NULL AND m."organizationId" = ${scope.organizationId}`;
+  return Number(rows[0]?.count ?? 0);
+}
+
+/**
+ * Sources the program admitted that can still earn: open sessions (B01b: open
+ * until the close watermark, `openSessionWhere`), and PLANNED/ACTIVE trips
+ * with issued bags.
+ */
 export async function hasOpenProgramSources(tx: Prisma.TransactionClient, campaignId: string): Promise<boolean> {
-  const sessions = await tx.depositSession.count({ where: { campaignId, status: { in: [...OPEN_SESSION_STATUSES] } } });
+  const sessions = await tx.depositSession.count({ where: openSessionWhere({ campaignId }) });
   if (sessions > 0) return true;
+  if ((await countHeldEndedSessions(tx, { campaignId })) > 0) return true;
   const trips = await tx.trip.count({
     where: { campaignId, status: { in: ["PLANNED", "ACTIVE"] }, bagAssignments: { some: {} } },
   });
@@ -331,10 +398,11 @@ export async function guardOrganizationModeChange(
 ): Promise<void> {
   if (!policy.enforced) return;
   if (input.current.machineRewardMode === "MONEY_REWARD" || input.next.machineRewardMode !== "MONEY_REWARD") return;
-  const open = await tx.depositSession.count({
-    where: { campaignId: null, status: { in: [...OPEN_SESSION_STATUSES] }, machine: { organizationId: input.organizationId } },
-  });
+  const open = await tx.depositSession.count({ where: openSessionWhere({ campaignId: null, organizationId: input.organizationId }) });
   if (open > 0) throw new HttpError(409, ORGANIZATION_HAS_OPEN_SESSIONS);
+  if ((await countHeldEndedSessions(tx, { organizationId: input.organizationId })) > 0) {
+    throw new HttpError(409, ORGANIZATION_HAS_OPEN_SESSIONS);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -801,15 +869,21 @@ export async function markCommitReviewPending(tx: Prisma.TransactionClient, busi
 /**
  * Releases up to `amount` of a reservation's remaining ceiling back to the
  * organization's capacity and the campaign's budget. Never negative, never
- * more than what remains; a released reservation is left as it is.
+ * more than what remains; a released reservation is left as it is. With a
+ * `businessKey` (B01b) the release is a keyed financial effect
+ * (RewardBudgetRelease): a retry under the same key returns the recorded
+ * release and gives nothing back a second time, closed or not.
  */
 export async function releaseUnusedRewardBudget(
   tx: Prisma.TransactionClient,
   reservationId: string,
   amount: number,
-  options: { close?: boolean; releasedById?: string | null; reason?: string | null } = {},
-): Promise<{ released: number }> {
+  options: { close?: boolean; releasedById?: string | null; reason?: string | null; businessKey?: string } = {},
+): Promise<{ released: number; existing: boolean }> {
   assertRupiah(amount, "nilai pelepasan");
+  if (options.businessKey !== undefined && (!options.businessKey || options.businessKey.length > 191)) {
+    throw new RangeError("businessKey is required");
+  }
   const ref = await tx.rewardBudgetReservation.findUnique({
     where: { id: reservationId },
     select: { accountId: true, campaignId: true },
@@ -818,28 +892,49 @@ export async function releaseUnusedRewardBudget(
   await lockFundingAccount(tx, ref.accountId);
   if (ref.campaignId) await lockCampaign(tx, ref.campaignId);
 
-  const reservation = await tx.rewardBudgetReservation.findUniqueOrThrow({ where: { id: reservationId } });
-  if (reservation.status === "RELEASED") return { released: 0 };
-  const released = Math.min(amount, reservation.remainingRupiah);
-  if (released > 0) {
-    await bumpAccount(tx, ref.accountId, { held: -released });
-    await bumpCampaign(tx, ref.campaignId, { held: -released });
+  if (options.businessKey) {
+    const recorded = await tx.rewardBudgetRelease.findUnique({ where: { businessKey: options.businessKey } });
+    if (recorded) {
+      if (recorded.reservationId !== reservationId) throw new HttpError(409, FUNDING_KEY_CONFLICT);
+      return { released: recorded.amount, existing: true };
+    }
   }
-  await tx.rewardBudgetReservation.update({
-    where: { id: reservationId },
-    data: {
-      remainingRupiah: { decrement: released },
-      ...(options.close
-        ? {
-            status: "RELEASED",
-            releasedAt: new Date(),
-            releasedById: options.releasedById ?? null,
-            releaseReason: options.reason ?? null,
-          }
-        : {}),
-    },
-  });
-  return { released };
+  const reservation = await tx.rewardBudgetReservation.findUniqueOrThrow({ where: { id: reservationId } });
+  const released = reservation.status === "RELEASED" ? 0 : Math.min(amount, reservation.remainingRupiah);
+  if (reservation.status !== "RELEASED") {
+    if (released > 0) {
+      await bumpAccount(tx, ref.accountId, { held: -released });
+      await bumpCampaign(tx, ref.campaignId, { held: -released });
+    }
+    await tx.rewardBudgetReservation.update({
+      where: { id: reservationId },
+      data: {
+        remainingRupiah: { decrement: released },
+        ...(options.close
+          ? {
+              status: "RELEASED",
+              releasedAt: new Date(),
+              releasedById: options.releasedById ?? null,
+              releaseReason: options.reason ?? null,
+            }
+          : {}),
+      },
+    });
+  }
+  if (options.businessKey) {
+    await tx.rewardBudgetRelease.create({
+      data: {
+        reservationId,
+        accountId: ref.accountId,
+        campaignId: ref.campaignId,
+        businessKey: options.businessKey,
+        amount: released,
+        reason: options.reason ?? null,
+        releasedById: options.releasedById ?? null,
+      },
+    });
+  }
+  return { released, existing: false };
 }
 
 /** Releases everything a reservation still holds and closes it (a trip that closed). */
@@ -847,7 +942,7 @@ export async function closeReservation(
   tx: Prisma.TransactionClient,
   reservationId: string,
   options: { releasedById?: string | null; reason?: string | null } = {},
-): Promise<{ released: number }> {
+): Promise<{ released: number; existing: boolean }> {
   const ref = await tx.rewardBudgetReservation.findUnique({
     where: { id: reservationId },
     select: { accountId: true, campaignId: true },

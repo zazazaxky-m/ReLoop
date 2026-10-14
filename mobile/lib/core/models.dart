@@ -404,15 +404,36 @@ class RewardLedgerEntry {
   }
 }
 
+/// The bound of one deposit session (B01b): the most the session can earn and
+/// the most items it accepts, fixed when the user is admitted. Null = no bound
+/// of that kind. Shown before the first item; the machine stops at the bound.
+class SessionLimits {
+  final int? maxRewardRupiah;
+  final int? maxItems;
+
+  SessionLimits({this.maxRewardRupiah, this.maxItems});
+
+  factory SessionLimits.fromJson(Map<String, dynamic> json) {
+    return SessionLimits(
+      maxRewardRupiah: (json['maxRewardRupiah'] as num?)?.toInt(),
+      maxItems: (json['maxItems'] as num?)?.toInt(),
+    );
+  }
+
+  bool get hasAny => maxRewardRupiah != null || maxItems != null;
+}
+
 class ScanResult {
   final DepositSession session;
   final MachineInfo machine;
   final bool resumed;
+  final SessionLimits? limits;
 
   ScanResult({
     required this.session,
     required this.machine,
     this.resumed = false,
+    this.limits,
   });
 
   factory ScanResult.fromJson(Map<String, dynamic> json) {
@@ -420,6 +441,9 @@ class ScanResult {
       session: DepositSession.fromJson(json['session'] as Map<String, dynamic>),
       machine: MachineInfo.fromJson(json['machine'] as Map<String, dynamic>),
       resumed: json['resumed'] as bool? ?? false,
+      limits: json['limits'] is Map<String, dynamic>
+          ? SessionLimits.fromJson(json['limits'] as Map<String, dynamic>)
+          : null,
     );
   }
 }

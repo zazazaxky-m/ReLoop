@@ -54,6 +54,11 @@ void main() {
         result.machine.supportedWasteTypes!.first.id,
         (wasteTypes.first as Map<String, dynamic>)['id'],
       );
+      // B01b: the session bound shown before the first item.
+      final limits = response['limits'] as Map<String, dynamic>;
+      expect(result.limits, isNotNull);
+      expect(result.limits!.maxRewardRupiah, limits['maxRewardRupiah']);
+      expect(result.limits!.maxItems, limits['maxItems']);
     });
   });
 }

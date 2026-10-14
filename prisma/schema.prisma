@@ -212,6 +212,8 @@ enum MachineEventType {
   STATUS_CHANGED
   FILL_LEVEL_UPDATED
   ERROR
+  /// B01b: "every event of session S up to localEventId N is synced" (rvm/sync.py); releases the residual hold.
+  SESSION_CLOSE_WATERMARK
 }
 
 enum LedgerEntryType {
@@ -685,6 +687,14 @@ model DepositSession {
   completedAt  DateTime?
   timeoutAt    DateTime?
   anomalyCount Int           @default(0)
+  /// B01b: sha256 of the admission snapshot (lib/session-policy.ts), bound into the signed lease v2.
+  policyVersion           String?
+  /// B01b: the admission snapshot (rates, multiplier, mode and bounds) every acceptance of this session is priced from.
+  policySnapshotJson      Json?
+  /// B01b: when the RVM confirmed that every event of this session was synced (SESSION_CLOSE_WATERMARK);
+  /// the residual reward hold is released only then. Null = still awaiting the machine.
+  closeWatermarkAt        DateTime?
+  closeWatermarkEventCount Int?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -972,11 +982,30 @@ model RewardBudgetReservation {
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
 
-  commits RewardBudgetCommit[]
+  commits  RewardBudgetCommit[]
+  releases RewardBudgetRelease[]
 
   @@index([accountId, status])
   @@index([sourceType, sourceId])
   @@index([userId])
+}
+
+/// B01b: one keyed release of a reservation's remaining ceiling (the close
+/// watermark, a trip close, an operator release). The unique business key makes
+/// a retried release a no-op: the same key never gives money back twice.
+model RewardBudgetRelease {
+  id            String                  @id @default(cuid())
+  reservationId String
+  reservation   RewardBudgetReservation @relation(fields: [reservationId], references: [id])
+  accountId     String
+  campaignId    String?
+  businessKey   String                  @unique
+  amount        Int
+  reason        String?
+  releasedById  String?
+  createdAt     DateTime                @default(now())
+
+  @@index([reservationId])
 }
 
 /// One reward obligation drawn from a reservation, keyed by the earning's

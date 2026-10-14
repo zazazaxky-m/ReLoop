@@ -23,6 +23,7 @@ import {
   type MaterialVerificationPolicy,
 } from "../reward-policy";
 import { sessionEnd } from "../deposit-session-deadline";
+import { bpsToMultiplier, parseSessionPolicy } from "../session-policy";
 import {
   SESSION_CLOSED_REASON,
   SESSION_TIMEOUT_REASON,
@@ -56,6 +57,15 @@ class DepositItemChangedError extends Error {
  *
  * An item that already has an acceptance event or left PENDING/REVIEW
  * (accepted, rejected, or decided by a reviewer) is never priced again.
+ *
+ * B01b: a session carries its admission snapshot (lib/session-policy.ts): the
+ * rate, weight window, multiplier and reward mode fixed when the user was
+ * admitted. The acceptance prices from it, so a late or offline batch that
+ * arrives after the operator changed a rate or multiplier is never repriced
+ * by the new configuration. A type the snapshot does not know (added to the
+ * machine after admission) falls back to the live rate under the snapshot's
+ * multiplier and mode; a session without a snapshot (admitted before B01b) is
+ * priced live, as before.
  *
  * R03 (controller ruling C1): the machine stays the authority on the items in
  * its outbox, so an undecided item is decided here whatever its session's
@@ -126,10 +136,11 @@ export async function handleAcceptance(
 
   const campaign = session.campaign;
   const machineCampaign = campaign && campaignSupportsMachine(campaign) ? campaign : null;
+  const policy = parseSessionPolicy(session.policySnapshotJson);
   // Money paths fail closed: an unreadable configuration pays nothing and
   // demands AI confirmation (in practice the event row's foreign key
   // guarantees the machine exists).
-  const mode = machineRewardMode({
+  const mode = policy?.mode ?? machineRewardMode({
     campaign,
     organizationMode: config?.organization.machineRewardMode ?? "COMPLIANCE_ONLY",
   });
@@ -141,16 +152,25 @@ export async function handleAcceptance(
   // wasteTypeId), whatever the fallback type's default reward or the weight.
   const unknownWasteType = isUnknownWasteTypeItem(item);
 
+  const snapshotType = policy?.wasteTypes.find((type) => type.id === item.wasteTypeId) ?? null;
   const rate = unknownWasteType
     ? null
-    : await resolveRewardRate(
-        {
-          organizationId: machine.organizationId,
-          campaignId: machineCampaign?.id ?? null,
-          wasteTypeId: item.wasteTypeId,
-        },
-        tx,
-      );
+    : snapshotType
+      ? {
+          id: snapshotType.rewardRateId,
+          pointsPerItem: snapshotType.rewardPerUnit,
+          unit: snapshotType.unit,
+          minWeightGrams: snapshotType.minWeightGrams,
+          maxWeightGrams: snapshotType.maxWeightGrams,
+        }
+      : await resolveRewardRate(
+          {
+            organizationId: machine.organizationId,
+            campaignId: machineCampaign?.id ?? null,
+            wasteTypeId: item.wasteTypeId,
+          },
+          tx,
+        );
 
   const weight = validateWeight(
     item.measuredWeightGrams,
@@ -170,7 +190,7 @@ export async function handleAcceptance(
     item.sensorSequenceJson as SensorSequencePayload | null,
   );
 
-  const multiplier = machineCampaign?.rewardMultiplier ?? 1;
+  const multiplier = policy ? bpsToMultiplier(policy.multiplierBps) : (machineCampaign?.rewardMultiplier ?? 1);
   const points = rate?.pointsPerItem ?? item.wasteType.defaultRewardPerItem ?? 0;
   const unit = rate?.unit ?? item.wasteType.unit;
   const computed =

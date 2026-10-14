@@ -217,9 +217,10 @@ dashboard admin/superadmin pada tab **Sinkronisasi** detail mesin.
 ## Lease sesi dan jendela replay (R03)
 
 **Lease sesi.** `GET /api/machine-session/{code}` (HMAC, body kosong)
-mengembalikan lease dengan kontrak yang sama seperti sebelumnya:
+mengembalikan lease v1 untuk worker lama:
 `{ id, sessionId, userRef, issuedAt, expiresAt, signature }`, signature =
-HMAC-SHA256(secret, `id.sessionId.issuedAt.expiresAt`), dan `lease: null`
+HMAC-SHA256(secret, `id.sessionId.issuedAt.expiresAt`), atau lease v2 untuk
+worker yang mengumumkan protokol 2 (lihat "Lease v2" di bawah); `lease: null`
 berarti "tidak ada sesi: berhenti". Aturan server di baliknya:
 
 - Satu mesin punya paling banyak satu sesi aktif. Bila data lama masih
@@ -278,6 +279,105 @@ masih berlaku (sebelumnya nonce kedaluwarsa setelah 360 s).
   transisi di mana server menerima keduanya; mengubah string kanonik atau arti
   `expiresAt` diam-diam akan menolak atau mengubah perilaku semua mesin yang
   sudah terpasang.
+
+## Lease v2: batas reward bertanda tangan, bound sesi, dan close watermark (B01b)
+
+Sejak B01b worker mengumumkan `x-reloop-lease-protocol: 2` pada
+`GET /api/machine-session/{code}`, dan server menjawab dengan **lease v2**
+(kontrak bersama: `tests/fixtures/contracts/machine-lease.v2.json`, diverifikasi
+oleh `tests/test_rvm_lease_contract.py` dan `tests/contracts/machine-lease-contract.test.ts`):
+
+```json
+{ "version": 2, "id": "lease-<sessionId>", "machineCode": "RLP-001", "sessionId": "…",
+  "userRef": "…", "issuedAt": 1760342400, "expiresAt": 1760342700,
+  "reservationId": "…", "policyVersion": "<sha256 hex>", "ceilingRupiah": 10000, "maxItems": 20,
+  "policy": { "version": 1, "mode": "MONEY_REWARD", "multiplierBps": 15000,
+              "wasteTypes": [ { "id": "…", "unit": "ITEM", "rewardPerUnit": 100, "maxRewardRupiah": 150 } ] },
+  "signature": "<hex>" }
+```
+
+- **Tanda tangan.** `signature` = HMAC-SHA256(secret mesin, kanonik), kanonik =
+  JSON UTF-8 kompak dari array dengan urutan tetap
+  `[2,id,machineCode,sessionId,userRef,issuedAt,expiresAt,reservationId,policyVersion,ceilingRupiah,maxItems]`.
+  Node `JSON.stringify(array)` dan Python `json.dumps(array, separators=(",",":"), ensure_ascii=False)`
+  menghasilkan byte yang identik; semua angka bilangan bulat (bukan float),
+  batas yang tidak ada bernilai `null`. Worker (`rvm/lease.py`) menolak lease
+  dengan field bertipe salah, `machineCode` yang bukan mesin ini, tanda tangan
+  salah, atau tanpa `version: 2` (lease v1 lama **ditolak**: cap yang tidak
+  ditandatangani tidak diberi fallback permisif).
+- **`policyVersion` mengikat snapshot admisi.** `policy` adalah snapshot tarif,
+  multiplier (basis poin), mode reward, dan batas reward per item untuk setiap
+  jenis sampah mesin, yang dibekukan server saat pengguna diterima
+  (`lib/session-policy.ts`). `policyVersion` = SHA-256 dari kanonik
+  `[1,mode,multiplierBps,[[wasteTypeId,unit,rewardPerUnit,maxRewardRupiah]…urut id]]`;
+  worker menghitung ulang hash itu dan menolak lease yang snapshot-nya tidak
+  cocok, sehingga cap per item yang ditegakkan lokal tidak dapat diubah tanpa
+  merusak tanda tangan. Server menghargai setiap titik penerimaan sesi
+  (termasuk batch offline/terlambat) dari snapshot yang sama: perubahan tarif
+  atau multiplier setelah admisi tidak pernah menghargai ulang barang yang
+  sudah masuk.
+- **SQLite menyimpan field bertanda tangan** (`leases.version, machine_code,
+  reservation_id, policy_version, ceiling_rupiah, max_items, policy_json`), dan
+  counter konsumsi durable per sesi di `session_consumption`
+  (`consumed_rupiah`, `consumed_items`): perpanjangan lease (sesi sama, expiry
+  baru) dan restart **tidak pernah** mereset counter; penerimaan item dan
+  kenaikan counter ditulis dalam satu transaksi SQLite.
+- **Bound sesi.** Setiap `ITEM_ACCEPTED_POINT` mengonsumsi batas maksimal yang
+  dapat dibayar server untuk jenis itu (ITEM: tarif x multiplier; KG: tarif x
+  berat maksimal jenis, atau `max_item_weight_grams` mesin bila server tidak
+  menetapkan). Sebelum conveyor bergerak, controller memeriksa bound: bila item
+  berikutnya tidak tertutup `ceilingRupiah` atau `maxItems` sudah habis, item
+  ditolak lewat jalur yang sama dengan penolakan interlock (`_safe_all_stop`,
+  `ITEM_REJECTED {reason: SESSION_BOUND_REACHED, bound: SESSION_CEILING_REACHED|SESSION_MAX_ITEMS_REACHED}`,
+  tanpa `ITEM_ACCEPTED_POINT`), state kembali `SESSION_ACTIVE` dan **gate tetap
+  tertutup**. Saat bound habis, gate tidak dibuka lagi oleh aktivasi/perpanjangan
+  lease, pembukaan ulang setelah item ditolak, `OPEN_GATE`, maupun
+  `RESUME_OPERATION` (audit `ACTUATION_BLOCKED` dengan alasan bound). Bound
+  bukan interlock: ia tidak pernah me-latch dan seluruh jaminan R01 tetap
+  berlaku di atasnya (interlock tetap mengalahkan lease dan bound). Kiosk
+  menampilkan sisa batas (`sessionBound` di `/api/state`) dan "Batas sesi
+  tercapai" bila habis; pengguna melihat batas di aplikasi sebelum item pertama
+  (`limits` pada respons scan).
+- **Close watermark.** Saat poll sesi menunjukkan server tidak lagi menjalankan
+  sesi (lease `null`, atau sesi lain), sesi ditandai `closed_at` lokal
+  (`sessionConflict` bukan akhir sesi). Sebelum setiap flush, untuk sesi
+  tertutup yang **semua** event-nya sudah `sent` (tidak ada `pending` maupun
+  `dead_letter`), worker mengantrikan tepat satu event
+  `SESSION_CLOSE_WATERMARK {eventCount, lastLocalEventId, consumedRupiah, consumedItems}`
+  lewat outbox yang sama (ACK per event, retry dengan `localEventId` sama, urutan
+  per sesi), sehingga tiba setelah semua yang dijaminnya. Server baru melepas
+  sisa reservasi sesi setelah watermark itu (`lib/machine-events/watermark.ts`,
+  pelepasan berkunci `session:<id>:close-watermark`: retry tidak melepas dua
+  kali). Koneksi hilang, event tertahan, atau event dead-letter berarti **tidak
+  ada watermark**: sisa dana tetap ditahan dan dilaporkan
+  (`SOURCE_CLOSED_AWAITING_WATERMARK`); hanya pelepasan eksplisit superadmin
+  yang membebaskannya. Watermark untuk sesi yang masih berjalan di server
+  dijawab `TEMPORARY_FAILURE` (dicoba lagi setelah poll berikutnya menutupnya);
+  jumlah event yang tidak cocok dijawab `EVENT_REJECTED` (dead-letter, dana
+  tetap ditahan, terlihat di panel maintenance).
+- **Upgrade database.** Tabel `leases` tanpa kolom `version` di-backup lebih
+  dulu ke `<database>.pre-lease-v2-<UTC>.bak` (SQLite backup API, termasuk WAL,
+  diverifikasi) lalu kolom ditambahkan dalam satu transaksi; baris lama tetap
+  `version 1` tanpa bound. `session_consumption` dibuat baru. Simpan file
+  `.bak` sampai mesin terbukti sinkron normal.
+
+### Urutan rollout lease v2
+
+1. **Backend dulu.** Worker v1 (tanpa header) tetap mendapat lease v1 untuk
+   sesi `COMPLIANCE_ONLY` dan, selama `REWARD_FUNDING_ENFORCED` belum `true`,
+   untuk sesi berhadiah (mode bayangan, perilaku tidak berubah).
+2. **Lalu worker mesin.** Worker v2 hanya menerima lease v2; terhadap backend
+   lama ia tidak membuka sesi (lease v1 ditolak, tidak ada yang dihapus).
+   Backup `leases` dibuat otomatis saat start pertama.
+3. **Baru `REWARD_FUNDING_ENFORCED=true`** setelah semua mesin berhadiah
+   menjalankan worker v2: sejak itu sesi berhadiah **ditolak** untuk worker v1
+   (`lease: null`, `leaseRefused: LEASE_PROTOCOL_V2_REQUIRED`, log server),
+   tidak pernah diberikan tanpa bound.
+
+Perubahan perilaku mesin ini (penolakan pada bound, gate yang tidak dibuka
+lagi, watermark) **belum diuji pada hardware**; prosedur penerimaan teknisi di
+[`docs/kiosk-setup-guide.md`](../docs/kiosk-setup-guide.md#4-interlock-keselamatan-dan-uji-penerimaan-teknisi)
+(langkah 10) wajib lulus sebelum rollout armada (gate Z01).
 
 ## Kamera, deteksi orang, dan bukti wajah
 

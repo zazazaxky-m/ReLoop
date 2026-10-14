@@ -38,6 +38,7 @@ import { applyRewardEffect, type CreditEntryType } from "./reward-credit";
 import { lockFundingAccountForOrganization, settleOrCommitReward } from "./reward-funding";
 import { resolveLegacyCutover, type LegacyCutover } from "./reward-legacy-cutover";
 import { campaignSupportsMachine, decideReward, machineRewardMode } from "./reward-policy";
+import { bpsToMultiplier, parseSessionPolicy } from "./session-policy";
 import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
 
 /**
@@ -273,14 +274,28 @@ async function approvalTarget(
   const quantity = input.quantity ?? item.quantity;
   const campaign = item.session.campaign;
   const machineCampaign = campaign && campaignSupportsMachine(campaign) ? campaign : null;
-  const mode = machineRewardMode({ campaign, organizationMode: item.session.machine.organization.machineRewardMode });
-  const rate = await acceptanceRate(
-    tx,
-    item,
-    { organizationId, campaignId: machineCampaign?.id ?? null, wasteTypeId: wasteType.id },
-    pricedAt,
-    legacyRow,
-  );
+  // B01b: a session admitted with a snapshot is reviewed at its admission
+  // mode, multiplier and rate (lib/session-policy.ts); a later configuration
+  // change never reprices it, and a program flipped to money after the
+  // session pays nothing for its items.
+  const policy = parseSessionPolicy(item.session.policySnapshotJson);
+  const snapshotType = policy?.wasteTypes.find((type) => type.id === wasteType.id) ?? null;
+  const mode = policy?.mode ?? machineRewardMode({ campaign, organizationMode: item.session.machine.organization.machineRewardMode });
+  const rate = snapshotType
+    ? {
+        id: snapshotType.rewardRateId,
+        pointsPerItem: snapshotType.rewardPerUnit,
+        unit: snapshotType.unit,
+        minWeightGrams: snapshotType.minWeightGrams,
+        maxWeightGrams: snapshotType.maxWeightGrams,
+      }
+    : await acceptanceRate(
+        tx,
+        item,
+        { organizationId, campaignId: machineCampaign?.id ?? null, wasteTypeId: wasteType.id },
+        pricedAt,
+        legacyRow,
+      );
   // A2: the same weight check as the acceptance point, against the assigned
   // type's window (the acceptance rate's window over the type window). Rule:
   // every waste type is weighed, so a missing weight is never valid. The
@@ -297,7 +312,7 @@ async function approvalTarget(
     throw new HttpError(422, weight.reasonCode === "WEIGHT_MISSING" ? REVIEW_WEIGHT_MISSING : REVIEW_WEIGHT_OUT_OF_RANGE);
   }
   const points = rate?.pointsPerItem ?? wasteType.defaultRewardPerItem ?? 0;
-  const multiplier = machineCampaign?.rewardMultiplier ?? 1;
+  const multiplier = policy ? bpsToMultiplier(policy.multiplierBps) : (machineCampaign?.rewardMultiplier ?? 1);
   const unit = rate?.unit ?? wasteType.unit;
   const baseAmount =
     unit === "KG"

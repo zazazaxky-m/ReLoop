@@ -31,6 +31,11 @@ export const scanSessionResponseV1 = z.object({
     supportedWasteTypes: z.array(z.object({ id: z.string().min(1), name: z.string().min(1) })).min(1),
   }),
   resumed: z.boolean(),
+  /** B01b (additive): the session bound the user sees before the first item; null = no bound of that kind. */
+  limits: z.object({
+    maxRewardRupiah: z.number().int().nonnegative().nullable(),
+    maxItems: z.number().int().positive().nullable(),
+  }),
 });
 
 export const scanSessionContractV1 = z.object({
@@ -264,4 +269,64 @@ export const reconciliationReportContractV1 = z.object({
   status: z.literal(200),
   description: z.string().min(1),
   response: reconciliationReportResponseV1,
+}).strict();
+
+/**
+ * B01b: signed session lease v2 (tests/fixtures/contracts/machine-lease.v2.json),
+ * verified by both lib/machine-lease.ts (Node) and rvm/lease.py (Python).
+ * Bounds are integers or null; the snapshot carries only integers.
+ */
+const hex64 = z.string().regex(/^[0-9a-f]{64}$/);
+const machinePolicyViewV1 = z.object({
+  version: z.literal(1),
+  mode: z.enum(["MONEY_REWARD", "COMPLIANCE_ONLY"]),
+  multiplierBps: z.number().int().positive(),
+  wasteTypes: z.array(z.object({
+    id: z.string().min(1),
+    unit: z.enum(["ITEM", "KG"]),
+    rewardPerUnit: z.number().int().nonnegative(),
+    maxRewardRupiah: z.number().int().nonnegative().nullable(),
+  }).strict()),
+}).strict();
+
+export const machineLeaseV2 = z.object({
+  version: z.literal(2),
+  id: z.string().min(1),
+  machineCode: z.string().min(1),
+  sessionId: z.string().min(1),
+  userRef: z.string().min(1).nullable(),
+  issuedAt: z.number().int().positive(),
+  expiresAt: z.number().int().positive(),
+  reservationId: z.string().min(1).nullable(),
+  policyVersion: hex64,
+  ceilingRupiah: z.number().int().nonnegative().nullable(),
+  maxItems: z.number().int().positive().nullable(),
+  policy: machinePolicyViewV1,
+  signature: hex64,
+}).strict();
+
+const leaseEntryV2 = z.object({
+  lease: machineLeaseV2,
+  canonical: z.string().min(1),
+  policyCanonical: z.string().min(1),
+}).strict();
+
+export const machineLeaseContractV2 = z.object({
+  contract: z.literal("machine-lease"),
+  version: z.literal(2),
+  endpoint: z.literal("GET /api/machine-session/{code}"),
+  description: z.string().min(1),
+  secret: z.string().min(1),
+  leases: z.object({ money: leaseEntryV2, compliance: leaseEntryV2, utf8: leaseEntryV2 }).strict(),
+  tamper: z.array(z.object({ case: z.string().min(1), field: z.string().min(1), value: z.unknown() }).strict()).min(1),
+  policyTamper: z.array(z.object({
+    case: z.string().min(1), path: z.array(z.union([z.string(), z.number().int()])).min(1), value: z.unknown(),
+  }).strict()).min(1),
+  legacyV1: z.object({
+    description: z.string().min(1),
+    lease: z.object({
+      id: z.string().min(1), sessionId: z.string().min(1), userRef: z.string().min(1).nullable(),
+      issuedAt: z.number().int(), expiresAt: z.number().int(), signature: z.string().min(1),
+    }).strict(),
+  }).strict(),
 }).strict();

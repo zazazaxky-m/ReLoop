@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { getWalletBalance } from "@/lib/ledger";
-import { endDepositByOwner } from "@/lib/deposit-session-service";
+import { endDepositByOwner, sessionLimitsOf } from "@/lib/deposit-session-service";
 
 const finishSchema = z.object({
   action: z.enum(["finish", "cancel"]),
@@ -34,7 +34,8 @@ export async function GET(
     if (!session) throw new HttpError(404, "Sesi tidak ditemukan");
     if (session.userId !== user.id) throw new HttpError(403, "Bukan sesi Anda");
 
-    return jsonOk({ session });
+    // B01b: the session's bound (admission snapshot), shown while depositing.
+    return jsonOk({ session, limits: sessionLimitsOf(session) });
   } catch (error) {
     return handleApiError(error);
   }
@@ -62,7 +63,7 @@ export async function PATCH(
       prisma.depositSession.findUnique({ where: { id }, include: sessionDetail }),
       getWalletBalance(user.id),
     ]);
-    return jsonOk({ session: updated ?? session, balance });
+    return jsonOk({ session: updated ?? session, balance, limits: sessionLimitsOf(updated ?? session) });
   } catch (error) {
     return handleApiError(error);
   }

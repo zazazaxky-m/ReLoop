@@ -21,6 +21,7 @@ import {
 import { flagAnomaly, holdItemForFraud, notifyOrgAdmins, publishSecurityAlert } from "./fraud";
 import { maybeCreateAutoPickup } from "./pickup";
 import { handleAcceptance, handleItemRejected, recordItemEvidence } from "./acceptance";
+import { handleCloseWatermark } from "./watermark";
 import { isTerminalSession } from "../deposit-review-contract";
 import { sessionDeadline } from "../deposit-session-deadline";
 import type { DepositItemCache } from "./item-cache";
@@ -399,6 +400,13 @@ export async function processEventSideEffects(
           });
         }
       }
+      break;
+    }
+
+    case "SESSION_CLOSE_WATERMARK": {
+      // B01b: the machine confirmed every event of the session is synced;
+      // the residual reward hold is released now (keyed), never before.
+      await handleCloseWatermark(tx, machine, input, eventId, afterCommit);
       break;
     }
 

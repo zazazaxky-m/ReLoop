@@ -29,6 +29,20 @@ interface MachineInfo {
   supportedWasteTypes?: { id: string; name: string }[];
 }
 
+/** The session bound (B01b): shown before the first item and while depositing. */
+interface SessionLimits {
+  maxRewardRupiah: number | null;
+  maxItems: number | null;
+}
+
+function describeLimits(limits: SessionLimits | null): string | null {
+  if (!limits) return null;
+  const parts: string[] = [];
+  if (limits.maxRewardRupiah !== null) parts.push(`reward maksimal ${formatRupiah(limits.maxRewardRupiah)}`);
+  if (limits.maxItems !== null) parts.push(`maksimal ${limits.maxItems} item`);
+  return parts.length ? `Batas sesi ini: ${parts.join(" dan ")}. Mesin berhenti menerima item setelah batas tercapai.` : null;
+}
+
 /** Extracts machine code (m) + token (t) from a scanned QR payload (URL or query). */
 function parseScanPayload(text: string): { m: string; t: string } | null {
   const raw = text.trim();
@@ -65,6 +79,7 @@ export function ScanPageClient() {
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [machine, setMachine] = useState<MachineInfo | null>(null);
+  const [limits, setLimits] = useState<SessionLimits | null>(null);
   const [items, setItems] = useState<
     { id: string; wasteType: { name: string }; rewardAmount: number; status: string }[]
   >([]);
@@ -77,6 +92,7 @@ export function ScanPageClient() {
     const data = await res.json();
     setSession(data.session);
     setItems(data.session.items ?? []);
+    if (data.limits) setLimits(data.limits);
   }, []);
 
   const startSession = useCallback(
@@ -97,6 +113,7 @@ export function ScanPageClient() {
         if (!res.ok) throw new Error(data.error ?? "Gagal memulai sesi");
         setSession(data.session);
         setMachine(data.machine);
+        setLimits(data.limits ?? null);
         if (data.session.id) await refreshSession(data.session.id);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Terjadi kesalahan");
@@ -161,6 +178,12 @@ export function ScanPageClient() {
 
   const totalReward = items.reduce((s, i) => s + (i.rewardAmount ?? 0), 0);
   const showIntro = !session && !loading;
+  const limitText = describeLimits(limits);
+  const acceptedCount = items.filter((i) => i.status === "ACCEPTED" || i.status === "REVIEW").length;
+  const limitReached =
+    !!limits &&
+    ((limits.maxItems !== null && acceptedCount >= limits.maxItems) ||
+      (limits.maxRewardRupiah !== null && totalReward >= limits.maxRewardRupiah));
 
   return (
     <div className="space-y-6">
@@ -258,6 +281,14 @@ export function ScanPageClient() {
                 Masukkan botol atau kaleng ke mesin. Reward dicatat setelah barang
                 melewati acceptance point. Gunakan simulator Python untuk demo.
               </p>
+              {limitText ? (
+                <p
+                  className="rounded-lg bg-mint px-3 py-2 text-sm text-brand-700 dark:text-brand-400"
+                  data-testid="session-limits"
+                >
+                  {limitReached ? "Batas sesi tercapai. Tekan Selesai Setor untuk menutup sesi." : limitText}
+                </p>
+              ) : null}
               {machine.supportedWasteTypes?.length ? (
                 <div className="flex flex-wrap gap-2">
                   {machine.supportedWasteTypes.map((w) => (

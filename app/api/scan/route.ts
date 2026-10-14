@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { startOrResumeDeposit } from "@/lib/deposit-session-service";
+import { sessionLimitsOf, startOrResumeDeposit } from "@/lib/deposit-session-service";
 
 const scanSchema = z.object({
   machineCode: z.string().min(1),
@@ -55,6 +55,8 @@ export async function POST(req: Request) {
     return jsonOk(
       {
         session,
+        // B01b: the bound the user sees before the first item (admission snapshot).
+        limits: sessionLimitsOf(session),
         machine: machine
           ? {
               id: machine.id,

@@ -1,0 +1,122 @@
+{
+  "contract": "machine-lease",
+  "version": 2,
+  "endpoint": "GET /api/machine-session/{code}",
+  "description": "Signed session lease v2 the backend issues to an RVM worker that announces `x-reloop-lease-protocol: 2` (app/api/machine-session/[code]/route.ts, lib/machine-lease.ts) and the RVM verifies and stores (rvm/lease.py, rvm/controller.py). Loaded by tests/contracts/machine-lease-contract.test.ts (Node) and tests/test_rvm_lease_contract.py (Python). The signature is HMAC-SHA256(machine secret, canonical) where canonical is the compact UTF-8 JSON array [2,id,machineCode,sessionId,userRef,issuedAt,expiresAt,reservationId,policyVersion,ceilingRupiah,maxItems]: Node JSON.stringify(array) and Python json.dumps(array, separators=(',',':'), ensure_ascii=False) must produce identical bytes (integers only, never floats; null for an absent bound). policyVersion is the hex SHA-256 of the canonical admission snapshot [1,mode,multiplierBps,[[wasteTypeId,unit,rewardPerUnit,maxRewardRupiah]...] sorted by wasteTypeId], so the per-item caps the RVM enforces locally are bound by the signature. Tampering with any field (every `tamper` case) must fail verification in both languages. Breaking changes need a new versioned file.",
+  "secret": "lease-fixture-secret",
+  "leases": {
+    "money": {
+      "lease": {
+        "version": 2,
+        "id": "lease-cmauditsession0000000000001",
+        "machineCode": "AUDIT-A-01",
+        "sessionId": "cmauditsession0000000000001",
+        "userRef": "cmaudituser000000000000001",
+        "issuedAt": 1760342400,
+        "expiresAt": 1760342700,
+        "reservationId": "cmauditreservation000000001",
+        "ceilingRupiah": 10000,
+        "maxItems": 20,
+        "policyVersion": "a8735e40278793160cbde92b51b2eeb2c50b5375f5f166e4b97fceabf3e7f170",
+        "policy": {
+          "version": 1,
+          "mode": "MONEY_REWARD",
+          "multiplierBps": 15000,
+          "wasteTypes": [
+            { "id": "cmauditwastetype0000000002", "unit": "KG", "rewardPerUnit": 2000, "maxRewardRupiah": null },
+            { "id": "cmauditwastetype0000000001", "unit": "ITEM", "rewardPerUnit": 100, "maxRewardRupiah": 150 }
+          ]
+        },
+        "signature": "6d3f37eaa3178b3ca22f9a7c7d75029584b1b81dc76418c4a4e7dda4bb6dab77"
+      },
+      "canonical": "[2,\"lease-cmauditsession0000000000001\",\"AUDIT-A-01\",\"cmauditsession0000000000001\",\"cmaudituser000000000000001\",1760342400,1760342700,\"cmauditreservation000000001\",\"a8735e40278793160cbde92b51b2eeb2c50b5375f5f166e4b97fceabf3e7f170\",10000,20]",
+      "policyCanonical": "[1,\"MONEY_REWARD\",15000,[[\"cmauditwastetype0000000001\",\"ITEM\",100,150],[\"cmauditwastetype0000000002\",\"KG\",2000,null]]]"
+    },
+    "compliance": {
+      "lease": {
+        "version": 2,
+        "id": "lease-cmauditsession0000000000002",
+        "machineCode": "AUDIT-A-01",
+        "sessionId": "cmauditsession0000000000002",
+        "userRef": "cmaudituser000000000000002",
+        "issuedAt": 1760342400,
+        "expiresAt": 1760342580,
+        "reservationId": null,
+        "ceilingRupiah": null,
+        "maxItems": null,
+        "policyVersion": "859d3db4f06ec25605562ecd95d2a8292cb7ba6971698179884c11d6db0438cd",
+        "policy": {
+          "version": 1,
+          "mode": "COMPLIANCE_ONLY",
+          "multiplierBps": 10000,
+          "wasteTypes": [
+            { "id": "cmauditwastetype0000000001", "unit": "ITEM", "rewardPerUnit": 0, "maxRewardRupiah": 0 }
+          ]
+        },
+        "signature": "0ba8521c72d203eeaf638d6e9e540c4854b411f18adb7c04506f96a3d8c09193"
+      },
+      "canonical": "[2,\"lease-cmauditsession0000000000002\",\"AUDIT-A-01\",\"cmauditsession0000000000002\",\"cmaudituser000000000000002\",1760342400,1760342580,null,\"859d3db4f06ec25605562ecd95d2a8292cb7ba6971698179884c11d6db0438cd\",null,null]",
+      "policyCanonical": "[1,\"COMPLIANCE_ONLY\",10000,[[\"cmauditwastetype0000000001\",\"ITEM\",0,0]]]"
+    },
+    "utf8": {
+      "lease": {
+        "version": 2,
+        "id": "lease-cmauditsession0000000000003",
+        "machineCode": "MESIN-ÜJI-\"01\"\\",
+        "sessionId": "cmauditsession0000000000003",
+        "userRef": "cmaudituser000000000000001",
+        "issuedAt": 1760342400,
+        "expiresAt": 1760342700,
+        "reservationId": "cmauditreservation000000003",
+        "ceilingRupiah": 2147483647,
+        "maxItems": 1,
+        "policyVersion": "a8735e40278793160cbde92b51b2eeb2c50b5375f5f166e4b97fceabf3e7f170",
+        "policy": {
+          "version": 1,
+          "mode": "MONEY_REWARD",
+          "multiplierBps": 15000,
+          "wasteTypes": [
+            { "id": "cmauditwastetype0000000002", "unit": "KG", "rewardPerUnit": 2000, "maxRewardRupiah": null },
+            { "id": "cmauditwastetype0000000001", "unit": "ITEM", "rewardPerUnit": 100, "maxRewardRupiah": 150 }
+          ]
+        },
+        "signature": "590719d2e83c33dbcf2750e0f13de0ad4a0bb9ee262dd2bfe433cc7d43c3beff"
+      },
+      "canonical": "[2,\"lease-cmauditsession0000000000003\",\"MESIN-ÜJI-\\\"01\\\"\\\\\",\"cmauditsession0000000000003\",\"cmaudituser000000000000001\",1760342400,1760342700,\"cmauditreservation000000003\",\"a8735e40278793160cbde92b51b2eeb2c50b5375f5f166e4b97fceabf3e7f170\",2147483647,1]",
+      "policyCanonical": "[1,\"MONEY_REWARD\",15000,[[\"cmauditwastetype0000000001\",\"ITEM\",100,150],[\"cmauditwastetype0000000002\",\"KG\",2000,null]]]"
+    }
+  },
+  "tamper": [
+    { "case": "ceilingRupiah raised", "field": "ceilingRupiah", "value": 999999 },
+    { "case": "ceilingRupiah removed", "field": "ceilingRupiah", "value": null },
+    { "case": "maxItems raised", "field": "maxItems", "value": 999 },
+    { "case": "maxItems removed", "field": "maxItems", "value": null },
+    { "case": "reservationId swapped", "field": "reservationId", "value": "cmauditreservation000000999" },
+    { "case": "reservationId removed", "field": "reservationId", "value": null },
+    { "case": "policyVersion swapped", "field": "policyVersion", "value": "859d3db4f06ec25605562ecd95d2a8292cb7ba6971698179884c11d6db0438cd" },
+    { "case": "machineCode swapped", "field": "machineCode", "value": "AUDIT-B-01" },
+    { "case": "sessionId swapped", "field": "sessionId", "value": "cmauditsession0000000000009" },
+    { "case": "userRef swapped", "field": "userRef", "value": "cmaudituser000000000000002" },
+    { "case": "expiresAt extended", "field": "expiresAt", "value": 1760346000 },
+    { "case": "issuedAt moved", "field": "issuedAt", "value": 1760342401 },
+    { "case": "id swapped", "field": "id", "value": "lease-cmauditsession0000000000009" },
+    { "case": "signature replaced", "field": "signature", "value": "0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "policyTamper": [
+    { "case": "per-item cap raised", "path": ["wasteTypes", 1, "maxRewardRupiah"], "value": 100000 },
+    { "case": "rate raised", "path": ["wasteTypes", 1, "rewardPerUnit"], "value": 1 },
+    { "case": "multiplier lowered", "path": ["multiplierBps"], "value": 1 },
+    { "case": "mode changed", "path": ["mode"], "value": "COMPLIANCE_ONLY" }
+  ],
+  "legacyV1": {
+    "description": "A v1 lease (HMAC over id.sessionId.issuedAt.expiresAt, no version) is still what a worker that does not announce protocol 2 receives; a v2 worker refuses it (no permissive fallback for a signed cap).",
+    "lease": {
+      "id": "lease-cmauditsession0000000000001",
+      "sessionId": "cmauditsession0000000000001",
+      "userRef": "cmaudituser000000000000001",
+      "issuedAt": 1760342400,
+      "expiresAt": 1760342700,
+      "signature": "v1"
+    }
+  }
+}
