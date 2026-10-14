@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { CONFIG_KEYS, getConfigInt, getMinRedemption } from "@/lib/config";
 import { getWalletBalance, getLedgerHistory } from "@/lib/ledger";
+import { getLiabilitySummary } from "@/lib/reconciliation-report";
 import { requireApiUser, activePartnerOrgIds } from "@/lib/rbac";
 import { isCampaignEligible } from "@/lib/campaign";
 import { getSecurityEvents, getSecuritySummary } from "@/lib/security-events";
@@ -201,7 +202,7 @@ export async function GET() {
       machineCount,
       userCount,
       depositCount,
-      ledgerSum,
+      liability,
       pendingPartners,
       pendingRedemptions,
       minRedemption,
@@ -212,10 +213,7 @@ export async function GET() {
       prisma.machine.count(),
       prisma.user.count({ where: { role: "USER" } }),
       prisma.depositItem.count({ where: { status: "ACCEPTED" } }),
-      prisma.rewardLedger.aggregate({
-        where: { entryType: "EARN", status: "AVAILABLE" },
-        _sum: { amount: true },
-      }),
+      getLiabilitySummary(),
       prisma.organizationCollectorPartner.count({
         where: { status: "PENDING_SUPERADMIN_APPROVAL" },
       }),
@@ -233,7 +231,10 @@ export async function GET() {
       machineCount,
       userCount,
       depositCount,
-      rewardAvailable: ledgerSum._sum.amount ?? 0,
+      // M05: net spendable liability (payouts and reserves subtracted). Until
+      // M05 this was the gross AVAILABLE earning; the name stays for old clients.
+      rewardAvailable: liability.availableLiability,
+      rewardLiability: liability,
       pendingPartners,
       pendingRedemptions,
       minRedemption,

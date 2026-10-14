@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
+import '../../core/models.dart';
 import '../../services/offline_service.dart';
 import '../../shared/format.dart';
 import '../../shared/widgets/metric_card.dart';
@@ -12,7 +13,9 @@ import '../admin/admin_shell.dart';
 
 /// SUPERADMIN financial reconciliation, mirroring the web page
 /// `/dashboard/superadmin/reconciliation`. Reads `/api/reports/reconciliation`
-/// which returns `{ report: ReconciliationReport }`.
+/// which returns `{ report: ReconciliationReport }` (contract
+/// tests/fixtures/contracts/reconciliation-report.v1.json; net figures are
+/// parsed by [ReconciliationLiability.fromJson]).
 class SuperadminReconciliationScreen extends StatefulWidget {
   const SuperadminReconciliationScreen({super.key});
 
@@ -109,9 +112,7 @@ class _SuperadminReconciliationScreenState
     final report = _report!;
     int money(String key) => (report[key] as num?)?.round() ?? 0;
 
-    final redeemedDiscrepancy = money('redeemedDiscrepancy');
-    final reservedDiscrepancy = money('reservedDiscrepancy');
-    final hasDiscrepancy = report['hasDiscrepancy'] as bool? ?? false;
+    final liability = ReconciliationLiability.fromJson(report);
     final organizations =
         (report['organizations'] as List?)?.cast<Map<String, dynamic>>() ??
             const [];
@@ -121,8 +122,8 @@ class _SuperadminReconciliationScreenState
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
       children: [
         Text(
-          'Liabilitas poin per organisasi dan pencocokan pembayaran '
-          '(ledger REDEEM vs pencairan) di seluruh platform.',
+          'Kewajiban saldo pengguna dari ledger dan pencocokan setiap '
+          'pengajuan pencairan dengan saldo yang ditahan atau dibayar.',
           style: TextStyle(fontSize: 12.5, color: context.reloopMuted, height: 1.4),
         ),
         if (_isOffline) ...[
@@ -134,9 +135,9 @@ class _SuperadminReconciliationScreenState
           children: [
             Expanded(
               child: MetricCard(
-                label: 'Total liabilitas',
-                value: formatRupiah(money('totalOutstanding')),
-                hint: 'Spendable saat ini',
+                label: 'Saldo tersedia',
+                value: formatRupiah(liability.availableLiability),
+                hint: 'Dapat dicairkan',
                 icon: Icons.account_balance_wallet_outlined,
                 tone: MetricTone.teal,
               ),
@@ -144,9 +145,9 @@ class _SuperadminReconciliationScreenState
             const SizedBox(width: 12),
             Expanded(
               child: MetricCard(
-                label: 'Menunggu review',
-                value: formatRupiah(money('totalEarnPending')),
-                hint: 'Pending',
+                label: 'Menunggu pemeriksaan',
+                value: formatRupiah(liability.pendingLiability),
+                hint: 'Belum dapat dicairkan',
                 icon: Icons.hourglass_bottom_outlined,
                 tone: MetricTone.amber,
               ),
@@ -158,29 +159,48 @@ class _SuperadminReconciliationScreenState
           children: [
             Expanded(
               child: MetricCard(
-                label: 'Dicairkan (ledger)',
-                value: formatRupiah(money('ledgerRedeemed')),
-                hint: 'REDEEM terbayar',
-                icon: Icons.payments_outlined,
-                tone: MetricTone.slate,
+                label: 'Sedang dicairkan',
+                value: formatRupiah(liability.reservedLiability),
+                hint: 'Ditahan untuk pengajuan',
+                icon: Icons.schedule_outlined,
+                tone: MetricTone.blue,
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: MetricCard(
-                label: 'Selisih',
-                value: formatRupiah(redeemedDiscrepancy + reservedDiscrepancy),
-                hint: 'Rekonsiliasi',
-                icon: Icons.rule_folder_outlined,
-                tone: hasDiscrepancy ? MetricTone.amber : MetricTone.teal,
+                label: 'Sudah dibayar',
+                value: formatRupiah(liability.paidTotal),
+                hint: 'Bukan lagi kewajiban',
+                icon: Icons.payments_outlined,
+                tone: MetricTone.slate,
               ),
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        Text(
+          'Total kewajiban ${formatRupiah(liability.totalObligation)}: saldo '
+          'tersedia + menunggu pemeriksaan + sedang dicairkan. Dana yang sudah '
+          'dibayar tidak termasuk.',
+          style: TextStyle(fontSize: 12, color: context.reloopMuted, height: 1.4),
+        ),
         const SizedBox(height: 16),
-        _DiscrepancyBanner(hasDiscrepancy: hasDiscrepancy),
+        _DiscrepancyBanner(
+          hasDiscrepancy: liability.hasDiscrepancy,
+          mismatchCount: liability.payoutMismatchCount,
+        ),
+        if (liability.overdrawnUsers > 0) ...[
+          const SizedBox(height: 12),
+          _NoticeCard(
+            message: '${liability.overdrawnUsers} pengguna bersaldo minus '
+                '(kekurangan ${formatRupiah(liability.overdrawnShortfall)}). '
+                'Tidak dikurangkan dari kewajiban kepada pengguna lain; '
+                'tangani sebagai kasus pemulihan.',
+          ),
+        ],
         const SizedBox(height: 20),
-        _SectionTitle('Pencocokan pembayaran (global)'),
+        _SectionTitle('Pencocokan pencairan (global)'),
         const SizedBox(height: 12),
         ReLoopCard(
           padding: const EdgeInsets.all(4),
@@ -188,24 +208,49 @@ class _SuperadminReconciliationScreenState
             children: [
               _MatchHeaderRow(),
               _MatchRow(
-                label: 'Sudah dibayar (SUCCESS)',
+                label: 'Sudah dibayar',
                 ledger: money('ledgerRedeemed'),
                 payout: money('redemptionSuccessTotal'),
-                diff: redeemedDiscrepancy,
+                diff: liability.redeemedDiscrepancy,
               ),
               Divider(height: 1, color: context.reloopBorder),
               _MatchRow(
-                label: 'Dalam proses (reserved)',
+                label: 'Sedang dicairkan',
                 ledger: money('ledgerReserved'),
                 payout: money('redemptionInFlightTotal'),
-                diff: reservedDiscrepancy,
+                diff: liability.reservedDiscrepancy,
               ),
             ],
           ),
         ),
+        const SizedBox(height: 8),
+        Text(
+          'Selisih dihitung per pengajuan; selisih yang berlawanan tidak '
+          'saling menutupi.',
+          style: TextStyle(fontSize: 11, color: context.reloopMutedSoft),
+        ),
+        if (liability.payoutMismatches.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          _SectionTitle(
+              'Pengajuan yang tidak cocok (${liability.payoutMismatchCount})'),
+          const SizedBox(height: 12),
+          ...liability.payoutMismatches.map((row) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _MismatchCard(row: row),
+              )),
+        ],
         const SizedBox(height: 20),
-        _SectionTitle('Liabilitas per organisasi'),
+        _SectionTitle('Saldo per organisasi'),
         const SizedBox(height: 12),
+        _NoticeCard(
+          message: 'Data legacy belum teralokasi: '
+              '${formatRupiah(liability.unallocatedLegacyAmount)}. Pencairan '
+              'dicatat per pengguna tanpa sumber organisasi, sehingga saldo '
+              'tersedia dilaporkan di baris legacy sampai alokasi per sumber '
+              'dana organisasi diaktifkan. Reward per organisasi di bawah '
+              'adalah nilai bruto, belum dikurangi pencairan.',
+        ),
+        const SizedBox(height: 8),
         if (organizations.isEmpty)
           ReLoopCard(
             padding: const EdgeInsets.symmetric(vertical: 28),
@@ -252,8 +297,12 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _DiscrepancyBanner extends StatelessWidget {
-  const _DiscrepancyBanner({required this.hasDiscrepancy});
+  const _DiscrepancyBanner({
+    required this.hasDiscrepancy,
+    required this.mismatchCount,
+  });
   final bool hasDiscrepancy;
+  final int mismatchCount;
 
   @override
   Widget build(BuildContext context) {
@@ -286,7 +335,7 @@ class _DiscrepancyBanner extends StatelessWidget {
               children: [
                 Text(
                   warn
-                      ? 'Selisih rekonsiliasi terdeteksi'
+                      ? 'Selisih rekonsiliasi pada $mismatchCount catatan'
                       : 'Ledger cocok dengan pencairan',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
@@ -299,11 +348,10 @@ class _DiscrepancyBanner extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   warn
-                      ? 'Ledger REDEEM dan catatan pencairan tidak cocok. '
-                          'Periksa entri yang belum tersettle atau pencairan '
-                          'yang belum tercatat di ledger.'
-                      : 'Tidak ada selisih antara ledger pembayaran dan '
-                          'catatan pencairan.',
+                      ? 'Ledger pencairan dan status pengajuan tidak cocok. '
+                          'Periksa setiap pengajuan di daftar di bawah.'
+                      : 'Setiap pengajuan pencairan cocok dengan saldo yang '
+                          'ditahan atau dibayar.',
                   style: TextStyle(fontSize: 11.5, color: context.reloopMuted, height: 1.35),
                 ),
               ],
@@ -440,23 +488,109 @@ class _OrgLiabilityCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                formatRupiah(money('outstanding')),
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: context.reloopBrandText,
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 10),
           Row(
             children: [
-              _MiniStat(label: 'Tersedia', value: formatRupiah(money('earnAvailable'))),
-              _MiniStat(label: 'Pending', value: formatRupiah(money('earnPending'))),
-              _MiniStat(label: 'Penyesuaian', value: formatRupiah(money('adjustments'))),
+              _MiniStat(label: 'Diterbitkan (bruto)', value: formatRupiah(money('earnAvailable'))),
+              _MiniStat(label: 'Menunggu (bruto)', value: formatRupiah(money('earnPending'))),
+              _MiniStat(label: 'Teralokasi', value: formatRupiah(money('outstanding'))),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoticeCard extends StatelessWidget {
+  const _NoticeCard({required this.message});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: ReLoopColors.warning.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ReLoopColors.warning.withValues(alpha: .3)),
+      ),
+      child: Text(
+        message,
+        style: TextStyle(fontSize: 11.5, color: context.reloopMuted, height: 1.35),
+      ),
+    );
+  }
+}
+
+const _problemLabels = <String, String>{
+  'RESERVE_MISSING': 'Saldo tahanan tidak ada',
+  'DUPLICATE_RESERVE': 'Saldo tahanan ganda',
+  'RESERVE_STATE_MISMATCH': 'Status tahanan tidak sesuai',
+  'AMOUNT_MISMATCH': 'Nominal tidak sesuai',
+  'NOT_LINKED_TO_REDEMPTION': 'Tidak terhubung ke pengajuan',
+  'MISSING_REFERENCE': 'Referensi pengajuan kosong',
+  'REQUEST_NOT_FOUND': 'Pengajuan tidak ditemukan',
+  'OWNER_MISMATCH': 'Pemilik berbeda',
+};
+
+String _signedRupiah(int value) {
+  if (value == 0) return formatRupiah(0);
+  return '${value > 0 ? '+' : '−'}${formatRupiah(value.abs())}';
+}
+
+class _MismatchCard extends StatelessWidget {
+  const _MismatchCard({required this.row});
+  final PayoutMismatch row;
+
+  @override
+  Widget build(BuildContext context) {
+    final ledger =
+        row.reserveStatuses.isEmpty ? 'tidak ada' : row.reserveStatuses.join(', ');
+    return ReLoopCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _problemLabels[row.problem] ?? row.problem,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: ReLoopColors.danger,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            row.redemptionId ?? '-',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: context.reloopMutedSoft),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Pengajuan ${row.requestStatus ?? 'tidak ada'} · ledger $ledger',
+            style: TextStyle(fontSize: 11.5, color: context.reloopMuted),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _MiniStat(
+                label: 'Nominal',
+                value: row.requestAmount == null
+                    ? '-'
+                    : formatRupiah(row.requestAmount!),
+              ),
+              _MiniStat(
+                label: 'Selisih dibayar',
+                value: _signedRupiah(row.paidDifference),
+              ),
+              _MiniStat(
+                label: 'Selisih ditahan',
+                value: _signedRupiah(row.reservedDifference),
+              ),
             ],
           ),
         ],

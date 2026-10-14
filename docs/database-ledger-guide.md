@@ -25,11 +25,12 @@ Tabel `RewardLedger` mencatat semua arus masuk dan keluar poin/uang dalam platfo
 
 Karena tidak ada kolom khusus `current_balance` pada entitas User, maka saldo total pengguna dihitung secara agregat *(sum)* dari seluruh baris di `RewardLedger` miliknya.
 
-**Rumus:**
-`Saldo Aktif = SUM(amount) di mana status = 'AVAILABLE'`
-`Saldo Tertahan = SUM(amount) di mana status = 'PENDING'`
+**Rumus** (`computeBalance` di `lib/ledger.ts`, satu-satunya definisi):
+- `Saldo tersedia = SUM(amount)` EARN/ADJUST/REVERSE/PENALTY berstatus `AVAILABLE` + REDEEM berstatus `PENDING` (reserve pencairan) dan `REDEEMED` (sudah dibayar).
+- `Menunggu pemeriksaan = SUM(amount)` EARN/ADJUST/REVERSE/PENALTY berstatus `PENDING` (ADJUST `PENDING` tidak menambah saldo tersedia).
+- `Sedang dicairkan = -SUM(amount)` REDEEM `PENDING`; `Sudah dibayar = -SUM(amount)` REDEEM `REDEEMED`. REDEEM `REVERSED`/`REJECTED` tidak berpengaruh.
 
-*Catatan: Nilai transaksi keluar (penarikan tunai) akan dicatat sebagai angka negatif (contoh: `-50000`), sehingga fungsi agregat SUM() akan otomatis menguranginya dari saldo total.*
+*Catatan: Nilai transaksi keluar (penarikan tunai) dicatat sebagai angka negatif (contoh: `-50000`) dengan status REDEEM `PENDING`/`REDEEMED`, bukan `AVAILABLE`. Karena itu `SUM(amount) WHERE status = 'AVAILABLE'` saja TIDAK mengurangi pencairan dan bukan saldo (kesalahan LOG-07 yang diperbaiki M05).*
 
 ## 3. Keuntungan Sistem Append-Only
 
@@ -61,3 +62,26 @@ Karena tidak ada kolom khusus `current_balance` pada entitas User, maka saldo to
 - Tarif dipilih pada jendela UTC `[effectiveFrom, effectiveTo)` yang di-AND dengan scope campaign/organisasi/global (EX-03: dulu `OR` scope menimpa `OR` jendela sehingga tarif kedaluwarsa terpilih). Persetujuan memakai tarif yang tercatat saat penerimaan hanya bila jendelanya memuat `acceptedAt` (`rateWindowContains`, tanpa melihat `active`); tarif tercatat di luar jendelanya (sisa EX-03 pada baris lama) diabaikan dan tarif ditentukan ulang pada `acceptedAt` dengan query yang sudah diperbaiki. Baris seperti itu tercantum di `reviewItemsWithRateOutsideAcceptance`.
 - Konfigurasi (migration `20261014013000_reward_policy`, expand + rekonsiliasi konfigurasi, tanpa mengubah ledger): `Machine.materialVerification` (bawaan `WEIGHT_ONLY`), `WasteType.aiAcceptedLabels` (diisi untuk PET/kaleng/Anorganik), `Organization.machineRewardMode` (bawaan `MONEY_REWARD`), `Campaign.supportsMachine` (diisi `true` untuk campaign EVENT/SCHOOL_PROGRAM yang sudah punya sesi mesin), dan tabel `RewardReconciliationCase`.
 - Dana/budget reward belum dibatasi: `checkRewardFunding` adalah titik sambung B01 yang saat ini tidak memeriksa apa pun dan mengembalikan `NOT_ENFORCED_UNTIL_B01`.
+
+## 6. Rekonsiliasi saldo global (M05)
+
+Laporan platform `getReconciliationReport()` (`lib/reconciliation-report.ts`) dipakai `GET /api/reports/reconciliation` (SUPERADMIN), halaman `/dashboard/superadmin/reconciliation`, dan layar rekonsiliasi mobile. Modulnya terpisah dari `lib/ledger.ts` (yang memegang semantik saldo per pengguna dan penulis ledger) karena ia read model atas seluruh ledger; ia memakai ulang `computeBalance` per pengguna dan `expectedReserveStatus` per pengajuan, dan berbagi predikat ledger dengan `scripts/reconcile-wallet-history.ts` (`readUserBalances`, `findReservesWithoutRequest`). Kontrak respons berversi: `tests/fixtures/contracts/reconciliation-report.v1.json`.
+
+- **Satu snapshot.** Semua agregat dibaca dalam satu transaksi `READ ONLY` REPEATABLE READ (`report.snapshot`), sehingga settlement yang commit di tengah laporan tidak memasangkan angka ledger sebelum settlement dengan angka pengajuan sesudahnya (selisih palsu). Laporan tidak mengambil lock baris: tidak menunggu dan tidak menahan transaksi wallet.
+- **Kewajiban bersih** (rupiah bulat; `computeBalance` per pengguna lalu dijumlahkan):
+
+  | Field | Label UI | Isi |
+  | --- | --- | --- |
+  | `availableLiability` | Saldo tersedia | Saldo yang dapat dicairkan, sudah dikurangi reserve dan pembayaran |
+  | `pendingLiability` | Menunggu pemeriksaan | Saldo `PENDING`, belum dapat dicairkan |
+  | `reservedLiability` | Sedang dicairkan | Reserve REDEEM `PENDING` milik pengajuan berjalan |
+  | `paidTotal` | Sudah dibayar | REDEEM `REDEEMED`; dilaporkan terpisah, bukan kewajiban |
+  | `totalObligation` | Total kewajiban | `availableLiability + reservedLiability + pendingLiability` |
+
+  `totalOutstanding` tetap ada sebagai **alias kompatibilitas** `availableLiability` (sebelum M05 field ini berisi EARN `AVAILABLE` bruto yang tidak dikurangi pencairan); klien baru memakai `availableLiability`. `totalEarnAvailable`/`totalEarnPending` tetap berupa penerbitan bruto (informasi, bukan kewajiban).
+- **Saldo minus tidak dinetting.** Saldo negatif seorang pengguna (misalnya pembayaran ganda lama) tidak mengurangi kewajiban kepada pengguna lain: kewajiban hanya menjumlahkan saldo positif, dan kekurangannya dilaporkan di `overdrawn { users, availableShortfall, pendingShortfall }` (sama dengan `negativeBalances` pada `npm run reconcile:wallet`) untuk ditangani sebagai kasus pemulihan.
+- **Pencocokan pencairan per pengajuan.** Untuk setiap `Redemption`, reserve hidup milik pemilik yang sama (bukan `REJECTED`) dibandingkan dengan status pengajuan menurut `expectedReserveStatus`: `SUCCESS` dengan `REDEEMED`, `REQUESTED`/`APPROVED`/`PROCESSING` dengan `PENDING`, `FAILED`/`REVERSED` tanpa efek saldo. Baris REDEEM `PENDING`/`REDEEMED` yang tidak menopang pengajuan pemiliknya (tanpa referensi, pengajuan tidak ada, pemilik berbeda) ikut dihitung. `payoutMismatches` (maksimal 200 baris, total di `payoutMismatchCount`) mencantumkan per pengajuan: status pengajuan, status reserve, `paidDifference`, `reservedDifference`, dan `problem` (`RESERVE_MISSING`, `DUPLICATE_RESERVE`, `RESERVE_STATE_MISMATCH`, `AMOUNT_MISMATCH`, `NOT_LINKED_TO_REDEMPTION`, `MISSING_REFERENCE`, `REQUEST_NOT_FOUND`, `OWNER_MISMATCH`). Sejak M05 `redeemedDiscrepancy`/`reservedDiscrepancy` adalah jumlah **nilai mutlak** selisih per baris (sebelumnya selisih total bertanda), sehingga +100 pada satu pengajuan dan -100 pada pengajuan lain tidak menghasilkan indikator sehat palsu. `hasDiscrepancy = redeemedDiscrepancy !== 0 || reservedDiscrepancy !== 0`.
+- `flaggedTransfers`: pengajuan dengan `reconciliationRequired` (M02); saldonya tetap ditahan dan termasuk `reservedLiability`. `rewardCases`: kasus M04 `OPEN`, di luar angka kewajiban sampai diselesaikan operator.
+- **Organisasi sebelum B01.** Baris REDEEM tidak membawa organisasi, sehingga saldo tersedia belum dapat dibagi per organisasi tanpa mengarang atribusi. `organizations[].earnAvailable/earnPending/adjustments` adalah penerbitan bruto (informasi). `organizations[].outstanding` (saldo tersedia teralokasi) bernilai 0 dengan `allocationStatus: "UNALLOCATED_LEGACY"`, `allocationStatus` laporan `NOT_ALLOCATED_UNTIL_B01`, dan `unallocatedLegacyAmount = availableLiability - SUM(organizations[].outstanding)` (seluruh saldo tersedia). Invarian: `SUM(organizations[].outstanding) + unallocatedLegacyAmount = availableLiability`. Titik sambung B01: `readOrganizationAllocations(tx)` saat ini tidak membaca apa pun; B01/B02 (alokasi earning per sumber dan backfill histori) mengisinya. Finding LOG-07 belum CLOSED sampai itu selesai.
+- `GET /api/mobile/overview` (SUPERADMIN) tetap aditif: `rewardAvailable` kini berisi `availableLiability` (sebelumnya EARN `AVAILABLE` bruto) dan field baru `rewardLiability { availableLiability, pendingLiability, reservedLiability, paidTotal, totalObligation }`. Tidak ada field yang dihapus.
+- Tidak ada migration atau backfill. Histori ledger tidak diubah; laporan hanya membaca.

@@ -44,8 +44,31 @@ Respons yang dikonsumsi web dan mobile dibekukan sebagai fixture JSON berversi d
 `tests/support/contracts.ts` (termasuk respons live di `npm run test:integration`),
 dan Flutter mem-parse file yang sama dengan model `fromJson` asli di
 `mobile/test/contracts/`. Fixture pertama: `scan-session.v1.json` untuk
-`POST /api/scan` (201, dibaca `ScanResult.fromJson`). Penambahan field boleh;
-menghapus, mengganti nama, atau mengubah tipe field wajib membuat versi baru.
+`POST /api/scan` (201, dibaca `ScanResult.fromJson`). `reconciliation-report.v1.json`
+(M05) membekukan `GET /api/reports/reconciliation` (200, SUPERADMIN, dibaca
+`ReconciliationLiability.fromJson`). Penambahan field boleh; menghapus, mengganti
+nama, atau mengubah tipe field wajib membuat versi baru.
+
+## Laporan rekonsiliasi dan ringkasan superadmin (M05)
+
+- `GET /api/reports/reconciliation` (SUPERADMIN; peran lain 403) mengembalikan
+  `{ report }` dari satu snapshot baca-saja. Angka kewajiban dalam rupiah bulat:
+  `availableLiability` (Saldo tersedia), `pendingLiability` (Menunggu pemeriksaan),
+  `reservedLiability` (Sedang dicairkan), `paidTotal` (Sudah dibayar, di luar
+  kewajiban) dan `totalObligation = availableLiability + reservedLiability +
+  pendingLiability`. `totalOutstanding` tetap dikirim sebagai alias
+  `availableLiability` untuk klien lama.
+- Ketidakcocokan pencairan dilaporkan per pengajuan di `payoutMismatches`
+  (`payoutMismatchCount` = total); `redeemedDiscrepancy`/`reservedDiscrepancy`
+  adalah jumlah nilai mutlak selisih per pengajuan, dan `hasDiscrepancy` true bila
+  salah satunya bukan 0. Jangan menjumlahkan keduanya menjadi satu "selisih".
+- Sebelum alokasi per organisasi tersedia, `organizations[].outstanding` = 0
+  (`allocationStatus: "UNALLOCATED_LEGACY"`) dan seluruh saldo tersedia ada di
+  `unallocatedLegacyAmount`; nilai reward per organisasi adalah bruto.
+- `GET /api/mobile/overview` untuk SUPERADMIN: `rewardAvailable` kini saldo
+  tersedia bersih (sebelumnya reward bruto), ditambah `rewardLiability` berisi lima
+  angka kewajiban di atas. Field lama tidak dihapus.
+- Rincian semantik: [`docs/database-ledger-guide.md`](database-ledger-guide.md#6-rekonsiliasi-saldo-global-m05).
 
 ## Pengajuan pencairan dan idempotency (M01)
 

@@ -11,7 +11,6 @@ import {
   getLedgerHistory,
   countLedgerHistory,
   assertAppendOnlyPolicy,
-  getReconciliationReport,
 } from '@/lib/ledger';
 import { prisma } from '@/lib/prisma';
 
@@ -24,16 +23,6 @@ vi.mock('@/lib/prisma', () => ({
       update: vi.fn(),
       findMany: vi.fn(),
       count: vi.fn(),
-    },
-    redemption: {
-      groupBy: vi.fn(),
-    },
-    organization: {
-      findMany: vi.fn(),
-    },
-    rewardReconciliationCase: {
-      findMany: vi.fn(async () => []),
-      aggregate: vi.fn(async () => ({ _count: { _all: 0 }, _sum: { amount: null } })),
     },
   },
 }));
@@ -242,92 +231,6 @@ describe('ledger', () => {
     it('throws error', () => {
       expect(() => assertAppendOnlyPolicy('update')).toThrow(/Append-only/i);
       expect(() => assertAppendOnlyPolicy('delete')).toThrow(/Append-only/i);
-    });
-  });
-
-  describe('getReconciliationReport', () => {
-    it('generates report correctly', async () => {
-      vi.mocked(prisma.rewardLedger.groupBy).mockImplementation((async (args: any) => {
-        if (args.where.entryType === 'EARN') {
-          return [
-            { organizationId: 'org1', status: 'AVAILABLE', _sum: { amount: 1000 } },
-            { organizationId: null, status: 'PENDING', _sum: { amount: 500 } },
-          ] as any;
-        }
-        if (args.where.entryType?.in) {
-          return [
-            { organizationId: 'org1', status: 'AVAILABLE', _sum: { amount: -100 } },
-          ] as any;
-        }
-        if (args.where.entryType === 'REDEEM') {
-          return [
-            { status: 'REDEEMED', _sum: { amount: -200 } },
-            { status: 'PENDING', _sum: { amount: -50 } },
-          ] as any;
-        }
-        return [];
-      }) as any);
-
-      vi.mocked(prisma.redemption.groupBy).mockResolvedValue([
-        { status: 'SUCCESS', _sum: { amount: 200 } },
-        { status: 'REQUESTED', _sum: { amount: 50 } },
-      ] as any);
-
-      vi.mocked(prisma.organization.findMany).mockResolvedValue([
-        { id: 'org1', name: 'Org 1' }
-      ] as any);
-
-      const report = await getReconciliationReport();
-      expect(report.totalEarnAvailable).toBe(1000);
-      expect(report.totalEarnPending).toBe(500);
-      expect(report.totalOutstanding).toBe(900); // 1000 + (-100)
-      expect(report.ledgerRedeemed).toBe(200);
-      expect(report.ledgerReserved).toBe(50);
-      expect(report.redemptionSuccessTotal).toBe(200);
-      expect(report.redemptionInFlightTotal).toBe(50);
-      expect(report.hasDiscrepancy).toBe(false);
-      expect(report.organizations).toHaveLength(2);
-    });
-
-    it('flags discrepancies and labels deleted orgs', async () => {
-      vi.mocked(prisma.rewardLedger.groupBy).mockImplementation((async (args: any) => {
-        if (args.where.entryType === 'EARN') {
-          return [
-            { organizationId: 'gone', status: 'AVAILABLE', _sum: { amount: 100 } },
-            { organizationId: 'gone', status: 'PENDING', _sum: { amount: null } },
-          ] as any;
-        }
-        if (args.where.entryType?.in) {
-          return [
-            { organizationId: 'gone', status: 'REDEEMED', _sum: { amount: 5 } },
-            { organizationId: 'gone', status: 'PENDING', _sum: { amount: -10 } },
-          ] as any;
-        }
-        if (args.where.entryType === 'REDEEM') {
-          return [
-            { status: 'REDEEMED', _sum: { amount: -300 } },
-            { status: 'PENDING', _sum: { amount: -80 } },
-            { status: 'REVERSED', _sum: { amount: -10 } },
-          ] as any;
-        }
-        return [];
-      }) as any);
-      vi.mocked(prisma.redemption.groupBy).mockResolvedValue([
-        { status: 'SUCCESS', _sum: { amount: 250 } },
-        { status: 'APPROVED', _sum: { amount: 40 } },
-        { status: 'FAILED', _sum: { amount: 999 } },
-      ] as any);
-      vi.mocked(prisma.organization.findMany).mockResolvedValue([] as any);
-
-      const report = await getReconciliationReport();
-      expect(report.organizations[0].organizationName).toBe('(organisasi dihapus)');
-      expect(report.ledgerRedeemed).toBe(300);
-      expect(report.ledgerReserved).toBe(80);
-      expect(report.redemptionSuccessTotal).toBe(250);
-      expect(report.redemptionInFlightTotal).toBe(40);
-      expect(report.redeemedDiscrepancy).toBe(50);
-      expect(report.reservedDiscrepancy).toBe(40);
-      expect(report.hasDiscrepancy).toBe(true);
     });
   });
 

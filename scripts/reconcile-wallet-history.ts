@@ -75,6 +75,10 @@
  *                                  acceptedAt with the fixed query (informational)
  * (userId+idempotencyKey and businessKey duplicates cannot exist: unique indexes.)
  *
+ * negativeBalances and reservesWithoutRequest use the same predicates as the
+ * SUPERADMIN reconciliation report (lib/reconciliation-report.ts, M05), which
+ * additionally compares every payout request with its reserve per status.
+ *
  * Procedure before the enforce migrations (20261013122400_wallet_keys_enforce,
  * 20261013151919_trip_reward_keys_enforce) and for any finding:
  *   1. Run this script against the target database and keep the JSON with the case.
@@ -132,7 +136,7 @@
  */
 import type { ConditionStatus, Prisma } from "@prisma/client";
 import { isBeforeCutover } from "../lib/deposit-review-contract";
-import { computeBalance, type LedgerGroup } from "../lib/ledger";
+import { findReservesWithoutRequest, readUserBalances, type ReserveWithoutRequest } from "../lib/reconciliation-report";
 import { resolveLegacyCutover, type LegacyCutover } from "../lib/reward-legacy-cutover";
 import { evaluateTripBags } from "../lib/trip";
 
@@ -163,10 +167,7 @@ export interface WalletInventory {
     rewardableCount: number; conditionStatus: ConditionStatus | null;
     recomputedRewardAmount: { appCompleted: number; appNotCompleted: number };
   }[];
-  reservesWithoutRequest: {
-    ledgerId: string; userId: string; amount: number; status: string;
-    referenceType: string | null; referenceId: string | null; problem: string;
-  }[];
+  reservesWithoutRequest: ReserveWithoutRequest[];
   requestsWithoutMatchingReserve: {
     redemptionId: string; userId: string; amount: number; status: string; reserveStatuses: string[]; problem: string;
   }[];
@@ -207,20 +208,9 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
            current_setting('transaction_isolation') AS isolation`;
   const legacyCutover = await resolveLegacyCutover(db);
 
-  const groups = await db.$queryRaw<{ userId: string; entryType: LedgerGroup["entryType"]; status: LedgerGroup["status"]; amount: bigint | null }[]>`
-    SELECT "userId", "entryType"::text AS "entryType", status::text AS status, SUM(amount)::bigint AS amount
-    FROM "RewardLedger" GROUP BY "userId", "entryType", status`;
-  const byUser = new Map<string, LedgerGroup[]>();
-  for (const group of groups) {
-    const list = byUser.get(group.userId) ?? [];
-    list.push({ entryType: group.entryType, status: group.status, amount: toNumber(group.amount) });
-    byUser.set(group.userId, list);
-  }
-  const negativeBalances = [...byUser.entries()]
-    .map(([userId, rows]) => {
-      const { available, pending, reserved, redeemed } = computeBalance(rows);
-      return { userId, available, pending, reserved, redeemed };
-    })
+  // Per-user computeBalance, shared with the reconciliation report (lib/reconciliation-report.ts).
+  const negativeBalances = [...(await readUserBalances(db)).entries()]
+    .map(([userId, { available, pending, reserved, redeemed }]) => ({ userId, available, pending, reserved, redeemed }))
     .filter((balance) => balance.available < 0 || balance.pending < 0)
     .sort((a, b) => a.available - b.available || a.userId.localeCompare(b.userId));
 
@@ -310,25 +300,8 @@ export async function collectWalletInventory(db: RawReader): Promise<WalletInven
     };
   });
 
-  const reservesWithoutRequest = (await db.$queryRaw<{
-    ledgerId: string; userId: string; amount: number; status: string;
-    referenceType: string | null; referenceId: string | null; problem: string;
-  }[]>`
-    SELECT l.id AS "ledgerId", l."userId", l.amount, l.status::text AS status,
-           l."referenceType", l."referenceId",
-           CASE
-             WHEN l."referenceType" IS DISTINCT FROM 'Redemption' THEN 'NOT_LINKED_TO_REDEMPTION'
-             WHEN l."referenceId" IS NULL THEN 'MISSING_REFERENCE'
-             WHEN r.id IS NULL THEN 'REQUEST_NOT_FOUND'
-             WHEN r."userId" <> l."userId" THEN 'OWNER_MISMATCH'
-             ELSE 'AMOUNT_MISMATCH'
-           END AS problem
-    FROM "RewardLedger" l
-    LEFT JOIN "Redemption" r ON l."referenceType" = 'Redemption' AND r.id = l."referenceId"
-    WHERE l."entryType" = 'REDEEM'
-      AND (l."referenceType" IS DISTINCT FROM 'Redemption' OR l."referenceId" IS NULL OR r.id IS NULL
-           OR r."userId" <> l."userId" OR -l.amount <> r.amount)
-    ORDER BY l."createdAt", l.id`);
+  // Same predicate as the reconciliation report's ledger rows backing no request.
+  const reservesWithoutRequest = await findReservesWithoutRequest(db);
 
   const requestsWithoutMatchingReserve = (await db.$queryRaw<{
     redemptionId: string; userId: string; amount: number; status: string; reserveStatuses: string[]; problem: string;

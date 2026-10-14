@@ -84,23 +84,49 @@ void main() {
   }
 
   Map<String, dynamic> reportData({bool discrepancy = false}) => {
-        'totalOutstanding': 100000,
+        'availableLiability': 77000,
+        'pendingLiability': 5000,
+        'reservedLiability': 3000,
+        'paidTotal': 20000,
+        'totalObligation': 85000,
+        'unallocatedLegacyAmount': 77000,
+        'allocationStatus': 'NOT_ALLOCATED_UNTIL_B01',
+        'overdrawn': {'users': 0, 'availableShortfall': 0, 'pendingShortfall': 0},
+        'payoutMismatchCount': discrepancy ? 1 : 0,
+        'payoutMismatches': discrepancy
+            ? [
+                {
+                  'redemptionId': 'r1',
+                  'userId': 'u1',
+                  'requestStatus': 'SUCCESS',
+                  'requestAmount': 5000,
+                  'reserveStatuses': ['PENDING'],
+                  'ledgerIds': ['l1'],
+                  'paidDifference': -5000,
+                  'reservedDifference': 5000,
+                  'problem': 'RESERVE_STATE_MISMATCH',
+                },
+              ]
+            : <Map<String, dynamic>>[],
+        'totalOutstanding': 77000,
         'totalEarnPending': 5000,
         'ledgerRedeemed': 20000,
         'redemptionSuccessTotal': discrepancy ? 15000 : 20000,
         'ledgerReserved': 3000,
         'redemptionInFlightTotal': 3000,
         'redeemedDiscrepancy': discrepancy ? 5000 : 0,
-        'reservedDiscrepancy': 0,
+        'reservedDiscrepancy': discrepancy ? 5000 : 0,
         'hasDiscrepancy': discrepancy,
         'generatedAt': '2026-07-10T00:00:00.000Z',
         'organizations': [
           {
             'organizationId': 'o1',
             'organizationName': 'Org A',
-            'outstanding': 40000,
+            'earnAvailable': 100000,
             'earnPending': 1000,
-            'redeemed': 5000,
+            'adjustments': 0,
+            'outstanding': 0,
+            'allocationStatus': 'UNALLOCATED_LEGACY',
           },
         ],
       };
@@ -118,8 +144,14 @@ void main() {
     await settle(tester);
 
     expect(find.text('Rekonsiliasi Keuangan'), findsOneWidget);
-    expect(find.text('Total liabilitas'), findsOneWidget);
+    expect(find.text('Saldo tersedia'), findsOneWidget);
+    expect(find.text('Menunggu pemeriksaan'), findsOneWidget);
+    // Metric card and payout cross-check row.
+    expect(find.text('Sedang dicairkan'), findsNWidgets(2));
+    expect(find.text('Sudah dibayar'), findsNWidgets(2));
+    expect(find.text('Rp77.000'), findsOneWidget);
     expect(find.text('Ledger cocok dengan pencairan'), findsOneWidget);
+    expect(find.textContaining('Data legacy belum teralokasi'), findsOneWidget);
     expect(find.text('Org A'), findsOneWidget);
   });
 
@@ -135,7 +167,8 @@ void main() {
     await tester.pumpWidget(buildApp());
     await settle(tester);
 
-    expect(find.text('Selisih rekonsiliasi terdeteksi'), findsOneWidget);
+    expect(find.text('Selisih rekonsiliasi pada 1 catatan'), findsOneWidget);
+    expect(find.text('Status tahanan tidak sesuai'), findsOneWidget);
   });
 
   testWidgets('shows retry when API fails', (tester) async {

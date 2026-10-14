@@ -486,3 +486,127 @@ class PayoutAccount {
     );
   }
 }
+
+/// Net liability figures of `GET /api/reports/reconciliation` (SUPERADMIN,
+/// contract tests/fixtures/contracts/reconciliation-report.v1.json). Money is
+/// integer rupiah. A server from before M05 has no net figures, so the
+/// compatibility fields (`totalOutstanding`, `ledgerReserved`, ...) are read
+/// instead.
+class ReconciliationLiability {
+  /// Saldo tersedia: spendable now, payouts and reserves subtracted.
+  final int availableLiability;
+
+  /// Menunggu pemeriksaan: not spendable yet.
+  final int pendingLiability;
+
+  /// Sedang dicairkan: held for payout requests in flight.
+  final int reservedLiability;
+
+  /// Sudah dibayar: paid out, not an obligation any more.
+  final int paidTotal;
+
+  /// available + reserved + pending.
+  final int totalObligation;
+
+  /// Part of the available liability no organization is allocated yet.
+  final int unallocatedLegacyAmount;
+
+  /// Sum of per-request differences (never netted).
+  final int redeemedDiscrepancy;
+  final int reservedDiscrepancy;
+  final bool hasDiscrepancy;
+  final int payoutMismatchCount;
+  final List<PayoutMismatch> payoutMismatches;
+  final int overdrawnUsers;
+  final int overdrawnShortfall;
+
+  ReconciliationLiability({
+    required this.availableLiability,
+    required this.pendingLiability,
+    required this.reservedLiability,
+    required this.paidTotal,
+    required this.totalObligation,
+    required this.unallocatedLegacyAmount,
+    required this.redeemedDiscrepancy,
+    required this.reservedDiscrepancy,
+    required this.hasDiscrepancy,
+    required this.payoutMismatchCount,
+    required this.payoutMismatches,
+    required this.overdrawnUsers,
+    required this.overdrawnShortfall,
+  });
+
+  factory ReconciliationLiability.fromJson(Map<String, dynamic> json) {
+    int money(String key, [String? fallbackKey]) =>
+        ((json[key] ?? (fallbackKey == null ? null : json[fallbackKey])) as num?)
+            ?.round() ??
+        0;
+    final overdrawn =
+        json['overdrawn'] as Map<String, dynamic>? ?? const <String, dynamic>{};
+    final mismatches = (json['payoutMismatches'] as List<dynamic>? ?? const [])
+        .map((row) => PayoutMismatch.fromJson(row as Map<String, dynamic>))
+        .toList();
+    final available = money('availableLiability', 'totalOutstanding');
+    final pending = money('pendingLiability', 'totalEarnPending');
+    final reserved = money('reservedLiability', 'ledgerReserved');
+    return ReconciliationLiability(
+      availableLiability: available,
+      pendingLiability: pending,
+      reservedLiability: reserved,
+      paidTotal: money('paidTotal', 'ledgerRedeemed'),
+      totalObligation: (json['totalObligation'] as num?)?.round() ??
+          available + reserved + pending,
+      unallocatedLegacyAmount:
+          (json['unallocatedLegacyAmount'] as num?)?.round() ?? available,
+      redeemedDiscrepancy: money('redeemedDiscrepancy'),
+      reservedDiscrepancy: money('reservedDiscrepancy'),
+      hasDiscrepancy: json['hasDiscrepancy'] as bool? ?? false,
+      payoutMismatchCount:
+          (json['payoutMismatchCount'] as num?)?.toInt() ?? mismatches.length,
+      payoutMismatches: mismatches,
+      overdrawnUsers: (overdrawn['users'] as num?)?.toInt() ?? 0,
+      overdrawnShortfall:
+          ((overdrawn['availableShortfall'] as num?)?.round() ?? 0) +
+              ((overdrawn['pendingShortfall'] as num?)?.round() ?? 0),
+    );
+  }
+}
+
+/// One payout request (or ledger row backing no request) whose ledger
+/// disagrees with its status.
+class PayoutMismatch {
+  final String? redemptionId;
+  final String userId;
+  final String? requestStatus;
+  final int? requestAmount;
+  final List<String> reserveStatuses;
+  final int paidDifference;
+  final int reservedDifference;
+  final String problem;
+
+  PayoutMismatch({
+    this.redemptionId,
+    required this.userId,
+    this.requestStatus,
+    this.requestAmount,
+    required this.reserveStatuses,
+    required this.paidDifference,
+    required this.reservedDifference,
+    required this.problem,
+  });
+
+  factory PayoutMismatch.fromJson(Map<String, dynamic> json) {
+    return PayoutMismatch(
+      redemptionId: json['redemptionId'] as String?,
+      userId: json['userId'] as String? ?? '',
+      requestStatus: json['requestStatus'] as String?,
+      requestAmount: (json['requestAmount'] as num?)?.round(),
+      reserveStatuses: (json['reserveStatuses'] as List<dynamic>? ?? const [])
+          .map((status) => status as String)
+          .toList(),
+      paidDifference: (json['paidDifference'] as num?)?.round() ?? 0,
+      reservedDifference: (json['reservedDifference'] as num?)?.round() ?? 0,
+      problem: json['problem'] as String? ?? '',
+    );
+  }
+}

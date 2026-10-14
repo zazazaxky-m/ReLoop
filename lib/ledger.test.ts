@@ -7,7 +7,6 @@ import {
   settleRedeemLedger,
   assertAppendOnlyPolicy,
   ledgerReasonLabel,
-  getReconciliationReport,
   getLedgerHistory,
   depositItemEarnKey,
   redemptionReserveKey,
@@ -23,12 +22,6 @@ vi.mock('./prisma', () => ({
       create: vi.fn(), 
       update: vi.fn(),
       findMany: vi.fn(),
-    },
-    redemption: { groupBy: vi.fn() },
-    organization: { findMany: vi.fn() },
-    rewardReconciliationCase: {
-      findMany: vi.fn(async () => []),
-      aggregate: vi.fn(async () => ({ _count: { _all: 0 }, _sum: { amount: null } })),
     },
   }
 }));
@@ -287,44 +280,4 @@ describe('lib/ledger', () => {
     });
   });
 
-  describe('getReconciliationReport', () => {
-    it('aggregates org liability and payout reconciliation with null sums', async () => {
-      vi.mocked(prisma.rewardLedger.groupBy)
-        .mockResolvedValueOnce([
-          { organizationId: 'org1', status: 'AVAILABLE', _sum: { amount: 100 } },
-          { organizationId: 'org1', status: 'PENDING', _sum: { amount: 20 } },
-          { organizationId: null, status: 'AVAILABLE', _sum: { amount: null } },
-          { organizationId: 'gone', status: 'AVAILABLE', _sum: { amount: 5 } },
-        ] as any)
-        .mockResolvedValueOnce([
-          { organizationId: 'org1', status: 'AVAILABLE', _sum: { amount: -10 } },
-          { organizationId: 'org1', status: 'PENDING', _sum: { amount: null } },
-          { organizationId: 'org1', status: 'REDEEMED', _sum: { amount: 1 } },
-        ] as any)
-        .mockResolvedValueOnce([
-          { status: 'REDEEMED', _sum: { amount: -50 } },
-          { status: 'PENDING', _sum: { amount: null } },
-          { status: 'AVAILABLE', _sum: { amount: -1 } },
-        ] as any);
-      vi.mocked(prisma.redemption.groupBy).mockResolvedValue([
-        { status: 'SUCCESS', _sum: { amount: 40 } },
-        { status: 'REQUESTED', _sum: { amount: 5 } },
-        { status: 'APPROVED', _sum: { amount: null } },
-        { status: 'FAILED', _sum: { amount: 9 } },
-      ] as any);
-      vi.mocked(prisma.organization.findMany).mockResolvedValue([
-        { id: 'org1', name: 'Org One' },
-      ] as any);
-
-      const report = await getReconciliationReport();
-      expect(report.organizations.some((o) => o.organizationName === 'Org One')).toBe(true);
-      expect(report.organizations.some((o) => o.organizationName === 'Tanpa organisasi')).toBe(true);
-      expect(report.organizations.some((o) => o.organizationName === '(organisasi dihapus)')).toBe(true);
-      expect(report.ledgerRedeemed).toBe(50);
-      expect(report.ledgerReserved).toBe(0);
-      expect(report.redemptionSuccessTotal).toBe(40);
-      expect(report.redemptionInFlightTotal).toBe(5);
-      expect(report.hasDiscrepancy).toBe(true);
-    });
-  });
 });
