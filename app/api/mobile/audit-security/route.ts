@@ -40,6 +40,8 @@ export async function GET(req: Request) {
 
     const enrichedLogs = auditLogs.map((l) => ({
       ...l,
+      // BigInt is not JSON: the chain position (A05) is sent as a string.
+      chainSequence: l.chainSequence == null ? null : l.chainSequence.toString(),
       actor: l.actorId ? actorById.get(l.actorId) ?? null : null,
     }));
 

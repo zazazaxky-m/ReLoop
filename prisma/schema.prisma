@@ -1269,16 +1269,26 @@ model ManualValidation {
 // ============================================================
 
 model AuditLog {
-  id           String   @id @default(cuid())
-  actorId      String?
-  action       String
-  entityType   String
-  entityId     String?
-  metadataJson Json?
-  // Tamper-evident chain: SHA-256 of (previousHash + canonical payload)
-  previousHash String?
-  checksum     String?
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  actorId       String?
+  action        String
+  entityType    String
+  entityId      String?
+  metadataJson  Json?
+  // Tamper-evident chain (lib/audit.ts). Version 2 (A05): HMAC-SHA256 over
+  // (chainSequence, previousHash, canonicalAuditPayload of the stored row),
+  // with createdAt stored exactly as hashed. Version 1 rows (before A05) are
+  // an archived legacy chain: never re-signed, see docs/security/audit-chain.md.
+  previousHash  String?
+  checksum      String?
+  createdAt     DateTime @default(now())
+  // 1 = legacy archive (no sequence), 2 = canonical chain. The migration sets
+  // existing rows to 1 before this default; a CHECK (by hand) pairs version
+  // and sequence.
+  chainVersion  Int      @default(2)
+  // Gapless position in the v2 chain, allocated under the chain advisory lock
+  // inside the inserting transaction. Verification orders by it.
+  chainSequence BigInt?  @unique
 
   @@index([entityType, entityId])
   @@index([actorId])

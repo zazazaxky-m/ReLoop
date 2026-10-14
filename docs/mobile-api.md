@@ -13,7 +13,7 @@ Component:
 | `GET /api/mobile/overview` | Semua role | Ringkasan dashboard sesuai role (USER/ADMIN termasuk `tourismSummary`) |
 | `GET /api/mobile/map` | Semua role | Mesin berkoordinat dan campaign publik; pengepul dibatasi mitra aktif (bukan layer trip wisata) |
 | `GET /api/mobile/tourism-pickups` | PENGEPUL | Daftar trip `COMPLETED` siap pickup bank sampah (mitra aktif) |
-| `GET /api/mobile/audit-security` | Superadmin | Audit log, security event, dan ringkasan alert |
+| `GET /api/mobile/audit-security` | Superadmin | Audit log, security event, dan ringkasan alert. Sejak A05 setiap log membawa `chainVersion` (1 = arsip legacy, 2 = rantai baru) dan `chainSequence` (string, `null` untuk legacy); verifikasi rantai: [audit-chain.md](security/audit-chain.md) |
 
 Kelompok endpoint existing yang dipakai:
 

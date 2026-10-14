@@ -31,6 +31,7 @@
     "reconcile:wallet": "tsx scripts/reconcile-wallet-history.ts",
     "reconcile:sessions": "tsx scripts/reconcile-active-sessions.ts",
     "erasure:process": "tsx scripts/process-erasure-jobs.ts",
+    "audit:checkpoint": "tsx scripts/checkpoint-audit-chain.ts",
     "email:outbox": "tsx scripts/process-email-outbox.ts",
     "report:travel-agent-access": "tsx scripts/report-travel-agent-access.ts",
     "db:reset": "prisma migrate reset --force"

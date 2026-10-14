@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import bcrypt from "bcryptjs";
 import { randomUUID, createHash } from "node:crypto";
+import { appendAuditEntry } from "../lib/audit";
 import { generateIngestSecret } from "../lib/machine-auth";
 
 function token() {
@@ -12,16 +13,9 @@ const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
 const hoursAgo = (n: number) => new Date(Date.now() - n * 3_600_000);
 const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000);
 
-// ---------- Audit checksum chain helper ----------
-const AUDIT_CHECKSUM_SECRET = process.env.AUDIT_CHECKSUM_SECRET ?? "audit-secret-change-me";
-let lastAuditChecksum: string | null = null;
-
-function checksumChain(previousHash: string | null, payload: string): string {
-  return createHash("sha256")
-    .update(`${previousHash ?? ""}${payload}${AUDIT_CHECKSUM_SECRET}`)
-    .digest("hex");
-}
-
+// ---------- Audit chain helper ----------
+// Demo history goes through the production writer (lib/audit.ts), so the seeded
+// chain is a valid v2 chain; only the demo timestamps are backdated.
 async function seedAuditLog(input: {
   actorId?: string | null;
   action: string;
@@ -30,29 +24,8 @@ async function seedAuditLog(input: {
   metadata?: Record<string, unknown> | null;
   createdAt?: Date;
 }) {
-  const ts = input.createdAt ?? new Date();
-  const canonical = JSON.stringify({
-    ts: ts.toISOString(),
-    actor: input.actorId,
-    action: input.action,
-    entity: `${input.entityType}:${input.entityId}`,
-    meta: input.metadata,
-  });
-  const checksum = checksumChain(lastAuditChecksum, canonical);
-  const entry = await prisma.auditLog.create({
-    data: {
-      actorId: input.actorId ?? null,
-      action: input.action,
-      entityType: input.entityType,
-      entityId: input.entityId ?? null,
-      metadataJson: (input.metadata ?? undefined) as object | undefined,
-      previousHash: lastAuditChecksum,
-      checksum,
-      createdAt: ts,
-    },
-  });
-  lastAuditChecksum = checksum;
-  return entry;
+  const { createdAt, ...entry } = input;
+  return prisma.$transaction((tx) => appendAuditEntry(tx, entry, { createdAt }));
 }
 
 async function wipe() {

@@ -24,6 +24,9 @@ import { InjectedFault, deferred, isStillPending, waitForBlockedBy } from "../su
 
 type Json = Record<string, any>;
 
+/** JSON text of audit rows for PII scans; AuditLog.chainSequence (A05) is a BigInt. */
+const auditJson = (value: unknown) => JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? v.toString() : v));
+
 const HOUR_MS = 3_600_000;
 const later = (ms: number) => new Date(Date.now() + ms);
 
@@ -224,7 +227,7 @@ describe("account erasure (real PostgreSQL foreign keys)", () => {
     // The audit trail records the erasure but never the old identity or account data.
     const audits = await erasureAudits();
     expect(audits.some((a) => a.action === "DATA_ERASURE" && a.entityId === userId)).toBe(true);
-    const auditText = JSON.stringify(audits);
+    const auditText = auditJson(audits);
     for (const secret of [oldEmail, "Pengguna Audit A", digits, "081234567890"]) {
       expect(auditText).not.toContain(secret);
     }
@@ -328,7 +331,7 @@ describe("email verification and invitation rows (A03)", () => {
     expect((await f.db.travelAgentInvite.findUniqueOrThrow({ where: { id: otherInvite.id } })).email).toBe(f.credentials("userB").email);
     const audit = await f.db.auditLog.findFirstOrThrow({ where: { action: "DATA_ERASURE", entityId: userId } });
     expect(audit.metadataJson).toMatchObject({ emailVerificationTokensDeleted: 1, queuedMailDeleted: 1, acceptedInvitesRedacted: 1 });
-    expect(JSON.stringify(audit)).not.toContain(oldEmail);
+    expect(auditJson(audit)).not.toContain(oldEmail);
   });
 });
 
@@ -485,7 +488,7 @@ describe("external file cleanup", () => {
       expect(user).toMatchObject({ name: "Pengguna dihapus", status: "INACTIVE" });
       expect((await f.db.redemption.findUniqueOrThrow({ where: { id } })).manualTransferProofUrl).toBeNull();
       expect((await f.json("superadmin", "GET", `/api/redemptions/${id}/proof`)).status).toBe(404);
-      expect(JSON.stringify(await erasureAudits())).not.toContain(oldEmail);
+      expect(auditJson(await erasureAudits())).not.toContain(oldEmail);
       const [cleanup] = (await erasureSteps(body.requestId)).filter((s) => s.step === "DELETE_PROOF_FILES");
       expect(cleanup).toMatchObject({ attempts: 1, completedAt: null, lastError: "EACCES" });
       expect(await getErasureStatus(body.requestId)).toMatchObject({ status: "RETRYABLE_FAILED", completed: false });
@@ -532,7 +535,7 @@ describe("public deletion requests", () => {
     expect(await f.db.user.findUniqueOrThrow({ where: { id: f.ids.userA } })).toMatchObject({ status: "ACTIVE", name: "Pengguna Audit A" });
     expect(await f.db.deletionRequest.findUniqueOrThrow({ where: { id: body.requestId } })).toMatchObject({ status: "PENDING" });
     expect(await erasureSteps(body.requestId)).toEqual([]);
-    expect(JSON.stringify(await erasureAudits())).not.toContain(email);
+    expect(auditJson(await erasureAudits())).not.toContain(email);
 
     // Mailed after the response, only for the real account, with a link on the
     // configured base URL (never the request Host).

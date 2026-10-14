@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { verifyAuditChain } from "@/lib/audit";
 import { isLegacyAcceptanceMarker } from "@/lib/deposit-review-contract";
 import { collectWalletInventory } from "@/scripts/reconcile-wallet-history";
 import { f } from "../support/audit-fixture";
@@ -59,5 +60,9 @@ describe("prisma/seed.ts follows the acceptance contract (M04 fix round 4)", () 
     expect(inventory.reviewItemsWithRateOutsideAcceptance).toEqual([]);
     expect(inventory.rejectedItemsWithMoney).toEqual([]);
     expect(inventory.summary.blocksEnforcement).toBe(0);
+
+    // A05: the demo audit history goes through the production writer, so it is a valid v2 chain.
+    expect(await verifyAuditChain()).toMatchObject({ valid: true, checkedVersion: 2, legacyStatus: "not-present" });
+    expect((await verifyAuditChain()).checkedCount).toBe(await f.db.auditLog.count());
   });
 });

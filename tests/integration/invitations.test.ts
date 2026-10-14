@@ -652,7 +652,8 @@ describe("token hygiene", () => {
       expect(external).toEqual([]);
     }
 
-    const audit = JSON.stringify(await f.db.auditLog.findMany());
+    // AuditLog.chainSequence (A05) is a BigInt: serialize it as text for the scan.
+    const audit = JSON.stringify(await f.db.auditLog.findMany(), (_key, v) => (typeof v === "bigint" ? v.toString() : v));
     expect(audit).toContain("TRAVEL_AGENT_INVITE_ACCEPTED");
     expect(audit).toContain("EMAIL_VERIFIED");
     await sleep(500); // let the runner flush the Next log

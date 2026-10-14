@@ -76,7 +76,7 @@ punya permintaan berjalan atau selesai.
 | Undangan travel agent yang diterima akun (A03) | `TravelAgentInvite` dengan `acceptedById` akun | Disimpan; `email` diganti alamat placeholder akun, `tokenHash` dikosongkan; `acceptedAt`/`acceptedById` tetap | Riwayat siapa menerima undangan agent dan kapan, untuk akuntabilitas organisasi | per approved policy — owner: product/legal (to be set) |
 | Persetujuan | `ConsentRecord` | Disimpan; `ipAddress` dan `userAgent` dikosongkan | Bukti pemberian/penarikan persetujuan | per approved policy — owner: product/legal (to be set) |
 | Permintaan penghapusan dan langkahnya | `DeletionRequest`, `ErasureJobStep` | Disimpan; `email`, `ipAddress`, `userAgent`, `reason` dikosongkan | Bukti permintaan diterima, diverifikasi, dan dipenuhi | per approved policy — owner: product/legal (to be set) |
-| Audit log | `AuditLog` (rantai hash) | Tidak diubah. Entri baru A04 tidak memuat email, nama, telepon, nomor rekening, atau catatan bebas | Keamanan dan akuntabilitas; rantai checksum tidak boleh ditulis ulang | per approved policy — owner: product/legal (to be set) |
+| Audit log | `AuditLog` (rantai hash) | Tidak diubah. Entri baru A04 tidak memuat email, nama, telepon, nomor rekening, atau catatan bebas. Baris sebelum A05 adalah arsip legacy yang ditolak database bila di-UPDATE/DELETE ([audit-chain.md](security/audit-chain.md)) | Keamanan dan akuntabilitas; rantai checksum tidak boleh ditulis ulang | per approved policy — owner: product/legal (to be set) |
 | Data sementara Redis | penghitung rate limit (kunci IP/ID), ID tantangan MFA | Tidak disentuh; kedaluwarsa sendiri sesuai jendela teknisnya | Pembatasan penyalahgunaan | Jendela teknis (menit), bukan retensi data pribadi |
 | Cadangan database dan berkas | di luar aplikasi | Tidak dijangkau job ini | Pemulihan bencana | per approved policy — owner: product/legal (to be set) |
 
@@ -84,7 +84,8 @@ punya permintaan berjalan atau selesai.
 A04 dapat memuat email yang diketik (`ACCOUNT_DELETION_REQUESTED`,
 `DATA_DELETION_REQUESTED`, dan `LOGIN_FAILED` yang memakai email sebagai
 `entityId`) serta catatan operator pada `REDEMPTION_*`. Mengubahnya merusak
-rantai checksum, jadi penanganannya diputuskan pemilik kebijakan (owner:
+rantai checksum, dan sejak A05 database menolak perubahan pada arsip legacy
+(versi 1); penanganannya diputuskan pemilik kebijakan (owner:
 product/legal + security). Sejak A04, catatan operator pencairan hanya dicatat
 sebagai `hasNote`; `LOGIN_FAILED` masih memakai email yang diketik dan menjadi
 tindak lanjut tim auth.
