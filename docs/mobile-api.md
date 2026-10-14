@@ -470,9 +470,17 @@ Respons 200:
   (`report.rewardCases: { open, openAmount, recent[] }`) dan halaman
   Rekonsiliasi Keuangan superadmin.
 
-Dana/budget reward belum dibatasi: `checkRewardFunding` di
-`lib/reward-credit.ts` adalah titik sambung B01 yang saat ini tidak memeriksa
-apa pun (`NOT_ENFORCED_UNTIL_B01`); rollout uang tetap tertahan di gate Z01.
+Dana/budget reward (B01a, `lib/reward-funding.ts`): setiap sesi mesin
+berhadiah mereservasi batas reward per sesi (program, atau mesin bila program
+tidak menetapkannya) dari dana terkonfirmasi organisasi saat scan, dan setiap
+penerbitan kantong trip mereservasi jumlah kantong x tarif x multiplier.
+`checkRewardFunding` di `lib/reward-credit.ts` mengikat setiap EARN ke
+reservasi sumbernya (kunci bisnis yang sama, retry tidak memakai dana dua
+kali). Penolakan hanya aktif bila `REWARD_FUNDING_ENFORCED=true` (409
+"Program sementara tidak menerima setoran berhadiah" / "Kuota reward program
+tidak mencukupi" sebelum sesi atau kantong dibuat); tanpa flag semuanya
+dicatat dalam mode bayangan. Lihat `docs/database-ledger-guide.md` bagian 7;
+rollout uang tetap tertahan di gate Z01.
 
 ## Sesi setoran mesin: satu sesi aktif per mesin (R03)
 

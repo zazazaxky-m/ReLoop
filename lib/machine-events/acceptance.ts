@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
-import { lockDepositItem, lockDepositSession, lockUser } from "../db-locks";
+import { lockCampaign, lockDepositItem, lockDepositSession, lockUser } from "../db-locks";
 import { depositItemEarnKey } from "../ledger";
+import { lockFundingAccountForOrganization } from "../reward-funding";
 import {
   transitionSession,
   validateSensorSequence,
@@ -74,11 +75,18 @@ export async function handleAcceptance(
   acceptanceEventId: string,
 ) {
   // Immutable relations first: they only say which rows to lock.
-  const sessionRef = await tx.depositSession.findUnique({ where: { id: sessionId }, select: { userId: true } });
+  const sessionRef = await tx.depositSession.findUnique({
+    where: { id: sessionId },
+    select: { userId: true, campaignId: true },
+  });
   const itemRef = await tx.depositItem.findUnique({ where: { id: depositItemId }, select: { sessionId: true } });
   if (!sessionRef || !itemRef || itemRef.sessionId !== sessionId) return;
 
   await lockUser(tx, sessionRef.userId);
+  // B01: the earning commits against the session's funding reservation, so
+  // the organization's account and the campaign are locked before the session.
+  await lockFundingAccountForOrganization(tx, machine.organizationId);
+  if (sessionRef.campaignId) await lockCampaign(tx, sessionRef.campaignId);
   await lockDepositSession(tx, sessionId);
   await lockDepositItem(tx, depositItemId);
 
@@ -91,6 +99,9 @@ export async function handleAcceptance(
     include: { wasteType: true },
   });
   if (!session || !item || item.sessionId !== sessionId) return;
+  if (session.userId !== sessionRef.userId || session.campaignId !== sessionRef.campaignId) {
+    throw new DepositItemChangedError();
+  }
   if (item.acceptanceEventId || (item.status !== "PENDING" && item.status !== "REVIEW")) return;
 
   const config = await tx.machine.findUnique({
@@ -212,6 +223,11 @@ export async function handleAcceptance(
   if (count !== 1) throw new DepositItemChangedError();
 
   if (decision.status !== "REJECTED") {
+    // B01: a held review commits the approvable ceiling (the full base at
+    // the admission rate), an accepted item its amount; COMPLIANCE_ONLY
+    // commits nothing. The commit never reprices the item: the admission
+    // ceiling bounds what a late or offline event can draw.
+    const fundedBase = mode === "MONEY_REWARD" ? baseAmount : 0;
     await creditReward(tx, {
       businessKey: depositItemEarnKey(depositItemId),
       userId: session.userId,
@@ -224,6 +240,10 @@ export async function handleAcceptance(
       referenceId: depositItemId,
       depositItemId,
       sessionId: session.id,
+      funding: {
+        ceilingRupiah: decision.status === "REVIEW" ? fundedBase : decision.amount,
+        reviewPending: decision.status === "REVIEW",
+      },
     });
   }
 

@@ -36,6 +36,10 @@ interface FakeDb {
   account: Row | null;
   calls: string[];
   tx: any;
+  /** B01: the owner's funded obligations (RewardBudgetCommit rows) a success attributes its gross to. */
+  commits: Row[];
+  fundingEntries: Row[];
+  fundingAccount: Row;
 }
 
 function redemptionRow(overrides: Row = {}): Row {
@@ -57,7 +61,11 @@ function reserveRow(overrides: Row = {}): Row {
 }
 
 function withDb(redemption: Row | null, reserve: Row | null = reserveRow(), account: Row | null = null): FakeDb {
-  const db: FakeDb = { redemption, reserve, account, calls: [], tx: null };
+  const db: FakeDb = {
+    redemption, reserve, account, calls: [], tx: null,
+    commits: [], fundingEntries: [],
+    fundingAccount: { id: 'acct1', organizationId: 'org1', confirmedRupiah: 100_000, heldRupiah: 20_000, version: 3 },
+  };
   const matches = (row: Row, where: Row) =>
     Object.entries(where).every(([key, value]) => row[key] === value);
   const tx = {
@@ -72,8 +80,39 @@ function withDb(redemption: Row | null, reserve: Row | null = reserveRow(), acco
         db.calls.push('lock:Redemption');
         return db.redemption ? [{ id: db.redemption.id }] : [];
       }
+      // B01: the funded sources a success will debit (read under the User lock, before Redemption).
+      if (sql.includes('FROM "RewardBudgetCommit"')) return db.commits.map((commit) => ({ accountId: commit.accountId }));
+      if (sql.includes('FROM "RewardFundingAccount"')) {
+        db.calls.push('lock:RewardFundingAccount');
+        return [{ id: 'acct1' }];
+      }
       throw new Error(`unexpected raw query ${sql}`);
     }),
+    rewardBudgetCommit: {
+      findMany: vi.fn(async () => db.commits.map((commit) => ({ ...commit }))),
+      update: vi.fn(async ({ where, data }: { where: Row; data: Row }) => {
+        const commit = db.commits.find((row) => row.id === where.id)!;
+        commit.paidRupiah += data.paidRupiah.increment;
+        return { ...commit };
+      }),
+    },
+    rewardFundingAccount: {
+      findUniqueOrThrow: vi.fn(async () => ({ ...db.fundingAccount })),
+      update: vi.fn(async ({ data }: { data: Row }) => {
+        db.calls.push('update:RewardFundingAccount');
+        db.fundingAccount = { ...db.fundingAccount, confirmedRupiah: data.confirmedRupiah, heldRupiah: data.heldRupiah };
+        return { ...db.fundingAccount };
+      }),
+    },
+    fundingEntry: {
+      findMany: vi.fn(async () => db.fundingEntries.map((entry) => ({ ...entry }))),
+      create: vi.fn(async ({ data }: { data: Row }) => {
+        db.calls.push('create:FundingEntry');
+        const entry = { id: `fe${db.fundingEntries.length + 1}`, ...data };
+        db.fundingEntries.push(entry);
+        return entry;
+      }),
+    },
     redemption: {
       findUnique: vi.fn(async ({ where, select }: { where: Row; select?: Row }) => {
         db.calls.push(select ? 'read:Redemption(partial)' : 'read:Redemption');
@@ -139,6 +178,44 @@ describe('PATCH /api/redemptions/[id]', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin_1', role: 'SUPERADMIN' } as any);
+  });
+
+  it('success locks the funded sources after the User and before the Redemption, then debits them by the gross (B01)', async () => {
+    const db = withDb(redemptionRow());
+    db.commits.push(
+      { id: 'c1', accountId: 'acct1', userId: 'u1', heldRupiah: 15_000, paidRupiah: 0, reviewPending: false },
+      { id: 'c2', accountId: 'acct1', userId: 'u1', heldRupiah: 10_000, paidRupiah: 0, reviewPending: false },
+    );
+    const res = await patch({ action: 'success', providerReference: 'REF1' });
+    expect(res.status).toBe(200);
+    const at = (call: string) => db.calls.indexOf(call);
+    expect(at('lock:User')).toBeGreaterThan(at('BEGIN'));
+    expect(at('lock:RewardFundingAccount')).toBeGreaterThan(at('lock:User'));
+    expect(at('lock:Redemption')).toBeGreaterThan(at('lock:RewardFundingAccount'));
+    // Oldest obligation first: 15.000 then 5.000 of the second; one entry per source account.
+    expect(db.commits.map((commit) => commit.paidRupiah)).toEqual([15_000, 5_000]);
+    expect(db.fundingEntries).toEqual([expect.objectContaining({
+      accountId: 'acct1', businessKey: 'redemption:r1:payout:acct1', kind: 'PAYOUT', amount: -20_000,
+      reference: 'r1', verifiedById: 'admin_1' })]);
+    expect(db.fundingAccount).toMatchObject({ confirmedRupiah: 80_000, heldRupiah: 0 });
+    expect(db.calls.indexOf('create:FundingEntry')).toBeGreaterThan(db.calls.indexOf('cas:RewardLedger'));
+    expect(db.calls.indexOf('create:FundingEntry')).toBeLessThan(db.calls.indexOf('COMMIT'));
+    expect(vi.mocked(logAudit).mock.calls[0][0].metadata).toMatchObject({ fundingAttributedRupiah: 20_000, fundingLegacyRupiah: 0 });
+  });
+
+  it('success of a legacy balance (no funded obligations) writes no funding entry; fail and cancel never touch funding', async () => {
+    const db = withDb(redemptionRow());
+    expect((await patch({ action: 'success', providerReference: 'REF1' })).status).toBe(200);
+    expect(db.calls).not.toContain('lock:RewardFundingAccount');
+    expect(db.fundingEntries).toEqual([]);
+    expect(vi.mocked(logAudit).mock.calls[0][0].metadata).toMatchObject({ fundingAttributedRupiah: 0, fundingLegacyRupiah: 20_000 });
+
+    const failed = withDb(redemptionRow());
+    failed.commits.push({ id: 'c1', accountId: 'acct1', userId: 'u1', heldRupiah: 20_000, paidRupiah: 0, reviewPending: false });
+    expect((await patch({ action: 'fail', note: 'bank menolak' })).status).toBe(200);
+    expect(failed.calls).not.toContain('lock:RewardFundingAccount');
+    expect(failed.fundingEntries).toEqual([]);
+    expect(failed.commits[0].paidRupiah).toBe(0);
   });
 
   it('rejects success skipped straight from REQUESTED (409)', async () => {

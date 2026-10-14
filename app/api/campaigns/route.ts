@@ -6,6 +6,16 @@ import { handleApiError, jsonOk } from "@/lib/api";
 import { normalizeEmailDomains } from "@/lib/campaign";
 import { logAudit } from "@/lib/audit";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
+import { MAX_FUNDING_RUPIAH, assertMoneyProgramConfigured } from "@/lib/reward-funding";
+
+/** B01: integer rupiah caps; null clears (no cap / not configured). */
+const rupiahCapSchema = z
+  .number({ invalid_type_error: "Nilai harus berupa angka" })
+  .int("Nilai harus bilangan bulat rupiah")
+  .min(0, "Nilai tidak boleh negatif")
+  .max(MAX_FUNDING_RUPIAH, "Nilai melebihi batas yang diizinkan")
+  .nullable()
+  .optional();
 
 const createSchema = z
   .object({
@@ -23,6 +33,9 @@ const createSchema = z
     endAt: z.string().datetime().nullable().optional(),
     rewardMultiplier: z.number().min(0).max(100).nullable().optional(),
     status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "ENDED"]).default("DRAFT"),
+    // B01: program budget and per-session reward ceiling (integer rupiah).
+    rewardBudgetRupiah: rupiahCapSchema,
+    maxRewardPerSessionRupiah: rupiahCapSchema,
     // Superadmin must specify; admin uses own org.
     organizationId: z.string().optional(),
   })
@@ -84,6 +97,14 @@ export async function POST(req: Request) {
     if (data.visibility === "PRIVATE" && (!domains || domains.length === 0)) {
       throw new HttpError(422, "Campaign private membutuhkan minimal satu domain email valid");
     }
+    // B01: under enforcement a money program at machines needs its ceiling before it is ACTIVE.
+    assertMoneyProgramConfigured({
+      status: data.status,
+      rewardMode: data.rewardMode,
+      campaignType: data.campaignType,
+      supportsMachine: data.supportsMachine ?? false,
+      maxRewardPerSessionRupiah: data.maxRewardPerSessionRupiah ?? null,
+    });
 
     const campaign = await prisma.campaign.create({
       data: {
@@ -99,6 +120,8 @@ export async function POST(req: Request) {
         endAt: data.endAt ? new Date(data.endAt) : null,
         rewardMultiplier: data.rewardMultiplier ?? null,
         status: data.status,
+        rewardBudgetRupiah: data.rewardBudgetRupiah ?? null,
+        maxRewardPerSessionRupiah: data.maxRewardPerSessionRupiah ?? null,
       },
     });
 

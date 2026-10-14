@@ -2,16 +2,19 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { handleAcceptance, handleItemRejected, recordItemEvidence } from '@/lib/machine-events/acceptance';
 import * as locks from '@/lib/db-locks';
 import * as credit from '@/lib/reward-credit';
+import * as funding from '@/lib/reward-funding';
 import * as machineState from '@/lib/machine-state';
 import * as reward from '@/lib/reward';
 import { UNKNOWN_WASTE_TYPE_NAME, UNKNOWN_WASTE_TYPE_REASON } from '@/lib/machine-events/shared';
 
 vi.mock('@/lib/db-locks', () => ({
   lockUser: vi.fn(),
+  lockCampaign: vi.fn(),
   lockDepositSession: vi.fn(),
   lockDepositItem: vi.fn(),
 }));
 vi.mock('@/lib/reward-credit', () => ({ creditReward: vi.fn() }));
+vi.mock('@/lib/reward-funding', () => ({ lockFundingAccountForOrganization: vi.fn() }));
 vi.mock('@/lib/machine-state', () => ({
   transitionSession: vi.fn(),
   validateSensorSequence: vi.fn(),
@@ -149,17 +152,51 @@ describe('handleAcceptance', () => {
     expect(credit.creditReward).not.toHaveBeenCalled();
   });
 
-  it('locks User -> DepositSession -> DepositItem before reading the decision state', async () => {
+  it('locks User -> funding account -> DepositSession -> DepositItem before reading the decision state', async () => {
     await run();
-    const order = [locks.lockUser, locks.lockDepositSession, locks.lockDepositItem]
+    const order = [locks.lockUser, funding.lockFundingAccountForOrganization, locks.lockDepositSession, locks.lockDepositItem]
       .map((fn) => vi.mocked(fn).mock.invocationCallOrder[0]);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(locks.lockUser).toHaveBeenCalledWith(mockTx, 'u1');
+    expect(funding.lockFundingAccountForOrganization).toHaveBeenCalledWith(mockTx, 'o1');
+    expect(locks.lockCampaign).not.toHaveBeenCalled();
     expect(locks.lockDepositSession).toHaveBeenCalledWith(mockTx, 's1');
     expect(locks.lockDepositItem).toHaveBeenCalledWith(mockTx, 'd1');
     const lastLock = vi.mocked(locks.lockDepositItem).mock.invocationCallOrder[0];
     expect(mockTx.machine.findUnique.mock.invocationCallOrder[0]).toBeGreaterThan(lastLock);
     expect(mockTx.depositItem.findUnique.mock.invocationCallOrder.at(-1)).toBeGreaterThan(lastLock);
+  });
+
+  it('locks the session campaign between the account and the session, and fails loudly if the session changed (B01)', async () => {
+    const campaign = { id: 'c1', campaignType: 'MACHINE_DEPOSIT', rewardMode: 'MONEY_REWARD', supportsMachine: false, rewardMultiplier: null };
+    mockTx.depositSession.findUnique.mockResolvedValue(session({ campaignId: 'c1', campaign }));
+    await run();
+    const account = vi.mocked(funding.lockFundingAccountForOrganization).mock.invocationCallOrder[0];
+    const campaignLock = vi.mocked(locks.lockCampaign).mock.invocationCallOrder[0];
+    expect(locks.lockCampaign).toHaveBeenCalledWith(mockTx, 'c1');
+    expect(campaignLock).toBeGreaterThan(account);
+    expect(campaignLock).toBeLessThan(vi.mocked(locks.lockDepositSession).mock.invocationCallOrder[0]);
+    expect(credited()).toMatchObject({ campaignId: 'c1', funding: { ceilingRupiah: 200, reviewPending: false } });
+
+    vi.clearAllMocks();
+    mockTx.depositSession.findUnique
+      .mockResolvedValueOnce(session({ campaignId: 'c1' }))
+      .mockResolvedValueOnce(session({ campaignId: null }));
+    await expect(run()).rejects.toThrow('DEPOSIT_ITEM_CHANGED');
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('commits the approvable ceiling for a review hold and nothing with money for COMPLIANCE_ONLY (B01)', async () => {
+    mockTx.depositItem.findUnique.mockResolvedValue(item({ aiDetectedType: 'paper', aiConfidence: 0.97 }));
+    await run();
+    expect(credited()).toMatchObject({ amount: 100, status: 'PENDING', funding: { ceilingRupiah: 200, reviewPending: true } });
+
+    vi.clearAllMocks();
+    mockTx.depositItem.findUnique.mockResolvedValue(item({ aiDetectedType: 'paper', aiConfidence: 0.97 }));
+    mockTx.machine.findUnique.mockResolvedValue({
+      materialVerification: 'WEIGHT_ONLY', sessionIdleTimeoutMinutes: 3, organization: { machineRewardMode: 'COMPLIANCE_ONLY' } });
+    await run();
+    expect(credited()).toMatchObject({ amount: 0, funding: { ceilingRupiah: 0, reviewPending: true } });
   });
 
   it('is idempotent: an item already accepted or decided is never priced or paid again', async () => {
@@ -181,7 +218,7 @@ describe('handleAcceptance', () => {
     expect(credited()).toEqual({
       businessKey: 'deposit-item:d1:earn', userId: 'u1', organizationId: 'o1', campaignId: null, amount: 200,
       status: 'AVAILABLE', reasonCode: 'ACCEPTED', referenceType: 'DepositItem', referenceId: 'd1',
-      depositItemId: 'd1', sessionId: 's1',
+      depositItemId: 'd1', sessionId: 's1', funding: { ceilingRupiah: 200, reviewPending: false },
     });
     expect(mockTx.depositSession.update).toHaveBeenCalledWith({ where: { id: 's1' }, data: { status: 'ACTIVE', anomalyCount: undefined } });
   });

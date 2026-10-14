@@ -13,6 +13,7 @@ import { prisma } from '@/lib/prisma';
 import * as audit from '@/lib/audit';
 import * as locks from '@/lib/db-locks';
 import * as credit from '@/lib/reward-credit';
+import * as funding from '@/lib/reward-funding';
 import * as cutover from '@/lib/reward-legacy-cutover';
 import * as rbac from '@/lib/rbac';
 import * as reward from '@/lib/reward';
@@ -31,9 +32,16 @@ vi.mock('@/lib/rbac', () => ({
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn() }));
 vi.mock('@/lib/db-locks', () => ({
   lockUser: vi.fn(),
+  lockCampaign: vi.fn(),
   lockMachine: vi.fn(),
   lockDepositSession: vi.fn(),
   lockDepositItem: vi.fn(),
+}));
+// B01: the decision settles the item's funding obligation under the account lock.
+vi.mock('@/lib/reward-funding', () => ({
+  lockFundingAccountForOrganization: vi.fn(),
+  settleOrCommitReward: vi.fn(async () => null),
+  sessionAdmissionKey: (id: string) => `session:${id}:admission`,
 }));
 vi.mock('@/lib/wallet-service', () => ({
   runWalletTransaction: vi.fn((fn: (tx: unknown) => unknown) => fn(mockTx)),
@@ -65,7 +73,10 @@ const makeReq = (body: unknown) => new Request('http://localhost', { method: 'PA
 const patch = (body: unknown) => PATCH(makeReq(body), makeParams('di1'));
 const admin = { id: 'a1', role: 'ADMIN', organizationId: 'org1' };
 
-const ref = { id: 'di1', sessionId: 's1', session: { userId: 'u1', machineId: 'm1', machine: { organizationId: 'org1' } } };
+const ref = {
+  id: 'di1', sessionId: 's1',
+  session: { userId: 'u1', machineId: 'm1', campaignId: null, machine: { organizationId: 'org1' } },
+};
 const ACCEPTED_AT = new Date('2026-10-01T08:00:00.000Z');
 const CREATED_AT = new Date('2026-10-01T07:59:00.000Z');
 /** The row version the operator saw (DepositItem.updatedAt), sent back as `itemVersion` with a legacy approval. */
@@ -134,17 +145,56 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     expect(locks.lockUser).not.toHaveBeenCalled();
   });
 
-  it('locks User -> Machine -> DepositSession -> DepositItem and only then re-reads the item and its earnings', async () => {
+  it('locks User -> funding account -> Machine -> DepositSession -> DepositItem and only then re-reads the item and its earnings', async () => {
     await patch({ action: 'approve' });
-    const order = [locks.lockUser, locks.lockMachine, locks.lockDepositSession, locks.lockDepositItem]
+    const order = [locks.lockUser, funding.lockFundingAccountForOrganization, locks.lockMachine, locks.lockDepositSession, locks.lockDepositItem]
       .map((fn) => vi.mocked(fn).mock.invocationCallOrder[0]);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(locks.lockUser).toHaveBeenCalledWith(mockTx, 'u1');
+    expect(funding.lockFundingAccountForOrganization).toHaveBeenCalledWith(mockTx, 'org1');
+    expect(locks.lockCampaign).not.toHaveBeenCalled();
     expect(locks.lockMachine).toHaveBeenCalledWith(mockTx, 'm1');
     expect(locks.lockDepositSession).toHaveBeenCalledWith(mockTx, 's1');
     expect(locks.lockDepositItem).toHaveBeenCalledWith(mockTx, 'di1');
-    expect(mockTx.depositItem.findUnique.mock.invocationCallOrder[0]).toBeGreaterThan(order[3]);
-    expect(mockTx.rewardLedger.findMany.mock.invocationCallOrder[0]).toBeGreaterThan(order[3]);
+    expect(mockTx.depositItem.findUnique.mock.invocationCallOrder[0]).toBeGreaterThan(order[4]);
+    expect(mockTx.rewardLedger.findMany.mock.invocationCallOrder[0]).toBeGreaterThan(order[4]);
+  });
+
+  it('locks the session campaign after the account and refuses an item whose campaign changed (B01)', async () => {
+    vi.mocked(prisma.depositItem.findUnique).mockResolvedValue({ ...ref, session: { ...ref.session, campaignId: 'c1' } } as any);
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ session: { ...lockedItem().session, campaignId: 'c1' } }));
+    expect((await patch({ action: 'approve' })).status).toBe(200);
+    const account = vi.mocked(funding.lockFundingAccountForOrganization).mock.invocationCallOrder[0];
+    const campaignLock = vi.mocked(locks.lockCampaign).mock.invocationCallOrder[0];
+    expect(locks.lockCampaign).toHaveBeenCalledWith(mockTx, 'c1');
+    expect(campaignLock).toBeGreaterThan(account);
+    expect(campaignLock).toBeLessThan(vi.mocked(locks.lockMachine).mock.invocationCallOrder[0]);
+
+    vi.clearAllMocks();
+    vi.mocked(prisma.depositItem.findUnique).mockResolvedValue({ ...ref, session: { ...ref.session, campaignId: 'c1' } } as any);
+    mockTx.depositItem.findUnique.mockResolvedValue(lockedItem());
+    const changed = await patch({ action: 'approve' });
+    expect(changed.status).toBe(409);
+    expect(mockTx.depositItem.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('settles the funding obligation to the approved target, releases it on reject, and keeps it when a case opened (B01)', async () => {
+    expect((await patch({ action: 'approve' })).status).toBe(200);
+    expect(funding.settleOrCommitReward).toHaveBeenCalledWith(mockTx, {
+      businessKey: 'deposit-item:di1:earn', reservationKey: 'session:s1:admission', targetRupiah: 100, reviewPending: false });
+    expect(effect()).toEqual(expect.objectContaining({ funding: { settledByCaller: true } }));
+
+    vi.clearAllMocks();
+    expect((await patch({ action: 'reject' })).status).toBe(200);
+    expect(funding.settleOrCommitReward).toHaveBeenCalledWith(mockTx, expect.objectContaining({ targetRupiah: 0, reviewPending: false }));
+
+    vi.clearAllMocks();
+    vi.mocked(credit.applyRewardEffect).mockResolvedValue({
+      outcome: 'CASE_OPENED', entry: null, reconciliationCase: { id: 'case1', status: 'OPEN' } as any });
+    mockTx.rewardLedger.findMany.mockResolvedValue([
+      { id: 'le1', entryType: 'EARN', status: 'AVAILABLE', amount: 100, userId: 'u1' }]);
+    expect((await patch({ action: 'reject' })).status).toBe(200);
+    expect(funding.settleOrCommitReward).toHaveBeenCalledWith(mockTx, expect.objectContaining({ targetRupiah: null }));
   });
 
   it('approves with a compare-and-set, releases the hold and pays target minus committed once', async () => {
@@ -170,6 +220,7 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
   });
 
   it('pays nothing and rejects the hold in a COMPLIANCE_ONLY campaign (LOG-04)', async () => {
+    vi.mocked(prisma.depositItem.findUnique).mockResolvedValue({ ...ref, session: { ...ref.session, campaignId: 'c1' } } as any);
     mockTx.depositItem.findUnique.mockResolvedValue(lockedItem({ session: { ...lockedItem().session, campaignId: 'c1',
       campaign: { campaignType: 'MACHINE_DEPOSIT', rewardMode: 'COMPLIANCE_ONLY', supportsMachine: false, rewardMultiplier: 2 } } }));
     expect((await patch({ action: 'approve' })).status).toBe(200);

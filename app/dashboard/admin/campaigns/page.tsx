@@ -45,6 +45,10 @@ export default async function AdminCampaignsPage({
     status: c.status,
     sessionCount: c._count.sessions,
     organizationName: null,
+    rewardBudgetRupiah: c.rewardBudgetRupiah,
+    maxRewardPerSessionRupiah: c.maxRewardPerSessionRupiah,
+    heldRupiah: c.heldRupiah,
+    spentRupiah: c.spentRupiah,
   }));
 
   const pageMeta = buildPaginationMeta(total, pagination);

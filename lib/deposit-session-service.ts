@@ -1,13 +1,21 @@
-import { Prisma, type DepositSession, type SessionStatus } from "@prisma/client";
+import { Prisma, type Campaign, type DepositSession, type SessionStatus } from "@prisma/client";
 import { logAudit } from "./audit";
 import { isCampaignEligible } from "./campaign";
-import { lockDepositItem, lockDepositSession, lockMachine, lockUser } from "./db-locks";
+import { lockCampaign, lockDepositItem, lockDepositSession, lockMachine, lockUser } from "./db-locks";
 import { InvalidSessionTransitionError, machineAcceptsSessions, transitionSession } from "./machine-state";
 import { prisma } from "./prisma";
 import { isTokenValid } from "./qr";
 import { SESSION_CLOSED_REASON, SESSION_TIMEOUT_REASON } from "./machine-events/shared";
 import { HttpError, type CurrentUser } from "./rbac";
-import { campaignSupportsMachine } from "./reward-policy";
+import {
+  FUNDING_INSUFFICIENT,
+  fundingPolicy,
+  lockFundingAccountForOrganization,
+  reserveRewardBudget,
+  resolveSessionCeiling,
+  sessionAdmissionKey,
+} from "./reward-funding";
+import { campaignSupportsMachine, machineRewardMode } from "./reward-policy";
 import { runWalletTransaction } from "./wallet-service";
 import { MACHINE_LEASE_MAX_SECONDS, machineLeaseExpiry, sessionDeadline, sessionEnd } from "./deposit-session-deadline";
 
@@ -57,6 +65,7 @@ export const MACHINE_UNAVAILABLE = "Mesin sedang tidak dapat digunakan. Silakan 
 export const ITEM_STILL_PROCESSING = "Mesin masih memproses item terakhir Anda. Tunggu sebentar, lalu coba lagi.";
 export const SESSION_CANNOT_END = "Sesi tidak dapat diselesaikan saat ini.";
 export const CAMPAIGN_NOT_FOR_MACHINE = "Campaign ini tidak berlaku untuk setoran mesin";
+export const MACHINE_CHANGED = "Konfigurasi mesin berubah. Silakan scan ulang QR mesin.";
 
 export { SESSION_CLOSED_REASON, SESSION_TIMEOUT_REASON };
 
@@ -176,7 +185,7 @@ async function assertCampaignForMachine(
   actorId: string,
   organizationId: string,
   campaignId: string,
-) {
+): Promise<Campaign> {
   const campaign = await tx.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign || campaign.organizationId !== organizationId) {
     throw new HttpError(422, "Campaign tidak valid untuk mesin ini");
@@ -188,27 +197,82 @@ async function assertCampaignForMachine(
   if (!isCampaignEligible(campaign, user?.email ?? "").eligible) {
     throw new HttpError(403, "Anda tidak memenuhi syarat campaign ini");
   }
+  return campaign;
+}
+
+/**
+ * B01: reserves the session's reward ceiling before it is admitted (the
+ * session row is inserted in the same transaction, so a refused reservation
+ * rolls it back). COMPLIANCE_ONLY admits nothing with money and reserves
+ * nothing. A money program without a configured ceiling is refused under
+ * enforcement; in shadow mode it is admitted with a zero ceiling, which the
+ * reconciliation report lists so the operator configures it before enforcing.
+ */
+async function reserveSessionCeiling(
+  tx: Prisma.TransactionClient,
+  session: DepositSession,
+  machine: { id: string; organizationId: string; maxRewardPerSessionRupiah: number | null; organization: { machineRewardMode: string } },
+  campaign: Campaign | null,
+): Promise<{ ceilingRupiah: number; reservationId: string } | null> {
+  const mode = machineRewardMode({ campaign, organizationMode: machine.organization.machineRewardMode });
+  if (mode !== "MONEY_REWARD") return null;
+  const policy = fundingPolicy();
+  const configured = resolveSessionCeiling({ campaign, machine });
+  if (configured === null) {
+    console.warn("[deposit-session] money session without a configured reward ceiling", {
+      machineId: machine.id,
+      campaignId: campaign?.id ?? null,
+      enforced: policy.enforced,
+    });
+    if (policy.enforced) throw new HttpError(409, FUNDING_INSUFFICIENT);
+  }
+  const ceilingRupiah = configured ?? 0;
+  const reservationId = await reserveRewardBudget(
+    tx,
+    {
+      businessKey: sessionAdmissionKey(session.id),
+      organizationId: machine.organizationId,
+      campaignId: campaign?.id ?? null,
+      userId: session.userId,
+      ceilingRupiah,
+      sourceType: "SESSION",
+      sourceId: session.id,
+    },
+    policy,
+  );
+  return { ceilingRupiah, reservationId };
 }
 
 async function decideStart(
   tx: Prisma.TransactionClient,
   actor: CurrentUser,
   input: { machineCode: string; token: string; campaignId?: string },
-  machineId: string,
+  ref: { id: string; organizationId: string },
   hooks: DepositSessionHooks | undefined,
 ): Promise<StartDecision> {
+  const machineId = ref.id;
   await lockUser(tx, actor.id);
-  // B01 inserts RewardFundingAccount -> Campaign locks here (global lock order).
+  // B01 (global lock order): the organization's funding account and the
+  // requested campaign come before the Machine row. The campaign's existence
+  // is immutable; its content is re-read under the locks (assertCampaignForMachine).
+  await lockFundingAccountForOrganization(tx, ref.organizationId);
+  if (input.campaignId) {
+    const known = await tx.campaign.findUnique({ where: { id: input.campaignId }, select: { id: true } });
+    if (!known) throw new HttpError(422, "Campaign tidak valid untuk mesin ini");
+    await lockCampaign(tx, input.campaignId);
+  }
   await lockMachine(tx, machineId);
 
   const machine = await tx.machine.findUnique({
     where: { id: machineId },
     include: {
-      organization: { select: { status: true } },
+      organization: { select: { status: true, machineRewardMode: true } },
       wasteTypes: { where: { active: true }, select: { id: true } },
     },
   });
   if (!machine) throw new HttpError(404, "Mesin tidak ditemukan");
+  // The account locked above belongs to the organization read before the lock.
+  if (machine.organizationId !== ref.organizationId) throw new HttpError(409, MACHINE_CHANGED);
   if (!isTokenValid(machine, input.token)) {
     console.warn("[scan] invalid QR token", { machineCode: input.machineCode, userId: actor.id });
     throw new HttpError(
@@ -234,7 +298,8 @@ async function decideStart(
 
   // Validate the campaign before any write, so a refused request changes nothing.
   const campaignId = input.campaignId ?? null;
-  if (live.length === 0 && campaignId) await assertCampaignForMachine(tx, actor.id, machine.organizationId, campaignId);
+  const campaign =
+    live.length === 0 && campaignId ? await assertCampaignForMachine(tx, actor.id, machine.organizationId, campaignId) : null;
 
   // All timed-out sessions together: sessions, then items, each in id order (M1).
   const expired = await expireTimedOutSessions(tx, timedOut.map((s) => s.id), idle, now);
@@ -259,6 +324,8 @@ async function decideStart(
       timeoutAt: new Date(now.getTime() + idle * 60_000),
     },
   });
+  // B01: reserve the reward ceiling before the admission is committed.
+  await reserveSessionCeiling(tx, session, machine, campaign);
   return { kind: "created", session, expired, campaignId };
 }
 
@@ -274,14 +341,18 @@ export async function startOrResumeDeposit(
   input: { machineCode: string; token: string; campaignId?: string },
   hooks?: DepositSessionHooks,
 ): Promise<{ session: DepositSession; resumed: boolean }> {
-  // Immutable: the id behind the code only tells which Machine row to lock.
-  const ref = await prisma.machine.findUnique({ where: { machineCode: input.machineCode }, select: { id: true } });
+  // Immutable: the id behind the code only tells which Machine row to lock,
+  // and its organization which funding account (re-checked under the locks).
+  const ref = await prisma.machine.findUnique({
+    where: { machineCode: input.machineCode },
+    select: { id: true, organizationId: true },
+  });
   if (!ref) throw new HttpError(404, "Mesin tidak ditemukan");
 
   let decision: StartDecision | undefined;
   for (let attempt = 0; !decision; attempt += 1) {
     try {
-      decision = await runWalletTransaction((tx) => decideStart(tx, actor, input, ref.id, attempt === 0 ? hooks : undefined));
+      decision = await runWalletTransaction((tx) => decideStart(tx, actor, input, ref, attempt === 0 ? hooks : undefined));
     } catch (error) {
       if (!isActiveSessionConflict(error)) throw error;
       // A writer that skipped the machine lock created an active session

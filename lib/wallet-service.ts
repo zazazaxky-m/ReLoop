@@ -3,7 +3,7 @@ import { Prisma, type Redemption, type RedemptionStatus } from "@prisma/client";
 import { z } from "zod";
 import { logAudit } from "./audit";
 import { getMinRedemption } from "./config";
-import { lockRedemption, lockUser } from "./db-locks";
+import { lockFundingAccount, lockRedemption, lockUser } from "./db-locks";
 import {
   RESERVE_MISMATCH,
   createRedeemReserve,
@@ -22,6 +22,7 @@ import {
 } from "./payout-destination";
 import { prisma } from "./prisma";
 import { HttpError, type CurrentUser } from "./rbac";
+import { fundingAccountsForPayout, settlePayoutFunding } from "./reward-funding";
 
 /**
  * Wallet transaction boundary. Request (M01) and transition (M02) of a
@@ -355,25 +356,31 @@ function notFrom(status: RedemptionStatus): HttpError {
 
 /**
  * Locks one payout request in the global order and re-reads it:
- * immutable owner first (no lock), then User, then Redemption, then the row
- * through the same `tx`. A request whose owner changed meanwhile is refused.
+ * immutable owner first (no lock), then User, then (for a success, B01) every
+ * RewardFundingAccount the owner's funded earnings draw from in id order,
+ * then Redemption, then the row through the same `tx`. A request whose owner
+ * changed meanwhile is refused.
  */
 async function lockRedemptionForChange(
   tx: Prisma.TransactionClient,
   actor: CurrentUser,
   id: string,
-  expectedUserId?: string,
+  options: { expectedUserId?: string; lockFunding?: boolean } = {},
 ): Promise<Redemption> {
   const owner = await tx.redemption.findUnique({ where: { id }, select: { userId: true } });
   if (!owner) throw new HttpError(404, REDEMPTION_NOT_FOUND);
   if (actor.role === "USER" && owner.userId !== actor.id) {
     throw new HttpError(403, "Bukan pengajuan pencairan Anda");
   }
-  if (expectedUserId !== undefined && owner.userId !== expectedUserId) {
+  if (options.expectedUserId !== undefined && owner.userId !== options.expectedUserId) {
     throw new HttpError(409, REDEMPTION_OWNER_CHANGED);
   }
 
   await lockUser(tx, owner.userId);
+  if (options.lockFunding) {
+    // The set is fixed while the owner's User lock is held (every commit writer takes it).
+    for (const accountId of await fundingAccountsForPayout(tx, owner.userId)) await lockFundingAccount(tx, accountId);
+  }
   await lockRedemption(tx, id);
 
   const redemption = await tx.redemption.findUnique({ where: { id } });
@@ -445,6 +452,8 @@ interface TransitionOutcome {
   from: RedemptionStatus;
   /** This change closed an open reconciliation flag. */
   resolvedReconciliation: boolean;
+  /** B01: gross attributed to funded sources (PAYOUT entries) and the legacy remainder, on success. */
+  funding?: { attributedRupiah: number; legacyRupiah: number };
 }
 
 /**
@@ -472,7 +481,7 @@ export async function transitionRedemption(
   const rule = TRANSITIONS[input.action];
 
   const outcome = await runWalletTransaction<TransitionOutcome>(async (tx) => {
-    const current = await lockRedemptionForChange(tx, actor, id);
+    const current = await lockRedemptionForChange(tx, actor, id, { lockFunding: input.action === "success" });
     await hooks.afterLock?.(tx);
     const reserve = await loadRedeemReserve(tx, current);
 
@@ -504,10 +513,23 @@ export async function transitionRedemption(
         ? { reconciliationRequired: false }
         : {}),
     });
+    let funding: TransitionOutcome["funding"];
     if (rule.reserve !== "hold") {
       const settled = await settleRedeemLedger(id, rule.reserve, tx);
       // The reserve was PENDING under our locks, so exactly one mutation must happen.
       if (!settled.changed) throw new HttpError(409, RESERVE_MISMATCH);
+      // B01: a success debits the funded sources (confirmed and held by the
+      // gross). A failure or cancel returns the user's spendable balance but
+      // the obligation stays funded: nothing to do here.
+      if (input.action === "success") {
+        const attributed = await settlePayoutFunding(tx, {
+          redemptionId: id,
+          userId: current.userId,
+          grossRupiah: current.amount,
+          actorId: actor.id,
+        });
+        funding = { attributedRupiah: attributed.attributedRupiah, legacyRupiah: attributed.legacyRupiah };
+      }
     }
 
     const redemption = await tx.redemption.findUnique({ where: { id } });
@@ -517,11 +539,12 @@ export async function transitionRedemption(
       idempotent: false,
       from: current.status,
       resolvedReconciliation: current.reconciliationRequired && !redemption.reconciliationRequired,
+      funding,
     };
   });
 
   if (!outcome.idempotent) {
-    const { redemption, from, resolvedReconciliation } = outcome;
+    const { redemption, from, resolvedReconciliation, funding } = outcome;
     await afterCommitSafely(`audit REDEMPTION_${input.action.toUpperCase()}`, () =>
       logAudit({
         actorId: actor.id,
@@ -536,6 +559,7 @@ export async function transitionRedemption(
           hasNote: input.note ? true : undefined,
           destinationSource: rule.destination === "none" ? undefined : redemption.payoutDestinationSource,
           reconciliationResolved: resolvedReconciliation || undefined,
+          ...(funding ? { fundingAttributedRupiah: funding.attributedRupiah, fundingLegacyRupiah: funding.legacyRupiah } : {}),
         },
       }),
     );
@@ -629,7 +653,7 @@ export async function attachRedemptionProof(
   if (!input.relativePath.startsWith(`${id}/`)) throw new Error("proof path must live under the redemption id");
 
   const redemption = await runWalletTransaction(async (tx) => {
-    const current = await lockRedemptionForChange(tx, actor, id, input.expectedUserId);
+    const current = await lockRedemptionForChange(tx, actor, id, { expectedUserId: input.expectedUserId });
     await hooks.afterLock?.(tx);
     if (TERMINAL_STATUSES.includes(current.status)) throw new HttpError(409, REDEMPTION_PROOF_CLOSED);
 

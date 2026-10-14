@@ -66,6 +66,44 @@
           }
         ]
       },
+      "funding": {
+        "enforced": false,
+        "totalConfirmedRupiah": 250000,
+        "totalHeldRupiah": 60000,
+        "staleHoldCount": 1,
+        "organizations": [
+          {
+            "organizationId": "cmauditorganization0000001",
+            "organizationName": "Organisasi Audit A",
+            "accountId": "cmauditfunding00000000001",
+            "confirmedRupiah": 250000,
+            "heldRupiah": 60000,
+            "capacityRupiah": 190000,
+            "activeReservations": 2,
+            "reservedRemainingRupiah": 35000,
+            "uncoveredRupiah": 0,
+            "staleHolds": [
+              {
+                "reservationId": "cmauditreservation0000001",
+                "businessKey": "session:cmauditsession000000001:admission",
+                "organizationId": "cmauditorganization0000001",
+                "userId": "cmaudituser000000000000001",
+                "campaignId": null,
+                "sourceType": "SESSION",
+                "sourceId": "cmauditsession000000001",
+                "sourceStatus": "COMPLETED",
+                "ceilingRupiah": 20000,
+                "remainingRupiah": 15000,
+                "shortfallRupiah": 0,
+                "campaignShortfallRupiah": 0,
+                "ageMinutes": 95,
+                "reasons": ["SOURCE_CLOSED_AWAITING_WATERMARK"],
+                "reconciliation": "Sumber sudah berakhir tetapi sisa dana masih ditahan. Pastikan seluruh event mesin sudah tersinkron, lalu superadmin melepas sisa dana secara eksplisit (alasan wajib) atau tunggu konfirmasi penutupan dari mesin."
+              }
+            ]
+          }
+        ]
+      },
       "snapshot": { "readOnly": true, "isolation": "repeatable read" },
       "generatedAt": "2026-10-13T08:05:00.000Z"
     }

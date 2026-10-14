@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import { computeBalance, expectedReserveStatus, type LedgerGroup, type WalletBalance } from "./ledger";
 import { prisma } from "./prisma";
+import { readFundingVisibility, type FundingVisibility } from "./reward-funding";
 
 /**
  * Platform-wide financial reconciliation (M05, finding LOG-07).
@@ -138,10 +139,20 @@ export async function getLiabilitySummary(db: RawReader = prisma): Promise<Liabi
 }
 
 // ---------------------------------------------------------------------------
-// Organization allocation (B01 extension point)
+// Organization allocation (B02 extension point) and reward funding (B01a)
 // ---------------------------------------------------------------------------
 
-/** Report-level allocation state. B01/B02 add the allocated state once allocations are backfilled. */
+/**
+ * B01a fills the funding side of this section: `report.funding`
+ * (lib/reward-funding.ts readFundingVisibility, read in the same snapshot)
+ * shows confirmed cash, held obligations and capacity per organization plus
+ * the holds that need an operator. The allocation of the user liability per
+ * organization (`readOrganizationAllocations`) stays B02's: funding
+ * obligations are the program side of the money, the ledger liability the
+ * user side, and only B02's per-lot allocation ties the two together.
+ */
+
+/** Report-level allocation state. B02 adds the allocated state once allocations are backfilled. */
 export const ALLOCATION_NOT_AVAILABLE = "NOT_ALLOCATED_UNTIL_B01" as const;
 export type ReportAllocationStatus = typeof ALLOCATION_NOT_AVAILABLE;
 /** Per-organization allocation state. */
@@ -333,6 +344,13 @@ export interface ReconciliationReport extends LiabilitySummary {
       createdAt: Date;
     }>;
   };
+  /**
+   * B01a: reward funding per organization (confirmed cash, held obligations,
+   * capacity) and the reservations that need an operator (owner and reason).
+   * Program-side money, read in the same snapshot; kept apart from the user
+   * liability figures above.
+   */
+  funding: FundingVisibility;
   /** The transaction every figure was read in. */
   snapshot: { readOnly: boolean; isolation: string };
   generatedAt: string;
@@ -349,8 +367,18 @@ export interface ReconciliationSnapshot {
   reservesWithoutRequest: ReserveWithoutRequest[];
   redemptionTotals: { status: RedemptionStatus; amount: number; flaggedCount: number; flaggedAmount: number }[];
   rewardCases: ReconciliationReport["rewardCases"];
+  /** Omitted only by unit snapshots that test the ledger figures alone. */
+  funding?: FundingVisibility;
   generatedAt: string;
 }
+
+const EMPTY_FUNDING: FundingVisibility = {
+  enforced: false,
+  totalConfirmedRupiah: 0,
+  totalHeldRupiah: 0,
+  staleHoldCount: 0,
+  organizations: [],
+};
 
 /** Pure: computes the report from one snapshot. */
 export function buildReconciliationReport(input: ReconciliationSnapshot): ReconciliationReport {
@@ -423,6 +451,7 @@ export function buildReconciliationReport(input: ReconciliationSnapshot): Reconc
       amount: input.redemptionTotals.reduce((sum, row) => sum + row.flaggedAmount, 0),
     },
     rewardCases: input.rewardCases,
+    funding: input.funding ?? EMPTY_FUNDING,
     snapshot: input.snapshot,
     generatedAt: input.generatedAt,
   };
@@ -465,6 +494,7 @@ export async function getReconciliationReport(hooks: ReconciliationReportHooks =
       WHERE "entryType" IN ('EARN', 'ADJUST', 'REVERSE', 'PENALTY') AND status IN ('AVAILABLE', 'PENDING')
       GROUP BY "organizationId", "entryType", status`).map((row) => ({ ...row, amount: toNumber(row.amount) }));
     const allocations = await readOrganizationAllocations(tx);
+    const funding = await readFundingVisibility(tx);
     await hooks.afterLedgerRead?.();
 
     const mismatchedRequests = await findMismatchedRequests(tx);
@@ -503,6 +533,7 @@ export async function getReconciliationReport(hooks: ReconciliationReportHooks =
       reservesWithoutRequest,
       redemptionTotals,
       rewardCases: { open: caseTotals._count._all, openAmount: caseTotals._sum.amount ?? 0, recent },
+      funding,
       generatedAt: new Date().toISOString(),
     });
   }, REPORT_TX_OPTIONS);

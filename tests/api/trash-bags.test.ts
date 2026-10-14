@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
 import * as trip from '@/lib/trip';
 import * as locks from '@/lib/db-locks';
+import * as funding from '@/lib/reward-funding';
 import * as tripValidation from '@/lib/trip-validation';
 import * as walletService from '@/lib/wallet-service';
 import { logAudit } from '@/lib/audit';
@@ -33,7 +34,13 @@ vi.mock('@/lib/trip', async (importOriginal) => ({
   generateBagQrCode: vi.fn().mockReturnValue('QR123'),
   getTripTravelAgentGateBlockReason: vi.fn(async () => null),
 }));
-vi.mock('@/lib/db-locks', () => ({ lockTrip: vi.fn(), lockTripBags: vi.fn(), lockUser: vi.fn() }));
+vi.mock('@/lib/db-locks', () => ({ lockTrip: vi.fn(), lockTripBags: vi.fn(), lockUser: vi.fn(), lockCampaign: vi.fn() }));
+// B01: issuance reserves the most the bags can pay, under User -> account -> Campaign -> Trip.
+vi.mock('@/lib/reward-funding', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/reward-funding')>()),
+  lockFundingAccountForOrganization: vi.fn(),
+  reserveRewardBudget: vi.fn(async () => 'res1'),
+}));
 vi.mock('@/lib/wallet-service', () => ({
   runWalletTransaction: vi.fn(),
   afterCommitSafely: vi.fn(async (_label: string, effect: () => Promise<unknown>) => {
@@ -95,18 +102,27 @@ describe('/api/trash-bags', () => {
   });
 
   describe('POST (issuance under the Trip lock)', () => {
+    const moneyCampaign = { organizationId: 'org1', campaignType: 'TRASH_BAG', rewardMode: 'MONEY_REWARD', rewardMultiplier: null };
+    const lockedTrip = (over: Record<string, unknown> = {}) =>
+      ({ status: 'PLANNED', userId: 'u1', campaignId: 'c1', campaign: moneyCampaign, ...over });
+
     beforeEach(() => {
       vi.mocked(prisma.trip.findUnique).mockResolvedValue({
-        id: 't1', status: 'PLANNED', travelAgentId: null, campaign: { organizationId: 'org1' },
+        id: 't1', status: 'PLANNED', travelAgentId: null, userId: 'u1', campaignId: 'c1', campaign: moneyCampaign,
       } as any);
       tx = {
-        trip: { findUniqueOrThrow: vi.fn().mockResolvedValue({ status: 'PLANNED' }) },
+        trip: { findUniqueOrThrow: vi.fn().mockResolvedValue(lockedTrip()) },
         trashBagAssignment: {
+          count: vi.fn().mockResolvedValue(0),
           createMany: vi.fn().mockResolvedValue({ count: 2 }),
           findMany: vi.fn().mockResolvedValue([{ id: 'b1' }, { id: 'b2' }]),
         },
       };
+      vi.mocked(locks.lockUser).mockImplementation(async () => { calls.push('lockUser'); });
+      vi.mocked(funding.lockFundingAccountForOrganization).mockImplementation(async () => { calls.push('lockAccount'); return {} as any; });
+      vi.mocked(locks.lockCampaign).mockImplementation(async () => { calls.push('lockCampaign'); });
       vi.mocked(locks.lockTrip).mockImplementation(async () => { calls.push('lockTrip'); });
+      vi.mocked(funding.reserveRewardBudget).mockImplementation(async () => { calls.push('reserve'); return 'res1'; });
     });
 
     const post = (body: Record<string, unknown>) =>
@@ -118,20 +134,63 @@ describe('/api/trash-bags', () => {
       expect(res.status).toBe(404);
     });
 
-    it('creates one row per bag under the Trip lock after re-reading the status (201)', async () => {
+    it('creates one row per bag under User -> account -> Campaign -> Trip after re-reading, reserving the most they can pay (201)', async () => {
       const res = await post({ tripId: 't1', bagCount: 2 });
       expect(res.status).toBe(201);
       expect(await res.json()).toEqual({ bags: [{ id: 'b1' }, { id: 'b2' }] });
+      expect(locks.lockUser).toHaveBeenCalledWith(tx, 'u1');
+      expect(funding.lockFundingAccountForOrganization).toHaveBeenCalledWith(tx, 'org1');
+      expect(locks.lockCampaign).toHaveBeenCalledWith(tx, 'c1');
       expect(locks.lockTrip).toHaveBeenCalledWith(tx, 't1');
-      expect(calls).toEqual(['begin', 'lockTrip', 'commit', 'audit']);
+      expect(calls).toEqual(['begin', 'lockUser', 'lockAccount', 'lockCampaign', 'lockTrip', 'reserve', 'commit', 'audit']);
+      // B01: 2 bags x Rp2.000 x multiplier 1, before the rows exist.
+      expect(funding.reserveRewardBudget).toHaveBeenCalledWith(tx, {
+        businessKey: 'trip:t1:issuance', organizationId: 'org1', campaignId: 'c1', userId: 'u1',
+        ceilingRupiah: 4_000, sourceType: 'TRIP', sourceId: 't1' });
       expect(tx.trashBagAssignment.createMany).toHaveBeenCalledWith({
         data: [expect.objectContaining({ tripId: 't1', bagCount: 1, assignedById: 'a1' }),
           expect.objectContaining({ tripId: 't1', bagCount: 1 })],
       });
     });
 
+    it('extends the issuance reservation to every issued bag with the campaign multiplier (B01)', async () => {
+      tx.trashBagAssignment.count.mockResolvedValue(3);
+      tx.trip.findUniqueOrThrow.mockResolvedValue(lockedTrip({ campaign: { ...moneyCampaign, rewardMultiplier: 1.5 } }));
+      expect((await post({ tripId: 't1', bagCount: 2 })).status).toBe(201);
+      expect(funding.reserveRewardBudget).toHaveBeenCalledWith(tx, expect.objectContaining({ ceilingRupiah: 15_000 }));
+    });
+
+    it('reserves nothing for a COMPLIANCE_ONLY campaign or a trip without a recipient (B01)', async () => {
+      tx.trip.findUniqueOrThrow.mockResolvedValue(lockedTrip({ campaign: { ...moneyCampaign, rewardMode: 'COMPLIANCE_ONLY' } }));
+      expect((await post({ tripId: 't1', bagCount: 1 })).status).toBe(201);
+      expect(funding.reserveRewardBudget).not.toHaveBeenCalled();
+
+      calls.length = 0;
+      vi.mocked(prisma.trip.findUnique).mockResolvedValue({
+        id: 't1', status: 'PLANNED', travelAgentId: null, userId: null, campaignId: 'c1', campaign: moneyCampaign } as any);
+      tx.trip.findUniqueOrThrow.mockResolvedValue(lockedTrip({ userId: null }));
+      expect((await post({ tripId: 't1', bagCount: 1 })).status).toBe(201);
+      expect(funding.reserveRewardBudget).not.toHaveBeenCalled();
+      expect(calls).toEqual(['begin', 'lockAccount', 'lockCampaign', 'lockTrip', 'commit', 'audit']);
+    });
+
+    it('issues no bag when the funding reservation is refused (B01) or the trip changed owner/campaign under the lock', async () => {
+      vi.mocked(funding.reserveRewardBudget).mockRejectedValueOnce(
+        new rbac.HttpError(409, 'Program sementara tidak menerima setoran berhadiah'));
+      const refused = await post({ tripId: 't1', bagCount: 1 });
+      expect(refused.status).toBe(409);
+      expect((await refused.json()).error).toBe('Program sementara tidak menerima setoran berhadiah');
+      expect(tx.trashBagAssignment.createMany).not.toHaveBeenCalled();
+      expect(logAudit).not.toHaveBeenCalled();
+
+      tx.trip.findUniqueOrThrow.mockResolvedValue(lockedTrip({ userId: 'someone-else' }));
+      const changed = await post({ tripId: 't1', bagCount: 1 });
+      expect(changed.status).toBe(409);
+      expect(tx.trashBagAssignment.createMany).not.toHaveBeenCalled();
+    });
+
     it('refuses to add bags when the trip closed while waiting for the lock', async () => {
-      tx.trip.findUniqueOrThrow.mockResolvedValue({ status: 'COMPLETED' });
+      tx.trip.findUniqueOrThrow.mockResolvedValue(lockedTrip({ status: 'COMPLETED' }));
       const res = await post({ tripId: 't1', bagCount: 1 });
       expect(res.status).toBe(422);
       expect((await res.json()).error).toBe('Kantong hanya dapat diterbitkan untuk trip PLANNED atau ACTIVE');

@@ -1,6 +1,7 @@
-import type { LedgerEntryType, LedgerStatus, Prisma, RewardLedger, RewardReconciliationCase } from "@prisma/client";
+import type { LedgerEntryType, LedgerStatus, Prisma, RewardBudgetCommit, RewardLedger, RewardReconciliationCase } from "@prisma/client";
 import { logAudit } from "./audit";
-import { lockDepositItem, lockDepositSession, lockMachine, lockUser } from "./db-locks";
+import { lockCampaign, lockDepositItem, lockDepositSession, lockMachine, lockUser } from "./db-locks";
+import { depositItemEarnKey } from "./ledger";
 import {
   REVIEW_ENDED_SESSION_REJECT_ONLY,
   REVIEW_LEGACY_CUTOVER_UNAVAILABLE,
@@ -34,6 +35,7 @@ import {
   validateWeight,
 } from "./reward";
 import { applyRewardEffect, type CreditEntryType } from "./reward-credit";
+import { lockFundingAccountForOrganization, sessionAdmissionKey, settleOrCommitReward } from "./reward-funding";
 import { resolveLegacyCutover, type LegacyCutover } from "./reward-legacy-cutover";
 import { campaignSupportsMachine, decideReward, machineRewardMode } from "./reward-policy";
 import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
@@ -325,6 +327,8 @@ type TransactionOutcome =
       ledgerEntry: RewardLedger | null;
       reconciliationCase: RewardReconciliationCase | null;
       plan: ReviewSettlementPlan;
+      /** B01: the funding obligation after this decision (null: legacy/compliance source). */
+      fundingCommit: RewardBudgetCommit | null;
       previousReasonCode: string | null;
       wasteTypeId: string;
       /** Instant the approval price was resolved at (null for a reject). */
@@ -357,7 +361,7 @@ export async function decideDepositReview(
     select: {
       id: true,
       sessionId: true,
-      session: { select: { userId: true, machineId: true, machine: { select: { organizationId: true } } } },
+      session: { select: { userId: true, machineId: true, campaignId: true, machine: { select: { organizationId: true } } } },
     },
   });
   if (!ref) throw new HttpError(404, "Item setoran tidak ditemukan");
@@ -370,6 +374,10 @@ export async function decideDepositReview(
   const outcome = await runWalletTransaction(async (tx): Promise<TransactionOutcome> => {
     // 2. Global lock order, then re-read everything the decision depends on.
     await lockUser(tx, ref.session.userId);
+    // B01: the decision settles the item's funding obligation (account and
+    // campaign before Machine).
+    await lockFundingAccountForOrganization(tx, ref.session.machine.organizationId);
+    if (ref.session.campaignId) await lockCampaign(tx, ref.session.campaignId);
     await lockMachine(tx, ref.session.machineId);
     await lockDepositSession(tx, ref.sessionId);
     await lockDepositItem(tx, itemId);
@@ -380,7 +388,8 @@ export async function decideDepositReview(
       !item ||
       item.sessionId !== ref.sessionId ||
       item.session.userId !== ref.session.userId ||
-      item.session.machineId !== ref.session.machineId
+      item.session.machineId !== ref.session.machineId ||
+      item.session.campaignId !== ref.session.campaignId
     ) {
       throw new HttpError(409, ITEM_CHANGED);
     }
@@ -497,10 +506,21 @@ export async function decideDepositReview(
         depositItemId: itemId,
         sessionId: item.sessionId,
         actorId: actor.id,
+        funding: { settledByCaller: true },
       });
       ledgerEntry = effect.entry;
       reconciliationCase = effect.reconciliationCase;
     }
+    // 5. B01: the review hold held the approvable ceiling; the decision
+    // settles the obligation to the target (approve) or releases it (reject).
+    // A correction refused into a reconciliation case keeps the obligation:
+    // the money is still out there until an operator settles the case.
+    const fundingCommit = await settleOrCommitReward(tx, {
+      businessKey: depositItemEarnKey(itemId),
+      reservationKey: sessionAdmissionKey(item.sessionId),
+      targetRupiah: reconciliationCase ? null : targetAmount,
+      reviewPending: false,
+    });
 
     const updated = await tx.depositItem.findUnique({ where: { id: itemId }, include: LOCKED_ITEM_INCLUDE });
     return {
@@ -510,6 +530,7 @@ export async function decideDepositReview(
       ledgerEntry,
       reconciliationCase,
       plan,
+      fundingCommit,
       previousReasonCode: item.validationReasonCode,
       wasteTypeId,
       pricedAt,
@@ -559,6 +580,8 @@ export async function decideDepositReview(
           rejectedHolds: outcome.plan.rejectIds.length,
           ledgerEntryId: outcome.ledgerEntry?.id ?? null,
           reconciliationCaseId: outcome.reconciliationCase?.id ?? null,
+          // B01: the obligation held for this item after the decision.
+          fundingHeldRupiah: outcome.fundingCommit?.heldRupiah ?? null,
         },
       }),
     );

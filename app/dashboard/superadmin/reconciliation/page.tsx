@@ -269,6 +269,97 @@ export default async function ReconciliationPage() {
       </section>
 
       <section className="space-y-3">
+        <h2 className="text-lg font-semibold text-foreground">Pendanaan reward per organisasi</h2>
+        <p className="text-sm text-muted">
+          Sisi program dari uang: dana yang sudah dikonfirmasi operator dengan bukti, kewajiban reward yang
+          direservasi saat setoran diterima atau diperoleh pengguna dan belum dibayar, serta kapasitas yang masih
+          dapat direservasi.{" "}
+          {report.funding.enforced
+            ? "Penegakan dana aktif: setoran berhadiah ditolak bila kapasitas tidak mencukupi."
+            : "Mode bayangan: reservasi dicatat dan kekurangannya dilaporkan, tetapi belum ada setoran yang ditolak."}
+        </p>
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-surface-soft text-left text-xs uppercase text-muted">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Organisasi</th>
+                <th className="px-4 py-2 text-right font-semibold">Dana terkonfirmasi</th>
+                <th className="px-4 py-2 text-right font-semibold">Kewajiban ditahan</th>
+                <th className="px-4 py-2 text-right font-semibold">Kapasitas</th>
+                <th className="px-4 py-2 text-right font-semibold">Reservasi aktif</th>
+                <th className="px-4 py-2 text-right font-semibold">Di luar reservasi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {report.funding.organizations.map((org) => (
+                <tr key={org.organizationId}>
+                  <td className="px-4 py-2.5 text-foreground">{org.organizationName}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{formatRupiah(org.confirmedRupiah)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{formatRupiah(org.heldRupiah)}</td>
+                  <td className={`px-4 py-2.5 text-right tabular-nums font-semibold ${org.capacityRupiah < 0 ? "text-status-error" : "text-foreground"}`}>
+                    {signedRupiah(org.capacityRupiah)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-muted">
+                    {org.activeReservations} ({formatRupiah(org.reservedRemainingRupiah)})
+                  </td>
+                  <td className={`px-4 py-2.5 text-right tabular-nums ${org.uncoveredRupiah > 0 ? "font-semibold text-status-error" : "text-muted"}`}>
+                    {formatRupiah(org.uncoveredRupiah)}
+                  </td>
+                </tr>
+              ))}
+              <tr className="bg-surface-soft">
+                <td className="px-4 py-2.5 font-semibold text-foreground">Total</td>
+                <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-foreground">
+                  {formatRupiah(report.funding.totalConfirmedRupiah)}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-foreground">
+                  {formatRupiah(report.funding.totalHeldRupiah)}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-foreground">
+                  {signedRupiah(report.funding.totalConfirmedRupiah - report.funding.totalHeldRupiah)}
+                </td>
+                <td className="px-4 py-2.5" colSpan={2} />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {report.funding.staleHoldCount > 0 ? (
+          <div className="overflow-x-auto rounded-xl border border-amber-200 dark:border-amber-900/30">
+            <table className="w-full text-sm">
+              <thead className="bg-amber-50 text-left text-xs uppercase text-muted dark:bg-amber-950/20">
+                <tr>
+                  <th className="px-4 py-2 font-semibold">Reservasi menggantung ({report.funding.staleHoldCount})</th>
+                  <th className="px-4 py-2 font-semibold">Pemilik</th>
+                  <th className="px-4 py-2 text-right font-semibold">Sisa ditahan</th>
+                  <th className="px-4 py-2 text-right font-semibold">Usia</th>
+                  <th className="px-4 py-2 font-semibold">Alasan rekonsiliasi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {report.funding.organizations.flatMap((org) =>
+                  org.staleHolds.map((hold) => (
+                    <tr key={hold.reservationId}>
+                      <td className="px-4 py-2.5 text-foreground">
+                        {org.organizationName} · {hold.sourceType === "SESSION" ? "sesi" : "trip"}{" "}
+                        <span className="font-mono text-xs text-muted">{hold.sourceId}</span>
+                        {hold.sourceStatus ? <span className="ml-1 text-xs text-muted">({hold.sourceStatus})</span> : null}
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-foreground">{hold.userId}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">{formatRupiah(hold.remainingRupiah)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-muted">{hold.ageMinutes} mnt</td>
+                      <td className="px-4 py-2.5 text-muted">{hold.reconciliation}</td>
+                    </tr>
+                  )),
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-xs text-muted">Tidak ada reservasi yang menggantung. Sisa dana sesi tidak pernah dilepas otomatis.</p>
+        )}
+      </section>
+
+      <section className="space-y-3">
         <h2 className="text-lg font-semibold text-foreground">
           Kasus rekonsiliasi reward ({report.rewardCases.open} terbuka, {formatRupiah(report.rewardCases.openAmount)})
         </h2>

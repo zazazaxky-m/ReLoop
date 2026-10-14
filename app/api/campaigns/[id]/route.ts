@@ -5,6 +5,16 @@ import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { normalizeEmailDomains } from "@/lib/campaign";
 import { logAudit } from "@/lib/audit";
+import { MAX_FUNDING_RUPIAH, assertMoneyProgramConfigured } from "@/lib/reward-funding";
+
+/** B01: integer rupiah caps; null clears (no cap / not configured). */
+const rupiahCapSchema = z
+  .number({ invalid_type_error: "Nilai harus berupa angka" })
+  .int("Nilai harus bilangan bulat rupiah")
+  .min(0, "Nilai tidak boleh negatif")
+  .max(MAX_FUNDING_RUPIAH, "Nilai melebihi batas yang diizinkan")
+  .nullable()
+  .optional();
 
 const updateSchema = z
   .object({
@@ -22,6 +32,9 @@ const updateSchema = z
     endAt: z.string().datetime().nullable().optional(),
     rewardMultiplier: z.number().min(0).max(100).nullable().optional(),
     status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "ENDED"]).optional(),
+    // B01: program budget and per-session reward ceiling (integer rupiah).
+    rewardBudgetRupiah: rupiahCapSchema,
+    maxRewardPerSessionRupiah: rupiahCapSchema,
   })
   .refine(
     (d) => !d.startAt || !d.endAt || new Date(d.startAt) <= new Date(d.endAt),
@@ -60,6 +73,15 @@ export async function PATCH(
       }
       domainsValue = domains.length ? (domains as Prisma.InputJsonValue) : Prisma.DbNull;
     }
+    // B01: the program as it will be after this change must carry its ceiling if money is live.
+    assertMoneyProgramConfigured({
+      status: data.status ?? current.status,
+      rewardMode: data.rewardMode ?? current.rewardMode,
+      campaignType: data.campaignType ?? current.campaignType,
+      supportsMachine: data.supportsMachine ?? current.supportsMachine,
+      maxRewardPerSessionRupiah:
+        data.maxRewardPerSessionRupiah === undefined ? current.maxRewardPerSessionRupiah : data.maxRewardPerSessionRupiah,
+    });
 
     const campaign = await prisma.campaign.update({
       where: { id },
@@ -69,6 +91,8 @@ export async function PATCH(
         campaignType: data.campaignType,
         rewardMode: data.rewardMode,
         supportsMachine: data.supportsMachine,
+        rewardBudgetRupiah: data.rewardBudgetRupiah,
+        maxRewardPerSessionRupiah: data.maxRewardPerSessionRupiah,
         visibility: data.visibility,
         allowedEmailDomainsJson: domainsValue,
         startAt:

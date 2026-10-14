@@ -5,6 +5,7 @@ import * as notifications from '@/lib/notifications';
 import * as locks from '@/lib/db-locks';
 import * as ledger from '@/lib/ledger';
 import * as credit from '@/lib/reward-credit';
+import * as funding from '@/lib/reward-funding';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -21,11 +22,15 @@ vi.mock('@/lib/db-locks', () => ({
   lockDepositSession: vi.fn(),
   lockDepositItem: vi.fn(),
 }));
-vi.mock('@/lib/ledger', () => ({ getWalletBalance: vi.fn() }));
+vi.mock('@/lib/ledger', () => ({
+  getWalletBalance: vi.fn(),
+  depositItemEarnKey: (id: string) => `deposit-item:${id}:earn`,
+}));
 vi.mock('@/lib/reward-credit', () => ({
   CASE_ALREADY_PAID_OUT: 'ANOMALY_ALREADY_PAID_OUT',
   openRewardReconciliationCase: vi.fn(async () => ({ id: 'case1' })),
 }));
+vi.mock('@/lib/reward-funding', () => ({ markCommitReviewPending: vi.fn() }));
 
 const mockTx = {
   depositItem: { update: vi.fn(), findUnique: vi.fn() },
@@ -121,6 +126,9 @@ describe('fraud', () => {
       expect(mockTx.rewardLedger.updateMany).toHaveBeenCalledWith({ where: { id: 'e1', status: 'AVAILABLE' }, data: { status: 'PENDING' } });
       expect(credit.openRewardReconciliationCase).not.toHaveBeenCalled();
       expect(result).toEqual({ sessionId: 's1', decided: false, heldAmount: 100, reconciliationCaseId: null });
+      // B01: the item's funding obligation is no longer drawable by a payout until a reviewer settles it.
+      expect(funding.markCommitReviewPending).toHaveBeenCalledWith(mockTx, 'deposit-item:d1:earn');
+      expect(vi.mocked(funding.markCommitReviewPending).mock.invocationCallOrder[0]).toBeGreaterThan(order[2]);
     });
 
     it('opens a reconciliation case instead of pushing the balance below zero', async () => {

@@ -42,6 +42,20 @@ import { HttpError } from "./rbac";
  * then the TravelAgentOrganization link row; no transaction locks a link
  * before a User. Email verification, an email change and minting a
  * verification token (lib/email-outbox.ts) lock only the User.
+ * Reward funding (B01, lib/reward-funding.ts): every money path takes the
+ * organization's RewardFundingAccount (created on first use) and the
+ * session/trip Campaign right after the User and before any Machine/Trip/
+ * DepositSession/DepositItem/Redemption lock: session admission (User ->
+ * account -> Campaign -> Machine), machine acceptance and the deposit review
+ * (User -> account -> Campaign -> [Machine ->] DepositSession -> DepositItem),
+ * bag issuance and trip outcome (User -> account -> Campaign -> Trip -> bags),
+ * and a payout success (User -> every account the owner's funded earnings
+ * draw from, in id order -> Redemption). The account counters, reservations
+ * and commit amounts change only under the account lock; a commit's
+ * `reviewPending` flag follows the item and changes under its owner's User
+ * lock. An operator topup/correction or residual release locks the account
+ * alone (a prefix-free suffix of the order is allowed: nothing earlier is
+ * taken afterwards).
  */
 
 /**
@@ -70,6 +84,30 @@ export async function lockRedemption(tx: Prisma.TransactionClient, redemptionId:
   const rows = await tx.$queryRaw<{ id: string }[]>`
     SELECT id FROM "Redemption" WHERE id = ${redemptionId} FOR NO KEY UPDATE`;
   if (rows.length !== 1) throw new HttpError(404, "Pengajuan pencairan tidak ditemukan");
+}
+
+/**
+ * Locks one organization's reward funding account (B01). Taken right after
+ * the User lock(s) and before any Campaign/Machine/Trip/DepositSession lock;
+ * lib/reward-funding.ts creates the row on first use. FOR NO KEY UPDATE:
+ * foreign-key inserts referencing the account (entries, reservations,
+ * commits) are not blocked by it.
+ */
+export async function lockFundingAccount(tx: Prisma.TransactionClient, accountId: string): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "RewardFundingAccount" WHERE id = ${accountId} FOR NO KEY UPDATE`;
+  if (rows.length !== 1) throw new HttpError(404, "Akun pendanaan reward tidak ditemukan");
+}
+
+/**
+ * Locks one campaign for its budget counters (B01), after the funding
+ * account and before any Machine/Trip/DepositSession lock. FOR NO KEY UPDATE:
+ * sessions, trips and rates that reference the campaign are not blocked.
+ */
+export async function lockCampaign(tx: Prisma.TransactionClient, campaignId: string): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "Campaign" WHERE id = ${campaignId} FOR NO KEY UPDATE`;
+  if (rows.length !== 1) throw new HttpError(404, "Campaign tidak ditemukan");
 }
 
 /**

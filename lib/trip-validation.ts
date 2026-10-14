@@ -1,8 +1,9 @@
 import type { ConditionStatus, Prisma } from "@prisma/client";
-import { lockTrip, lockTripBags, lockUser } from "./db-locks";
+import { lockCampaign, lockTrip, lockTripBags, lockUser } from "./db-locks";
 import { prisma } from "./prisma";
 import { HttpError } from "./rbac";
 import { creditReward } from "./reward-credit";
+import { closeReservation, findReservationByKey, lockFundingAccountForOrganization, tripIssuanceKey } from "./reward-funding";
 import { decideReward, tripRewardMode } from "./reward-policy";
 import type { ComplianceResult } from "./tourism";
 import { VERIFIED_MEMBERSHIP } from "./travel-agent-access";
@@ -76,20 +77,44 @@ export type LockedTrip = Prisma.TripGetPayload<{ select: typeof LOCKED_TRIP_SELE
 
 /**
  * Locks the trip aggregate in the global order (reward recipient User ->
- * Trip -> bag rows by id) and re-reads it through `tx`. Re-entrant inside one
+ * RewardFundingAccount of the campaign's organization -> Campaign -> Trip ->
+ * bag rows by id) and re-reads it through `tx`. Re-entrant inside one
  * transaction, so `refreshTripOutcome` can call it again safely.
  */
 export async function lockTripAggregate(tx: Prisma.TransactionClient, tripId: string): Promise<LockedTrip> {
-  // Trip.userId is written once at creation; reading it unlocked only tells us which User to lock.
-  const ref = await tx.trip.findUnique({ where: { id: tripId }, select: { userId: true } });
+  // Trip.userId and Trip.campaignId are written once at creation; reading
+  // them unlocked only tells us which User, account and Campaign to lock.
+  const ref = await tx.trip.findUnique({
+    where: { id: tripId },
+    select: { userId: true, campaignId: true, campaign: { select: { organizationId: true } } },
+  });
   if (!ref) throw new HttpError(404, "Trip tidak ditemukan");
   if (ref.userId) await lockUser(tx, ref.userId);
+  // B01: the trip's reward draws from its issuance reservation.
+  await lockFundingAccountForOrganization(tx, ref.campaign.organizationId);
+  await lockCampaign(tx, ref.campaignId);
   await lockTrip(tx, tripId);
   await lockTripBags(tx, tripId);
   const trip = await tx.trip.findUnique({ where: { id: tripId }, select: LOCKED_TRIP_SELECT });
   if (!trip) throw new HttpError(404, "Trip tidak ditemukan");
-  if (trip.userId !== ref.userId) throw new HttpError(409, TRIP_CHANGED);
+  if (trip.userId !== ref.userId || trip.campaignId !== ref.campaignId) throw new HttpError(409, TRIP_CHANGED);
   return trip;
+}
+
+/**
+ * B01: once a trip is closed no further earning can draw from its issuance
+ * reservation, so its residue goes back to the organization's capacity and
+ * the campaign's budget (the trip's own return earning, if any, committed
+ * first). Legacy trips (no reservation) are left alone.
+ */
+export async function closeTripReservation(
+  tx: Prisma.TransactionClient,
+  tripId: string,
+  reason: "TRIP_COMPLETED" | "TRIP_CANCELLED",
+): Promise<void> {
+  const reservation = await findReservationByKey(tx, tripIssuanceKey(tripId));
+  if (!reservation || reservation.status !== "ACTIVE") return;
+  await closeReservation(tx, reservation.id, { reason });
 }
 
 /**
@@ -286,6 +311,7 @@ export async function refreshTripOutcome(
     });
     rewardAmount = entry?.amount ?? 0;
   }
+  if (completedNow) await closeTripReservation(tx, tripId, "TRIP_COMPLETED");
   const paidRewardAmount =
     rewardAmount +
     rewards

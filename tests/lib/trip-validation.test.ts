@@ -60,19 +60,32 @@ function fakeTx(state: {
   const log: string[] = [];
   let reads = 0;
   const tx = {
+    // B01: the funding account row is created on first use (conflict-free insert, no lock).
+    $executeRaw: vi.fn(async () => 0),
     $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = strings.join("?");
       const table = /FROM "(\w+)"/.exec(sql)![1];
       log.push(`lock ${table} ${values.join(",")}${/ORDER BY id/.test(sql) ? " ordered" : ""}`);
       if (table === "User") return Array.from({ length: state.lockRows?.user ?? 1 }, () => ({ id: values[0] }));
+      if (table === "RewardFundingAccount") return [{ id: "acct1" }];
+      if (table === "Campaign") return [{ id: values[0] }];
       if (table === "Trip") return Array.from({ length: state.lockRows?.trip ?? 1 }, () => ({ id: values[0] }));
       return (state.trip?.bagAssignments ?? []).map((bag) => ({ id: bag.id }));
     }),
+    rewardFundingAccount: {
+      findUniqueOrThrow: vi.fn(async () => ({ id: "acct1", organizationId: "org1", confirmedRupiah: 0, heldRupiah: 0, version: 0 })),
+    },
+    // No issuance reservation: a legacy trip, so no funding commit or release.
+    rewardBudgetReservation: { findUnique: vi.fn(async () => null) },
     trip: {
       findUnique: vi.fn(async () => {
         reads += 1;
         log.push(reads === 1 ? "read ref" : "read locked");
-        if (reads === 1) return state.trip ? { userId: state.trip.userId } : null;
+        if (reads === 1) {
+          return state.trip
+            ? { userId: state.trip.userId, campaignId: state.trip.campaignId, campaign: { organizationId: state.trip.campaign.organizationId } }
+            : null;
+        }
         return state.locked === undefined ? state.trip : state.locked;
       }),
       updateMany: vi.fn(async () => {
@@ -110,17 +123,28 @@ function fakeTx(state: {
 }
 
 describe("lockTripAggregate", () => {
-  it("locks the reward user, then the trip, then its bags in id order, then re-reads", async () => {
+  it("locks the reward user, the funding account, the campaign, then the trip, then its bags in id order, then re-reads", async () => {
     const { tx, log } = fakeTx({ trip: tripRow() });
     const trip = await lockTripAggregate(tx, "t1");
     expect(trip.id).toBe("t1");
-    expect(log).toEqual(["read ref", "lock User u1", "lock Trip t1", "lock TrashBagAssignment t1 ordered", "read locked"]);
+    expect(log).toEqual([
+      "read ref", "lock User u1", "lock RewardFundingAccount org1", "lock Campaign c1",
+      "lock Trip t1", "lock TrashBagAssignment t1 ordered", "read locked",
+    ]);
   });
 
   it("locks no user for a trip without a reward recipient", async () => {
     const { tx, log } = fakeTx({ trip: tripRow({ userId: null }) });
     await lockTripAggregate(tx, "t1");
-    expect(log).toEqual(["read ref", "lock Trip t1", "lock TrashBagAssignment t1 ordered", "read locked"]);
+    expect(log).toEqual([
+      "read ref", "lock RewardFundingAccount org1", "lock Campaign c1",
+      "lock Trip t1", "lock TrashBagAssignment t1 ordered", "read locked",
+    ]);
+  });
+
+  it("refuses when the re-read trip belongs to another campaign than the one locked (B01)", async () => {
+    const { tx } = fakeTx({ trip: tripRow(), locked: tripRow({ campaignId: "c2" }) });
+    await expect(lockTripAggregate(tx, "t1")).rejects.toMatchObject({ status: 409, message: TRIP_CHANGED });
   });
 
   it("answers 404 before taking any lock when the trip does not exist", async () => {

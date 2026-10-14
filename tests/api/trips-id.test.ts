@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { GET, PATCH } from '@/app/api/trips/[id]/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
+import * as tripValidation from '@/lib/trip-validation';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -20,6 +21,15 @@ vi.mock('@/lib/rbac', () => ({
 }));
 
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn() }));
+// B01: the status change runs under the trip locks and gives a cancelled
+// trip's issuance reservation back; the transaction client is the mocked prisma.
+vi.mock('@/lib/wallet-service', () => ({
+  runWalletTransaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),
+}));
+vi.mock('@/lib/trip-validation', () => ({
+  lockTripAggregate: vi.fn(),
+  closeTripReservation: vi.fn(),
+}));
 
 const makeParams = (id: string) => ({ params: Promise.resolve({ id }) });
 
@@ -215,6 +225,7 @@ describe('/api/trips/[id]', () => {
       vi.mocked(prisma.trip.findUnique).mockResolvedValue({
         id: 't1', campaign: { organizationId: 'org1' }, userId: null, status: 'PLANNED',
       } as any);
+      vi.mocked(tripValidation.lockTripAggregate).mockResolvedValue({ status: 'PLANNED' } as any);
       vi.mocked(prisma.trip.updateMany).mockResolvedValue({ count: 1 } as any);
       vi.mocked(prisma.trip.findUniqueOrThrow).mockResolvedValue({ id: 't1', status: 'CANCELLED' } as any);
 
@@ -224,8 +235,13 @@ describe('/api/trips/[id]', () => {
       const res = await PATCH(req, makeParams('t1'));
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ trip: { id: 't1', status: 'CANCELLED' } });
-      // Compare-and-set on the status the decision was made on.
+      // Under the trip locks, compare-and-set on the status the decision was made on.
+      expect(tripValidation.lockTripAggregate).toHaveBeenCalledWith(prisma, 't1');
       expect(prisma.trip.updateMany).toHaveBeenCalledWith({ where: { id: 't1', status: 'PLANNED' }, data: { status: 'CANCELLED' } });
+      expect(vi.mocked(tripValidation.lockTripAggregate).mock.invocationCallOrder[0])
+        .toBeLessThan(vi.mocked(prisma.trip.updateMany).mock.invocationCallOrder[0]);
+      // B01: a cancelled trip can no longer earn, so its issuance reservation is given back.
+      expect(tripValidation.closeTripReservation).toHaveBeenCalledWith(prisma, 't1', 'TRIP_CANCELLED');
     });
 
     it('answers 409 when a check-out changed the trip meanwhile', async () => {
@@ -233,6 +249,7 @@ describe('/api/trips/[id]', () => {
       vi.mocked(prisma.trip.findUnique).mockResolvedValue({
         id: 't1', campaign: { organizationId: 'org1' }, userId: null, status: 'ACTIVE',
       } as any);
+      vi.mocked(tripValidation.lockTripAggregate).mockResolvedValue({ status: 'ACTIVE' } as any);
       vi.mocked(prisma.trip.updateMany).mockResolvedValue({ count: 0 } as any);
 
       const res = await PATCH(new Request('http://localhost', {
@@ -241,6 +258,16 @@ describe('/api/trips/[id]', () => {
       expect(res.status).toBe(409);
       expect((await res.json()).error).toBe('Status trip sudah berubah. Muat ulang halaman lalu coba lagi.');
       expect(prisma.trip.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(tripValidation.closeTripReservation).not.toHaveBeenCalled();
+
+      // The locked re-read already shows the closed trip: refused before the compare-and-set.
+      vi.mocked(prisma.trip.updateMany).mockClear();
+      vi.mocked(tripValidation.lockTripAggregate).mockResolvedValue({ status: 'COMPLETED' } as any);
+      const early = await PATCH(new Request('http://localhost', {
+        method: 'PATCH', body: JSON.stringify({ status: 'CANCELLED' }),
+      }), makeParams('t1'));
+      expect(early.status).toBe(409);
+      expect(prisma.trip.updateMany).not.toHaveBeenCalled();
     });
 
     it('rejects illegal status transitions', async () => {

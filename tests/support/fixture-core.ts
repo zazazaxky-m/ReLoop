@@ -3,12 +3,15 @@ import { writeFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import Redis from "ioredis";
 import { buildSessionPayload, hashPassword, SESSION_COOKIE, signSession } from "@/lib/auth";
+import { lockUser } from "@/lib/db-locks";
 import { generateEmailToken, hashInviteToken, INVITE_TOKEN_TTL_MS } from "@/lib/email-tokens";
 import { encrypt } from "@/lib/encryption";
 import { getWalletBalance } from "@/lib/ledger";
 import { prisma } from "@/lib/prisma";
 import { generateToken } from "@/lib/qr";
+import { recordFundingEntry, reserveRewardBudget } from "@/lib/reward-funding";
 import type { AppRole } from "@/lib/roles";
+import { runWalletTransaction } from "@/lib/wallet-service";
 import { readCapturedTransport, type CapturedTransport } from "@/lib/test-transport";
 import { generateTotpCode, generateTotpSecret } from "@/lib/totp";
 import {
@@ -375,11 +378,34 @@ export async function createAuditFixture(): Promise<AuditFixture> {
         201, "POST /api/pickups");
       return { id: body.pickup.id };
     },
-    async confirmFunding() {
-      throw new FixtureContractUnavailable("B01", "confirmFunding()");
+    // B01: operator-confirmed cash for organization A, through the production
+    // writer (one immutable CONFIRMED_TOPUP entry with a unique fixture reference).
+    async confirmFunding(amount) {
+      assertRupiah(amount);
+      await runWalletTransaction((tx) =>
+        recordFundingEntry(tx, {
+          organizationId: ids.orgA,
+          kind: "CONFIRMED_TOPUP",
+          amount,
+          reference: `audit-fixture-${randomUUID()}`,
+          note: "audit fixture",
+          verifiedById: ids.superadmin,
+        }),
+      );
     },
-    async reserveBudget() {
-      throw new FixtureContractUnavailable("B01", "reserveBudget()");
+    // B01: an admission reservation for user A on organization A, enforced
+    // (the helper tests capacity, whatever the server's flag is).
+    async reserveBudget({ businessKey, amount }) {
+      assertRupiah(amount);
+      return runWalletTransaction(async (tx) => {
+        await lockUser(tx, ids.userA);
+        return reserveRewardBudget(
+          tx,
+          { businessKey, organizationId: ids.orgA, campaignId: null, userId: ids.userA,
+            ceilingRupiah: amount, sourceType: "SESSION", sourceId: businessKey },
+          { enforced: true },
+        );
+      });
     },
     async gateway() {
       const harness = await startRealtimeHarness({

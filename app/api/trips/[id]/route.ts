@@ -4,7 +4,9 @@ import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { TRIP_CHANGED, canManuallySetTripStatus } from "@/lib/trip";
+import { closeTripReservation, lockTripAggregate } from "@/lib/trip-validation";
 import { VERIFIED_MEMBERSHIP } from "@/lib/travel-agent-access";
+import { runWalletTransaction } from "@/lib/wallet-service";
 
 const patchSchema = z.object({
   status: z.enum(["PLANNED", "ACTIVE", "COMPLETED", "CANCELLED"]),
@@ -111,12 +113,18 @@ export async function PATCH(
       throw new HttpError(422, allowed.reason!);
     }
 
-    // Compare-and-set: a check-out that closed the trip meanwhile (under the
-    // trip lock, lib/trip-validation.ts) must not be overwritten by a cancel
-    // decided on the status read above.
-    const { count } = await prisma.trip.updateMany({ where: { id, status: existing.status }, data: { status } });
-    if (count !== 1) throw new HttpError(409, TRIP_CHANGED);
-    const trip = await prisma.trip.findUniqueOrThrow({ where: { id } });
+    // Under the trip locks (lib/trip-validation.ts; B01: User -> funding
+    // account -> Campaign -> Trip): a check-out that closed the trip meanwhile
+    // must not be overwritten by a cancel decided on the status read above,
+    // and a cancelled trip gives its issuance reservation back.
+    const trip = await runWalletTransaction(async (tx) => {
+      const locked = await lockTripAggregate(tx, id);
+      if (locked.status !== existing.status) throw new HttpError(409, TRIP_CHANGED);
+      const { count } = await tx.trip.updateMany({ where: { id, status: existing.status }, data: { status } });
+      if (count !== 1) throw new HttpError(409, TRIP_CHANGED);
+      if (status === "CANCELLED") await closeTripReservation(tx, id, "TRIP_CANCELLED");
+      return tx.trip.findUniqueOrThrow({ where: { id } });
+    });
     await logAudit({
       actorId: user.id,
       action: "TRIP_STATUS",

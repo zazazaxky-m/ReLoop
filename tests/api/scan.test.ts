@@ -21,7 +21,11 @@ const db = vi.hoisted(() => {
     user: { findUnique: vi.fn() },
     depositSession: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
     depositItem: { findMany: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
-    campaign: { findUnique: vi.fn() },
+    campaign: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn() },
+    // B01: the organization's funding account and the session's reservation.
+    rewardFundingAccount: { findUniqueOrThrow: vi.fn(), update: vi.fn() },
+    rewardBudgetReservation: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+    rewardBudgetCommit: { aggregate: vi.fn() },
     $queryRaw: vi.fn(),
     $executeRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -84,6 +88,14 @@ describe("/api/scan", () => {
     db.$executeRaw.mockResolvedValue(0);
     db.user.findUnique.mockResolvedValue({ email: "user@example.com" });
     db.depositSession.findMany.mockResolvedValue([]);
+    db.rewardFundingAccount.findUniqueOrThrow.mockResolvedValue({
+      id: "acct1", organizationId: "org1", confirmedRupiah: 50_000, heldRupiah: 0, version: 0 });
+    db.rewardFundingAccount.update.mockResolvedValue({});
+    db.rewardBudgetReservation.findUnique.mockResolvedValue(null);
+    db.rewardBudgetReservation.create.mockImplementation(async ({ data }: any) => ({ id: "res1", ...data }));
+    db.campaign.findUniqueOrThrow.mockImplementation(async ({ where }: any) => ({
+      id: where.id, organizationId: "org1", rewardBudgetRupiah: null, heldRupiah: 0, spentRupiah: 0 }));
+    db.campaign.update.mockResolvedValue({});
     vi.mocked(rateLimit.checkRateLimit).mockResolvedValue({
       allowed: true,
       remaining: 19,
@@ -112,7 +124,9 @@ describe("/api/scan", () => {
     status: "ONLINE",
     organizationId: "org1",
     sessionIdleTimeoutMinutes: 5,
-    organization: { id: "org1", name: "Org 1", status: "ACTIVE" },
+    // B01: a money organization with a configured per-session ceiling.
+    maxRewardPerSessionRupiah: 20_000,
+    organization: { id: "org1", name: "Org 1", status: "ACTIVE", machineRewardMode: "MONEY_REWARD" },
     wasteTypes: [{ id: "link1", wasteType: { id: "w1", name: "Plastik" } }],
   };
 
@@ -169,11 +183,13 @@ describe("/api/scan", () => {
       id: "m1", machineCode: "RVM-001", name: "Mesin 1", organizationName: "Org 1",
       supportedWasteTypes: [{ id: "w1", name: "Plastik" }],
     });
-    expect(lockOrder()).toEqual(["User", "Machine"]);
-    // The decision reads happen after both locks, inside the transaction.
+    // B01: the organization's funding account comes between the User and the
+    // Machine; the reservation re-takes it afterwards (re-entrant, already held).
+    expect(lockOrder()).toEqual(["User", "RewardFundingAccount", "Machine", "RewardFundingAccount"]);
+    // The decision reads happen after the locks, inside the transaction.
     const machineRead = db.machine.findUnique.mock.invocationCallOrder[1];
     const sessionsRead = db.depositSession.findMany.mock.invocationCallOrder[0];
-    const machineLock = db.$queryRaw.mock.invocationCallOrder[1];
+    const machineLock = db.$queryRaw.mock.invocationCallOrder[2];
     expect(machineRead).toBeGreaterThan(machineLock);
     expect(sessionsRead).toBeGreaterThan(machineLock);
     expect(db.depositSession.create).toHaveBeenCalledWith({
@@ -250,6 +266,93 @@ describe("/api/scan", () => {
     expect(db.depositSession.update).not.toHaveBeenCalled();
   });
 
+  describe("B01: the session's reward ceiling is reserved before the admission commits", () => {
+    const reservationCreate = () => db.rewardBudgetReservation.create.mock.calls[0]?.[0]?.data;
+
+    it("reserves the machine's ceiling for a money organization, under the account lock, after the session row", async () => {
+      db.machine.findUnique.mockResolvedValue(baseMachine);
+      db.depositSession.create.mockResolvedValue({ id: "sess1", userId: "u1", status: "ACTIVE" });
+      const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+      expect(res.status).toBe(201);
+      expect(reservationCreate()).toEqual({
+        businessKey: "session:sess1:admission", accountId: "acct1", campaignId: null, userId: "u1",
+        sourceType: "SESSION", sourceId: "sess1", ceilingRupiah: 20_000, remainingRupiah: 20_000,
+        shortfallRupiah: 0, campaignShortfallRupiah: 0,
+      });
+      expect(db.rewardFundingAccount.update).toHaveBeenCalledWith({
+        where: { id: "acct1" }, data: { confirmedRupiah: 50_000, heldRupiah: 20_000, version: { increment: 1 } } });
+      expect(db.rewardBudgetReservation.create.mock.invocationCallOrder[0])
+        .toBeGreaterThan(db.depositSession.create.mock.invocationCallOrder[0]);
+    });
+
+    it("uses the campaign's ceiling and budget when the session binds a campaign, locking it before the Machine", async () => {
+      db.machine.findUnique.mockResolvedValue(baseMachine);
+      db.campaign.findUnique.mockResolvedValue({
+        id: "c1", organizationId: "org1", campaignType: "MACHINE_DEPOSIT", rewardMode: "MONEY_REWARD",
+        supportsMachine: false, visibility: "PUBLIC", maxRewardPerSessionRupiah: 5_000 });
+      db.campaign.findUniqueOrThrow.mockResolvedValue({
+        id: "c1", organizationId: "org1", rewardBudgetRupiah: 100_000, heldRupiah: 0, spentRupiah: 0 });
+      vi.mocked(campaign.isCampaignEligible).mockReturnValue({ eligible: true } as any);
+      db.depositSession.create.mockResolvedValue({ id: "sess1", userId: "u1", status: "ACTIVE" });
+      const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok", campaignId: "c1" }));
+      expect(res.status).toBe(201);
+      expect(lockOrder()).toEqual(["User", "RewardFundingAccount", "Campaign", "Machine", "RewardFundingAccount", "Campaign"]);
+      expect(reservationCreate()).toMatchObject({ campaignId: "c1", ceilingRupiah: 5_000, remainingRupiah: 5_000 });
+      expect(db.campaign.update).toHaveBeenCalledWith({ where: { id: "c1" }, data: { heldRupiah: { increment: 5_000 } } });
+    });
+
+    it("reserves nothing for a COMPLIANCE_ONLY organization", async () => {
+      db.machine.findUnique.mockResolvedValue({
+        ...baseMachine, organization: { ...baseMachine.organization, machineRewardMode: "COMPLIANCE_ONLY" } });
+      db.depositSession.create.mockResolvedValue({ id: "sess1", userId: "u1", status: "ACTIVE" });
+      expect((await POST(makeReq({ machineCode: "RVM-001", token: "tok" }))).status).toBe(201);
+      expect(db.rewardBudgetReservation.create).not.toHaveBeenCalled();
+      expect(db.rewardFundingAccount.update).not.toHaveBeenCalled();
+    });
+
+    it("without a configured ceiling: refused under enforcement, admitted with a zero ceiling in shadow mode", async () => {
+      db.machine.findUnique.mockResolvedValue({ ...baseMachine, maxRewardPerSessionRupiah: null });
+      db.depositSession.create.mockResolvedValue({ id: "sess1", userId: "u1", status: "ACTIVE" });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const previous = process.env.REWARD_FUNDING_ENFORCED;
+      try {
+        process.env.REWARD_FUNDING_ENFORCED = "true";
+        const refused = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+        expect(refused.status).toBe(409);
+        expect((await refused.json()).error).toBe("Program sementara tidak menerima setoran berhadiah");
+        expect(db.rewardBudgetReservation.create).not.toHaveBeenCalled();
+
+        process.env.REWARD_FUNDING_ENFORCED = "false";
+        const shadow = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+        expect(shadow.status).toBe(201);
+        expect(reservationCreate()).toMatchObject({ ceilingRupiah: 0, remainingRupiah: 0 });
+      } finally {
+        if (previous === undefined) delete process.env.REWARD_FUNDING_ENFORCED;
+        else process.env.REWARD_FUNDING_ENFORCED = previous;
+        warn.mockRestore();
+      }
+    });
+
+    it("refuses the admission under enforcement when the organization's capacity is short, before any reservation", async () => {
+      db.machine.findUnique.mockResolvedValue(baseMachine);
+      db.rewardFundingAccount.findUniqueOrThrow.mockResolvedValue({
+        id: "acct1", organizationId: "org1", confirmedRupiah: 10_000, heldRupiah: 0, version: 0 });
+      db.depositSession.create.mockResolvedValue({ id: "sess1", userId: "u1", status: "ACTIVE" });
+      const previous = process.env.REWARD_FUNDING_ENFORCED;
+      try {
+        process.env.REWARD_FUNDING_ENFORCED = "true";
+        const refused = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
+        expect(refused.status).toBe(409);
+        expect((await refused.json()).error).toBe("Program sementara tidak menerima setoran berhadiah");
+        expect(db.rewardBudgetReservation.create).not.toHaveBeenCalled();
+        expect(db.rewardFundingAccount.update).not.toHaveBeenCalled();
+      } finally {
+        if (previous === undefined) delete process.env.REWARD_FUNDING_ENFORCED;
+        else process.env.REWARD_FUNDING_ENFORCED = previous;
+      }
+    });
+  });
+
   it("resumes session if active session exists for same user", async () => {
     db.machine.findUnique.mockResolvedValue(baseMachine);
     db.depositSession.findMany.mockResolvedValue([session({ id: "sess1", userId: "u1" })]);
@@ -274,7 +377,7 @@ describe("/api/scan", () => {
 
     const res = await POST(makeReq({ machineCode: "RVM-001", token: "tok" }));
     expect(res.status).toBe(201);
-    expect(lockOrder()).toEqual(["User", "Machine", "DepositSession", "DepositItem"]);
+    expect(lockOrder()).toEqual(["User", "RewardFundingAccount", "Machine", "DepositSession", "DepositItem", "RewardFundingAccount"]);
     expect(db.depositItem.updateMany).toHaveBeenCalledWith({
       where: { id: "item-1", status: "PENDING", acceptanceEventId: null },
       data: { status: "REVIEW", validationReasonCode: "SESSION_TIMEOUT" },
@@ -316,9 +419,11 @@ describe("/api/scan", () => {
     const locks = db.$queryRaw.mock.calls.map((call: unknown[]) =>
       [(call[0] as TemplateStringsArray).join("?").match(/FROM "(\w+)"/)?.[1], call[1]]);
     expect(locks).toEqual([
-      ["User", "u1"], ["Machine", "m1"],
+      ["User", "u1"], ["RewardFundingAccount", "org1"], ["Machine", "m1"],
       ["DepositSession", "s-a"], ["DepositSession", "s-b"],
       ["DepositItem", "i-1"], ["DepositItem", "i-2"],
+      // The reservation re-takes the account row it already holds (re-entrant).
+      ["RewardFundingAccount", "org1"],
     ]);
     const expired = vi.mocked(audit.logAudit).mock.calls.map((call) => call[0])
       .filter((entry) => entry.action === "DEPOSIT_SESSION_EXPIRE")

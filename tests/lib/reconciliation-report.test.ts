@@ -13,6 +13,11 @@ import {
 import { prisma } from '@/lib/prisma';
 
 vi.mock('@/lib/prisma', () => ({ prisma: { $transaction: vi.fn() } }));
+// B01a: the funding visibility is read in the same snapshot; its own reads are unit-tested in reward-funding.test.ts.
+vi.mock('@/lib/reward-funding', () => ({
+  readFundingVisibility: vi.fn(async () => ({
+    enforced: false, totalConfirmedRupiah: 0, totalHeldRupiah: 0, staleHoldCount: 0, organizations: [] })),
+}));
 
 const balance = (overrides: Partial<WalletBalance>): WalletBalance => ({
   available: 0, pending: 0, redeemed: 0, reserved: 0, totalEarned: 0, ...overrides,

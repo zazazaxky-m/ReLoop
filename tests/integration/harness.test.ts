@@ -300,11 +300,24 @@ describe("fixture domain helpers", () => {
   });
 
   it("refuses later-contract helpers instead of faking success", async () => {
-    await expect(f.confirmFunding(10_000)).rejects.toThrow("B01 contract unavailable");
-    await expect(f.reserveBudget({ businessKey: "admission-a", amount: 8_000 })).rejects.toThrow("B01 contract unavailable");
     await expect(f.trip({ bagCount: 1, recipientConfirmed: true })).rejects.toThrow("B03 contract unavailable");
     expect(await f.db.trip.count()).toBe(0);
     await expect(f.seedBalance(10.5)).rejects.toThrow(/positive integer/);
+  });
+
+  it("B01 funding helpers write real rows through the production funding service (no fake success)", async () => {
+    await f.confirmFunding(10_000);
+    const account = await f.db.rewardFundingAccount.findUniqueOrThrow({ where: { organizationId: f.ids.orgA } });
+    expect(account).toMatchObject({ confirmedRupiah: 10_000, heldRupiah: 0 });
+    expect(await f.db.fundingEntry.findMany()).toEqual([expect.objectContaining({
+      accountId: account.id, kind: "CONFIRMED_TOPUP", amount: 10_000, verifiedById: f.ids.superadmin })]);
+    const reservationId = await f.reserveBudget({ businessKey: "admission-a", amount: 8_000 });
+    expect(await f.db.rewardBudgetReservation.findUniqueOrThrow({ where: { id: reservationId } })).toMatchObject({
+      businessKey: "admission-a", accountId: account.id, userId: f.ids.userA, ceilingRupiah: 8_000, remainingRupiah: 8_000 });
+    expect((await f.db.rewardFundingAccount.findUniqueOrThrow({ where: { organizationId: f.ids.orgA } })).heldRupiah).toBe(8_000);
+    // The helper enforces capacity regardless of the server's flag.
+    await expect(f.reserveBudget({ businessKey: "admission-b", amount: 8_000 })).rejects.toMatchObject({ status: 409 });
+    await expect(f.confirmFunding(0)).rejects.toThrow(/positive integer/);
   });
 });
 

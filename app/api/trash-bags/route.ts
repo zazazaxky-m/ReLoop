@@ -2,12 +2,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireApiUser, assertOrgScope, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
-import { lockTrip } from "@/lib/db-locks";
-import {
-  generateBagQrCode,
-  canIssueBagsForTripStatus,
-  getTripTravelAgentGateBlockReason,
-} from "@/lib/trip";
+import { getTripTravelAgentGateBlockReason } from "@/lib/trip";
+import { issueTrashBags } from "@/lib/trip-issuance";
 import {
   CORRECTION_REQUIRED,
   lockTripAggregate,
@@ -36,8 +32,6 @@ const updateSchema = z.object({
   /** Required to change a bag after the trip is COMPLETED (never changes the reward). */
   correctionReason: z.string().trim().min(5).max(500).optional(),
 });
-
-const ISSUE_STATUS_ERROR = "Kantong hanya dapat diterbitkan untuk trip PLANNED atau ACTIVE";
 
 const BAG_RESPONSE_INCLUDE = {
   wasteType: { select: { name: true } },
@@ -101,89 +95,16 @@ export async function GET(req: Request) {
   }
 }
 
+/**
+ * Issues bags for a trip (lib/trip-issuance.ts): under the reward recipient's
+ * User -> funding account -> Campaign -> Trip locks, reserving the most the
+ * bags can pay before the rows exist (B01).
+ */
 export async function POST(req: Request) {
   try {
     const user = await requireApiUser(["ADMIN", "SUPERADMIN"]);
     const data = createSchema.parse(await req.json());
-
-    const trip = await prisma.trip.findUnique({
-      where: { id: data.tripId },
-      include: { campaign: { select: { organizationId: true } } },
-    });
-    if (!trip) throw new HttpError(404, "Trip tidak ditemukan");
-    assertOrgScope(user, trip.campaign.organizationId);
-    if (!canIssueBagsForTripStatus(trip.status)) {
-      throw new HttpError(422, ISSUE_STATUS_ERROR);
-    }
-    const agentBlock = await getTripTravelAgentGateBlockReason({
-      travelAgentId: trip.travelAgentId,
-      organizationId: trip.campaign.organizationId,
-    });
-    if (agentBlock) throw new HttpError(422, agentBlock);
-
-    if (data.wasteTypeId) {
-      const wasteType = await prisma.wasteType.findFirst({
-        where: {
-          id: data.wasteTypeId,
-          active: true,
-          OR: [
-            { organizationId: null },
-            { organizationId: trip.campaign.organizationId },
-          ],
-        },
-        select: { id: true },
-      });
-      if (!wasteType) {
-        throw new HttpError(422, "Jenis sampah tidak aktif atau di luar organisasi trip");
-      }
-    }
-
-    // One unique QR per physical bag (one row = one unit). Issued under the
-    // Trip lock so a closing check-out and a new bag cannot interleave; the
-    // whole transaction is retried on a rare QR collision.
-    const maxAttempts = 5;
-    let created: Awaited<ReturnType<typeof prisma.trashBagAssignment.findMany>> = [];
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const qrCodes = Array.from({ length: data.bagCount }, () => generateBagQrCode());
-      try {
-        created = await runWalletTransaction(async (tx) => {
-          await lockTrip(tx, trip.id);
-          const current = await tx.trip.findUniqueOrThrow({ where: { id: trip.id }, select: { status: true } });
-          if (!canIssueBagsForTripStatus(current.status)) throw new HttpError(422, ISSUE_STATUS_ERROR);
-          await tx.trashBagAssignment.createMany({
-            data: qrCodes.map((bagQrCode) => ({
-              tripId: trip.id,
-              assignedById: user.id,
-              wasteTypeId: data.wasteTypeId ?? null,
-              bagQrCode,
-              bagCount: 1,
-            })),
-          });
-          return tx.trashBagAssignment.findMany({
-            where: { tripId: trip.id, bagQrCode: { in: qrCodes } },
-            orderBy: { assignedAt: "asc" },
-          });
-        });
-        break;
-      } catch (err: unknown) {
-        const code =
-          err && typeof err === "object" && "code" in err
-            ? String((err as { code: unknown }).code)
-            : "";
-        if (code !== "P2002" || attempt === maxAttempts) throw err;
-      }
-    }
-
-    await afterCommitSafely("audit TRASH_BAG_ASSIGN", () =>
-      logAudit({
-        actorId: user.id,
-        action: "TRASH_BAG_ASSIGN",
-        entityType: "Trip",
-        entityId: trip.id,
-        metadata: { bagCount: data.bagCount, wasteTypeId: data.wasteTypeId ?? null },
-      }),
-    );
-
+    const created = await issueTrashBags(user, data);
     return jsonOk({ bags: created }, 201);
   } catch (error) {
     return handleApiError(error);

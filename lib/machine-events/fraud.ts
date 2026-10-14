@@ -1,9 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { lockDepositItem, lockDepositSession, lockUser } from "../db-locks";
-import { getWalletBalance } from "../ledger";
+import { depositItemEarnKey, getWalletBalance } from "../ledger";
 import { prisma } from "../prisma";
 import { sendPushToUsersBestEffort } from "../notifications";
 import { CASE_ALREADY_PAID_OUT, openRewardReconciliationCase } from "../reward-credit";
+import { markCommitReviewPending } from "../reward-funding";
 import { isReviewFinal } from "./shared";
 
 /**
@@ -120,6 +121,10 @@ export async function holdItemForFraud(
 
   let heldAmount = 0;
   let reconciliationCaseId: string | null = null;
+  // B01: whatever happens to the ledger row, the item is under review again,
+  // so its funding obligation must not be drawn by a payout until a reviewer
+  // settles it (owner User lock held; no counter changes).
+  await markCommitReviewPending(tx, depositItemEarnKey(depositItemId));
   const earnings = await tx.rewardLedger.findMany({
     where: { depositItemId, userId, entryType: "EARN", status: "AVAILABLE" },
     orderBy: { id: "asc" },

@@ -123,6 +123,24 @@ enum RewardReconciliationStatus {
   RESOLVED
 }
 
+/// B01: cash-side movements of a RewardFundingAccount (immutable rows).
+enum FundingEntryKind {
+  CONFIRMED_TOPUP
+  PAYOUT
+  CORRECTION
+}
+
+/// B01: what a reward budget reservation was taken for.
+enum RewardReservationSource {
+  SESSION
+  TRIP
+}
+
+enum RewardReservationStatus {
+  ACTIVE
+  RELEASED
+}
+
 enum SessionStatus {
   RESERVED
   ACTIVE
@@ -436,6 +454,7 @@ model Organization {
   ledgerEntries      RewardLedger[]
   travelAgentLinks   TravelAgentOrganization[]
   travelAgentInvites TravelAgentInvite[]
+  rewardFunding      RewardFundingAccount?
 
   @@index([regionId])
   @@index([type])
@@ -509,6 +528,12 @@ model Machine {
   materialVerification      MaterialVerification @default(WEIGHT_ONLY)
   chamberTimeoutSeconds     Int                  @default(20)
   sessionIdleTimeoutMinutes Int                  @default(3)
+  /// B01: reward ceiling reserved for one deposit session on this machine
+  /// (integer rupiah) when the session's campaign sets none. Null = not
+  /// configured: with REWARD_FUNDING_ENFORCED a money session is refused.
+  maxRewardPerSessionRupiah Int?
+  /// B01: item bound of one session, bound into the signed lease by B01b.
+  maxItemsPerSession        Int?
   lastHeartbeatAt           DateTime?
   latitude                  Float?
   longitude                 Float?
@@ -611,6 +636,15 @@ model Campaign {
   status                  CampaignStatus     @default(DRAFT)
   rewardMultiplier        Float?
   rulesJson               Json?
+  /// B01: total reward budget of the program (integer rupiah); null = no
+  /// program cap (the organization's funded capacity still applies).
+  rewardBudgetRupiah        Int?
+  /// B01: admission ceilings reserved and not yet committed (lib/reward-funding.ts).
+  heldRupiah                Int                @default(0)
+  /// B01: committed reward obligations (earned, pending review or paid); not refilled by a payout.
+  spentRupiah               Int                @default(0)
+  /// B01: reward ceiling reserved per deposit session under this program; falls back to Machine.maxRewardPerSessionRupiah.
+  maxRewardPerSessionRupiah Int?
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
 
@@ -618,6 +652,8 @@ model Campaign {
   rewardRates   RewardRate[]
   ledgerEntries RewardLedger[]
   trips         Trip[]
+  rewardReservations RewardBudgetReservation[]
+  rewardCommits      RewardBudgetCommit[]
 
   @@index([organizationId, status])
 }
@@ -853,6 +889,117 @@ model RewardReconciliationCase {
 
   @@index([status, createdAt])
   @@index([userId])
+}
+
+/// B01 (BIZ-02): confirmed reward cash and held reward obligations of one
+/// organization. Counters are maintained only under the row lock
+/// (lib/db-locks.ts lockFundingAccount) by lib/reward-funding.ts; every change
+/// is backed by an immutable FundingEntry (cash) or a reservation/commit row
+/// (obligation). `confirmedRupiah - heldRupiah` is the capacity an admission
+/// may still reserve.
+model RewardFundingAccount {
+  id              String       @id @default(cuid())
+  organizationId  String       @unique
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  /// Cash confirmed by an operator with evidence (sum of entries).
+  confirmedRupiah Int          @default(0)
+  /// Reward obligations not yet paid: admission ceilings still reserved plus committed earnings.
+  heldRupiah      Int          @default(0)
+  /// Bumped on every counter change (diagnostics; the row lock serializes writers).
+  version         Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  entries      FundingEntry[]
+  reservations RewardBudgetReservation[]
+  commits      RewardBudgetCommit[]
+}
+
+/// Immutable cash movement of a funding account. Never moves real money:
+/// CONFIRMED_TOPUP records a verified deposit (unique `reference`), PAYOUT the
+/// gross of a successful user payout attributed to this source, CORRECTION a
+/// signed operator correction with evidence.
+model FundingEntry {
+  id           String               @id @default(cuid())
+  accountId    String
+  account      RewardFundingAccount @relation(fields: [accountId], references: [id])
+  /// `topup:<organizationId>:<reference>`, `correction:<organizationId>:<reference>`, `redemption:<id>:payout:<accountId>`.
+  businessKey  String               @unique
+  kind         FundingEntryKind
+  /// Signed integer rupiah: topups positive, payouts negative, corrections either sign.
+  amount       Int
+  /// Operator evidence reference (bank/transfer reference) or the redemption id for a payout.
+  reference    String
+  note         String?
+  verifiedById String?
+  createdAt    DateTime             @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([kind, reference])
+}
+
+/// Reward capacity reserved before material is admitted: a deposit session's
+/// ceiling (`session:<id>:admission`) or a trip's issued bags
+/// (`trip:<id>:issuance`). `remainingRupiah` is what commits may still draw;
+/// a session's residue is released only by an explicit operator action (B01a)
+/// or the RVM close watermark (B01b), never by a timeout.
+model RewardBudgetReservation {
+  id                      String                  @id @default(cuid())
+  businessKey             String                  @unique
+  accountId               String
+  account                 RewardFundingAccount    @relation(fields: [accountId], references: [id])
+  campaignId              String?
+  campaign                Campaign?               @relation(fields: [campaignId], references: [id])
+  userId                  String
+  sourceType              RewardReservationSource
+  sourceId                String
+  ceilingRupiah           Int
+  remainingRupiah         Int
+  /// Shadow mode only: capacity the account lacked when this was reserved (0 when covered).
+  shortfallRupiah         Int                     @default(0)
+  /// Shadow mode only: budget the campaign lacked when this was reserved (0 when covered).
+  campaignShortfallRupiah Int                     @default(0)
+  status                  RewardReservationStatus @default(ACTIVE)
+  releasedAt              DateTime?
+  releasedById            String?
+  releaseReason           String?
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+
+  commits RewardBudgetCommit[]
+
+  @@index([accountId, status])
+  @@index([sourceType, sourceId])
+  @@index([userId])
+}
+
+/// One reward obligation drawn from a reservation, keyed by the earning's
+/// business key (`deposit-item:<id>:earn`, `trip:<id>:return`) so a retried
+/// event never consumes budget twice. `heldRupiah` is the obligation (the
+/// approvable ceiling while `reviewPending`), `paidRupiah` the part already
+/// attributed to successful payouts, `uncoveredRupiah` the part that exceeded
+/// the reservation when committed (material already accepted never loses its
+/// reward; the excess is reported).
+model RewardBudgetCommit {
+  id              String                  @id @default(cuid())
+  reservationId   String
+  reservation     RewardBudgetReservation @relation(fields: [reservationId], references: [id])
+  accountId       String
+  account         RewardFundingAccount    @relation(fields: [accountId], references: [id])
+  campaignId      String?
+  campaign        Campaign?               @relation(fields: [campaignId], references: [id])
+  userId          String
+  businessKey     String                  @unique
+  heldRupiah      Int
+  paidRupiah      Int                     @default(0)
+  uncoveredRupiah Int                     @default(0)
+  reviewPending   Boolean                 @default(false)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@index([reservationId])
+  @@index([accountId])
+  @@index([userId, reviewPending])
 }
 
 // ============================================================

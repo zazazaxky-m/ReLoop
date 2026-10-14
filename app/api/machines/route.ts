@@ -28,6 +28,9 @@ const createSchema = z.object({
   hasCompactor: z.boolean().optional(),
   hasExternalCamera: z.boolean().optional(),
   materialVerification: z.enum(["AI_REQUIRED", "BARCODE_WEIGHT", "WEIGHT_ONLY"]).optional(),
+  // B01: reward ceiling and item bound of one deposit session (null = not configured).
+  maxRewardPerSessionRupiah: z.number().int().min(0).max(2_147_483_647).nullable().optional(),
+  maxItemsPerSession: z.number().int().min(1).max(10_000).nullable().optional(),
   status: z.enum(["ONLINE", "OFFLINE", "FULL", "MAINTENANCE", "ERROR"]).optional(),
   latitude: z.number().optional(),
   longitude: z.number().optional(),
@@ -104,6 +107,8 @@ export async function POST(req: NextRequest) {
         hasCompactor: data.hasCompactor ?? false,
         hasExternalCamera: data.hasExternalCamera ?? false,
         materialVerification: data.materialVerification ?? "WEIGHT_ONLY",
+        maxRewardPerSessionRupiah: data.maxRewardPerSessionRupiah ?? null,
+        maxItemsPerSession: data.maxItemsPerSession ?? null,
         latitude: data.latitude ?? null,
         longitude: data.longitude ?? null,
         qrToken: generateToken(),

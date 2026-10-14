@@ -18,7 +18,7 @@ import {
   type Column,
 } from "@/components/ui";
 import { Plus } from "@/components/ui/icons";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatRupiah } from "@/lib/format";
 
 const TYPES = [
   ["MACHINE_DEPOSIT", "Setor Mesin"],
@@ -50,6 +50,11 @@ export interface CampaignRow {
   status: string;
   sessionCount: number;
   organizationName: string | null;
+  /** B01: program reward budget (null = no cap) and per-session ceiling (null = not configured). */
+  rewardBudgetRupiah?: number | null;
+  maxRewardPerSessionRupiah?: number | null;
+  heldRupiah?: number;
+  spentRupiah?: number;
 }
 
 function toDateInput(v: string | Date | null): string {
@@ -70,7 +75,16 @@ const EMPTY = {
   endAt: "",
   rewardMultiplier: "",
   status: "DRAFT",
+  rewardBudgetRupiah: "",
+  maxRewardPerSessionRupiah: "",
 };
+
+/** Integer rupiah from a form field; empty clears the cap. */
+function rupiahOrNull(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return Number(trimmed);
+}
 
 export function CampaignManager({
   campaigns,
@@ -113,6 +127,8 @@ export function CampaignManager({
       endAt: toDateInput(row.endAt),
       rewardMultiplier: row.rewardMultiplier?.toString() ?? "",
       status: row.status,
+      rewardBudgetRupiah: row.rewardBudgetRupiah?.toString() ?? "",
+      maxRewardPerSessionRupiah: row.maxRewardPerSessionRupiah?.toString() ?? "",
     });
     setEditId(row.id);
     setError(null);
@@ -141,6 +157,8 @@ export function CampaignManager({
         endAt: form.endAt ? new Date(form.endAt).toISOString() : null,
         rewardMultiplier: form.rewardMultiplier ? Number(form.rewardMultiplier) : null,
         status: form.status,
+        rewardBudgetRupiah: rupiahOrNull(form.rewardBudgetRupiah),
+        maxRewardPerSessionRupiah: rupiahOrNull(form.maxRewardPerSessionRupiah),
       };
       const url = editId ? `/api/campaigns/${editId}` : "/api/campaigns";
       const res = await fetch(url, {
@@ -214,6 +232,26 @@ export function CampaignManager({
       key: "multiplier",
       header: "Multiplier",
       render: (r) => (r.rewardMultiplier ? `${r.rewardMultiplier}x` : "1x"),
+    },
+    {
+      key: "budget",
+      header: "Kuota reward",
+      render: (r) =>
+        r.rewardMode === "MONEY_REWARD" ? (
+          <div className="text-xs">
+            <p className="text-foreground">
+              {r.rewardBudgetRupiah == null ? "Tanpa kuota" : formatRupiah(r.rewardBudgetRupiah)}
+            </p>
+            <p className="text-muted">
+              Terpakai {formatRupiah(r.spentRupiah ?? 0)} · ditahan {formatRupiah(r.heldRupiah ?? 0)}
+              {r.maxRewardPerSessionRupiah == null
+                ? " · batas per sesi belum diisi"
+                : ` · maks ${formatRupiah(r.maxRewardPerSessionRupiah)}/sesi`}
+            </p>
+          </div>
+        ) : (
+          <span className="text-xs text-muted">-</span>
+        ),
     },
     { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
     {
@@ -374,6 +412,40 @@ export function CampaignManager({
                     ))}
                   </Select>
                 </FormField>
+                {form.rewardMode === "MONEY_REWARD" ? (
+                  <>
+                    <FormField
+                      label="Kuota reward program (Rp)"
+                      htmlFor="c-budget"
+                      hint="Kosongkan bila program hanya dibatasi dana terkonfirmasi organisasi. Reservasi baru ditolak saat kuota habis."
+                    >
+                      <Input
+                        id="c-budget"
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={form.rewardBudgetRupiah}
+                        onChange={(e) => setForm((f) => ({ ...f, rewardBudgetRupiah: e.target.value }))}
+                        placeholder="misal 5000000"
+                      />
+                    </FormField>
+                    <FormField
+                      label="Batas reward per sesi mesin (Rp)"
+                      htmlFor="c-session-cap"
+                      hint="Dana sebesar ini direservasi setiap sesi setoran dimulai. Wajib diisi sebelum program berhadiah di mesin diaktifkan."
+                    >
+                      <Input
+                        id="c-session-cap"
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={form.maxRewardPerSessionRupiah}
+                        onChange={(e) => setForm((f) => ({ ...f, maxRewardPerSessionRupiah: e.target.value }))}
+                        placeholder="misal 20000"
+                      />
+                    </FormField>
+                  </>
+                ) : null}
               </div>
               <FormField label="Deskripsi" htmlFor="c-desc">
                 <Textarea

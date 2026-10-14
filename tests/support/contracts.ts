@@ -137,6 +137,59 @@ const payoutMismatchV1 = z.object({
   ]),
 });
 
+/** B01a: one reservation that needs an operator (owner and reconciliation reason). */
+export const fundingStaleHoldV1 = z.object({
+  reservationId: z.string().min(1),
+  businessKey: z.string().min(1),
+  organizationId: z.string().min(1),
+  userId: z.string().min(1),
+  campaignId: z.string().min(1).nullable(),
+  sourceType: z.enum(["SESSION", "TRIP"]),
+  sourceId: z.string().min(1),
+  sourceStatus: z.string().min(1).nullable(),
+  ceilingRupiah: nonNegativeRupiah,
+  remainingRupiah: nonNegativeRupiah,
+  shortfallRupiah: nonNegativeRupiah,
+  campaignShortfallRupiah: nonNegativeRupiah,
+  ageMinutes: z.number().int().nonnegative(),
+  reasons: z.array(z.enum([
+    "SOURCE_CLOSED_AWAITING_WATERMARK", "SOURCE_OPEN_TOO_LONG", "CEILING_NOT_CONFIGURED", "CAPACITY_SHORTFALL",
+  ])).min(1),
+  reconciliation: z.string().min(1),
+});
+
+/** B01a: reward funding per organization (program-side money, read in the report's snapshot). */
+export const fundingVisibilityV1 = z.object({
+  enforced: z.boolean(),
+  totalConfirmedRupiah: rupiah,
+  totalHeldRupiah: rupiah,
+  staleHoldCount: z.number().int().nonnegative(),
+  organizations: z.array(z.object({
+    organizationId: z.string().min(1),
+    organizationName: z.string().min(1),
+    accountId: z.string().min(1).nullable(),
+    confirmedRupiah: rupiah,
+    heldRupiah: rupiah,
+    capacityRupiah: rupiah,
+    activeReservations: z.number().int().nonnegative(),
+    reservedRemainingRupiah: nonNegativeRupiah,
+    uncoveredRupiah: nonNegativeRupiah,
+    staleHolds: z.array(fundingStaleHoldV1),
+  })),
+}).superRefine((funding, ctx) => {
+  const confirmed = funding.organizations.reduce((sum, org) => sum + org.confirmedRupiah, 0);
+  const held = funding.organizations.reduce((sum, org) => sum + org.heldRupiah, 0);
+  const stale = funding.organizations.reduce((sum, org) => sum + org.staleHolds.length, 0);
+  if (confirmed !== funding.totalConfirmedRupiah || held !== funding.totalHeldRupiah || stale !== funding.staleHoldCount) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "funding totals must equal the sum over organizations" });
+  }
+  for (const org of funding.organizations) {
+    if (org.capacityRupiah !== org.confirmedRupiah - org.heldRupiah) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `capacityRupiah must be confirmed - held (${org.organizationId})` });
+    }
+  }
+});
+
 export const reconciliationReportV1 = z.object({
   availableLiability: nonNegativeRupiah,
   pendingLiability: nonNegativeRupiah,
@@ -182,6 +235,7 @@ export const reconciliationReportV1 = z.object({
       createdAt: isoDate,
     })),
   }),
+  funding: fundingVisibilityV1,
   snapshot: z.object({ readOnly: z.literal(true), isolation: z.literal("repeatable read") }),
   generatedAt: isoDate,
 }).superRefine((report, ctx) => {

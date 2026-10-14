@@ -2,6 +2,12 @@ import type { Prisma, RewardLedger, RewardReconciliationCase } from "@prisma/cli
 import { lockUser } from "./db-locks";
 import { getWalletBalance } from "./ledger";
 import { HttpError } from "./rbac";
+import {
+  commitRewardAgainstBudget,
+  findReservationByKey,
+  sessionAdmissionKey,
+  tripIssuanceKey,
+} from "./reward-funding";
 
 /**
  * The only writer of reward money effects (task M04): machine acceptance,
@@ -21,10 +27,25 @@ import { HttpError } from "./rbac";
  *   (the money was already paid out or reserved) are refused and recorded as
  *   an OPEN RewardReconciliationCase under the same business key, visible in
  *   the reconciliation report for an operator to resolve.
- * - Funding/budget enforcement is B01's (see `checkRewardFunding`).
+ * - Every EARN commits its obligation against the source's funding
+ *   reservation (B01, `checkRewardFunding`): the admission hold becomes an
+ *   obligation hold, keyed by the same business key, so a retried event never
+ *   consumes budget twice. Corrections are settled by the review path.
  */
 
 export type CreditEntryType = "EARN" | "ADJUST" | "REVERSE";
+
+/**
+ * How the effect relates to reward funding (B01):
+ * - `{ ceilingRupiah, reviewPending }`: commit this ceiling (default: the
+ *   amount) against the source reservation; a review hold commits the
+ *   approvable ceiling and is marked pending.
+ * - `{ settledByCaller: true }`: the caller settles the obligation itself
+ *   (the deposit review, lib/deposit-review.ts).
+ */
+export type RewardFundingHint =
+  | { ceilingRupiah?: number; reviewPending?: boolean; settledByCaller?: false }
+  | { settledByCaller: true };
 
 export interface CreditRewardInput {
   businessKey: string;
@@ -42,6 +63,7 @@ export interface CreditRewardInput {
   depositItemId?: string | null;
   sessionId?: string | null;
   actorId?: string | null;
+  funding?: RewardFundingHint;
 }
 
 export type RewardEffectOutcome = "CREDITED" | "EXISTING" | "ZERO" | "CASE_OPENED";
@@ -73,30 +95,58 @@ function assertEffect(input: CreditRewardInput, entryType: CreditEntryType) {
 }
 
 // ---------------------------------------------------------------------------
-// B01 extension point
+// Reward funding (B01)
 // ---------------------------------------------------------------------------
 
-/** Result of the funding check. There is no "ok" value until B01 enforces funding. */
-export type FundingCheck = "NOT_ENFORCED_UNTIL_B01";
+export type FundingCheck =
+  /** The obligation was committed against the source's admission reservation (or found already committed). */
+  | { status: "COMMITTED"; reservationId: string; commitId: string; covered: number; uncovered: number; existing: boolean }
+  /** A correction, or an effect whose caller settles the obligation itself (the deposit review). */
+  | { status: "SETTLED_BY_CALLER" }
+  /** No funding obligation: the effect names no session/trip, or its source predates B01 (legacy; B02 backfills). */
+  | { status: "NO_RESERVATION"; reason: "NO_SOURCE" | "LEGACY_SOURCE" }
+  | { status: "ZERO" };
+
+/** The funding ceiling of an effect: the hinted approvable ceiling, else the (positive) amount. */
+function fundingCeiling(effect: Readonly<CreditRewardInput>): number {
+  const hint = effect.funding;
+  if (hint && hint.settledByCaller) return 0;
+  return hint?.ceilingRupiah ?? Math.max(effect.amount, 0);
+}
 
 /**
- * B01 extension point: reward funding / budget capacity for one money effect.
- *
- * B01 enforces later. TODO(B01): commit positive effects against the
- * session/trip admission reservation (`commitRewardAgainstBudget`) and release
- * budget for negative ones (`releaseUnusedRewardBudget`), under
- * User -> RewardFundingAccount -> Campaign locks, refusing with 409 when the
- * funded capacity is exhausted.
- *
- * Until then this function checks NOTHING: credits are not capped by funding
- * or budget. It deliberately reports that instead of a success value, and the
- * money rollout stays held at gate Z01.
+ * Reward funding for one money effect (B01, lib/reward-funding.ts). An EARN
+ * commits its ceiling against the reservation its source was admitted under
+ * (`session:<id>:admission` or `trip:<id>:issuance`), keyed by the effect's
+ * business key; the admission hold turns into an obligation hold and no cash
+ * moves. The capacity gate is the admission itself, so a commit is never
+ * refused: material already accepted keeps its reward, and any excess over
+ * the reservation is recorded as uncovered for the operator. Corrections
+ * (ADJUST/REVERSE) and effects flagged `settledByCaller` are settled by the
+ * review path. A source without a reservation (admitted before B01) is a
+ * legacy obligation, reported as such and backfilled by B02.
  */
 export async function checkRewardFunding(
-  _tx: Prisma.TransactionClient,
-  _effect: Readonly<CreditRewardInput>,
+  tx: Prisma.TransactionClient,
+  effect: Readonly<CreditRewardInput>,
 ): Promise<FundingCheck> {
-  return "NOT_ENFORCED_UNTIL_B01";
+  const hint = effect.funding;
+  if (hint && hint.settledByCaller) return { status: "SETTLED_BY_CALLER" };
+  if ((effect.entryType ?? "EARN") !== "EARN") return { status: "SETTLED_BY_CALLER" };
+  const ceiling = fundingCeiling(effect);
+  if (ceiling <= 0) return { status: "ZERO" };
+  const key = effect.sessionId
+    ? sessionAdmissionKey(effect.sessionId)
+    : effect.referenceType === "Trip"
+      ? tripIssuanceKey(effect.referenceId)
+      : null;
+  if (!key) return { status: "NO_RESERVATION", reason: "NO_SOURCE" };
+  const reservation = await findReservationByKey(tx, key);
+  if (!reservation) return { status: "NO_RESERVATION", reason: "LEGACY_SOURCE" };
+  const commit = await commitRewardAgainstBudget(tx, reservation.id, effect.businessKey, ceiling, {
+    reviewPending: hint?.reviewPending ?? effect.status === "PENDING",
+  });
+  return { status: "COMMITTED", reservationId: reservation.id, ...commit };
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +220,14 @@ export async function applyRewardEffect(
 ): Promise<RewardEffectResult> {
   const entryType = input.entryType ?? "EARN";
   assertEffect(input, entryType);
-  if (input.amount === 0) return { outcome: "ZERO", entry: null, reconciliationCase: null };
+  if (input.amount === 0) {
+    // A review hold whose 50% share rounds to 0 still holds its approvable ceiling.
+    if (fundingCeiling(input) > 0) {
+      await lockUser(tx, input.userId);
+      await checkRewardFunding(tx, input);
+    }
+    return { outcome: "ZERO", entry: null, reconciliationCase: null };
+  }
 
   await lockUser(tx, input.userId);
 

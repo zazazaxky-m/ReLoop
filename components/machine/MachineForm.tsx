@@ -23,6 +23,9 @@ interface MachineInitial {
   hasCompactor: boolean;
   hasExternalCamera: boolean;
   materialVerification?: string;
+  /** B01: reward ceiling and item bound of one deposit session (null = not configured). */
+  maxRewardPerSessionRupiah?: number | null;
+  maxItemsPerSession?: number | null;
   regionId: string | null;
   wasteTypeIds: string[];
 }
@@ -70,6 +73,8 @@ export function MachineForm({
     hasCompactor: machine?.hasCompactor ?? false,
     hasExternalCamera: machine?.hasExternalCamera ?? false,
     materialVerification: machine?.materialVerification ?? "WEIGHT_ONLY",
+    maxRewardPerSessionRupiah: machine?.maxRewardPerSessionRupiah?.toString() ?? "",
+    maxItemsPerSession: machine?.maxItemsPerSession?.toString() ?? "",
     wasteTypeIds: new Set<string>(machine?.wasteTypeIds ?? []),
   });
 
@@ -101,6 +106,8 @@ export function MachineForm({
         hasCompactor: form.hasCompactor,
         hasExternalCamera: form.hasExternalCamera,
         materialVerification: form.materialVerification,
+        maxRewardPerSessionRupiah: form.maxRewardPerSessionRupiah.trim() ? Number(form.maxRewardPerSessionRupiah) : null,
+        maxItemsPerSession: form.maxItemsPerSession.trim() ? Number(form.maxItemsPerSession) : null,
         wasteTypeIds: Array.from(form.wasteTypeIds),
       };
       if (mode === "create") {
@@ -238,6 +245,32 @@ export function MachineForm({
             max="30"
             value={form.sessionIdleTimeoutMinutes}
             onChange={(e) => setForm((f) => ({ ...f, sessionIdleTimeoutMinutes: e.target.value }))}
+          />
+        </FormField>
+        <FormField
+          label="Batas reward per sesi (Rp)"
+          htmlFor="maxRewardPerSession"
+          hint="Dana sebesar ini direservasi saat sesi berhadiah dimulai bila program tidak menetapkan batasnya sendiri."
+        >
+          <Input
+            id="maxRewardPerSession"
+            type="number"
+            min="0"
+            step="1"
+            value={form.maxRewardPerSessionRupiah}
+            onChange={(e) => setForm((f) => ({ ...f, maxRewardPerSessionRupiah: e.target.value }))}
+            placeholder="misal 20000"
+          />
+        </FormField>
+        <FormField label="Maksimal item per sesi" htmlFor="maxItemsPerSession" hint="Batas item satu sesi setoran.">
+          <Input
+            id="maxItemsPerSession"
+            type="number"
+            min="1"
+            step="1"
+            value={form.maxItemsPerSession}
+            onChange={(e) => setForm((f) => ({ ...f, maxItemsPerSession: e.target.value }))}
+            placeholder="misal 50"
           />
         </FormField>
       </div>
