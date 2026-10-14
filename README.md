@@ -80,6 +80,29 @@ All demo accounts use the password **`password1234`** (minimum 12 characters).
 - `npm run db:migrate` / `db:push` / `db:seed` / `db:reset` - database
 - `npm run prisma:generate` - regenerate the Prisma client
 
+## Production deployment (Docker Compose)
+
+`docker-compose.yml` runs the standalone Next.js server (`HOSTNAME=0.0.0.0`, port 3000) behind
+nginx (`127.0.0.1:8111`). The deploy workflow copies `.env.production` to `.env`; besides the
+secrets it must set `NEXT_PUBLIC_BASE_URL` to the public URL browsers use, e.g.
+`https://reloop.example`:
+
+- The request proxy accepts signed-in browser writes (POST/PUT/PATCH/DELETE carrying an `Origin`
+  header) only when `Origin` equals that URL's origin. The server's bind address
+  (`http://0.0.0.0:3000`) and the `Host` / `X-Forwarded-Host` headers are never trusted.
+  Requests without `Origin` (the mobile app) are unaffected.
+- Emailed links (password reset, account deletion, invitations, email verification) are built
+  only from it.
+- Without a valid http(s) value the app fails closed: browser writes answer 403, those email
+  endpoints answer 503, and the web log shows `NEXT_PUBLIC_BASE_URL is not configured or invalid`.
+  The compose file has no localhost default for it.
+- Exactly one origin is accepted. Serve other host names (e.g. `www.` vs the apex) as redirects
+  to it in nginx.
+- Set it in the runtime environment. A `NEXT_PUBLIC_` value present during `next build` is
+  inlined into the bundle and wins over the runtime one (the Docker build leaves it unset).
+
+To run the whole stack locally through its nginx, set `NEXT_PUBLIC_BASE_URL=http://localhost:8111`.
+
 ## Regression harness (real services)
 
 `npm test` stays fast and Docker-free (unit tests only). The suites below run through

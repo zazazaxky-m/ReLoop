@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { signMfaChallenge } from "@/lib/mfa";
 import { SignJWT } from "jose";
@@ -165,5 +165,123 @@ describe("proxy", () => {
       process.env.AUTH_JWT_SECRET = prevSecret;
       (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
     }
+  });
+});
+
+/**
+ * P01: the CSRF Origin check compares the browser's Origin with the configured
+ * public origin (NEXT_PUBLIC_BASE_URL), never with request.nextUrl. Next 16
+ * builds nextUrl from the server's bind address (the Docker image runs
+ * HOSTNAME=0.0.0.0 PORT=3000 behind nginx), so nextUrl.origin is
+ * http://0.0.0.0:3000 while a browser sends the public host.
+ */
+describe("proxy Origin check against the configured public origin (P01)", () => {
+  const PUBLIC = "https://reloop.example";
+  const BIND = "http://0.0.0.0:3000";
+  const api = (base: string) => `${base}/api/notifications`;
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  function env(nodeEnv: string, baseUrl: string | undefined) {
+    vi.stubEnv("NODE_ENV", nodeEnv);
+    vi.stubEnv("AUTH_JWT_SECRET", "p01-unit-test-secret-not-the-dev-default");
+    vi.stubEnv("NEXT_PUBLIC_BASE_URL", baseUrl);
+  }
+
+  async function write(url: string, headers: Record<string, string>, method = "PATCH") {
+    return (await proxy(await authedRequest(url, { method, headers }))).status;
+  }
+
+  it("accepts a signed-in browser write from the public origin on a server bound to 0.0.0.0", async () => {
+    env("production", PUBLIC);
+    const logged = vi.spyOn(console, "error");
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(await write(api(BIND), {
+        origin: PUBLIC, host: "reloop.example", "x-forwarded-proto": "https", "sec-fetch-site": "same-origin",
+      }, method)).toBe(200);
+    }
+    expect(logged).not.toHaveBeenCalled();
+  });
+
+  it("accepts the public origin whatever path or trailing slash the configured base URL has", async () => {
+    env("production", "https://reloop.example/");
+    expect(await write(api(BIND), { origin: PUBLIC })).toBe(200);
+    env("production", "  https://reloop.example/app  ");
+    expect(await write(api(BIND), { origin: PUBLIC })).toBe(200);
+  });
+
+  it("rejects a foreign Origin with a valid session", async () => {
+    env("production", PUBLIC);
+    for (const origin of ["https://evil.test", "https://reloop.example.evil.test", "http://reloop.example", "https://reloop.example:8443", "null"]) {
+      expect(await write(api(BIND), { origin }), origin).toBe(403);
+    }
+  });
+
+  it("no longer trusts the server's own bind or loopback origin in production", async () => {
+    env("production", PUBLIC);
+    for (const origin of [BIND, "http://localhost:3000", "http://127.0.0.1:3000"]) {
+      expect(await write(api(BIND), { origin }), origin).toBe(403);
+    }
+  });
+
+  it("is not satisfied by a spoofed Host or X-Forwarded-Host", async () => {
+    env("production", PUBLIC);
+    expect(await write(api(BIND), {
+      origin: "https://evil.test", host: "evil.test", "x-forwarded-host": "evil.test", "x-forwarded-proto": "https",
+    })).toBe(403);
+    // Even if Next ever built nextUrl from the Host header (trustHostHeader),
+    // a request URL on the attacker's host must not make its Origin trusted.
+    expect(await write(api("https://evil.test"), { origin: "https://evil.test", host: "evil.test" })).toBe(403);
+  });
+
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+    ["unparsable", "reloop.example"],
+    ["not http(s)", "ftp://reloop.example"],
+    ["javascript:", "javascript:alert(1)"],
+  ])("fails closed in production when NEXT_PUBLIC_BASE_URL is %s", async (_label, baseUrl) => {
+    env("production", baseUrl);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const origin of [PUBLIC, BIND, "http://localhost:3000"]) {
+      expect(await write(api(BIND), { origin }), origin).toBe(403);
+    }
+    // The misconfiguration is logged (without the client's Origin value).
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("NEXT_PUBLIC_BASE_URL is not configured or invalid"));
+    expect(logged.mock.calls.flat().join(" ")).not.toContain("reloop.example");
+    // Requests without an Origin are unchanged (SameSite=Lax + Sec-Fetch-Site).
+    expect(await write(api(BIND), {})).toBe(200);
+  });
+
+  it("leaves requests without an Origin, safe methods and public paths as before", async () => {
+    env("production", PUBLIC);
+    expect(await write(api(BIND), {})).toBe(200);
+    expect(await write(api(BIND), { "sec-fetch-site": "same-origin" })).toBe(200);
+    expect(await write(api(BIND), { "sec-fetch-site": "cross-site" })).toBe(403);
+    expect(await write(api(BIND), { origin: "https://evil.test" }, "GET")).toBe(200);
+    // Public paths skip the check; the route itself decides.
+    expect((await proxy(new NextRequest(`${BIND}/api/auth/login`, { method: "POST", headers: { origin: "https://evil.test" } }))).status).toBe(200);
+    // Origin passes, session still required.
+    expect((await proxy(new NextRequest(api(BIND), { method: "PATCH", headers: { origin: PUBLIC } }))).status).toBe(401);
+  });
+
+  it("in development accepts the configured origin and loopback origins on the dev server's port", async () => {
+    // The audit harness runs `next dev --hostname 127.0.0.1` with
+    // NEXT_PUBLIC_BASE_URL=http://127.0.0.1:<port>; Next reports nextUrl as localhost.
+    env("development", "http://127.0.0.1:4123");
+    for (const origin of ["http://127.0.0.1:4123", "http://localhost:4123", "http://[::1]:4123"]) {
+      expect(await write(api("http://localhost:4123"), { origin }), origin).toBe(200);
+    }
+    for (const origin of ["http://localhost:5000", "http://127.0.0.1:5000", "https://evil.test", "http://192.168.0.107:4123"]) {
+      expect(await write(api("http://localhost:4123"), { origin }), origin).toBe(403);
+    }
+    // Unset base URL in development: the local default and the dev port still work.
+    env("development", undefined);
+    expect(await write(api("http://localhost:3000"), { origin: "http://localhost:3000" })).toBe(200);
+    expect(await write(api("http://localhost:3001"), { origin: "http://127.0.0.1:3001" })).toBe(200);
+    expect(await write(api("http://localhost:3001"), { origin: "https://evil.test" })).toBe(403);
   });
 });

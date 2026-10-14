@@ -35,3 +35,14 @@ export function emailLinkBase(): string | null {
     return null;
   }
 }
+
+/**
+ * The origin browsers use to reach this app (scheme://host[:port] of
+ * NEXT_PUBLIC_BASE_URL), under the same rules as emailLinkBase(): never derived
+ * from the request, local default outside production, null in production when
+ * unset or invalid. The proxy's CSRF Origin check trusts only this (P01).
+ */
+export function publicOrigin(): string | null {
+  const base = emailLinkBase();
+  return base ? new URL(base).origin : null;
+}

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { verifySessionToken } from "@/lib/auth-tokens";
 import { buildSecurityHeaders, NONCE_HEADER } from "@/lib/security-headers";
+import { publicOrigin } from "@/lib/site";
 
 const SESSION_COOKIE = "reloop_session";
 
@@ -39,10 +40,39 @@ function isPublicApiPath(pathname: string): boolean {
   return PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
+const LOOPBACK_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
+
+/**
+ * Origins whose browser requests may change state (P01). Only the configured
+ * public origin (NEXT_PUBLIC_BASE_URL) is trusted, never request.nextUrl or the
+ * Host / X-Forwarded-Host headers: Next builds nextUrl from the server's bind
+ * address (http://0.0.0.0:3000 in the Docker image behind nginx), and the
+ * headers are client-controlled. In production an unset or invalid base URL
+ * leaves nothing trusted, so every state-changing request that carries an
+ * Origin is refused. Outside production the dev server's own loopback origins
+ * on its port are trusted too.
+ */
+function trustedOrigins(req: NextRequest): Set<string> {
+  const origins = new Set<string>();
+  const configured = publicOrigin();
+  if (configured) origins.add(configured);
+  if (process.env.NODE_ENV !== "production") {
+    const { protocol, port } = req.nextUrl;
+    for (const host of LOOPBACK_HOSTS) origins.add(`${protocol}//${host}${port ? `:${port}` : ""}`);
+  }
+  return origins;
+}
+
 function isSameOriginUnsafeRequest(req: NextRequest): boolean {
   if (!UNSAFE_METHODS.has(req.method)) return true;
   const origin = req.headers.get("origin");
-  if (origin && origin !== req.nextUrl.origin) return false;
+  if (origin) {
+    const trusted = trustedOrigins(req);
+    if (trusted.size === 0) {
+      console.error("[proxy] NEXT_PUBLIC_BASE_URL is not configured or invalid; refusing a state-changing request that carries an Origin header");
+    }
+    if (!trusted.has(origin)) return false;
+  }
   const site = req.headers.get("sec-fetch-site");
   return site !== "cross-site";
 }

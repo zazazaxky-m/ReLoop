@@ -8,12 +8,10 @@ import { expect, test } from "../support/browser-fixture";
  */
 test("accepting an invitation from the emailed link keeps the token out of URLs and Referer", async ({ page, fixture, artifacts, baseURL }) => {
   const { audit } = fixture;
-  // `next dev` reports request.nextUrl as localhost, so proxy.ts's same-origin
-  // check refuses a browser POST whose Origin is 127.0.0.1. Browse the same
-  // server as localhost, as a deployment browses its configured host.
-  const origin = new URL(baseURL ?? process.env.AUDIT_BASE_URL ?? "");
-  origin.hostname = "localhost";
-  const site = origin.origin;
+  // The harness default host (http://127.0.0.1:<port>), which is also the
+  // server's NEXT_PUBLIC_BASE_URL: the proxy's Origin check trusts the
+  // configured public origin, not the host Next reports for the request (P01).
+  const site = new URL(baseURL ?? process.env.AUDIT_BASE_URL ?? "").origin;
   const invite = await audit.pendingInvite(audit.credentials("userA").email);
   const leaks: string[] = [];
   const consoleErrors: string[] = [];
