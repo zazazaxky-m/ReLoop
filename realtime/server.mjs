@@ -11,6 +11,8 @@ const APP_ROLES = new Set(["SUPERADMIN", "ADMIN", "PENGEPUL", "USER"]);
 export const REVALIDATE_INTERVAL_MS = 30_000;
 const HEARTBEAT_INTERVAL_MS = 25_000;
 const VERIFY_TIMEOUT_MS = 3_000;
+/** At most one verifier-failure warning per window (status/reason only). */
+const VERIFIER_WARN_INTERVAL_MS = 60_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /** Application close codes sent before the gateway drops a socket. */
@@ -90,16 +92,15 @@ export function parsePublishedEvent(data) {
   if (!boundedString(data.machineCode, 128)) return { error: "invalid_machine_code" };
   if (typeof data.eventType !== "string" || !EVENT_TYPE.test(data.eventType)) return { error: "invalid_event_type" };
   if (data.eventId !== undefined && !boundedString(data.eventId, 128)) return { error: "invalid_event_id" };
-  if (
-    data.occurredAt !== undefined &&
-    !(boundedString(data.occurredAt, 64) && Number.isFinite(Date.parse(data.occurredAt)))
-  ) {
-    return { error: "invalid_occurred_at" };
-  }
   const event = {};
   for (const field of restricted ? RESTRICTED_FIELDS : PUBLIC_FIELDS) {
+    if (field === "occurredAt") continue;
     if (data[field] !== undefined) event[field] = data[field];
   }
+  // Only ever forwarded as a normalized ISO timestamp: Date.parse accepts
+  // free text (e.g. parenthesised comments), which must not reach a socket.
+  const occurredMs = boundedString(data.occurredAt, 64) ? Date.parse(data.occurredAt) : Number.NaN;
+  if (Number.isFinite(occurredMs)) event.occurredAt = new Date(occurredMs).toISOString();
   return { event, restricted };
 }
 
@@ -147,6 +148,25 @@ export function createGateway({
   let closing = null;
 
   const setTimer = (fn, ms) => timers.setTimeout(fn, Math.min(Math.max(0, ms), MAX_TIMER_DELAY_MS));
+
+  // A wrong secret/URL or a pre-R04 verifier would otherwise withhold every
+  // restricted topic silently. Status/reason only: never the cookie or body.
+  let lastVerifierWarnAt = Number.NEGATIVE_INFINITY;
+  let suppressedVerifierWarnings = 0;
+  function warnVerifierFailure(reason) {
+    if (shuttingDown) return;
+    const at = now();
+    if (at - lastVerifierWarnAt < VERIFIER_WARN_INTERVAL_MS) {
+      suppressedVerifierWarnings += 1;
+      return;
+    }
+    const suppressed = suppressedVerifierWarnings
+      ? `; ${suppressedVerifierWarnings} suppressed since the last warning`
+      : "";
+    console.warn(`[realtime] live verifier unavailable (${reason}); restricted topics withheld${suppressed}`);
+    lastVerifierWarnAt = at;
+    suppressedVerifierWarnings = 0;
+  }
   const clearTimer = (handle) => {
     if (handle) timers.clearTimeout(handle);
   };
@@ -168,16 +188,25 @@ export function createGateway({
         body: JSON.stringify({ token }),
         signal: AbortSignal.any([AbortSignal.timeout(VERIFY_TIMEOUT_MS), shutdownController.signal]),
       });
-      if (!res.ok) return { status: "unavailable" };
+      if (!res.ok) {
+        warnVerifierFailure(`status ${res.status}`);
+        return { status: "unavailable" };
+      }
       const data = await res.json();
       // `null` is the verifier's definitive "not a current session"; the
       // pre-R04 `{ role: null }` answer means the same.
       if (data === null || (typeof data === "object" && data.role === null)) return { status: "revoked" };
       const identity = parseIdentity(data);
-      if (!identity) return { status: "unavailable" };
+      if (!identity) {
+        warnVerifierFailure("malformed answer");
+        return { status: "unavailable" };
+      }
       if (identity.expiresAt * 1000 <= now()) return { status: "revoked" };
       return { status: "valid", identity };
-    } catch {
+    } catch (error) {
+      warnVerifierFailure(
+        error?.name === "TimeoutError" ? "timeout" : error instanceof SyntaxError ? "malformed answer" : "unreachable",
+      );
       return { status: "unavailable" };
     }
   }
@@ -225,17 +254,23 @@ export function createGateway({
     meta.expiryTimer = setTimer(fire, meta.expiresAt * 1000 - now());
   }
 
-  function scheduleRevalidation(socket, meta) {
+  /** Next revalidation 30 s after `from` (the start of the last verifier request). */
+  function scheduleRevalidation(socket, meta, from = now()) {
     clearTimer(meta.revalidateTimer);
     meta.revalidateTimer = null;
     if (shuttingDown || meta.closed || !meta.token) return;
     meta.revalidateTimer = setTimer(() => {
       meta.revalidateTimer = null;
       return revalidate(socket, meta);
-    }, REVALIDATE_INTERVAL_MS);
+    }, from + REVALIDATE_INTERVAL_MS - now());
   }
 
-  function applyIdentity(socket, meta, identity) {
+  /**
+   * `validatedAt` is when the verifier request STARTED: the verifier read the
+   * database no earlier than that, so measuring identity age from it keeps
+   * revocation within 30 s whatever the round-trip took.
+   */
+  function applyIdentity(socket, meta, identity, validatedAt) {
     if (meta.userId !== null && meta.userId !== identity.userId) {
       closeSocket(socket, CLOSE_SESSION_REVOKED, "Sesi tidak berlaku");
       return;
@@ -245,23 +280,24 @@ export function createGateway({
     meta.organizationId = identity.organizationId;
     meta.tokenVersion = identity.tokenVersion;
     meta.expiresAt = identity.expiresAt;
-    meta.lastValidatedAt = now();
+    meta.lastValidatedAt = validatedAt;
     meta.verified = true;
     // Only privileged sockets can ever receive a restricted topic, so only
     // they keep the cookie for revalidation; everyone is closed at expiry.
     if (!ADMIN_ROLES.has(identity.role)) meta.token = null;
     scheduleExpiry(socket, meta);
-    scheduleRevalidation(socket, meta);
+    scheduleRevalidation(socket, meta, validatedAt);
   }
 
   function revalidate(socket, meta) {
     if (meta.closed || shuttingDown || !meta.token) return Promise.resolve();
     if (meta.inflight) return meta.inflight;
     meta.inflight = (async () => {
+      const startedAt = now();
       const result = await verify(meta.token);
       if (meta.closed || shuttingDown) return;
       if (result.status === "valid") {
-        applyIdentity(socket, meta, result.identity);
+        applyIdentity(socket, meta, result.identity, startedAt);
       } else if (result.status === "revoked") {
         closeSocket(socket, CLOSE_SESSION_REVOKED, "Sesi tidak berlaku");
       } else {
@@ -409,6 +445,7 @@ export function createGateway({
       closed: false,
     };
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+    const startedAt = now();
     const result = token ? await verify(token) : { status: "absent" };
     if (shuttingDown || socket.destroyed || !sockets.has(socket)) {
       socket.destroy();
@@ -430,7 +467,7 @@ export function createGateway({
     clients.set(socket, meta);
     if (result.status === "valid") {
       meta.token = token;
-      applyIdentity(socket, meta, result.identity);
+      applyIdentity(socket, meta, result.identity, startedAt);
     } else if (result.status === "unavailable") {
       // No private role now; retry with the same cookie on the normal cadence.
       meta.token = token;

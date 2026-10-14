@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CLOSE_SESSION_EXPIRED,
   CLOSE_SESSION_REVOKED,
@@ -41,21 +41,23 @@ type Answer = { status: number; body?: unknown };
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  vi.restoreAllMocks();
 });
 
-async function setup(answer: (token: string) => Answer) {
+/** `advance` moves the injected clock while the verifier "works" (round-trip). */
+async function setup(answer: (token: string, advance: (ms: number) => void) => Answer) {
   let calls = 0;
+  let clock = T0;
   const verifier: Server = createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
     calls += 1;
     if (req.headers.authorization !== `Bearer ${SECRET}`) return void res.writeHead(401).end();
-    const { status, body } = answer(JSON.parse(raw).token);
+    const { status, body } = answer(JSON.parse(raw).token, (ms) => { clock += ms; });
     res.writeHead(status, { "content-type": "application/json" }).end(body === undefined ? "" : JSON.stringify(body));
   });
   verifier.listen(0, "127.0.0.1");
   await once(verifier, "listening");
-  let clock = T0;
   const timers = manualTimers(() => clock);
   const gateway = createGateway({
     internalSecret: SECRET,
@@ -203,6 +205,73 @@ describe("realtime gateway session authorization (R04)", () => {
   });
 });
 
+describe("realtime gateway fix round 1 (R04 review)", () => {
+  it("measures identity age from the verifier request start, so revocation lands within 30 s despite the round-trip", async () => {
+    const RTT_MS = 3_000;
+    let current: Answer = { status: 200, body: identity() };
+    // The verifier reads the database when the request arrives (clock T0) and
+    // its answer reaches the gateway RTT_MS later on the injected clock.
+    const t = await setup((_token, advance) => {
+      advance(RTT_MS);
+      return current;
+    });
+    const admin = await t.connect("admin-cookie");
+    expect(t.timers.dueTimes()).toContain(T0 + REVALIDATE_INTERVAL_MS);
+
+    // Revoked right after the verifier's database read.
+    current = { status: 200, body: null };
+    t.advance(REVALIDATE_INTERVAL_MS - RTT_MS); // exactly 30 s after that read
+
+    expect((await t.publish(alert())).body).toEqual({ delivered: 0 });
+    expect(await admin.closed()).toBe(true);
+    expect(admin.closeCode).toBe(CLOSE_SESSION_REVOKED);
+  });
+
+  it("keeps a revalidated identity fresh for 30 s from that request's start", async () => {
+    const RTT_MS = 2_000;
+    const t = await setup((_token, advance) => {
+      advance(RTT_MS);
+      return { status: 200, body: identity() };
+    });
+    await t.connect("admin-cookie"); // request at T0, answer at T0 + 2 s
+    t.advance(REVALIDATE_INTERVAL_MS - RTT_MS); // T0 + 30 s: stale, revalidated (request at T0 + 30 s)
+    expect((await t.publish(alert())).body).toEqual({ delivered: 1 });
+    expect(t.calls()).toBe(2);
+    t.advance(REVALIDATE_INTERVAL_MS - RTT_MS - 1); // T0 + 60 s - 1 ms: still fresh
+    expect((await t.publish(alert())).body).toEqual({ delivered: 1 });
+    expect(t.calls()).toBe(2);
+  });
+
+  it("warns about verifier failures with status/reason only, throttled, never with the cookie", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cookie = "cookie-SECRET-r04-abc123";
+    let answer: Answer = { status: 503 };
+    const t = await setup(() => answer);
+
+    await t.connect(cookie);
+    await t.connect(cookie);
+    expect(warn).toHaveBeenCalledTimes(1); // second failure inside the window is throttled
+    expect(String(warn.mock.calls[0][0])).toContain("503");
+
+    t.advance(60_000);
+    answer = { status: 200, body: { role: "ADMIN" } }; // pre-R04 verifier: unusable answer
+    await t.connect(cookie);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(String(warn.mock.calls[1][0])).toMatch(/malformed/);
+    expect(String(warn.mock.calls[1][0])).toMatch(/1 suppressed/);
+
+    for (const call of warn.mock.calls) expect(call.map(String).join(" ")).not.toContain(cookie);
+  });
+
+  it("does not warn when the verifier answers normally or revokes", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const t = await setup((token) => ({ status: 200, body: token === "admin-cookie" ? identity() : null }));
+    await t.connect("admin-cookie");
+    await t.connect("revoked-cookie");
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
 describe("parsePublishedEvent", () => {
   it("rejects a restricted topic without an organization instead of treating it as global", () => {
     for (const organizationId of [undefined, null, "", 42]) {
@@ -215,7 +284,24 @@ describe("parsePublishedEvent", () => {
     expect(parsePublishedEvent(null)).toEqual({ error: "invalid_event" });
     expect(parsePublishedEvent({ ...alert(), machineCode: "" })).toEqual({ error: "invalid_machine_code" });
     expect(parsePublishedEvent({ ...alert(), eventType: "Ditolak oleh Budi" })).toEqual({ error: "invalid_event_type" });
-    expect(parsePublishedEvent({ ...alert(), occurredAt: "yesterday" })).toEqual({ error: "invalid_occurred_at" });
+  });
+
+  it("forwards occurredAt only as a normalized ISO timestamp and drops anything else", () => {
+    const state = { topic: "machine-state", machineCode: "M-1", eventType: "REMOTE_COMMAND_QUEUED" };
+    expect(parsePublishedEvent({ ...state, occurredAt: "2026-10-14T10:00:00+07:00" }))
+      .toEqual({ restricted: false, event: { ...state, occurredAt: "2026-10-14T03:00:00.000Z" } });
+
+    // V8's Date.parse accepts parenthesised text: it must never reach a socket.
+    const smuggled = "2026-10-14 (Budi Santoso 081234567890)";
+    expect(Number.isFinite(Date.parse(smuggled))).toBe(true);
+    const parsed = parsePublishedEvent({ ...state, occurredAt: smuggled });
+    expect(parsed.event?.occurredAt).toBe(new Date(Date.parse(smuggled)).toISOString());
+    expect(JSON.stringify(parsed)).not.toContain("Budi");
+
+    for (const occurredAt of ["yesterday", 1_760_000_000_000, "", "x".repeat(65)]) {
+      expect(parsePublishedEvent({ ...state, occurredAt })).toEqual({ restricted: false, event: state });
+      expect(parsePublishedEvent({ ...alert(), occurredAt })).toEqual({ restricted: true, event: alert() });
+    }
   });
 
   it("whitelists the payload per topic", () => {

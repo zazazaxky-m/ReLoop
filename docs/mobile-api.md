@@ -880,14 +880,19 @@ memberi akses privat, dan tidak ada fallback permisif.
   tidak pernah dicatat di log dan hanya dikirim ke verifier. Socket ini
   divalidasi ulang setiap 30 detik. Sebelum broadcast topik restricted, socket
   yang validasi terakhirnya sudah 30 detik atau lebih divalidasi ulang dulu.
-  Pencabutan berlaku paling lambat 30 detik.
+  Umur identitas dihitung sejak request ke verifier dimulai, bukan sejak
+  jawabannya tiba, sehingga pencabutan berlaku paling lambat 30 detik
+  berapa pun lama round-trip-nya.
 - Jawaban `null` menutup socket dengan close code `4403`. Perubahan role atau
   organisasi memperbarui kapabilitas. Socket yang turun ke USER/PENGEPUL
   kehilangan topik restricted, dan cookie-nya dibuang.
 - Jika verifier tidak tersedia (timeout, non-2xx, atau jawaban tidak
   lengkap), topik restricted ditahan sampai identitas valid lagi. Socket
   tidak ditutup dan topik publik tetap berjalan. Aturan ini juga berlaku untuk
-  socket yang terhubung saat verifier mati.
+  socket yang terhubung saat verifier mati. Gateway mencatat peringatan
+  `[realtime] live verifier unavailable (<status/alasan>)` paling banyak sekali
+  per 60 detik, berisi jumlah peringatan yang ditekan. Peringatan ini hanya
+  memuat status atau alasan, tidak pernah cookie atau body.
 - Socket USER/PENGEPUL tidak divalidasi ulang karena tidak pernah menerima
   topik restricted, tetapi tetap ditutup saat expiry.
 - Shutdown membersihkan seluruh timer dan cookie. Koneksi ulang selalu
@@ -907,7 +912,9 @@ memberi akses privat, dan tidak ada fallback permisif.
   mesin.
 - Validasi: `machineCode` berupa string 1–128 karakter, dan `eventType` harus
   cocok dengan `^[A-Z][A-Z0-9_]{0,63}$`. `eventId` opsional, string paling
-  panjang 128 karakter. `occurredAt` opsional, tanggal yang dapat di-parse.
+  panjang 128 karakter. `occurredAt` opsional: hanya diteruskan sebagai
+  timestamp ISO yang dinormalisasi gateway. Nilai yang tidak dapat di-parse
+  dibuang tanpa menolak event, dan teks bebas tidak pernah sampai ke socket.
 - Respons:
   - Topik tidak dikenal: 422 `unknown_topic`.
   - `security-alert` tanpa `organizationId`: 422 `organization_required`.
