@@ -120,6 +120,30 @@ describe('buildReconciliationReport', () => {
     expect(report.reservedDiscrepancy).toBe(300);
   });
 
+  it('classifies with the reserves that still hold or paid money, never with released legacy rows', () => {
+    const report = buildReconciliationReport(snapshot({
+      mismatchedRequests: [
+        request({ redemptionId: 'released-then-held', requestStatus: 'SUCCESS', reserveStatuses: ['REVERSED', 'PENDING'],
+          ledgerIds: ['old', 'live'], ledgerPaid: 0, ledgerReserved: 100 }),
+        request({ redemptionId: 'released-only', requestStatus: 'PROCESSING', reserveStatuses: ['REVERSED'],
+          ledgerIds: ['old'], ledgerPaid: 0, ledgerReserved: 0 }),
+        request({ redemptionId: 'released-then-paid', requestStatus: 'SUCCESS', reserveStatuses: ['REVERSED', 'REDEEMED'],
+          ledgerIds: ['old', 'live'], ledgerPaid: 150 }),
+        request({ redemptionId: 'two-live', requestStatus: 'APPROVED', reserveStatuses: ['REVERSED', 'PENDING', 'PENDING'],
+          ledgerIds: ['old', 'a', 'b'], ledgerPaid: 0, ledgerReserved: 200 }),
+      ],
+    }));
+    expect(report.payoutMismatches.map((row) => [row.redemptionId, row.problem])).toEqual([
+      ['released-then-held', 'RESERVE_STATE_MISMATCH'],
+      ['released-only', 'RESERVE_STATE_MISMATCH'],
+      ['released-then-paid', 'AMOUNT_MISMATCH'],
+      ['two-live', 'DUPLICATE_RESERVE'],
+    ]);
+    // Every row is still listed (history stays visible) and the totals do not change.
+    expect(report.payoutMismatches[0].reserveStatuses).toEqual(['REVERSED', 'PENDING']);
+    expect([report.redeemedDiscrepancy, report.reservedDiscrepancy]).toEqual([150, 300]);
+  });
+
   it('lists held or paid ledger rows that back no request, and leaves amount mismatches to the request', () => {
     const orphan = (overrides: Record<string, unknown>) => ({
       ledgerId: 'l', userId: 'u2', amount: -500, status: 'PENDING', referenceType: 'Redemption',

@@ -8,6 +8,7 @@ import '../../shared/format.dart';
 import '../../shared/widgets/metric_card.dart';
 import '../../shared/widgets/reloop_card.dart';
 import '../../shared/widgets/skeleton_loading.dart';
+import '../../shared/widgets/status_badge.dart';
 import '../../theme/colors.dart';
 import '../admin/admin_shell.dart';
 
@@ -547,8 +548,7 @@ class _MismatchCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ledger =
-        row.reserveStatuses.isEmpty ? 'tidak ada' : row.reserveStatuses.join(', ');
+    final label = TextStyle(fontSize: 11.5, color: context.reloopMuted);
     return ReLoopCard(
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -570,9 +570,24 @@ class _MismatchCard extends StatelessWidget {
             style: TextStyle(fontSize: 11, color: context.reloopMutedSoft),
           ),
           const SizedBox(height: 4),
-          Text(
-            'Pengajuan ${row.requestStatus ?? 'tidak ada'} · ledger $ledger',
-            style: TextStyle(fontSize: 11.5, color: context.reloopMuted),
+          // Indonesian status labels, the same mapping as the web StatusBadge.
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text('Pengajuan', style: label),
+              if (row.requestStatus == null)
+                Text('tidak ada', style: label)
+              else
+                StatusBadge(statusKey: row.requestStatus!),
+              Text('Ledger', style: label),
+              if (row.reserveStatuses.isEmpty)
+                Text('tidak ada', style: label)
+              else
+                ...row.reserveStatuses
+                    .map((status) => StatusBadge(statusKey: status)),
+            ],
           ),
           const SizedBox(height: 10),
           Row(

@@ -169,6 +169,11 @@ void main() {
 
     expect(find.text('Selisih rekonsiliasi pada 1 catatan'), findsOneWidget);
     expect(find.text('Status tahanan tidak sesuai'), findsOneWidget);
+    // Statuses use the Indonesian badge labels, never the raw enum codes.
+    expect(find.text('Sukses'), findsOneWidget);
+    expect(find.text('Pending'), findsOneWidget);
+    expect(find.textContaining('SUCCESS'), findsNothing);
+    expect(find.textContaining('PENDING'), findsNothing);
   });
 
   testWidgets('shows retry when API fails', (tester) async {

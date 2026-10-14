@@ -256,10 +256,13 @@ export async function findMismatchedRequests(db: RawReader): Promise<PayoutReque
 function requestMismatch(row: PayoutRequestRow): PayoutMismatch {
   const paid = PAID_STATUSES.includes(row.requestStatus) ? row.requestAmount : 0;
   const held = IN_FLIGHT_STATUSES.includes(row.requestStatus) ? row.requestAmount : 0;
+  // Classify with the rows that still hold or paid money. A released (REVERSED)
+  // legacy row stays listed in reserveStatuses but is never a "duplicate".
+  const moneyRows = row.reserveStatuses.filter((status) => status === "PENDING" || status === "REDEEMED");
   const problem: PayoutMismatchProblem =
     row.ledgerIds.length === 0 ? "RESERVE_MISSING"
-      : row.ledgerIds.length > 1 ? "DUPLICATE_RESERVE"
-        : row.reserveStatuses[0] !== expectedReserveStatus(row.requestStatus) ? "RESERVE_STATE_MISMATCH"
+      : moneyRows.length > 1 ? "DUPLICATE_RESERVE"
+        : moneyRows.length === 0 || moneyRows[0] !== expectedReserveStatus(row.requestStatus) ? "RESERVE_STATE_MISMATCH"
           : "AMOUNT_MISMATCH";
   return {
     redemptionId: row.redemptionId, userId: row.userId, requestStatus: row.requestStatus, requestAmount: row.requestAmount,
