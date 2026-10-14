@@ -18,7 +18,7 @@ import {
   resolveFraudDepositItemId,
   resolveOrCreateUnknownWasteType,
 } from "./item";
-import { flagAnomaly, holdItemForFraud, notifyOrgAdmins } from "./fraud";
+import { flagAnomaly, holdItemForFraud, notifyOrgAdmins, publishSecurityAlert } from "./fraud";
 import { maybeCreateAutoPickup } from "./pickup";
 import { handleAcceptance, handleItemRejected, recordItemEvidence } from "./acceptance";
 import { isTerminalSession } from "../deposit-review-contract";
@@ -340,8 +340,17 @@ export async function processEventSideEffects(
         // The item itself was handled by the hold above.
         await flagAnomaly(tx, input.sessionId, null, reason);
       }
-      const notify = () =>
-        notifyOrgAdmins(machine.organizationId, {
+      const securityEventType = input.eventType;
+      const notify = () => {
+        // R04: realtime alert scoped to the machine row's organization.
+        publishSecurityAlert({
+          organizationId: machine.organizationId,
+          machineCode: input.machineCode,
+          eventType: securityEventType,
+          eventId,
+          occurredAt: input.occurredAt,
+        });
+        return notifyOrgAdmins(machine.organizationId, {
           type: "MACHINE_FRAUD",
           title:
             input.eventType === "VANDALISM_DETECTED"
@@ -350,6 +359,7 @@ export async function processEventSideEffects(
           body: `Mesin ${input.machineCode ?? ""} melaporkan ${reason.replaceAll("_", " ").toLowerCase()}. Tinjau di log keamanan.`.trim(),
           data: { machineCode: input.machineCode, reason },
         });
+      };
       if (afterCommit) afterCommit(notify);
       else await notify();
       break;

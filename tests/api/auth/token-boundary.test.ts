@@ -110,7 +110,8 @@ describe("real JWT and route boundaries", () => {
       .sign(new TextEncoder().encode(process.env.AUTH_JWT_SECRET || "dev-insecure-secret-change-me"));
     for (const token of [await signMfaChallenge("admin-1", 0), legacy]) {
       const request = req({ token }); request.headers.set("authorization", "Bearer internal-test");
-      expect(await (await ws(request)).json()).toEqual({ role: null });
+      // R04 verifier contract: a definitive denial is `null` (no partial identity).
+      expect(await (await ws(request)).json()).toBeNull();
     }
   });
 });

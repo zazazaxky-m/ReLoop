@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { flagAnomaly, fraudHoldKey, holdItemForFraud, notifyOrgAdmins } from '@/lib/machine-events/fraud';
+import { flagAnomaly, fraudHoldKey, holdItemForFraud, notifyOrgAdmins, publishSecurityAlert } from '@/lib/machine-events/fraud';
+import * as realtime from '@/lib/realtime';
 import { prisma } from '@/lib/prisma';
 import * as notifications from '@/lib/notifications';
 import * as locks from '@/lib/db-locks';
@@ -12,6 +13,10 @@ vi.mock('@/lib/prisma', () => ({
     user: { findMany: vi.fn() },
     notification: { createMany: vi.fn() },
   },
+}));
+
+vi.mock('@/lib/realtime', () => ({
+  publishRealtime: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/notifications', () => ({
@@ -211,6 +216,36 @@ describe('fraud', () => {
       
       expect(consoleError).toHaveBeenCalled();
       consoleError.mockRestore();
+    });
+  });
+
+  describe('publishSecurityAlert (R04)', () => {
+    beforeEach(() => vi.mocked(realtime.publishRealtime).mockClear());
+
+    it('publishes an admin-only alert scoped to the given organization', () => {
+      publishSecurityAlert({
+        organizationId: 'org-a', machineCode: 'M1', eventType: 'FRAUD_DETECTED', eventId: 'evt1',
+        occurredAt: '2026-10-14T10:00:00+07:00',
+      });
+      expect(realtime.publishRealtime).toHaveBeenCalledWith({
+        topic: 'security-alert', organizationId: 'org-a', machineCode: 'M1', eventType: 'FRAUD_DETECTED',
+        eventId: 'evt1', occurredAt: '2026-10-14T03:00:00.000Z',
+      });
+    });
+
+    it('omits an unparseable occurredAt instead of forwarding it', () => {
+      publishSecurityAlert({ organizationId: 'org-a', machineCode: 'M1', eventType: 'VANDALISM_DETECTED', eventId: 'evt1', occurredAt: 'kemarin' });
+      expect(realtime.publishRealtime).toHaveBeenCalledWith({
+        topic: 'security-alert', organizationId: 'org-a', machineCode: 'M1', eventType: 'VANDALISM_DETECTED', eventId: 'evt1',
+      });
+    });
+
+    it.each([
+      [{ organizationId: '', machineCode: 'M1' }],
+      [{ organizationId: 'org-a', machineCode: undefined }],
+    ])('publishes nothing without an organization or machine code (%o)', (input) => {
+      publishSecurityAlert({ ...input, eventType: 'FRAUD_DETECTED', eventId: 'evt1' });
+      expect(realtime.publishRealtime).not.toHaveBeenCalled();
     });
   });
 });

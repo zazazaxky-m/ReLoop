@@ -31,11 +31,13 @@ async function openSocket(port: number, token: string) {
   const [data] = await ready; expect(data.toString()).toContain("101 Switching Protocols");
 }
 async function publish(port: number, topic: string) {
+  // R04: restricted topics must name the organization; public topics name a machine.
+  const event = { topic, machineCode: "M-1", eventType: "FRAUD_DETECTED", ...(topic === "security-alert" ? { organizationId: "org-1" } : {}) };
   const response = await fetch(`http://127.0.0.1:${port}/publish`, { method: "POST",
-    headers: { authorization: "Bearer test-internal" }, body: JSON.stringify({ topic }) });
+    headers: { authorization: "Bearer test-internal" }, body: JSON.stringify(event) });
   return (await response.json()).delivered;
 }
-const admin = { sub: "admin-1", email: "admin@example.com", name: "Admin", role: "ADMIN" as const, organizationId: null, tokenVersion: 0 };
+const admin = { sub: "admin-1", email: "admin@example.com", name: "Admin", role: "ADMIN" as const, organizationId: "org-1", tokenVersion: 0 };
 
 describe("realtime token boundary", () => {
   it.each(["", "http://127.0.0.1:1/unavailable"])("keeps public topics but denies private role when live verifier is absent/unavailable (%s)", async url => {
@@ -48,7 +50,11 @@ describe("realtime token boundary", () => {
     const verifier = createServer(async (req, res) => {
       let raw = ""; for await (const chunk of req) raw += chunk;
       const payload = await verifySessionToken(JSON.parse(raw).token);
-      res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ role: payload?.role ?? null }));
+      // R04 verifier contract: the full identity or null.
+      res.setHeader("content-type", "application/json"); res.end(JSON.stringify(payload ? {
+        userId: payload.sub, role: payload.role, organizationId: payload.organizationId,
+        tokenVersion: payload.tokenVersion, expiresAt: payload.expiresAt,
+      } : null));
     });
     verifier.listen(0, "127.0.0.1"); await once(verifier, "listening");
     try {

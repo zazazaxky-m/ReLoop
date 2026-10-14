@@ -20,7 +20,7 @@ export async function POST(
   const raw = await req.text();
   const machine = await prisma.machine.findUnique({
     where: { machineCode: code },
-    select: { id: true, ingestSecret: true },
+    select: { id: true, ingestSecret: true, organizationId: true },
   });
   if (!machine) return jsonError(404, "Mesin tidak ditemukan");
   const verdict = await verifyMachineRequest({
@@ -100,6 +100,7 @@ export async function POST(
     machineCode: code,
     eventType: "REMOTE_COMMAND_COMPLETED",
     eventId: id,
+    organizationId: machine.organizationId,
   });
   return jsonOk({ command, duplicate: false });
 }

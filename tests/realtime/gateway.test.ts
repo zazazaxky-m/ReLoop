@@ -17,17 +17,18 @@ describe("realtime gateway harness", () => {
     expect(await guest.receivedCount()).toBe(0);
   });
 
-  it("lets the fake live verifier judge session expiry on the injected clock", async () => {
+  it("judges session expiry on the injected clock after the sockets connected", async () => {
     const gateway = await f.gateway();
-    await gateway.advanceClock(90_000);
-    const current = await gateway.connect("adminB", { ttlSeconds: 60 });
-    const expired = await gateway.connect("adminA", { ttlSeconds: 0 });
+    const current = await gateway.connect("superadmin", { ttlSeconds: 120 });
+    const expiring = await gateway.connect("adminA", { ttlSeconds: 60 });
 
+    // Both sockets were valid at connect; only the clock moves.
+    await gateway.advanceClock(90_000);
     await gateway.publish({
-      topic: "security-alert", organizationId: f.ids.orgB, machineCode: f.ids.machineCode, eventType: "VANDALISM",
+      topic: "security-alert", organizationId: f.ids.orgA, machineCode: f.ids.machineCode, eventType: "VANDALISM",
     });
 
     expect(await current.receivedCount()).toBe(1);
-    expect(await expired.receivedCount()).toBe(0);
+    expect(await expiring.receivedCount()).toBe(0);
   });
 });

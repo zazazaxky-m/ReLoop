@@ -35,8 +35,10 @@ export async function verifySessionToken(token: string) {
     if (payload.purpose !== "session") return null;
     const parsed = sessionClaims.safeParse(payload);
     if (!parsed.success) return null;
-    const { sub, email, name, role, organizationId, tokenVersion } = parsed.data;
-    return { sub, email, name, role, organizationId, tokenVersion };
+    const { sub, email, name, role, organizationId, tokenVersion, exp } = parsed.data;
+    // expiresAt: the verified `exp` (Unix seconds); the realtime verifier
+    // hands it to the gateway, which closes the socket at that instant.
+    return { sub, email, name, role, organizationId, tokenVersion, expiresAt: exp };
   } catch {
     return null;
   }

@@ -111,7 +111,7 @@ To run the whole stack locally through its nginx, set `NEXT_PUBLIC_BASE_URL=http
 | Command | What runs |
 | --- | --- |
 | `npm run test:integration [-- <file> ...]` | Vitest `tests/integration/**` against real PostgreSQL 16 + Redis 7 and a real `next dev` server |
-| `npm run test:realtime [-- <file> ...]` | Vitest `tests/realtime/**`: gateway child process + fake live verifier |
+| `npm run test:realtime [-- <file> ...]` | Vitest `tests/realtime/**`: gateway child process (virtual clock/timers over IPC) + live verifier running the production DB guard on the disposable DB |
 | `npm run test:browser [-- <playwright args>]` | Playwright `tests/browser/**/*.spec.ts` at 360/768/1280 px, light and dark (`npx playwright install chromium` once) |
 | `npm run test:rvm [-- <unittest args>]` | RVM `tests/test_rvm*.py` in a fresh temporary venv with `rvm/requirements.txt` |
 | `npm run test:flutter [-- <flutter test args>]` | `flutter test` from `mobile/` (needs Flutter 3.41.7; fails as "NOT RUN" when absent) |

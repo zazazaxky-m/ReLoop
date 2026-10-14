@@ -31,6 +31,7 @@ describe("lib/realtime", () => {
     await expect(
       publishRealtime({
         topic: "security-alert",
+        organizationId: "org-1",
         machineCode: "M002",
         eventType: "ALERT",
       }),

@@ -14,6 +14,7 @@ vi.mock('@/lib/machine-events/fraud', () => ({
   flagAnomaly: vi.fn(),
   holdItemForFraud: vi.fn(),
   notifyOrgAdmins: vi.fn(),
+  publishSecurityAlert: vi.fn(),
 }));
 vi.mock('@/lib/machine-events/item', () => ({
   resolveDepositItemId: vi.fn(),
@@ -652,6 +653,31 @@ describe('processEventSideEffects', () => {
       expect.objectContaining({ title: 'Indikasi fraud terdeteksi' }),
     );
   });
+
+  it.each(['FRAUD_DETECTED', 'VANDALISM_DETECTED'])(
+    'publishes a %s security alert scoped to the machine row organization, only after commit (R04)',
+    async (eventType) => {
+      vi.mocked(item.resolveFraudDepositItemId).mockResolvedValue(null);
+      const deferred: Array<() => Promise<void>> = [];
+      await processEventSideEffects(
+        mockTx,
+        mockMachine,
+        {
+          eventType, sessionId: null, machineCode: 'M1', occurredAt: '2026-10-14T03:00:00.000Z',
+          payload: { organizationId: 'org-from-machine-payload' },
+        } as any,
+        'evt1',
+        undefined,
+        undefined,
+        (effect) => deferred.push(effect),
+      );
+      expect(fraud.publishSecurityAlert).not.toHaveBeenCalled();
+      await deferred[0]();
+      expect(fraud.publishSecurityAlert).toHaveBeenCalledWith({
+        organizationId: 'o1', machineCode: 'M1', eventType, eventId: 'evt1', occurredAt: '2026-10-14T03:00:00.000Z',
+      });
+    },
+  );
 
   it('passes the post-commit collector to auto pickup (R02)', async () => {
     const collect = vi.fn();

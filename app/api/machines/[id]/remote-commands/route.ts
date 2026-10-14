@@ -80,7 +80,7 @@ export async function POST(
     const body = createSchema.parse(await req.json());
     const machine = await prisma.machine.findUnique({
       where: { id },
-      select: { id: true, machineCode: true, ingestSecret: true },
+      select: { id: true, machineCode: true, ingestSecret: true, organizationId: true },
     });
     if (!machine) throw new HttpError(404, "Mesin tidak ditemukan");
     if (!machine.ingestSecret) {
@@ -126,6 +126,7 @@ export async function POST(
       machineCode: machine.machineCode,
       eventType: "REMOTE_COMMAND_QUEUED",
       eventId: command.id,
+      organizationId: machine.organizationId,
     });
     return jsonOk({ command, duplicate: false }, 201);
   } catch (error) {

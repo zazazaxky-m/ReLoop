@@ -58,6 +58,8 @@ describe('lib/auth', () => {
       expect(verified?.email).toBe(mockPayload.email);
       expect(verified?.name).toBe(mockPayload.name);
       expect(verified?.role).toBe(mockPayload.role);
+      // R04: the realtime verifier needs the verified expiry (Unix seconds).
+      expect(verified?.expiresAt).toBe(decodeJwt(token).exp);
     });
 
     it('should return null for an invalid token', async () => {

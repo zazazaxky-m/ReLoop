@@ -3,6 +3,7 @@ import { lockDepositItem, lockDepositSession, lockUser } from "../db-locks";
 import { depositItemEarnKey, getWalletBalance } from "../ledger";
 import { prisma } from "../prisma";
 import { sendPushToUsersBestEffort } from "../notifications";
+import { publishRealtime } from "../realtime";
 import { CASE_ALREADY_PAID_OUT, openRewardReconciliationCase } from "../reward-credit";
 import { markCommitReviewPending } from "../reward-funding";
 import { isReviewFinal } from "./shared";
@@ -190,4 +191,30 @@ export async function notifyOrgAdmins(
   } catch (err) {
     console.error("[machine-events] notifyOrgAdmins failed:", err);
   }
+}
+
+/**
+ * R04: admin-only realtime `security-alert` for a FRAUD/VANDALISM event,
+ * scoped to `organizationId`, which callers take from the machine's database
+ * row (never from the machine payload). Fire-and-forget; run it only after
+ * the event committed. Without an organization or machine code nothing is
+ * published: an unscoped alert is never broadcast globally.
+ */
+export function publishSecurityAlert(input: {
+  organizationId: string;
+  machineCode: string | null | undefined;
+  eventType: "FRAUD_DETECTED" | "VANDALISM_DETECTED";
+  eventId: string;
+  occurredAt?: string | null;
+}) {
+  if (!input.organizationId || !input.machineCode) return;
+  const occurredMs = input.occurredAt ? Date.parse(input.occurredAt) : Number.NaN;
+  void publishRealtime({
+    topic: "security-alert",
+    organizationId: input.organizationId,
+    machineCode: input.machineCode,
+    eventType: input.eventType,
+    eventId: input.eventId,
+    ...(Number.isFinite(occurredMs) ? { occurredAt: new Date(occurredMs).toISOString() } : {}),
+  });
 }

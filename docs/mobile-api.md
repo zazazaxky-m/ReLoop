@@ -841,3 +841,107 @@ Aturan:
 - `POST /api/auth/reset-password` mengklaim token reset di dalam transaksi yang
   sama dengan perubahan password, di bawah lock User. Kegagalan seperti 503
   akibat lock membatalkan klaim, sehingga tautan reset tetap bisa dipakai.
+
+## Otorisasi websocket realtime (R04)
+
+Gateway `realtime/server.mjs` (proses terpisah, endpoint `/ws`) tidak lagi
+memakai role dari handshake selama socket hidup. Kedaluwarsa sesi, pencabutan
+akun, perubahan role, dan perpindahan organisasi berlaku untuk socket yang
+sudah terhubung.
+
+### Verifier internal
+
+`POST /api/internal/ws-session` (Bearer `REALTIME_INTERNAL_SECRET`, body
+`{ token }`) menjawab 401 tanpa secret yang benar dan 422 tanpa `token`. Untuk
+pemanggil yang sah, jawabannya 200 dengan salah satu dari:
+
+- `{ userId, role, organizationId, tokenVersion, expiresAt }` jika JWT sesi
+  lolos verifikasi ketat, akun `ACTIVE`, tokenVersion sama dengan database,
+  dan `expiresAt` (exp yang sudah diverifikasi, detik Unix) belum lewat.
+  `role` dan `organizationId` dibaca dari database, bukan dari token.
+- `null` untuk kondisi lain: token tidak sah atau kedaluwarsa, akun
+  nonaktif/ditangguhkan, atau tokenVersion berubah. Gateway menganggapnya
+  pencabutan definitif.
+
+DB guard ada di `lib/ws-session.ts` (`resolveWsSessionIdentity`).
+`verifySessionToken` kini juga mengembalikan `expiresAt` (field tambahan).
+Jawaban lama `{ role }` tidak diterima: identitas yang tidak lengkap tidak
+memberi akses privat, dan tidak ada fallback permisif.
+
+### Metadata socket dan revalidasi
+
+- Socket anonim (tanpa cookie, cookie ditolak, atau verifier tidak
+  dikonfigurasi) hanya menerima topik publik. Frame dari klien diabaikan dan
+  tidak pernah mempromosikan socket.
+- Socket dengan identitas menyimpan `userId`, `role`, `organizationId`,
+  `tokenVersion`, `expiresAt`, dan `lastValidatedAt`. Socket ditutup tepat
+  pada `expiresAt` dengan close code `4401`.
+- Socket ADMIN/SUPERADMIN menyimpan cookie mentah hanya di memori. Cookie
+  tidak pernah dicatat di log dan hanya dikirim ke verifier. Socket ini
+  divalidasi ulang setiap 30 detik. Sebelum broadcast topik restricted, socket
+  yang validasi terakhirnya sudah 30 detik atau lebih divalidasi ulang dulu.
+  Pencabutan berlaku paling lambat 30 detik.
+- Jawaban `null` menutup socket dengan close code `4403`. Perubahan role atau
+  organisasi memperbarui kapabilitas. Socket yang turun ke USER/PENGEPUL
+  kehilangan topik restricted, dan cookie-nya dibuang.
+- Jika verifier tidak tersedia (timeout, non-2xx, atau jawaban tidak
+  lengkap), topik restricted ditahan sampai identitas valid lagi. Socket
+  tidak ditutup dan topik publik tetap berjalan. Aturan ini juga berlaku untuk
+  socket yang terhubung saat verifier mati.
+- Socket USER/PENGEPUL tidak divalidasi ulang karena tidak pernah menerima
+  topik restricted, tetapi tetap ditutup saat expiry.
+- Shutdown membersihkan seluruh timer dan cookie. Koneksi ulang selalu
+  mendapat metadata baru dari verifier, tanpa mewarisi socket lama.
+
+### Kontrak publish
+
+`POST /publish` hanya untuk internal (Bearer secret).
+
+| Topik | Penerima | Field yang diteruskan |
+|---|---|---|
+| `machine-state`, `machine-event` | Semua socket, termasuk kiosk anonim | `topic`, `machineCode`, `eventType`, `occurredAt` |
+| `security-alert` | ADMIN dengan `organizationId` yang sama, dan semua SUPERADMIN | `topic`, `organizationId`, `machineCode`, `eventType`, `eventId`, `occurredAt` |
+
+- Field lain selalu dibuang (whitelist). Topik publik tidak membawa
+  organisasi, pemilik, pengguna, PII, nilai uang/refund, atau payload mentah
+  mesin.
+- Validasi: `machineCode` berupa string 1–128 karakter, dan `eventType` harus
+  cocok dengan `^[A-Z][A-Z0-9_]{0,63}$`. `eventId` opsional, string paling
+  panjang 128 karakter. `occurredAt` opsional, tanggal yang dapat di-parse.
+- Respons:
+  - Topik tidak dikenal: 422 `unknown_topic`.
+  - `security-alert` tanpa `organizationId`: 422 `organization_required`.
+    Alert seperti ini tidak pernah diperlakukan sebagai global.
+  - Field tidak valid: 422 dengan kode field.
+  - Body bukan JSON: 400.
+  - Sukses: 202 `{ delivered }`.
+
+### Publisher
+
+`publishRealtime` (`lib/realtime.ts`) mewajibkan `organizationId` (tipe) untuk
+`security-alert`. Alert tanpa organisasi tidak dikirim, dan web hanya mencatat
+peringatan tanpa token. Organisasi selalu diambil dari baris database:
+
+- `POST /api/machines/[id]/remote-commands` dan
+  `POST /api/machine-commands/[code]/[id]/result` (`machine-state`) mengisi
+  `organizationId` dari baris Machine. Gateway tidak meneruskannya ke socket.
+- Event mesin `FRAUD_DETECTED`/`VANDALISM_DETECTED` mem-publish
+  `security-alert` setelah commit lewat `publishSecurityAlert`
+  (`lib/machine-events/fraud.ts`). `organizationId`-nya diambil dari baris
+  Machine, bukan dari payload mesin.
+
+### Klien dan peluncuran
+
+- Dashboard web (`RealtimeRefresh`) tersambung ulang 3 detik setelah socket
+  ditutup. Setelah expiry atau pencabutan, koneksi tanpa sesi valid menjadi
+  socket anonim (topik publik saja). Setelah login baru, socket mendapat
+  identitas baru.
+- Kiosk (`MachineDisplay`) bersifat anonim dan tidak terpengaruh. Mobile tidak
+  memakai websocket.
+- Tidak ada migrasi skema atau backfill. Deploy web (verifier baru) bersamaan
+  dengan atau sebelum gateway realtime:
+  - Gateway lama dengan verifier baru: body `null` membuat akses privat
+    ditolak (fail closed).
+  - Gateway baru dengan verifier lama: jawaban `{ role }` dianggap tidak
+    lengkap, sehingga topik restricted ditahan sampai web diperbarui.
+- Finding SEC-10 tidak ditandai RELEASED sebelum gate Z01.

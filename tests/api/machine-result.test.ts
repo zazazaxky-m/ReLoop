@@ -76,7 +76,7 @@ describe('/api/machine-commands/[code]/[id]/result POST', () => {
   });
 
   it('updates command and machine state on success', async () => {
-    vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret' } as any);
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', ingestSecret: 'secret', organizationId: 'org-a' } as any);
     vi.mocked(machineAuth.verifyMachineRequest).mockResolvedValue({ ok: true } as any);
     vi.mocked(prisma.machineRemoteCommand.findFirst).mockResolvedValue({ id: 'cmd1', status: 'DISPATCHED' } as any);
     vi.mocked(prisma.machineRemoteCommand.update).mockResolvedValue({ id: 'cmd1' } as any);
@@ -92,7 +92,11 @@ describe('/api/machine-commands/[code]/[id]/result POST', () => {
       expect.objectContaining({ data: expect.objectContaining({ status: 'FULL', fillLevelPercent: 100 }) })
     );
     expect(realtime.publishRealtime).toHaveBeenCalledWith(
-      expect.objectContaining({ eventType: 'REMOTE_COMMAND_COMPLETED', machineCode: 'M1' })
+      expect.objectContaining({ eventType: 'REMOTE_COMMAND_COMPLETED', machineCode: 'M1', organizationId: 'org-a' })
+    );
+    // R04: the organization comes from the machine row.
+    expect(prisma.machine.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ organizationId: true }) })
     );
   });
 

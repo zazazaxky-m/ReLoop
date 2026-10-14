@@ -100,7 +100,7 @@ describe('Remote Commands API', () => {
 
     it('creates new command and publishes realtime event', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 's1', role: 'SUPERADMIN' } as any);
-      vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', machineCode: 'M1', ingestSecret: 'secret' } as any);
+      vi.mocked(prisma.machine.findUnique).mockResolvedValue({ id: 'm1', machineCode: 'M1', ingestSecret: 'secret', organizationId: 'org-a' } as any);
       vi.mocked(prisma.machineRemoteCommand.findFirst).mockResolvedValue(null);
       vi.mocked(prisma.machineRemoteCommand.create).mockResolvedValue({ id: 'cmd2', command: 'RESTART_APP' } as any);
 
@@ -111,7 +111,11 @@ describe('Remote Commands API', () => {
       const data = await res.json();
       expect(data.duplicate).toBe(false);
       expect(realtime.publishRealtime).toHaveBeenCalledWith(
-        expect.objectContaining({ eventType: 'REMOTE_COMMAND_QUEUED', machineCode: 'M1' })
+        expect.objectContaining({ eventType: 'REMOTE_COMMAND_QUEUED', machineCode: 'M1', organizationId: 'org-a' })
+      );
+      // R04: the organization comes from the machine row.
+      expect(prisma.machine.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ select: expect.objectContaining({ organizationId: true }) })
       );
     });
 
