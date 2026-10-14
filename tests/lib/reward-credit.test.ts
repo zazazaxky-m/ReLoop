@@ -16,7 +16,7 @@ vi.mock('@/lib/db-locks', () => ({ lockUser: vi.fn() }));
 vi.mock('@/lib/ledger', () => ({ getWalletBalance: vi.fn() }));
 vi.mock('@/lib/reward-funding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/reward-funding')>()),
-  findReservationByKey: vi.fn(async () => null),
+  resolveSourceReservation: vi.fn(async () => ({ kind: 'LEGACY_SOURCE', cutover: { at: new Date(), source: 'migration' } })),
   commitRewardAgainstBudget: vi.fn(async () => ({ commitId: 'c1', covered: 100, uncovered: 0, existing: false })),
 }));
 vi.mock('@/lib/rbac', () => ({
@@ -132,13 +132,14 @@ describe('creditReward / applyRewardEffect', () => {
   });
 
   describe('reward funding (B01)', () => {
-    const reservation = { id: 'res1', status: 'ACTIVE', remainingRupiah: 500 } as any;
+    const reservation = { id: 'res1', status: 'ACTIVE', remainingRupiah: 500, lateReservation: false } as any;
+    const admitted = { kind: 'RESERVATION' as const, reservation, late: false };
 
     it('commits an EARN against its session reservation, keyed by the effect (never twice)', async () => {
-      vi.mocked(funding.findReservationByKey).mockResolvedValue(reservation);
+      vi.mocked(funding.resolveSourceReservation).mockResolvedValue(admitted);
       expect(await checkRewardFunding(mockTx, earn)).toEqual({
-        status: 'COMMITTED', reservationId: 'res1', commitId: 'c1', covered: 100, uncovered: 0, existing: false });
-      expect(funding.findReservationByKey).toHaveBeenCalledWith(mockTx, 'session:s1:admission');
+        status: 'COMMITTED', reservationId: 'res1', commitId: 'c1', covered: 100, uncovered: 0, existing: false, late: false });
+      expect(funding.resolveSourceReservation).toHaveBeenCalledWith(mockTx, { sourceType: 'SESSION', sourceId: 's1' });
       expect(funding.commitRewardAgainstBudget).toHaveBeenCalledWith(mockTx, 'res1', 'deposit-item:d1:earn', 100, { reviewPending: false });
       // The commit runs inside the same write path as the ledger row.
       await creditReward(mockTx, earn);
@@ -146,8 +147,8 @@ describe('creditReward / applyRewardEffect', () => {
       expect(mockTx.rewardLedger.create).toHaveBeenCalledTimes(1);
     });
 
-    it('a review hold commits the approvable ceiling and is marked pending; a trip earning uses its issuance key', async () => {
-      vi.mocked(funding.findReservationByKey).mockResolvedValue(reservation);
+    it('a review hold commits the approvable ceiling and is marked pending; a trip earning uses its issuance source', async () => {
+      vi.mocked(funding.resolveSourceReservation).mockResolvedValue(admitted);
       const hold = { ...earn, amount: 50, status: 'PENDING' as const, funding: { ceilingRupiah: 100, reviewPending: true } };
       expect((await checkRewardFunding(mockTx, hold)).status).toBe('COMMITTED');
       expect(funding.commitRewardAgainstBudget).toHaveBeenLastCalledWith(mockTx, 'res1', 'deposit-item:d1:earn', 100, { reviewPending: true });
@@ -158,21 +159,34 @@ describe('creditReward / applyRewardEffect', () => {
       expect(funding.commitRewardAgainstBudget).toHaveBeenLastCalledWith(mockTx, 'res1', 'deposit-item:d1:earn', 1, { reviewPending: true });
       const trip = { ...earn, businessKey: 'trip:t1:return', sessionId: null, depositItemId: null, referenceType: 'Trip', referenceId: 't1' };
       expect((await checkRewardFunding(mockTx, trip)).status).toBe('COMMITTED');
-      expect(funding.findReservationByKey).toHaveBeenLastCalledWith(mockTx, 'trip:t1:issuance');
+      expect(funding.resolveSourceReservation).toHaveBeenLastCalledWith(mockTx, { sourceType: 'TRIP', sourceId: 't1' });
     });
 
-    it('reports a legacy source (no reservation) and an effect without a source, committing nothing', async () => {
-      vi.mocked(funding.findReservationByKey).mockResolvedValue(null);
+    it('a source admitted without a reservation after the cutover is held late (uncovered), reported as such (I2)', async () => {
+      vi.mocked(funding.resolveSourceReservation).mockResolvedValue({
+        kind: 'RESERVATION', reservation: { ...reservation, id: 'late1', ceilingRupiah: 0, remainingRupiah: 0, lateReservation: true }, late: true });
+      vi.mocked(funding.commitRewardAgainstBudget).mockResolvedValueOnce({ commitId: 'c9', covered: 0, uncovered: 100, existing: false });
+      expect(await checkRewardFunding(mockTx, earn)).toEqual({
+        status: 'COMMITTED', reservationId: 'late1', commitId: 'c9', covered: 0, uncovered: 100, existing: false, late: true });
+      expect(funding.commitRewardAgainstBudget).toHaveBeenCalledWith(mockTx, 'late1', 'deposit-item:d1:earn', 100, { reviewPending: false });
+    });
+
+    it('reports a legacy source (pre-cutover, no reservation) and an effect without a source, committing nothing', async () => {
+      vi.mocked(funding.resolveSourceReservation)
+        .mockResolvedValueOnce({ kind: 'LEGACY_SOURCE', cutover: { at: new Date('2026-10-14T15:00:00Z'), source: 'migration' } })
+        .mockResolvedValueOnce({ kind: 'NO_SOURCE' });
       expect(await checkRewardFunding(mockTx, earn)).toEqual({ status: 'NO_RESERVATION', reason: 'LEGACY_SOURCE' });
+      expect(await checkRewardFunding(mockTx, earn)).toEqual({ status: 'NO_RESERVATION', reason: 'NO_SOURCE' });
       expect(await checkRewardFunding(mockTx, { ...earn, sessionId: null, referenceType: 'ManualValidation' }))
         .toEqual({ status: 'NO_RESERVATION', reason: 'NO_SOURCE' });
       expect(funding.commitRewardAgainstBudget).not.toHaveBeenCalled();
       // The ledger row is still written: funding never withholds an accepted reward.
+      vi.mocked(funding.resolveSourceReservation).mockResolvedValue({ kind: 'LEGACY_SOURCE', cutover: { at: null, source: 'migration-missing' } });
       expect(await creditReward(mockTx, earn)).toMatchObject({ businessKey: 'deposit-item:d1:earn', amount: 100 });
     });
 
     it('leaves corrections and caller-settled effects to the review path', async () => {
-      vi.mocked(funding.findReservationByKey).mockResolvedValue(reservation);
+      vi.mocked(funding.resolveSourceReservation).mockResolvedValue(admitted);
       expect(await checkRewardFunding(mockTx, { ...earn, entryType: 'ADJUST', amount: 50 })).toEqual({ status: 'SETTLED_BY_CALLER' });
       expect(await checkRewardFunding(mockTx, { ...earn, funding: { settledByCaller: true } })).toEqual({ status: 'SETTLED_BY_CALLER' });
       expect(await checkRewardFunding(mockTx, { ...earn, amount: 0 })).toEqual({ status: 'ZERO' });

@@ -1,4 +1,4 @@
-import type { TrashBagAssignment } from "@prisma/client";
+import type { Prisma, Trip, TrashBagAssignment, TripStatus } from "@prisma/client";
 import { logAudit } from "./audit";
 import { lockCampaign, lockTrip, lockUser } from "./db-locks";
 import { prisma } from "./prisma";
@@ -11,7 +11,7 @@ import {
 } from "./reward-funding";
 import { tripRewardMode } from "./reward-policy";
 import { canIssueBagsForTripStatus, generateBagQrCode, getTripTravelAgentGateBlockReason } from "./trip";
-import { TRIP_CHANGED } from "./trip-validation";
+import { TRIP_CHANGED, closeTripReservation, lockTripAggregate } from "./trip-validation";
 import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
 
 /**
@@ -29,6 +29,62 @@ import { afterCommitSafely, runWalletTransaction } from "./wallet-service";
  */
 
 export const ISSUE_STATUS_ERROR = "Kantong hanya dapat diterbitkan untuk trip PLANNED atau ACTIVE";
+
+/**
+ * Reserves (or extends / re-activates) the trip's issuance reservation for
+ * `issuedRows` bags: the most they can ever pay. Nothing for a trip without a
+ * recipient or a program that pays no money. The caller holds the trip
+ * locks (`lockTripAggregate`, or User -> account -> Campaign -> Trip).
+ */
+export async function reserveTripIssuance(
+  tx: Prisma.TransactionClient,
+  trip: {
+    id: string;
+    userId: string | null;
+    campaignId: string;
+    campaign: { organizationId: string; campaignType: string; rewardMode: string; rewardMultiplier: number | null };
+  },
+  issuedRows: number,
+): Promise<string | null> {
+  if (!trip.userId || issuedRows <= 0 || tripRewardMode(trip.campaign) !== "MONEY_REWARD") return null;
+  return reserveRewardBudget(tx, {
+    businessKey: tripIssuanceKey(trip.id),
+    organizationId: trip.campaign.organizationId,
+    campaignId: trip.campaignId,
+    userId: trip.userId,
+    ceilingRupiah: tripIssuanceCeiling(issuedRows, trip.campaign.rewardMultiplier),
+    sourceType: "TRIP",
+    sourceId: trip.id,
+  });
+}
+
+/**
+ * Manual trip status change (PATCH /api/trips/[id]), under the trip locks
+ * (lib/trip-validation.ts; B01: User -> funding account -> Campaign -> Trip):
+ * a check-out that closed the trip meanwhile is never overwritten (409). A
+ * cancelled trip gives its issuance reservation back; a reopened one
+ * (CANCELLED -> PLANNED) reserves its issued bags again before it can earn
+ * (fix round 1, I1), refused under enforcement when capacity cannot cover it.
+ * The scope and transition checks are the caller's (loadScopedTrip,
+ * canManuallySetTripStatus).
+ */
+export async function changeTripStatus(
+  tripId: string,
+  expectedStatus: TripStatus,
+  status: TripStatus,
+): Promise<Trip> {
+  return runWalletTransaction(async (tx) => {
+    const locked = await lockTripAggregate(tx, tripId);
+    if (locked.status !== expectedStatus) throw new HttpError(409, TRIP_CHANGED);
+    const { count } = await tx.trip.updateMany({ where: { id: tripId, status: expectedStatus }, data: { status } });
+    if (count !== 1) throw new HttpError(409, TRIP_CHANGED);
+    if (status === "CANCELLED") await closeTripReservation(tx, tripId, "TRIP_CANCELLED");
+    if (expectedStatus === "CANCELLED" && status === "PLANNED") {
+      await reserveTripIssuance(tx, locked, locked.bagAssignments.length);
+    }
+    return tx.trip.findUniqueOrThrow({ where: { id: tripId } });
+  });
+}
 
 export interface IssueTrashBagsInput {
   tripId: string;
@@ -92,18 +148,17 @@ export async function issueTrashBags(user: CurrentUser, data: IssueTrashBagsInpu
           throw new HttpError(409, TRIP_CHANGED);
         }
         if (!canIssueBagsForTripStatus(current.status)) throw new HttpError(422, ISSUE_STATUS_ERROR);
-        if (current.userId && tripRewardMode(current.campaign) === "MONEY_REWARD") {
-          const issued = await tx.trashBagAssignment.count({ where: { tripId: trip.id } });
-          await reserveRewardBudget(tx, {
-            businessKey: tripIssuanceKey(trip.id),
-            organizationId: trip.campaign.organizationId,
-            campaignId: trip.campaignId,
+        const issued = await tx.trashBagAssignment.count({ where: { tripId: trip.id } });
+        await reserveTripIssuance(
+          tx,
+          {
+            id: trip.id,
             userId: current.userId,
-            ceilingRupiah: tripIssuanceCeiling(issued + data.bagCount, current.campaign.rewardMultiplier),
-            sourceType: "TRIP",
-            sourceId: trip.id,
-          });
-        }
+            campaignId: trip.campaignId,
+            campaign: { ...current.campaign, organizationId: trip.campaign.organizationId },
+          },
+          issued + data.bagCount,
+        );
         await tx.trashBagAssignment.createMany({
           data: qrCodes.map((bagQrCode) => ({
             tripId: trip.id,

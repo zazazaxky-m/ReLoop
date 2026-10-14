@@ -959,6 +959,10 @@ model RewardBudgetReservation {
   shortfallRupiah         Int                     @default(0)
   /// Shadow mode only: budget the campaign lacked when this was reserved (0 when covered).
   campaignShortfallRupiah Int                     @default(0)
+  /// B01a fix 1: created at the first earning of a source that was admitted
+  /// without a reservation after the funding cutover (its program turned to
+  /// money later). Ceiling 0: every commit is uncovered and reported.
+  lateReservation         Boolean                 @default(false)
   status                  RewardReservationStatus @default(ACTIVE)
   releasedAt              DateTime?
   releasedById            String?

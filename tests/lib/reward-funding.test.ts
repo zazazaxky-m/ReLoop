@@ -1,13 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CAMPAIGN_BUDGET_REQUIRED_FOR_ACTIVATION,
+  FUNDING_CUTOVER_ENV,
   REWARD_FUNDING_ENFORCED_ENV,
+  REWARD_FUNDING_MIGRATION,
   SESSION_CEILING_NOT_CONFIGURED,
   STALE_HOLD_AFTER_MS,
   assertMoneyProgramConfigured,
   checkCapacity,
   classifyHold,
+  configuredCap,
+  effectiveMultiplier,
   fundingPolicy,
+  fundingCorrectionKey,
+  fundingTopupKey,
   isRewardFundingEnforced,
+  resolveFundingCutover,
   resolveSessionCeiling,
   tripIssuanceCeiling,
 } from "@/lib/reward-funding";
@@ -51,12 +59,23 @@ describe("capacity checks (the brief's two conditions)", () => {
 });
 
 describe("ceilings", () => {
-  it("prefers the campaign's per-session ceiling, then the machine's, else null", () => {
+  it("prefers the campaign's per-session ceiling, then the machine's, else null; zero is never a ceiling (I3)", () => {
     expect(resolveSessionCeiling({ campaign: { maxRewardPerSessionRupiah: 5_000 }, machine: { maxRewardPerSessionRupiah: 20_000 } })).toBe(5_000);
     expect(resolveSessionCeiling({ campaign: { maxRewardPerSessionRupiah: null }, machine: { maxRewardPerSessionRupiah: 20_000 } })).toBe(20_000);
     expect(resolveSessionCeiling({ campaign: null, machine: { maxRewardPerSessionRupiah: 20_000 } })).toBe(20_000);
     expect(resolveSessionCeiling({ campaign: null, machine: { maxRewardPerSessionRupiah: null } })).toBeNull();
-    expect(resolveSessionCeiling({ campaign: { maxRewardPerSessionRupiah: 0 }, machine: { maxRewardPerSessionRupiah: 20_000 } })).toBe(0);
+    // A zero (or negative) cap is "not configured": it falls through, and a zero everywhere is null.
+    expect(resolveSessionCeiling({ campaign: { maxRewardPerSessionRupiah: 0 }, machine: { maxRewardPerSessionRupiah: 20_000 } })).toBe(20_000);
+    expect(resolveSessionCeiling({ campaign: { maxRewardPerSessionRupiah: -5 }, machine: { maxRewardPerSessionRupiah: 20_000 } })).toBe(20_000);
+    expect(resolveSessionCeiling({ campaign: null, machine: { maxRewardPerSessionRupiah: 0 } })).toBeNull();
+    expect(resolveSessionCeiling({ campaign: { maxRewardPerSessionRupiah: 0 }, machine: { maxRewardPerSessionRupiah: 0 } })).toBeNull();
+    expect(configuredCap(1)).toBe(1);
+    expect(configuredCap(0)).toBeNull();
+    expect(configuredCap(null)).toBeNull();
+    expect(configuredCap(1.5)).toBeNull();
+    expect(effectiveMultiplier(null)).toBe(1);
+    expect(effectiveMultiplier(0)).toBe(1);
+    expect(effectiveMultiplier(1.5)).toBe(1.5);
   });
 
   it("a trip's issuance ceiling is bags x Rp2.000 x the campaign multiplier at full compliance, rounded up", () => {
@@ -70,10 +89,14 @@ describe("ceilings", () => {
 });
 
 describe("assertMoneyProgramConfigured", () => {
-  const live = { status: "ACTIVE", rewardMode: "MONEY_REWARD", campaignType: "MACHINE_DEPOSIT", supportsMachine: false, maxRewardPerSessionRupiah: null };
-  it("under enforcement, an ACTIVE money program at machines needs its per-session ceiling", () => {
+  const live = {
+    status: "ACTIVE", rewardMode: "MONEY_REWARD", campaignType: "MACHINE_DEPOSIT", supportsMachine: false,
+    maxRewardPerSessionRupiah: null, rewardBudgetRupiah: 50_000,
+  };
+  it("under enforcement, an ACTIVE money program at machines needs its per-session ceiling (at least Rp1)", () => {
     expect(() => assertMoneyProgramConfigured(live, { enforced: true })).toThrow(SESSION_CEILING_NOT_CONFIGURED);
-    expect(() => assertMoneyProgramConfigured({ ...live, maxRewardPerSessionRupiah: 1_000 }, { enforced: true })).not.toThrow();
+    expect(() => assertMoneyProgramConfigured({ ...live, maxRewardPerSessionRupiah: 0 }, { enforced: true })).toThrow(SESSION_CEILING_NOT_CONFIGURED);
+    expect(() => assertMoneyProgramConfigured({ ...live, maxRewardPerSessionRupiah: 1 }, { enforced: true })).not.toThrow();
     expect(() => assertMoneyProgramConfigured({ ...live, campaignType: "EVENT", supportsMachine: true }, { enforced: true })).toThrow();
     // Programs that never run at machines, inactive or compliance-only programs, and shadow mode: never refused.
     expect(() => assertMoneyProgramConfigured({ ...live, campaignType: "EVENT" }, { enforced: true })).not.toThrow();
@@ -82,6 +105,46 @@ describe("assertMoneyProgramConfigured", () => {
     expect(() => assertMoneyProgramConfigured({ ...live, rewardMode: "COMPLIANCE_ONLY" }, { enforced: true })).not.toThrow();
     expect(() => assertMoneyProgramConfigured(live, { enforced: false })).not.toThrow();
   });
+
+  it("under enforcement, every ACTIVE money program needs a budget of at least Rp1; null is never unlimited (C1)", () => {
+    const configured = { ...live, maxRewardPerSessionRupiah: 1_000 };
+    for (const type of ["MACHINE_DEPOSIT", "TRASH_BAG", "TOURISM_PROGRAM", "EVENT"]) {
+      expect(() => assertMoneyProgramConfigured({ ...configured, campaignType: type, rewardBudgetRupiah: null }, { enforced: true }))
+        .toThrow(CAMPAIGN_BUDGET_REQUIRED_FOR_ACTIVATION);
+      expect(() => assertMoneyProgramConfigured({ ...configured, campaignType: type, rewardBudgetRupiah: 0 }, { enforced: true }))
+        .toThrow(CAMPAIGN_BUDGET_REQUIRED_FOR_ACTIVATION);
+      expect(() => assertMoneyProgramConfigured({ ...configured, campaignType: type, rewardBudgetRupiah: 1 }, { enforced: true })).not.toThrow();
+    }
+    expect(() => assertMoneyProgramConfigured({ ...configured, rewardBudgetRupiah: null, status: "PAUSED" }, { enforced: true })).not.toThrow();
+    expect(() => assertMoneyProgramConfigured({ ...configured, rewardBudgetRupiah: null }, { enforced: false })).not.toThrow();
+  });
+});
+
+describe("evidence keys and the funding cutover", () => {
+  it("evidence references are unique per kind across organizations (C2)", () => {
+    expect(fundingTopupKey("BANK-001")).toBe("topup:BANK-001");
+    expect(fundingCorrectionKey("BANK-001")).toBe("correction:BANK-001");
+  });
+
+  it("resolves the funding cutover from the explicit setting, else the applied funding migration, and fails closed", async () => {
+    const reader = () => ({ $queryRaw: vi.fn() });
+    const db = reader();
+    const finishedAt = new Date("2026-10-14T15:00:00.000Z");
+    db.$queryRaw.mockResolvedValueOnce([{ present: true }]).mockResolvedValueOnce([{ finishedAt }]);
+    expect(await resolveFundingCutover(db as never, {})).toEqual({ at: finishedAt, source: "migration" });
+    expect(db.$queryRaw.mock.calls[1][1]).toBe(REWARD_FUNDING_MIGRATION);
+    expect(REWARD_FUNDING_MIGRATION).toBe("20261014150000_reward_funding");
+
+    const explicit = reader();
+    expect(await resolveFundingCutover(explicit as never, { [FUNDING_CUTOVER_ENV]: "2026-10-20T00:00:00Z" }))
+      .toEqual({ at: new Date("2026-10-20T00:00:00.000Z"), source: "env" });
+    expect(explicit.$queryRaw).not.toHaveBeenCalled();
+    expect(await resolveFundingCutover(explicit as never, { [FUNDING_CUTOVER_ENV]: "bukan-tanggal" }))
+      .toEqual({ at: null, source: "env-invalid" });
+    const missing = reader();
+    missing.$queryRaw.mockResolvedValueOnce([{ present: false }]);
+    expect(await resolveFundingCutover(missing as never, {})).toEqual({ at: null, source: "migration-missing" });
+  });
 });
 
 describe("classifyHold (stale-hold monitoring)", () => {
@@ -89,7 +152,7 @@ describe("classifyHold (stale-hold monitoring)", () => {
   const row = {
     id: "res1", businessKey: "session:s1:admission", organizationId: "org1", userId: "u1", campaignId: null,
     sourceType: "SESSION" as const, sourceId: "s1", sourceStatus: "ACTIVE", ceilingRupiah: 20_000, remainingRupiah: 15_000,
-    shortfallRupiah: 0, campaignShortfallRupiah: 0, createdAt: new Date(now.getTime() - 5 * 60_000),
+    shortfallRupiah: 0, campaignShortfallRupiah: 0, lateReservation: false, createdAt: new Date(now.getTime() - 5 * 60_000),
   };
 
   it("names the owner and a reconciliation reason for closed sources, old open sources, missing ceilings and shortfalls", () => {
@@ -107,5 +170,11 @@ describe("classifyHold (stale-hold monitoring)", () => {
     expect(classifyHold({ ...row, sourceType: "TRIP", sourceStatus: "ACTIVE" }, now)).toBeNull();
     const several = classifyHold({ ...row, sourceStatus: "COMPLETED", shortfallRupiah: 10 }, now)!;
     expect(several.reasons).toEqual(["SOURCE_CLOSED_AWAITING_WATERMARK", "CAPACITY_SHORTFALL"]);
+    // A source admitted without a reservation (I2) is told apart from a configured zero ceiling, for sessions and trips.
+    const late = classifyHold({ ...row, ceilingRupiah: 0, remainingRupiah: 0, lateReservation: true }, now)!;
+    expect(late.reasons).toEqual(["ADMITTED_WITHOUT_RESERVATION"]);
+    expect(late.reconciliation).toMatch(/tanpa reservasi/);
+    expect(classifyHold({ ...row, sourceType: "TRIP", ceilingRupiah: 0, remainingRupiah: 0, lateReservation: true }, now)?.reasons)
+      .toEqual(["ADMITTED_WITHOUT_RESERVATION"]);
   });
 });

@@ -388,7 +388,7 @@ export async function createAuditFixture(): Promise<AuditFixture> {
           kind: "CONFIRMED_TOPUP",
           amount,
           reference: `audit-fixture-${randomUUID()}`,
-          note: "audit fixture",
+          note: "Bukti pendanaan fixture audit (sumber, tanggal, rekening uji)",
           verifiedById: ids.superadmin,
         }),
       );

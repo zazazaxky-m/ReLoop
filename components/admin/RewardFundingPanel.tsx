@@ -72,6 +72,7 @@ interface FundingDetail {
   reservedRemainingRupiah: number;
   uncoveredRupiah: number;
   staleHolds: StaleHold[];
+  programsWithoutBudget: { id: string; name: string }[];
   entries: FundingEntryRow[];
   campaigns: CampaignBudgetRow[];
   commits: { active: number; heldRupiah: number; paidRupiah: number; uncoveredRupiah: number; reviewPending: number };
@@ -88,6 +89,7 @@ const REASON_LABELS: Record<string, string> = {
   SOURCE_OPEN_TOO_LONG: "Sumber terbuka lebih dari 24 jam",
   CEILING_NOT_CONFIGURED: "Batas reward per sesi belum diisi",
   CAPACITY_SHORTFALL: "Reservasi melebihi dana terkonfirmasi",
+  ADMITTED_WITHOUT_RESERVATION: "Diterima tanpa reservasi (program berubah setelah penerimaan)",
 };
 
 const EMPTY_FORM = { kind: "CONFIRMED_TOPUP", amount: "", reference: "", note: "" };
@@ -146,7 +148,7 @@ export function RewardFundingPanel({ organizations }: { organizations: Option[] 
           kind: form.kind,
           amount: Number(form.amount),
           reference: form.reference,
-          note: form.note || undefined,
+          note: form.note,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -258,6 +260,12 @@ export function RewardFundingPanel({ organizations }: { organizations: Option[] 
               <p className="text-sm text-status-error">
                 {formatRupiah(detail.uncoveredRupiah)} kewajiban tercatat di luar reservasinya (barang sudah diterima
                 mesin, reward tidak dihilangkan). Periksa batas reward per sesi program/mesin.
+              </p>
+            ) : null}
+            {detail.programsWithoutBudget.length > 0 ? (
+              <p className="text-sm text-status-error">
+                Program berhadiah aktif tanpa kuota: {detail.programsWithoutBudget.map((program) => program.name).join(", ")}.
+                Kuota wajib diisi (minimal Rp1); saat penegakan dana aktif program ini tidak menerima setoran.
               </p>
             ) : null}
 
@@ -392,7 +400,7 @@ export function RewardFundingPanel({ organizations }: { organizations: Option[] 
                 <FormField
                   label="Referensi bukti"
                   htmlFor="funding-reference"
-                  hint="Nomor referensi transfer/bukti bank. Referensi yang sama tidak dicatat dua kali."
+                  hint="Nomor referensi transfer/bukti bank, minimal 6 karakter. Satu referensi hanya dicatat sekali, untuk satu organisasi."
                   required
                   className="sm:col-span-2"
                 >
@@ -401,15 +409,24 @@ export function RewardFundingPanel({ organizations }: { organizations: Option[] 
                     value={form.reference}
                     onChange={(e) => setForm((f) => ({ ...f, reference: e.target.value }))}
                     placeholder="BANK-2026-10-14-001"
+                    minLength={6}
                     required
                   />
                 </FormField>
-                <FormField label="Catatan" htmlFor="funding-note" className="sm:col-span-2">
+                <FormField
+                  label="Catatan bukti"
+                  htmlFor="funding-note"
+                  hint="Minimal 10 karakter: sumber dana, tanggal, dan rekening. Disimpan bersama entri."
+                  required
+                  className="sm:col-span-2"
+                >
                   <Textarea
                     id="funding-note"
                     value={form.note}
                     onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-                    placeholder="Keterangan bukti pendanaan"
+                    placeholder="Transfer BCA 14-10-2026 dari rek 1234567890 a.n. Yayasan"
+                    minLength={10}
+                    required
                   />
                 </FormField>
                 <div className="sm:col-span-2">

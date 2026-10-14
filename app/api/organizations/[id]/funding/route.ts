@@ -4,6 +4,10 @@ import { requireApiUser, assertOrgScope, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import {
+  FUNDING_NOTE_MIN,
+  FUNDING_NOTE_REQUIRED,
+  FUNDING_REFERENCE_MIN,
+  FUNDING_REFERENCE_REQUIRED,
   MAX_FUNDING_RUPIAH,
   getOrganizationFunding,
   recordFundingEntry,
@@ -19,10 +23,13 @@ import { afterCommitSafely, runWalletTransaction } from "@/lib/wallet-service";
  * organization's own ADMIN (read-only).
  *
  * POST (SUPERADMIN only; never moves real money):
- * - `{ amount, reference, note?, kind? }` records confirmed cash with its
- *   evidence reference (`CONFIRMED_TOPUP`, positive) or a signed
- *   `CORRECTION`. Idempotent by reference: the same reference and amount
- *   answers 200 with the existing entry, a different amount 409.
+ * - `{ amount, reference, note, kind? }` records confirmed cash with its
+ *   evidence: a reference of at least 6 characters, unique per kind across
+ *   organizations (one bank transfer confirms cash once), and a note of at
+ *   least 10 characters (source of funds, date, account) stored with the
+ *   entry (`CONFIRMED_TOPUP`, positive, or a signed `CORRECTION`). Idempotent
+ *   by reference: the same reference for the same organization and amount
+ *   answers 200 with the existing entry; another organization or amount 409.
  * - `{ action: "release_reservation", reservationId, reason }` releases the
  *   residual hold of a session/trip that already ended (controller ruling:
  *   never by timeout). Audited with the reason.
@@ -37,11 +44,15 @@ const entrySchema = z.object({
     .min(-MAX_FUNDING_RUPIAH, "Nominal melebihi batas yang diizinkan")
     .max(MAX_FUNDING_RUPIAH, "Nominal melebihi batas yang diizinkan"),
   reference: z
-    .string({ required_error: "Referensi bukti pendanaan wajib diisi" })
+    .string({ required_error: FUNDING_REFERENCE_REQUIRED, invalid_type_error: FUNDING_REFERENCE_REQUIRED })
     .trim()
-    .min(1, "Referensi bukti pendanaan wajib diisi")
+    .min(FUNDING_REFERENCE_MIN, FUNDING_REFERENCE_REQUIRED)
     .max(120, "Referensi maksimal 120 karakter"),
-  note: z.string().trim().max(500, "Catatan maksimal 500 karakter").optional(),
+  note: z
+    .string({ required_error: FUNDING_NOTE_REQUIRED, invalid_type_error: FUNDING_NOTE_REQUIRED })
+    .trim()
+    .min(FUNDING_NOTE_MIN, FUNDING_NOTE_REQUIRED)
+    .max(500, "Catatan maksimal 500 karakter"),
 }).superRefine((value, ctx) => {
   if (value.kind === "CONFIRMED_TOPUP" && value.amount <= 0) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["amount"], message: "Nominal topup harus lebih dari 0" });

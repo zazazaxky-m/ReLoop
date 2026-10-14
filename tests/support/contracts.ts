@@ -154,6 +154,7 @@ export const fundingStaleHoldV1 = z.object({
   ageMinutes: z.number().int().nonnegative(),
   reasons: z.array(z.enum([
     "SOURCE_CLOSED_AWAITING_WATERMARK", "SOURCE_OPEN_TOO_LONG", "CEILING_NOT_CONFIGURED", "CAPACITY_SHORTFALL",
+    "ADMITTED_WITHOUT_RESERVATION",
   ])).min(1),
   reconciliation: z.string().min(1),
 });
@@ -175,6 +176,7 @@ export const fundingVisibilityV1 = z.object({
     reservedRemainingRupiah: nonNegativeRupiah,
     uncoveredRupiah: nonNegativeRupiah,
     staleHolds: z.array(fundingStaleHoldV1),
+    programsWithoutBudget: z.array(z.object({ id: z.string().min(1), name: z.string().min(1) })),
   })),
 }).superRefine((funding, ctx) => {
   const confirmed = funding.organizations.reduce((sum, org) => sum + org.confirmedRupiah, 0);

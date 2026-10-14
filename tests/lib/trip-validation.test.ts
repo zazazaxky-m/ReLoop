@@ -21,6 +21,12 @@ vi.mock("@/lib/prisma", () => ({
     travelAgentOrganization: { findMany: vi.fn() },
   },
 }));
+// B01 fix 1 (I2): a trip without an issuance reservation is resolved against the
+// funding cutover (lib/reward-funding.ts, its own real-DB tests); here every trip is legacy.
+vi.mock("@/lib/reward-funding", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/reward-funding")>()),
+  resolveSourceReservation: vi.fn(async () => ({ kind: "LEGACY_SOURCE", cutover: { at: new Date(0), source: "migration" } })),
+}));
 
 type Bag = { id: string; bagQrCode: string; status: string | null };
 

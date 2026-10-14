@@ -250,12 +250,12 @@ export function MachineForm({
         <FormField
           label="Batas reward per sesi (Rp)"
           htmlFor="maxRewardPerSession"
-          hint="Dana sebesar ini direservasi saat sesi berhadiah dimulai bila program tidak menetapkan batasnya sendiri."
+          hint="Minimal Rp1; dana sebesar ini direservasi saat sesi berhadiah dimulai bila program tidak menetapkan batasnya sendiri."
         >
           <Input
             id="maxRewardPerSession"
             type="number"
-            min="0"
+            min="1"
             step="1"
             value={form.maxRewardPerSessionRupiah}
             onChange={(e) => setForm((f) => ({ ...f, maxRewardPerSessionRupiah: e.target.value }))}

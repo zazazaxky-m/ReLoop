@@ -2,12 +2,7 @@ import type { Prisma, RewardLedger, RewardReconciliationCase } from "@prisma/cli
 import { lockUser } from "./db-locks";
 import { getWalletBalance } from "./ledger";
 import { HttpError } from "./rbac";
-import {
-  commitRewardAgainstBudget,
-  findReservationByKey,
-  sessionAdmissionKey,
-  tripIssuanceKey,
-} from "./reward-funding";
+import { commitRewardAgainstBudget, resolveSourceReservation } from "./reward-funding";
 
 /**
  * The only writer of reward money effects (task M04): machine acceptance,
@@ -99,11 +94,16 @@ function assertEffect(input: CreditRewardInput, entryType: CreditEntryType) {
 // ---------------------------------------------------------------------------
 
 export type FundingCheck =
-  /** The obligation was committed against the source's admission reservation (or found already committed). */
-  | { status: "COMMITTED"; reservationId: string; commitId: string; covered: number; uncovered: number; existing: boolean }
+  /**
+   * The obligation was committed against the source's admission reservation
+   * (or found already committed). `late`: the source was admitted without a
+   * reservation after the funding cutover, so a zero-ceiling reservation was
+   * created now and the whole amount is uncovered (held and reported).
+   */
+  | { status: "COMMITTED"; reservationId: string; commitId: string; covered: number; uncovered: number; existing: boolean; late: boolean }
   /** A correction, or an effect whose caller settles the obligation itself (the deposit review). */
   | { status: "SETTLED_BY_CALLER" }
-  /** No funding obligation: the effect names no session/trip, or its source predates B01 (legacy; B02 backfills). */
+  /** No funding obligation: the effect names no session/trip, or its source predates the funding cutover (legacy; B02 backfills). */
   | { status: "NO_RESERVATION"; reason: "NO_SOURCE" | "LEGACY_SOURCE" }
   | { status: "ZERO" };
 
@@ -123,8 +123,11 @@ function fundingCeiling(effect: Readonly<CreditRewardInput>): number {
  * refused: material already accepted keeps its reward, and any excess over
  * the reservation is recorded as uncovered for the operator. Corrections
  * (ADJUST/REVERSE) and effects flagged `settledByCaller` are settled by the
- * review path. A source without a reservation (admitted before B01) is a
- * legacy obligation, reported as such and backfilled by B02.
+ * review path. A source without a reservation is legacy only when it predates
+ * the funding cutover (reported as such, backfilled by B02); a later one is
+ * given a zero-ceiling reservation on the spot and committed uncovered
+ * (lib/reward-funding.ts `resolveSourceReservation`), so an earning never
+ * disappears from capacity.
  */
 export async function checkRewardFunding(
   tx: Prisma.TransactionClient,
@@ -135,18 +138,19 @@ export async function checkRewardFunding(
   if ((effect.entryType ?? "EARN") !== "EARN") return { status: "SETTLED_BY_CALLER" };
   const ceiling = fundingCeiling(effect);
   if (ceiling <= 0) return { status: "ZERO" };
-  const key = effect.sessionId
-    ? sessionAdmissionKey(effect.sessionId)
+  const source = effect.sessionId
+    ? { sourceType: "SESSION" as const, sourceId: effect.sessionId }
     : effect.referenceType === "Trip"
-      ? tripIssuanceKey(effect.referenceId)
+      ? { sourceType: "TRIP" as const, sourceId: effect.referenceId }
       : null;
-  if (!key) return { status: "NO_RESERVATION", reason: "NO_SOURCE" };
-  const reservation = await findReservationByKey(tx, key);
-  if (!reservation) return { status: "NO_RESERVATION", reason: "LEGACY_SOURCE" };
-  const commit = await commitRewardAgainstBudget(tx, reservation.id, effect.businessKey, ceiling, {
+  if (!source) return { status: "NO_RESERVATION", reason: "NO_SOURCE" };
+  const resolved = await resolveSourceReservation(tx, source);
+  if (resolved.kind === "NO_SOURCE") return { status: "NO_RESERVATION", reason: "NO_SOURCE" };
+  if (resolved.kind === "LEGACY_SOURCE") return { status: "NO_RESERVATION", reason: "LEGACY_SOURCE" };
+  const commit = await commitRewardAgainstBudget(tx, resolved.reservation.id, effect.businessKey, ceiling, {
     reviewPending: hint?.reviewPending ?? effect.status === "PENDING",
   });
-  return { status: "COMMITTED", reservationId: reservation.id, ...commit };
+  return { status: "COMMITTED", reservationId: resolved.reservation.id, late: resolved.late, ...commit };
 }
 
 // ---------------------------------------------------------------------------

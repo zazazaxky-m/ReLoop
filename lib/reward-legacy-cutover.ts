@@ -31,11 +31,18 @@ export type LegacyCutover =
 
 type RawReader = Pick<Prisma.TransactionClient, "$queryRaw">;
 
-export async function resolveLegacyCutover(
+/**
+ * Deterministic cutover of one migration (the pattern above, reused by the
+ * B01a funding cutover in lib/reward-funding.ts): the explicit `envName`
+ * value wins and fails closed when unparsable; otherwise the applied
+ * `finished_at` of `migration`.
+ */
+export async function resolveMigrationCutover(
   db: RawReader,
-  env: Record<string, string | undefined> = process.env,
+  options: { migration: string; envName: string; env?: Record<string, string | undefined> },
 ): Promise<LegacyCutover> {
-  const configured = env[LEGACY_CUTOVER_ENV]?.trim();
+  const env = options.env ?? process.env;
+  const configured = env[options.envName]?.trim();
   if (configured) {
     const at = new Date(configured);
     return Number.isNaN(at.getTime()) ? { at: null, source: "env-invalid" } : { at, source: "env" };
@@ -46,8 +53,15 @@ export async function resolveLegacyCutover(
   if (!present) return { at: null, source: "migration-missing" };
   const rows = await db.$queryRaw<{ finishedAt: Date | null }[]>`
     SELECT finished_at AS "finishedAt" FROM "_prisma_migrations"
-    WHERE migration_name = ${REWARD_POLICY_MIGRATION} AND rolled_back_at IS NULL AND finished_at IS NOT NULL
+    WHERE migration_name = ${options.migration} AND rolled_back_at IS NULL AND finished_at IS NOT NULL
     ORDER BY finished_at ASC LIMIT 1`;
   const at = rows[0]?.finishedAt ?? null;
   return at ? { at, source: "migration" } : { at: null, source: "migration-missing" };
+}
+
+export async function resolveLegacyCutover(
+  db: RawReader,
+  env: Record<string, string | undefined> = process.env,
+): Promise<LegacyCutover> {
+  return resolveMigrationCutover(db, { migration: REWARD_POLICY_MIGRATION, envName: LEGACY_CUTOVER_ENV, env });
 }

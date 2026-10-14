@@ -417,12 +417,12 @@ export function CampaignManager({
                     <FormField
                       label="Kuota reward program (Rp)"
                       htmlFor="c-budget"
-                      hint="Kosongkan bila program hanya dibatasi dana terkonfirmasi organisasi. Reservasi baru ditolak saat kuota habis."
+                      hint="Minimal Rp1. Wajib diisi sebelum program berhadiah diaktifkan saat penegakan dana aktif (tanpa kuota program tidak menerima setoran). Reservasi baru ditolak saat kuota habis."
                     >
                       <Input
                         id="c-budget"
                         type="number"
-                        min={0}
+                        min={1}
                         step={1}
                         value={form.rewardBudgetRupiah}
                         onChange={(e) => setForm((f) => ({ ...f, rewardBudgetRupiah: e.target.value }))}
@@ -432,12 +432,12 @@ export function CampaignManager({
                     <FormField
                       label="Batas reward per sesi mesin (Rp)"
                       htmlFor="c-session-cap"
-                      hint="Dana sebesar ini direservasi setiap sesi setoran dimulai. Wajib diisi sebelum program berhadiah di mesin diaktifkan."
+                      hint="Minimal Rp1; dana sebesar ini direservasi setiap sesi setoran dimulai. Wajib diisi sebelum program berhadiah di mesin diaktifkan. Mode reward dan multiplier tidak dapat dinaikkan selama masih ada sesi/trip berjalan."
                     >
                       <Input
                         id="c-session-cap"
                         type="number"
-                        min={0}
+                        min={1}
                         step={1}
                         value={form.maxRewardPerSessionRupiah}
                         onChange={(e) => setForm((f) => ({ ...f, maxRewardPerSessionRupiah: e.target.value }))}

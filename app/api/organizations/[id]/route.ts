@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
+import { guardOrganizationModeChange, lockFundingAccountForOrganization } from "@/lib/reward-funding";
+import { runWalletTransaction } from "@/lib/wallet-service";
 
 const patchSchema = z.object({
   name: z.string().min(2).max(160).optional(),
@@ -29,7 +31,18 @@ export async function PATCH(
     if (!existing) throw new HttpError(404, "Organisasi tidak ditemukan");
     const data = patchSchema.parse(await req.json());
 
-    const organization = await prisma.organization.update({ where: { id }, data });
+    // B01 (I2): the machine reward mode of an organization with open
+    // campaign-less sessions cannot turn to money under enforcement; checked
+    // under the organization's funding account lock, which every admission
+    // takes before the Machine row, then the row is re-read.
+    const organization = data.machineRewardMode
+      ? await runWalletTransaction(async (tx) => {
+          await lockFundingAccountForOrganization(tx, id);
+          const locked = await tx.organization.findUniqueOrThrow({ where: { id }, select: { machineRewardMode: true } });
+          await guardOrganizationModeChange(tx, { organizationId: id, current: locked, next: { machineRewardMode: data.machineRewardMode! } });
+          return tx.organization.update({ where: { id }, data });
+        })
+      : await prisma.organization.update({ where: { id }, data });
     await logAudit({
       actorId: user.id,
       action: "ORGANIZATION_UPDATE",

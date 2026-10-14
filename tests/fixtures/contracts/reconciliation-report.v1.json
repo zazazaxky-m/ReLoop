@@ -100,7 +100,8 @@
                 "reasons": ["SOURCE_CLOSED_AWAITING_WATERMARK"],
                 "reconciliation": "Sumber sudah berakhir tetapi sisa dana masih ditahan. Pastikan seluruh event mesin sudah tersinkron, lalu superadmin melepas sisa dana secara eksplisit (alasan wajib) atau tunggu konfirmasi penutupan dari mesin."
               }
-            ]
+            ],
+            "programsWithoutBudget": []
           }
         ]
       },

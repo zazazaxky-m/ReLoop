@@ -4,11 +4,22 @@ import { PATCH } from '@/app/api/organizations/[id]/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
 import * as audit from '@/lib/audit';
+import * as funding from '@/lib/reward-funding';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    organization: { findMany: vi.fn(), create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), count: vi.fn() },
+    organization: { findMany: vi.fn(), create: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), count: vi.fn() },
   },
+}));
+// B01 fix 1 (I2): a machine reward mode change runs under the organization's
+// funding account lock with the enforcement guard; the transaction client is the mocked prisma.
+vi.mock('@/lib/wallet-service', () => ({
+  runWalletTransaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),
+}));
+vi.mock('@/lib/reward-funding', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/reward-funding')>()),
+  lockFundingAccountForOrganization: vi.fn(),
+  guardOrganizationModeChange: vi.fn(),
 }));
 
 vi.mock('@/lib/rbac', () => ({
@@ -97,6 +108,32 @@ describe('/api/organizations', () => {
         data: { name: 'Updated' }
       }));
       expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'ORGANIZATION_UPDATE' }));
+      // No reward-mode change: no funding lock or guard.
+      expect(funding.lockFundingAccountForOrganization).not.toHaveBeenCalled();
+      expect(funding.guardOrganizationModeChange).not.toHaveBeenCalled();
+    });
+
+    it('changes the machine reward mode under the funding account lock with the enforcement guard (B01 fix 1, I2)', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'super1' } as any);
+      vi.mocked(prisma.organization.findUnique).mockResolvedValue({ id: 'org1' } as any);
+      vi.mocked(prisma.organization.findUniqueOrThrow).mockResolvedValue({ machineRewardMode: 'COMPLIANCE_ONLY' } as any);
+      vi.mocked(prisma.organization.update).mockResolvedValue({ id: 'org1', machineRewardMode: 'MONEY_REWARD' } as any);
+
+      const res = await PATCH(makePatchReq({ machineRewardMode: 'MONEY_REWARD' }), { params: Promise.resolve({ id: 'org1' }) });
+      expect(res.status).toBe(200);
+      expect(funding.lockFundingAccountForOrganization).toHaveBeenCalledWith(prisma, 'org1');
+      expect(funding.guardOrganizationModeChange).toHaveBeenCalledWith(prisma, {
+        organizationId: 'org1', current: { machineRewardMode: 'COMPLIANCE_ONLY' }, next: { machineRewardMode: 'MONEY_REWARD' } });
+      const order = [funding.lockFundingAccountForOrganization, funding.guardOrganizationModeChange, prisma.organization.update]
+        .map((fn) => vi.mocked(fn as any).mock.invocationCallOrder[0]);
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+
+      vi.mocked(funding.guardOrganizationModeChange).mockRejectedValueOnce(
+        new (rbac as any).HttpError(409, 'Organisasi masih memiliki sesi setoran berjalan tanpa program.'));
+      vi.mocked(prisma.organization.update).mockClear();
+      const refused = await PATCH(makePatchReq({ machineRewardMode: 'MONEY_REWARD' }), { params: Promise.resolve({ id: 'org1' }) });
+      expect(refused.status).toBe(409);
+      expect(prisma.organization.update).not.toHaveBeenCalled();
     });
 
     it('returns 404 if org not found', async () => {

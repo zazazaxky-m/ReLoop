@@ -22,8 +22,8 @@ const updateSchema = z.object({
   hasExternalCamera: z.boolean().optional(),
   // M04: how an inserted item is verified (lib/reward-policy.ts verifyMaterial).
   materialVerification: z.enum(["AI_REQUIRED", "BARCODE_WEIGHT", "WEIGHT_ONLY"]).optional(),
-  // B01: reward ceiling and item bound of one deposit session (null = not configured).
-  maxRewardPerSessionRupiah: z.number().int().min(0).max(2_147_483_647).nullable().optional(),
+  // B01: reward ceiling (at least Rp1; null = not configured, zero is never a ceiling) and item bound of one session.
+  maxRewardPerSessionRupiah: z.number().int().min(1).max(2_147_483_647).nullable().optional(),
   maxItemsPerSession: z.number().int().min(1).max(10_000).nullable().optional(),
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),

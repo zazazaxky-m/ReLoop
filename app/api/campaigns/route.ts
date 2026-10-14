@@ -8,11 +8,11 @@ import { logAudit } from "@/lib/audit";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
 import { MAX_FUNDING_RUPIAH, assertMoneyProgramConfigured } from "@/lib/reward-funding";
 
-/** B01: integer rupiah caps; null clears (no cap / not configured). */
+/** B01: integer rupiah caps of at least Rp1; null clears (no cap / not configured). Zero is never a cap (I3). */
 const rupiahCapSchema = z
   .number({ invalid_type_error: "Nilai harus berupa angka" })
   .int("Nilai harus bilangan bulat rupiah")
-  .min(0, "Nilai tidak boleh negatif")
+  .min(1, "Nilai minimal Rp1; kosongkan untuk menghapus batas")
   .max(MAX_FUNDING_RUPIAH, "Nilai melebihi batas yang diizinkan")
   .nullable()
   .optional();
@@ -97,13 +97,14 @@ export async function POST(req: Request) {
     if (data.visibility === "PRIVATE" && (!domains || domains.length === 0)) {
       throw new HttpError(422, "Campaign private membutuhkan minimal satu domain email valid");
     }
-    // B01: under enforcement a money program at machines needs its ceiling before it is ACTIVE.
+    // B01: under enforcement an ACTIVE money program needs its budget, and one at machines its ceiling.
     assertMoneyProgramConfigured({
       status: data.status,
       rewardMode: data.rewardMode,
       campaignType: data.campaignType,
       supportsMachine: data.supportsMachine ?? false,
       maxRewardPerSessionRupiah: data.maxRewardPerSessionRupiah ?? null,
+      rewardBudgetRupiah: data.rewardBudgetRupiah ?? null,
     });
 
     const campaign = await prisma.campaign.create({

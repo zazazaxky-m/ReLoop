@@ -11,6 +11,7 @@ import type {
 import { lockCampaign, lockFundingAccount } from "./db-locks";
 import { prisma } from "./prisma";
 import { HttpError } from "./rbac";
+import { resolveMigrationCutover, type LegacyCutover } from "./reward-legacy-cutover";
 import { TRASH_BAG_REWARD_PER_BAG } from "./trip";
 
 /**
@@ -98,6 +99,26 @@ export function fundingPolicy(env: Record<string, string | undefined> = process.
   return { enforced: isRewardFundingEnforced(env) };
 }
 
+/**
+ * B01a cutover (fix round 1, I2): the instant from which every session/trip
+ * is admitted with a reservation. A source created before it that has none
+ * is a legacy obligation (B02 backfills it); a later source without one (its
+ * program turned to money after admission) gets a zero-ceiling reservation at
+ * its first earning and is held uncovered. Resolution is deterministic and
+ * fails closed (an unresolvable cutover treats every source as post-cutover,
+ * i.e. holds it): `REWARD_FUNDING_CUTOVER_AT` when set (unparsable = none),
+ * else the applied time of the funding migration.
+ */
+export const REWARD_FUNDING_MIGRATION = "20261014150000_reward_funding";
+export const FUNDING_CUTOVER_ENV = "REWARD_FUNDING_CUTOVER_AT";
+
+export async function resolveFundingCutover(
+  db: Pick<Prisma.TransactionClient, "$queryRaw">,
+  env: Record<string, string | undefined> = process.env,
+): Promise<LegacyCutover> {
+  return resolveMigrationCutover(db, { migration: REWARD_FUNDING_MIGRATION, envName: FUNDING_CUTOVER_ENV, env });
+}
+
 // ---------------------------------------------------------------------------
 // Messages and keys
 // ---------------------------------------------------------------------------
@@ -108,7 +129,9 @@ export const FUNDING_KEY_CONFLICT =
   "Kunci pendanaan ini sudah tercatat dengan nilai berbeda. Hubungi tim keuangan untuk rekonsiliasi.";
 export const FUNDING_REFERENCE_CONFLICT =
   "Referensi ini sudah tercatat dengan nominal atau jenis berbeda. Periksa bukti pendanaan sebelum mencatat ulang.";
-export const FUNDING_REFERENCE_REQUIRED = "Referensi bukti pendanaan wajib diisi";
+export const FUNDING_REFERENCE_REQUIRED = "Referensi bukti pendanaan wajib diisi (minimal 6 karakter)";
+export const FUNDING_NOTE_REQUIRED =
+  "Catatan bukti pendanaan wajib diisi (minimal 10 karakter: sumber dana, tanggal, dan rekening)";
 export const FUNDING_AMOUNT_INVALID = "Nominal harus bilangan bulat rupiah dalam batas yang diizinkan";
 export const RESERVATION_NOT_FOUND = "Reservasi dana reward tidak ditemukan";
 export const RESERVATION_SOURCE_STILL_OPEN =
@@ -116,14 +139,24 @@ export const RESERVATION_SOURCE_STILL_OPEN =
 export const RESERVATION_RELEASE_REASON_REQUIRED = "Alasan pelepasan sisa dana wajib diisi";
 export const SESSION_CEILING_NOT_CONFIGURED =
   "Batas reward per sesi wajib diisi sebelum program berhadiah diaktifkan";
+export const CAMPAIGN_BUDGET_REQUIRED_FOR_ACTIVATION =
+  "Kuota reward program wajib diisi sebelum program berhadiah diaktifkan";
+export const CAMPAIGN_BUDGET_NOT_CONFIGURED =
+  "Kuota reward program belum diatur. Program berhadiah wajib memiliki kuota sebelum menerima setoran.";
+export const PROGRAM_HAS_OPEN_SOURCES =
+  "Program masih memiliki sesi setoran atau trip yang berjalan. Tunggu sampai berakhir sebelum mengubah mode reward atau multiplier.";
+export const ORGANIZATION_HAS_OPEN_SESSIONS =
+  "Organisasi masih memiliki sesi setoran berjalan tanpa program. Tunggu sampai berakhir sebelum mengubah mode reward mesin.";
 
 export const sessionAdmissionKey = (sessionId: string) => `session:${sessionId}:admission`;
 export const tripIssuanceKey = (tripId: string) => `trip:${tripId}:issuance`;
-export const fundingTopupKey = (organizationId: string, reference: string) => `topup:${organizationId}:${reference}`;
-export const fundingCorrectionKey = (organizationId: string, reference: string) =>
-  `correction:${organizationId}:${reference}`;
+/** Evidence references are unique per kind across organizations: one bank transfer confirms cash once. */
+export const fundingTopupKey = (reference: string) => `topup:${reference}`;
+export const fundingCorrectionKey = (reference: string) => `correction:${reference}`;
 export const payoutFundingKey = (redemptionId: string, accountId: string) =>
   `redemption:${redemptionId}:payout:${accountId}`;
+export const FUNDING_REFERENCE_MIN = 6;
+export const FUNDING_NOTE_MIN = 10;
 
 /** Largest rupiah value a counter can hold (PostgreSQL `integer`). */
 export const MAX_FUNDING_RUPIAH = 2_147_483_647;
@@ -140,16 +173,22 @@ function assertRupiah(value: number, what: string, options: { min?: number; max?
 // Ceilings
 // ---------------------------------------------------------------------------
 
+/** A configured money cap is a positive integer; null, 0 or less is "not configured". */
+export function configuredCap(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
 /**
  * Reward ceiling of one deposit session: the campaign's configured value,
- * else the machine's. Null when neither is configured (a money program must
- * configure it before enforcement; shadow mode records a zero ceiling).
+ * else the machine's. Null when neither is configured (a zero is not a
+ * ceiling: a money program must configure one before enforcement; shadow
+ * mode records a zero ceiling and reports it).
  */
 export function resolveSessionCeiling(input: {
   campaign: { maxRewardPerSessionRupiah: number | null } | null;
   machine: { maxRewardPerSessionRupiah: number | null };
 }): number | null {
-  return input.campaign?.maxRewardPerSessionRupiah ?? input.machine.maxRewardPerSessionRupiah ?? null;
+  return configuredCap(input.campaign?.maxRewardPerSessionRupiah) ?? configuredCap(input.machine.maxRewardPerSessionRupiah);
 }
 
 /**
@@ -168,23 +207,90 @@ export function tripIssuanceCeiling(bagRows: number, rewardMultiplier: number | 
 }
 
 /**
- * A money program that runs at machines must carry its per-session ceiling
- * before it is ACTIVE (the brief: caps are configured when a program is
- * activated, never a hard-coded nominal). Checked by the campaign API under
- * enforcement only; in shadow mode the missing ceiling is reported instead.
+ * An ACTIVE money program must carry its caps (the brief: caps are
+ * configured when a program is activated, never a hard-coded nominal; a
+ * null budget is never "unlimited", C1): a budget of at least Rp1 for every
+ * money program, and a per-session ceiling of at least Rp1 for one that runs
+ * at machines (I3: zero is not configured). Checked by the campaign API under
+ * enforcement only; in shadow mode the missing caps are reported instead.
  */
 export function assertMoneyProgramConfigured(
-  campaign: { status: string; rewardMode: string; campaignType: string; supportsMachine: boolean; maxRewardPerSessionRupiah: number | null },
+  campaign: {
+    status: string; rewardMode: string; campaignType: string; supportsMachine: boolean;
+    maxRewardPerSessionRupiah: number | null; rewardBudgetRupiah: number | null;
+  },
   policy: FundingPolicy = fundingPolicy(),
 ): void {
   if (!policy.enforced) return;
   if (campaign.status !== "ACTIVE" || campaign.rewardMode !== "MONEY_REWARD") return;
+  if (configuredCap(campaign.rewardBudgetRupiah) === null) throw new HttpError(422, CAMPAIGN_BUDGET_REQUIRED_FOR_ACTIVATION);
   const atMachines =
     campaign.campaignType === "MACHINE_DEPOSIT" ||
     ((campaign.campaignType === "EVENT" || campaign.campaignType === "SCHOOL_PROGRAM") && campaign.supportsMachine);
-  if (atMachines && campaign.maxRewardPerSessionRupiah === null) {
+  if (atMachines && configuredCap(campaign.maxRewardPerSessionRupiah) === null) {
     throw new HttpError(422, SESSION_CEILING_NOT_CONFIGURED);
   }
+}
+
+/** Effective trip/machine multiplier (lib/trip.ts computeTrashBagRewardAmount: null or <= 0 means 1). */
+export function effectiveMultiplier(value: number | null | undefined): number {
+  return value != null && value > 0 ? value : 1;
+}
+
+const OPEN_SESSION_STATUSES = ["RESERVED", "ACTIVE", "PROCESSING_ITEM", "REVIEW"] as const;
+
+/** Sources the program admitted that can still earn: open sessions, and PLANNED/ACTIVE trips with issued bags. */
+export async function hasOpenProgramSources(tx: Prisma.TransactionClient, campaignId: string): Promise<boolean> {
+  const sessions = await tx.depositSession.count({ where: { campaignId, status: { in: [...OPEN_SESSION_STATUSES] } } });
+  if (sessions > 0) return true;
+  const trips = await tx.trip.count({
+    where: { campaignId, status: { in: ["PLANNED", "ACTIVE"] }, bagAssignments: { some: {} } },
+  });
+  return trips > 0;
+}
+
+/**
+ * I2: under enforcement a program with open sources cannot turn to money or
+ * raise its multiplier: its sources were admitted (and reserved) under the
+ * old terms, so the change would create obligations nothing reserved for.
+ * The caller holds the Campaign lock (admission and issuance take it too, so
+ * no source can slip in between the count and the update). Shadow mode
+ * allows the change; a later earning is then held late and reported.
+ */
+export async function guardProgramRewardChange(
+  tx: Prisma.TransactionClient,
+  input: {
+    campaignId: string;
+    current: { rewardMode: string; rewardMultiplier: number | null };
+    next: { rewardMode: string; rewardMultiplier: number | null };
+  },
+  policy: FundingPolicy = fundingPolicy(),
+): Promise<void> {
+  if (!policy.enforced) return;
+  const turnsToMoney = input.current.rewardMode !== "MONEY_REWARD" && input.next.rewardMode === "MONEY_REWARD";
+  const raisesMultiplier =
+    input.next.rewardMode === "MONEY_REWARD" &&
+    effectiveMultiplier(input.next.rewardMultiplier) > effectiveMultiplier(input.current.rewardMultiplier);
+  if (!turnsToMoney && !raisesMultiplier) return;
+  if (await hasOpenProgramSources(tx, input.campaignId)) throw new HttpError(409, PROGRAM_HAS_OPEN_SOURCES);
+}
+
+/**
+ * I2: the same guard for the organization's machine mode (sessions without a
+ * campaign). The caller holds the organization's funding account lock, which
+ * every admission takes before the Machine row.
+ */
+export async function guardOrganizationModeChange(
+  tx: Prisma.TransactionClient,
+  input: { organizationId: string; current: { machineRewardMode: string }; next: { machineRewardMode: string } },
+  policy: FundingPolicy = fundingPolicy(),
+): Promise<void> {
+  if (!policy.enforced) return;
+  if (input.current.machineRewardMode === "MONEY_REWARD" || input.next.machineRewardMode !== "MONEY_REWARD") return;
+  const open = await tx.depositSession.count({
+    where: { campaignId: null, status: { in: [...OPEN_SESSION_STATUSES] }, machine: { organizationId: input.organizationId } },
+  });
+  if (open > 0) throw new HttpError(409, ORGANIZATION_HAS_OPEN_SESSIONS);
 }
 
 // ---------------------------------------------------------------------------
@@ -345,8 +451,11 @@ export async function reserveRewardBudget(
   }
   const shortfall = checkCapacity(account, campaign, delta);
   if (policy.enforced) {
-    // The brief's two checks: refused before anything is written, so the
-    // session/bags of a refused admission never exist.
+    // Refused before anything is written, so the session/bags of a refused
+    // admission never exist. A zero reservation is not an admission (I3), a
+    // program without a budget admits nothing (C1), then the brief's two checks.
+    if (input.ceilingRupiah <= 0) throw new HttpError(409, FUNDING_INSUFFICIENT);
+    if (campaign && configuredCap(campaign.rewardBudgetRupiah) === null) throw new HttpError(409, CAMPAIGN_BUDGET_NOT_CONFIGURED);
     if (shortfall.accountShortfall > 0) throw new HttpError(409, FUNDING_INSUFFICIENT);
     if (shortfall.campaignShortfall > 0) throw new HttpError(409, CAMPAIGN_BUDGET_INSUFFICIENT);
   } else if (shortfall.accountShortfall > 0 || shortfall.campaignShortfall > 0) {
@@ -399,6 +508,78 @@ export async function findReservationByKey(
   businessKey: string,
 ): Promise<RewardBudgetReservation | null> {
   return tx.rewardBudgetReservation.findUnique({ where: { businessKey } });
+}
+
+export type SourceReservation =
+  | { kind: "RESERVATION"; reservation: RewardBudgetReservation; late: boolean }
+  /** The source predates the funding cutover: a legacy obligation B02 backfills. */
+  | { kind: "LEGACY_SOURCE"; cutover: LegacyCutover }
+  | { kind: "NO_SOURCE" };
+
+/**
+ * I2: the reservation an earning commits against. Admitted sources have one
+ * (`session:<id>:admission`, `trip:<id>:issuance`). A source without one is
+ * legacy only when it was created before the funding cutover; otherwise (its
+ * program turned to money after admission, or the cutover is unresolvable,
+ * which fails closed) a zero-ceiling reservation is created here, marked
+ * `lateReservation`, so the earning is committed uncovered, held on the
+ * account and reported, instead of disappearing from capacity.
+ */
+export async function resolveSourceReservation(
+  tx: Prisma.TransactionClient,
+  source: { sourceType: RewardReservationSource; sourceId: string },
+  env: Record<string, string | undefined> = process.env,
+): Promise<SourceReservation> {
+  const businessKey = source.sourceType === "SESSION" ? sessionAdmissionKey(source.sourceId) : tripIssuanceKey(source.sourceId);
+  const existing = await findReservationByKey(tx, businessKey);
+  if (existing) return { kind: "RESERVATION", reservation: existing, late: existing.lateReservation };
+
+  let admitted: { createdAt: Date; userId: string; campaignId: string | null; organizationId: string } | null = null;
+  if (source.sourceType === "SESSION") {
+    const session = await tx.depositSession.findUnique({
+      where: { id: source.sourceId },
+      select: { startedAt: true, userId: true, campaignId: true, machine: { select: { organizationId: true } } },
+    });
+    if (session) {
+      admitted = { createdAt: session.startedAt, userId: session.userId, campaignId: session.campaignId, organizationId: session.machine.organizationId };
+    }
+  } else {
+    const trip = await tx.trip.findUnique({
+      where: { id: source.sourceId },
+      select: { createdAt: true, userId: true, campaignId: true, campaign: { select: { organizationId: true } } },
+    });
+    if (trip && trip.userId) {
+      admitted = { createdAt: trip.createdAt, userId: trip.userId, campaignId: trip.campaignId, organizationId: trip.campaign.organizationId };
+    }
+  }
+  if (!admitted) return { kind: "NO_SOURCE" };
+
+  const cutover = await resolveFundingCutover(tx, env);
+  if (cutover.at !== null && admitted.createdAt.getTime() < cutover.at.getTime()) {
+    return { kind: "LEGACY_SOURCE", cutover };
+  }
+  if (cutover.at === null) console.warn(`[reward-funding] funding cutover unavailable (${cutover.source}); holding the source`);
+  await lockFundingAccountForOrganization(tx, admitted.organizationId);
+  const account = await tx.rewardFundingAccount.findUniqueOrThrow({ where: { organizationId: admitted.organizationId } });
+  if (admitted.campaignId) await lockCampaign(tx, admitted.campaignId);
+  const reservation = await tx.rewardBudgetReservation.create({
+    data: {
+      businessKey,
+      accountId: account.id,
+      campaignId: admitted.campaignId,
+      userId: admitted.userId,
+      sourceType: source.sourceType,
+      sourceId: source.sourceId,
+      ceilingRupiah: 0,
+      remainingRupiah: 0,
+      lateReservation: true,
+    },
+  });
+  console.warn("[reward-funding] source admitted without a reservation; holding its earning uncovered", {
+    businessKey,
+    organizationId: admitted.organizationId,
+  });
+  return { kind: "RESERVATION", reservation, late: true };
 }
 
 export interface CommitResult {
@@ -676,35 +857,36 @@ export interface RecordFundingEntryInput {
   kind: Extract<FundingEntryKind, "CONFIRMED_TOPUP" | "CORRECTION">;
   /** Topup: positive. Correction: either sign, never 0. */
   amount: number;
-  /** Operator evidence reference (bank/transfer reference); unique per organization and kind. */
+  /** Operator evidence reference (bank/transfer reference), at least 6 characters; unique per kind across organizations. */
   reference: string;
-  note?: string | null;
+  /** Evidence note (source of funds, date, account), at least 10 characters; stored with the entry. */
+  note: string;
   verifiedById: string;
 }
 
 /**
  * Records confirmed cash with evidence. Never moves real money. Idempotent by
- * reference: the same reference with the same amount returns the existing
- * entry; a different amount under the same reference is 409.
+ * reference: the same reference for the same organization and amount returns
+ * the existing entry; the same reference for another organization or amount
+ * is 409 (one bank transfer confirms cash once).
  */
 export async function recordFundingEntry(
   tx: Prisma.TransactionClient,
   input: RecordFundingEntryInput,
 ): Promise<{ entry: FundingEntry; account: RewardFundingAccount; idempotent: boolean }> {
   const reference = input.reference?.trim() ?? "";
-  if (!reference || reference.length > 120) throw new HttpError(422, FUNDING_REFERENCE_REQUIRED);
+  if (reference.length < FUNDING_REFERENCE_MIN || reference.length > 120) throw new HttpError(422, FUNDING_REFERENCE_REQUIRED);
+  const note = input.note?.trim() ?? "";
+  if (note.length < FUNDING_NOTE_MIN || note.length > 500) throw new HttpError(422, FUNDING_NOTE_REQUIRED);
   if (input.kind === "CONFIRMED_TOPUP") assertRupiah(input.amount, "nominal topup", { min: 1 });
   else {
     assertRupiah(Math.abs(input.amount), "nominal koreksi", { min: 1 });
   }
   const account = await lockFundingAccountForOrganization(tx, input.organizationId);
-  const businessKey =
-    input.kind === "CONFIRMED_TOPUP"
-      ? fundingTopupKey(input.organizationId, reference)
-      : fundingCorrectionKey(input.organizationId, reference);
+  const businessKey = input.kind === "CONFIRMED_TOPUP" ? fundingTopupKey(reference) : fundingCorrectionKey(reference);
   const existing = await tx.fundingEntry.findUnique({ where: { businessKey } });
   if (existing) {
-    if (existing.amount !== input.amount || existing.kind !== input.kind) {
+    if (existing.accountId !== account.id || existing.amount !== input.amount) {
       throw new HttpError(409, FUNDING_REFERENCE_CONFLICT);
     }
     return { entry: existing, account, idempotent: true };
@@ -716,7 +898,7 @@ export async function recordFundingEntry(
       kind: input.kind,
       amount: input.amount,
       reference,
-      note: input.note?.trim() || null,
+      note,
       verifiedById: input.verifiedById,
     },
   });
@@ -813,7 +995,8 @@ export type StaleHoldReason =
   | "SOURCE_CLOSED_AWAITING_WATERMARK"
   | "SOURCE_OPEN_TOO_LONG"
   | "CEILING_NOT_CONFIGURED"
-  | "CAPACITY_SHORTFALL";
+  | "CAPACITY_SHORTFALL"
+  | "ADMITTED_WITHOUT_RESERVATION";
 
 /** A session hold older than this while its source is still open is reported (lazy sessions, dead machines). */
 export const STALE_HOLD_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -851,6 +1034,8 @@ export interface FundingOrganizationView {
   /** Obligations committed beyond their reservation (never refused; to reconcile). */
   uncoveredRupiah: number;
   staleHolds: StaleHold[];
+  /** ACTIVE money programs without a budget (C1): never "unlimited"; refused under enforcement. */
+  programsWithoutBudget: { id: string; name: string }[];
 }
 
 export interface FundingVisibility {
@@ -870,6 +1055,8 @@ const RECONCILIATION_TEXT: Record<StaleHoldReason, string> = {
     "Sesi diterima tanpa batas reward per sesi yang dikonfigurasi (mode bayangan). Isi batas pada program atau mesin sebelum penegakan dana diaktifkan.",
   CAPACITY_SHORTFALL:
     "Reservasi dicatat melebihi dana terkonfirmasi (mode bayangan). Tambah dana terkonfirmasi dengan bukti, atau turunkan batas program.",
+  ADMITTED_WITHOUT_RESERVATION:
+    "Sumber diterima tanpa reservasi (program berubah menjadi berhadiah setelah penerimaan); seluruh reward-nya ditahan di luar reservasi. Tambah dana terkonfirmasi dan jangan mengubah mode/multiplier program saat masih ada sumber berjalan.",
 };
 
 interface ReservationRow {
@@ -885,6 +1072,7 @@ interface ReservationRow {
   remainingRupiah: number;
   shortfallRupiah: number;
   campaignShortfallRupiah: number;
+  lateReservation: boolean;
   createdAt: Date;
 }
 
@@ -896,7 +1084,8 @@ export function classifyHold(row: ReservationRow, now: Date): StaleHold | null {
   const ageMs = now.getTime() - row.createdAt.getTime();
   if (row.remainingRupiah > 0 && ended) reasons.push("SOURCE_CLOSED_AWAITING_WATERMARK");
   if (row.remainingRupiah > 0 && !ended && ageMs > STALE_HOLD_AFTER_MS) reasons.push("SOURCE_OPEN_TOO_LONG");
-  if (row.sourceType === "SESSION" && row.ceilingRupiah === 0) reasons.push("CEILING_NOT_CONFIGURED");
+  if (row.lateReservation) reasons.push("ADMITTED_WITHOUT_RESERVATION");
+  else if (row.sourceType === "SESSION" && row.ceilingRupiah === 0) reasons.push("CEILING_NOT_CONFIGURED");
   if (row.shortfallRupiah > 0 || row.campaignShortfallRupiah > 0) reasons.push("CAPACITY_SHORTFALL");
   if (reasons.length === 0) return null;
   return {
@@ -941,7 +1130,8 @@ export async function readFundingVisibility(
     SELECT r.id, r."businessKey", a."organizationId", r."userId", r."campaignId",
            r."sourceType"::text AS "sourceType", r."sourceId",
            COALESCE(s.status::text, t.status::text) AS "sourceStatus",
-           r."ceilingRupiah", r."remainingRupiah", r."shortfallRupiah", r."campaignShortfallRupiah", r."createdAt"
+           r."ceilingRupiah", r."remainingRupiah", r."shortfallRupiah", r."campaignShortfallRupiah",
+           r."lateReservation", r."createdAt"
     FROM "RewardBudgetReservation" r
     JOIN "RewardFundingAccount" a ON a.id = r."accountId"
     LEFT JOIN "DepositSession" s ON r."sourceType" = 'SESSION' AND s.id = r."sourceId"
@@ -955,6 +1145,17 @@ export async function readFundingVisibility(
     WHERE c."uncoveredRupiah" > 0
     GROUP BY a."organizationId"`;
   const uncoveredByOrg = new Map(uncovered.map((row) => [row.organizationId, toNumber(row.uncovered)]));
+  // C1: an ACTIVE money program without a budget is reported (shadow) and admits nothing (enforced).
+  const withoutBudget = await db.campaign.findMany({
+    where: {
+      status: "ACTIVE",
+      rewardMode: "MONEY_REWARD",
+      OR: [{ rewardBudgetRupiah: null }, { rewardBudgetRupiah: { lte: 0 } }],
+      ...(options.organizationId ? { organizationId: options.organizationId } : {}),
+    },
+    select: { id: true, name: true, organizationId: true },
+    orderBy: { name: "asc" },
+  });
 
   const views: FundingOrganizationView[] = organizations.map((org) => {
     const rows = reservations.filter((row) => row.organizationId === org.id);
@@ -974,6 +1175,9 @@ export async function readFundingVisibility(
       staleHolds: rows
         .map((row) => classifyHold({ ...row, sourceType: row.sourceType as RewardReservationSource }, now))
         .filter((hold): hold is StaleHold => hold !== null),
+      programsWithoutBudget: withoutBudget
+        .filter((campaign) => campaign.organizationId === org.id)
+        .map((campaign) => ({ id: campaign.id, name: campaign.name })),
     };
   });
   return {
