@@ -105,6 +105,10 @@ export async function ingestMachineEvent(
     ...input,
     sessionId,
     depositItemId,
+    // An event that names an item outside its session (e.g. a late event of
+    // the previous session pointing at the next one's item) must not fall
+    // back to "the session's latest item": it affects no item at all.
+    ...(orphanedReferences.depositItemId ? { itemReferenceRejected: true } : {}),
     payload:
       Object.keys(orphanedReferences).length > 0
         ? { ...(input.payload ?? {}), orphanedReferences }

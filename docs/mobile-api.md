@@ -412,6 +412,79 @@ Dana/budget reward belum dibatasi: `checkRewardFunding` di
 `lib/reward-credit.ts` adalah titik sambung B01 yang saat ini tidak memeriksa
 apa pun (`NOT_ENFORCED_UNTIL_B01`); rollout uang tetap tertahan di gate Z01.
 
+## Sesi setoran mesin: satu sesi aktif per mesin (R03)
+
+Satu mesin hanya punya satu sesi aktif (`RESERVED`, `ACTIVE`,
+`PROCESSING_ITEM`, `REVIEW`). Server memutuskan di
+`lib/deposit-session-service.ts` di bawah lock baris User -> Machine, membaca
+ulang token QR, status mesin, sesi aktif mesin, dan campaign sebelum membuat
+sesi; index unik parsial `DepositSession_one_active_per_machine` adalah
+pengaman database.
+
+`POST /api/scan` (`{ machineCode, token, campaignId? }`):
+
+| Kondisi | Respons |
+|---|---|
+| Mesin kosong | 201, `resumed: false` (kontrak `scan-session.v1`) |
+| Pemilik scan ulang mesin yang sama (termasuk dua request bersamaan) | 200, `resumed: true`, sesi yang sama; tidak ada perubahan pada sesi |
+| Sesi aktif milik pengguna lain | 409 `Mesin sedang digunakan. Silakan coba lagi nanti atau gunakan mesin lain.` Hanya `error`; tanpa ID, nama, email, atau detail sesi pemilik |
+| Data lama dengan lebih dari satu sesi aktif di mesin | 409 `Mesin sedang tidak dapat digunakan. Silakan gunakan mesin lain.` (sesi terbaru tidak pernah dipilih; lihat `scripts/reconcile-active-sessions.ts`) |
+
+Respons 200 untuk resume kini juga memuat `machine.supportedWasteTypes`
+(aditif). Pesan lain tidak berubah (401 token, 409 mesin/organisasi, 422/403
+campaign termasuk guard M04 `Campaign ini tidak berlaku untuk setoran mesin`).
+
+`PATCH /api/sessions/:id` (`finish`/`cancel`, hanya pemilik) berjalan di bawah
+lock User -> Machine -> DepositSession:
+
+- Selama mesin masih memutuskan sebuah item (item `PENDING` tanpa titik
+  penerimaan) dijawab 409 `Mesin masih memproses item terakhir Anda. Tunggu
+  sebentar, lalu coba lagi.` tanpa perubahan. Setelah mesin menerima/menolak
+  item itu, finish/cancel berhasil. Item yang sudah ditahan untuk ditinjau
+  (`REVIEW`) tidak menghalangi. Bila batas waktu sesi sudah lewat (mesin
+  berhenti karena lease habis), finish/cancel menutup sesi lewat kebijakan
+  timeout di bawah: 200 dengan status `EXPIRED`, item yang belum diputuskan
+  menjadi `REVIEW`.
+- Finish yang tidak diizinkan state machine (mis. `RESERVED`) dijawab 409
+  `Sesi tidak dapat diselesaikan saat ini.`, bukan 500.
+- Sesi yang sudah berakhir dikembalikan apa adanya (200).
+
+**Kebijakan timeout.** Sesi yang ditinggalkan hanya ditutup oleh kebijakan
+timeout, tidak pernah ditimpa sesi baru. Batas waktu sesi adalah `timeoutAt`,
+atau untuk sesi tanpa `timeoutAt` (baris lama, termasuk sesi `REVIEW`)
+`updatedAt` + `sessionIdleTimeoutMinutes` mesin; batas ini hanya dapat
+diperpanjang (oleh `ITEM_DETECTED`), tidak pernah dipercepat. Lease
+mesin tidak pernah melewati batas ini, jadi saat batas lewat setiap lease untuk
+sesi itu sudah kedaluwarsa. Poll mesin berikutnya atau scan berikutnya lalu
+menutup sesi menjadi `EXPIRED` dan memindahkan item yang belum diputuskan mesin
+ke `REVIEW` dengan alasan `SESSION_TIMEOUT` (tidak ada item atau uang yang
+dihapus; audit `DEPOSIT_SESSION_EXPIRE` mencatat item yang ditahan). Item itu
+diputuskan oleh event penerimaan/penolakan terlambat dari sesi yang sama, atau
+lewat antrean peninjauan. Sesi `REVIEW` tanpa `timeoutAt` (mis. `sessionB` di
+seed) karenanya berhenti menahan mesin setelah idle, bukan selamanya.
+
+**Event terlambat.** Event mesin selalu dicatat pada sesi yang dibawanya.
+Item yang dilaporkan setelah sesinya berakhir dibuat di sesi itu dengan status
+`REVIEW` (alasan `SESSION_CLOSED`), tanpa membuka ulang atau memperpanjang
+sesi. Event yang menyebut item dari sesi lain tidak memengaruhi item mana pun
+(referensi dicatat di `payload.orphanedReferences`).
+
+`getActiveDepositForUser(userId, machineCode?)` di service yang sama
+mengembalikan ringkasan sesi aktif milik pengguna sendiri saja (read-only:
+tanpa lease baru, tanpa perpanjangan, tanpa write). Tanpa `machineCode` dan
+dengan lebih dari satu sesi, `session` bernilai `null` dan klien harus meminta
+pengguna memilih dari `sessions`. Route publiknya (`GET /api/sessions/active`)
+dibuat di U01.
+
+Rollout: expand (kode ini + migration `20261014120000_one_active_machine_session`,
+yang hanya melaporkan jumlah duplikat), dry run
+`npm run reconcile:sessions`, lalu enforce
+`20261014120100_one_active_machine_session_enforce` (berhenti dengan jumlah
+duplikat bila masih ada, tanpa menutup atau menghapus apa pun). Prosedur
+lengkap ada di header `scripts/reconcile-active-sessions.ts`. Perubahan
+perilaku mesin (lease ditahan saat konflik, sesi ditutup setelah batas waktu)
+tidak dirilis sebelum uji mock dan uji hardware terkendali di gate Z01.
+
 ## Penghapusan akun (A04)
 
 `DELETE /api/user/data` (role USER, sesi aktif = verifikasi pemilik) selalu

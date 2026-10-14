@@ -14,6 +14,16 @@ import type { MachineEventType } from "@prisma/client";
 export const UNKNOWN_WASTE_TYPE_NAME = "Tidak Diketahui (Unknown)";
 export const UNKNOWN_WASTE_TYPE_REASON = "UNKNOWN_WASTE_TYPE";
 
+/**
+ * R03 session-release reasons (lib/deposit-session-service.ts). An item the
+ * machine had not decided when its session timed out, or that a machine
+ * reported after its session ended, waits in REVIEW in that same session: a
+ * later acceptance/rejection event of the session still decides it, or the
+ * review queue does.
+ */
+export const SESSION_TIMEOUT_REASON = "SESSION_TIMEOUT";
+export const SESSION_CLOSED_REASON = "SESSION_CLOSED";
+
 /** DepositItem.validationReasonCode of a reviewer's final decision (lib/deposit-review.ts). */
 export const REVIEW_APPROVED_REASON = "REVIEW_APPROVED";
 export const REVIEW_REJECTED_REASON = "REVIEW_REJECTED";
@@ -68,6 +78,12 @@ export interface IngestEventInput {
   sessionId?: string | null;
   depositItemId?: string | null;
   occurredAt?: string | null;
+  /**
+   * Set by ingest (R03) when the event named an item that does not belong to
+   * its session or machine. The reference is dropped, and no other item of
+   * the session is picked in its place.
+   */
+  itemReferenceRejected?: boolean;
 }
 
 export interface IngestEventResult {

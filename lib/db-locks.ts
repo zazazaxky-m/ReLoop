@@ -32,6 +32,12 @@ import { HttpError } from "./rbac";
  * DepositSession -> DepositItem; all money is written by lib/reward-credit.ts
  * last. Their machine-event transaction only inserts the MachineEvent row
  * before that (a foreign-key KEY SHARE, which none of these locks conflicts with).
+ * A deposit session start, owner finish/cancel and the timeout policy (R03,
+ * lib/deposit-session-service.ts) lock the User (the scanning user, the owner,
+ * or for a machine poll the session owner), then the Machine, then the
+ * DepositSession and its undecided DepositItems in id order; the Machine lock
+ * is what keeps one active session per machine. ITEM_DETECTED locks its
+ * DepositSession before re-reading it (no User or Machine lock).
  * An invitation accept (A03, lib/invitations.ts) locks the accepting User,
  * then the TravelAgentOrganization link row; no transaction locks a link
  * before a User. Email verification, an email change and minting a

@@ -214,6 +214,52 @@ dashboard admin/superadmin pada tab **Sinkronisasi** detail mesin.
    tanpa mengubah database. Simpan file `.bak` sampai mesin terbukti sinkron
    normal.
 
+## Lease sesi dan jendela replay (R03)
+
+**Lease sesi.** `GET /api/machine-session/{code}` (HMAC, body kosong)
+mengembalikan lease dengan kontrak yang sama seperti sebelumnya:
+`{ id, sessionId, userRef, issuedAt, expiresAt, signature }`, signature =
+HMAC-SHA256(secret, `id.sessionId.issuedAt.expiresAt`), dan `lease: null`
+berarti "tidak ada sesi: berhenti". Aturan server di baliknya:
+
+- Satu mesin punya paling banyak satu sesi aktif. Bila data lama masih
+  memuat beberapa sesi aktif untuk satu mesin, server **tidak** memberi lease
+  (`lease: null`, `sessionConflict: true`) dan tidak memilih sesi terbaru;
+  mesin berhenti sampai operator merekonsiliasi
+  (`scripts/reconcile-active-sessions.ts`).
+- `expiresAt` tidak pernah melewati batas waktu sesi (`timeoutAt`, atau
+  `updatedAt` + idle timeout untuk sesi tanpa `timeoutAt`) dan tidak pernah
+  lebih dari 300 s setelah `issuedAt`. Karena itu, setelah batas waktu lewat,
+  setiap lease untuk sesi itu sudah kedaluwarsa, dan server menutup sesi
+  lewat kebijakan timeout: item yang belum diputuskan mesin menjadi `REVIEW`
+  (`SESSION_TIMEOUT`), tidak ada yang dihapus.
+- Event terlambat (antrean outbox) tetap milik sesi yang dibawanya. Item yang
+  dilaporkan setelah sesinya berakhir ditahan untuk ditinjau di sesi itu
+  (`SESSION_CLOSED`), dan event yang menyebut item dari sesi lain tidak
+  memengaruhi item mana pun.
+
+**Jendela replay.** Tanda tangan diterima selama
+|jam server − `x-reloop-timestamp`| ≤ 300 s (`MACHINE_SIG_MAX_SKEW_SECONDS`), jadi
+satu request bertanda tangan berlaku hingga 600 s waktu server. Nonce disimpan
+`MACHINE_NONCE_TTL_MS` = (2 × 300 + 60) s = 660 s sejak pertama dipakai
+(`lib/machine-auth-constants.ts`), sehingga replay ditolak selama tanda tangan
+masih berlaku (sebelumnya nonce kedaluwarsa setelah 360 s).
+
+- Produksi menyimpan nonce di Redis (`SET NX PX`), dipakai bersama semua
+  instance aplikasi: satu nonce hanya diterima sekali di seluruh instance.
+  Tanpa `REDIS_URL` aplikasi menolak start; saat Redis tidak terjangkau setiap
+  request mesin ditolak (fail-closed) sampai koneksi pulih, lalu otomatis
+  normal kembali. Di luar produksi ada fallback memori per proses.
+- Rollout aman untuk request bertanda tangan yang sudah ada: kunci lama tetap
+  berlaku sampai TTL lamanya habis, kunci baru memakai 660 s. Tidak perlu
+  rotasi secret dan tidak ada perubahan di mesin.
+- **Belum dilakukan (upgrade protokol terpisah):** method dan path request
+  belum ikut ditandatangani (string kanonik tetap
+  `timestamp.nonce.rawBody`). Mengikatnya memerlukan versi tanda tangan baru
+  yang dikirim mesin secara eksplisit (mis. header versi) dan masa transisi
+  di mana server menerima keduanya; mengubah string kanonik diam-diam akan
+  menolak semua mesin yang sudah terpasang.
+
 ## Kamera, deteksi orang, dan bukti wajah
 
 Runtime kamera memakai OpenCV sepenuhnya lokal. Haar cascade bawaan OpenCV

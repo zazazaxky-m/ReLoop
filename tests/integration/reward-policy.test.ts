@@ -105,7 +105,7 @@ function depositEvents(sessionId: string, wasteTypeId: string, options: DepositO
 /** One item through the signed machine protocol; every event must be ACKed. */
 async function deposit(options: DepositOptions = {}) {
   const wasteTypeId = options.wasteTypeId ?? (await fixtureWasteTypeId());
-  const session = await f.db.depositSession.create({
+  const session = await openSession({
     data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE", campaignId: options.campaignId ?? null },
   });
   const events = depositEvents(session.id, wasteTypeId, options);
@@ -123,6 +123,24 @@ async function warmUp() {
 }
 
 const earnKey = (itemId: string) => `deposit-item:${itemId}:earn`;
+
+/**
+ * R03 (EX-04): a machine has at most one active session (partial unique index
+ * DepositSession_one_active_per_machine). These tests model consecutive
+ * deposits on the single fixture machine, so an active session is opened only
+ * after the previous one was finished, as its owner would; a closed session is
+ * inserted as is.
+ */
+async function openSession(args: Prisma.DepositSessionCreateArgs) {
+  const status = args.data.status ?? "RESERVED";
+  if (["RESERVED", "ACTIVE", "PROCESSING_ITEM", "REVIEW"].includes(status)) {
+    await f.db.depositSession.updateMany({
+      where: { machineId: f.ids.machineA, status: { in: ["RESERVED", "ACTIVE", "PROCESSING_ITEM", "REVIEW"] } },
+      data: { status: "COMPLETED", completedAt: new Date() },
+    });
+  }
+  return f.db.depositSession.create(args);
+}
 
 describe("COMPLIANCE_ONLY never mints money at any entry point (LOG-04)", () => {
   it("machine deposit: a COMPLIANCE_ONLY campaign session accepts the item without any money entry; MONEY_REWARD pays", async () => {
@@ -355,7 +373,7 @@ describe("machine event retries and rollback", () => {
 
   it("an exception inside the event transaction rolls back the event and the ledger together", async () => {
     const wasteTypeId = await fixtureWasteTypeId();
-    const session = await f.db.depositSession.create({
+    const session = await openSession({
       data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
     const [detected, weighed, accepted] = depositEvents(session.id, wasteTypeId, {});
     const machine = await f.db.machine.findUniqueOrThrow({ where: { id: f.ids.machineA }, include: { organization: true } });
@@ -412,7 +430,7 @@ describe("machine acceptance lock order", () => {
   it("takes the recipient's User lock before the session and item, and is ACKed only after the reward commits", async () => {
     await warmUp();
     const wasteTypeId = await fixtureWasteTypeId();
-    const session = await f.db.depositSession.create({
+    const session = await openSession({
       data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
     const [detected, weighed, accepted] = depositEvents(session.id, wasteTypeId, {});
     expect((await postBatch([detected, weighed])).body.results.map((r: Json) => r.status)).toEqual(["accepted", "accepted"]);
@@ -510,7 +528,7 @@ describe("fraud holds and erased recipients never force the ledger", () => {
 describe("decided items stay decided (M04 fix round 1)", () => {
   /** ITEM_DETECTED (+ optional weight) without an acceptance point: the item stays PENDING. */
   async function detectOnly(options: { weightGrams?: number | null; unknownType?: boolean } = {}) {
-    const session = await f.db.depositSession.create({
+    const session = await openSession({
       data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
     const detected = options.unknownType
       ? edgeEvent(session.id, "ITEM_DETECTED", { quantity: 1, inputBeam: true })
@@ -679,7 +697,7 @@ describe("review approvals price verified, frozen inputs (M04 fix round 2)", () 
     expect(res.body.results[0].status).toBe("accepted");
   };
   async function unknownItem(weightGrams: number | null) {
-    const session = await f.db.depositSession.create({
+    const session = await openSession({
       data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
     const events = [edgeEvent(session.id, "ITEM_DETECTED", { quantity: 1, inputBeam: true })];
     if (weightGrams !== null) events.push(edgeEvent(session.id, "WEIGHT_MEASURED", { weightGrams, stable: true }));
@@ -768,7 +786,7 @@ describe("review approvals price verified, frozen inputs (M04 fix round 2)", () 
     await send(accepted.session.id, "COMPACTION_COMPLETED", {}, accepted.item.id);
     expect((await itemOf(accepted.item.id)).compactionStatus).toBe("COMPACTED");
 
-    const session = await f.db.depositSession.create({
+    const session = await openSession({
       data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
     await send(session.id, "ITEM_DETECTED", { wasteTypeId: await fixtureWasteTypeId(), quantity: 1 });
     const pending = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: session.id } });
@@ -782,7 +800,7 @@ describe("review approvals price verified, frozen inputs (M04 fix round 2)", () 
 
   it("A3: evidence writes take the recipient's User lock before the session and item", async () => {
     await warmUp();
-    const session = await f.db.depositSession.create({
+    const session = await openSession({
       data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
     await send(session.id, "ITEM_DETECTED", { wasteTypeId: await fixtureWasteTypeId(), quantity: 1 });
     const pending = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: session.id } });
@@ -815,7 +833,7 @@ describe("approval needs the acceptance point and its recorded rate (M04 fix rou
   };
   /** An unknown-type item before the acceptance point: already in the review queue (REVIEW). */
   async function unknownBeforeAcceptance(weightGrams: number) {
-    const session = await f.db.depositSession.create({
+    const session = await openSession({
       data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" } });
     await send(session.id, "ITEM_DETECTED", { quantity: 1, inputBeam: true });
     const item = await f.db.depositItem.findFirstOrThrow({ where: { sessionId: session.id } });
@@ -951,7 +969,7 @@ describe("legacy review rows and recorded-rate drift (M04 fix round 4)", () => {
   } = {}) {
     const wasteTypeId = await fixtureWasteTypeId();
     const sessionStatus = options.sessionStatus ?? "COMPLETED";
-    const session = await f.db.depositSession.create({ data: {
+    const session = await openSession({ data: {
       userId: f.ids.userA, machineId: f.ids.machineA, status: sessionStatus, campaignId: options.campaignId ?? null,
       completedAt: sessionStatus === "ACTIVE" ? null : new Date() } });
     const earn = options.earn === undefined ? { amount: 50, status: "PENDING" as const } : options.earn;

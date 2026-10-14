@@ -12,6 +12,8 @@ vi.mock('./prisma', () => {
     machineWasteType: { findFirst: vi.fn() },
     pickupRequest: { findFirst: vi.fn(), create: vi.fn() },
     rewardLedger: { updateMany: vi.fn() },
+    // R03: ITEM_DETECTED locks the session row before re-reading it.
+    $queryRaw: vi.fn().mockResolvedValue([{ id: 'sess1' }]),
   };
   return {
     prisma: {

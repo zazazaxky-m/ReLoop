@@ -128,6 +128,24 @@ describe("ingestMachineEvent", () => {
     expect(res.depositItemId).toBeNull();
     expect(createdData.payloadJson.some).toBe("data");
     expect(createdData.payloadJson.orphanedReferences.depositItemId).toBe("item1");
+    // R03: the event keeps its session but may not fall back to another item of it.
+    expect(vi.mocked(sideEffects.processEventSideEffects).mock.calls[0][2]).toMatchObject({
+      sessionId: "sess1", depositItemId: null, itemReferenceRejected: true });
+  });
+
+  it("does not flag an event whose item reference is valid", async () => {
+    vi.mocked(prisma.machine.findUnique).mockResolvedValue(baseMachine as any);
+    vi.mocked(prisma.machineEvent.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.depositSession.findFirst).mockResolvedValue({ id: "sess1" } as any);
+    vi.mocked(prisma.depositItem.findFirst).mockResolvedValue({ id: "item1", sessionId: "sess1" } as any);
+    vi.mocked(prisma.$transaction).mockImplementation(async (cb) =>
+      (cb as any)({ machineEvent: { create: vi.fn().mockResolvedValue({ id: "e1" }) } }));
+
+    await ingestMachineEvent({
+      machineCode: "RVM-1", localEventId: "ev2", eventType: "ITEM_ACCEPTED_POINT", sessionId: "sess1", depositItemId: "item1" });
+    const passed = vi.mocked(sideEffects.processEventSideEffects).mock.calls[0][2];
+    expect(passed).toMatchObject({ sessionId: "sess1", depositItemId: "item1" });
+    expect(passed.itemReferenceRejected).toBeUndefined();
   });
 
   it("processes event normally with occurredAt string", async () => {

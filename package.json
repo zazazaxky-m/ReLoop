@@ -29,6 +29,7 @@
     "backfill:payout-encryption": "tsx scripts/backfill-payout-encryption.ts",
     "backfill:email-lookup": "tsx scripts/backfill-email-lookup.ts",
     "reconcile:wallet": "tsx scripts/reconcile-wallet-history.ts",
+    "reconcile:sessions": "tsx scripts/reconcile-active-sessions.ts",
     "erasure:process": "tsx scripts/process-erasure-jobs.ts",
     "email:outbox": "tsx scripts/process-email-outbox.ts",
     "report:travel-agent-access": "tsx scripts/report-travel-agent-access.ts",

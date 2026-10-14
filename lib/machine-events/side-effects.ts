@@ -6,6 +6,7 @@ import {
 } from "../machine-state";
 import { AUTO_PICKUP_FILL_THRESHOLD } from "../pickup";
 import {
+  SESSION_CLOSED_REASON,
   UNKNOWN_WASTE_TYPE_REASON,
   machineReasonCode,
   payloadStr,
@@ -20,6 +21,7 @@ import {
 import { flagAnomaly, holdItemForFraud, notifyOrgAdmins } from "./fraud";
 import { maybeCreateAutoPickup } from "./pickup";
 import { handleAcceptance, handleItemRejected, recordItemEvidence } from "./acceptance";
+import { isTerminalSession } from "../deposit-review-contract";
 import type { DepositItemCache } from "./item-cache";
 
 /** Work that must run only after the event transaction commits (notifications, pushes). */
@@ -133,19 +135,32 @@ export async function processEventSideEffects(
 
     case "ITEM_DETECTED": {
       if (!input.sessionId) break;
+      // R03: lock the session row first (finish/cancel and the timeout policy
+      // hold it while they decide), then re-read it, so an item never slips
+      // into a session that is being released without being seen there.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "DepositSession" WHERE id = ${input.sessionId} FOR NO KEY UPDATE`;
+      if (locked.length === 0) break;
       const session = await tx.depositSession.findUnique({
         where: { id: input.sessionId },
       });
       if (!session) break;
+      // Reported after the session ended (a queued event, or a race with
+      // finish/timeout): the item stays in that session and goes to review;
+      // the session is not reopened or extended.
+      const sessionClosed = isTerminalSession(session.status);
 
-      await tx.depositSession.update({
-        where: { id: session.id },
-        data: {
-          timeoutAt: new Date(
-            Date.now() + machine.sessionIdleTimeoutMinutes * 60 * 1000,
-          ),
-        },
-      });
+      if (!sessionClosed) {
+        // The deadline only moves later: every lease issued for the session
+        // stays within it (lib/deposit-session-service.ts sessionDeadline).
+        const extended = new Date(Date.now() + machine.sessionIdleTimeoutMinutes * 60 * 1000);
+        if (!session.timeoutAt || session.timeoutAt.getTime() < extended.getTime()) {
+          await tx.depositSession.update({
+            where: { id: session.id },
+            data: { timeoutAt: extended },
+          });
+        }
+      }
 
       // Preferred path: kiosk sends the real WasteType id the user picked
       // on-machine before inserting the item. Only trust it if it's still
@@ -204,10 +219,12 @@ export async function processEventSideEffects(
           wasteTypeId,
           quantity: (payload.quantity as number) ?? 1,
           source: kioskConfirmed ? "MACHINE" : "PYTHON_SIMULATOR",
-          status: isUnknownFallback ? "REVIEW" : "PENDING",
+          status: isUnknownFallback || sessionClosed ? "REVIEW" : "PENDING",
           validationReasonCode: isUnknownFallback
             ? UNKNOWN_WASTE_TYPE_REASON
-            : undefined,
+            : sessionClosed
+              ? SESSION_CLOSED_REASON
+              : undefined,
         },
       });
 

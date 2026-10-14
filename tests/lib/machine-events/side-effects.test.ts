@@ -34,6 +34,8 @@ const mockTx = {
   depositItem: { create: vi.fn(), update: vi.fn() },
   machineEvent: { update: vi.fn() },
   rewardLedger: { updateMany: vi.fn() },
+  // R03: ITEM_DETECTED locks the session row (FOR NO KEY UPDATE) before re-reading it.
+  $queryRaw: vi.fn().mockResolvedValue([{ id: 's1' }]),
 } as any;
 
 const mockMachine = { id: 'm1', organizationId: 'o1', sessionIdleTimeoutMinutes: 2 } as any;
@@ -448,6 +450,59 @@ describe('processEventSideEffects', () => {
       'evt0',
     );
     expect(mockTx.depositSession.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('ITEM_DETECTED locks the session row, then re-reads it, and extends an open session\'s deadline', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', timeoutAt: new Date(Date.now() + 1_000) });
+    mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: { wasteTypeId: 'wt1' } } as any, 'evt1');
+    const lockSql = (mockTx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
+    expect(lockSql).toMatch(/FROM "DepositSession" WHERE id = \? FOR NO KEY UPDATE/);
+    expect(mockTx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(mockTx.depositSession.findUnique.mock.invocationCallOrder[0]);
+    const extended = mockTx.depositSession.update.mock.calls.find((call: any[]) => call[0].data.timeoutAt);
+    expect(extended[0].data.timeoutAt.getTime()).toBeGreaterThan(Date.now() + 60_000);
+    expect(mockTx.depositItem.create).toHaveBeenCalledWith({ data: expect.objectContaining({ status: 'PENDING' }) });
+  });
+
+  it('ITEM_DETECTED never moves a session deadline earlier', async () => {
+    const later = new Date(Date.now() + 60 * 60_000);
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'PROCESSING_ITEM', timeoutAt: later });
+    mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: { wasteTypeId: 'wt1' } } as any, 'evt1');
+    expect(mockTx.depositSession.update).not.toHaveBeenCalled();
+  });
+
+  it('ITEM_DETECTED for an ended session holds the item for review there, without reopening or extending it', async () => {
+    for (const status of ['COMPLETED', 'CANCELLED', 'EXPIRED']) {
+      vi.clearAllMocks();
+      mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status, timeoutAt: new Date(Date.now() - 1_000) });
+      mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
+      mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
+      await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: { wasteTypeId: 'wt1' } } as any, 'evt1');
+      expect(mockTx.depositItem.create, status).toHaveBeenCalledWith({
+        data: expect.objectContaining({ sessionId: 's1', status: 'REVIEW', validationReasonCode: 'SESSION_CLOSED' }),
+      });
+      expect(mockTx.depositSession.update, status).not.toHaveBeenCalled();
+    }
+  });
+
+  it('ITEM_DETECTED keeps the unknown-type reason for an item reported after the session ended', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'COMPLETED', timeoutAt: null });
+    vi.mocked(item.resolveOrCreateUnknownWasteType).mockResolvedValue('wt-unknown');
+    mockTx.depositItem.create.mockResolvedValue({ id: 'd1' });
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 's1', payload: {} } as any, 'evt1');
+    expect(mockTx.depositItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ status: 'REVIEW', validationReasonCode: 'UNKNOWN_WASTE_TYPE' }),
+    });
+  });
+
+  it('ITEM_DETECTED breaks when the session row cannot be locked', async () => {
+    mockTx.$queryRaw.mockResolvedValueOnce([]);
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'ITEM_DETECTED', sessionId: 'gone', payload: {} } as any, 'evt0');
+    expect(mockTx.depositSession.findUnique).not.toHaveBeenCalled();
+    expect(mockTx.depositItem.create).not.toHaveBeenCalled();
   });
 
   it('ITEM_DETECTED breaks when session row is missing', async () => {

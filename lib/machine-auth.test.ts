@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
 import {
   generateIngestSecret,
   signMachinePayload,
@@ -6,6 +7,7 @@ import {
   verifyMachineRequest,
 } from "@/lib/machine-auth";
 import { consumeMachineNonce } from "./machine-nonce";
+import { MACHINE_NONCE_TTL_MS, MACHINE_SIG_MAX_SKEW_SECONDS } from "./machine-auth-constants";
 
 describe("machine HMAC handshake", () => {
   const secret = "test-secret";
@@ -140,5 +142,83 @@ describe("machine HMAC handshake", () => {
     const b = generateIngestSecret();
     expect(a).not.toBe(b);
     expect(a.length).toBeGreaterThanOrEqual(40);
+  });
+});
+
+/**
+ * SEC-09: a signature is accepted while |server clock - timestamp| <= skew, so
+ * one signed request is valid for 2 * skew seconds of server time (a machine
+ * clock up to `skew` ahead or behind). The nonce must be remembered for that
+ * whole window; it lives 2 * skew + 60 s from its first use.
+ */
+describe("machine replay window (SEC-09)", () => {
+  const secret = "window-secret";
+  const body = '{"machineCode":"RLP-001","events":[]}';
+  const t = 2_000_000_000; // server clock (seconds) at the first use
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function signedAt(timestamp: number) {
+    const nonce = randomUUID();
+    const ts = String(timestamp);
+    return {
+      machineId: `mach-window-${randomUUID()}`,
+      secret,
+      timestamp: ts,
+      nonce,
+      rawBody: body,
+      signature: signMachinePayload(secret, ts, nonce, body),
+    };
+  }
+
+  function at(seconds: number) {
+    vi.setSystemTime(new Date(seconds * 1000));
+  }
+
+  it("shares one skew constant and derives the nonce TTL as 2 * skew + 60 s", () => {
+    expect(MACHINE_SIG_MAX_SKEW_SECONDS).toBe(300);
+    expect(MACHINE_NONCE_TTL_MS).toBe(660_000);
+    expect(MACHINE_NONCE_TTL_MS).toBe((2 * MACHINE_SIG_MAX_SKEW_SECONDS + 60) * 1000);
+  });
+
+  it("accepts a timestamp exactly 300 s ahead of or behind the server clock and rejects 301 s (fake clock)", () => {
+    vi.useFakeTimers();
+    at(t);
+    const check = (timestamp: number) => {
+      const request = signedAt(timestamp);
+      return verifyMachineSignature(request);
+    };
+    expect(check(t + 300)).toEqual({ ok: true });
+    expect(check(t - 300)).toEqual({ ok: true });
+    expect(check(t + 301)).toEqual({ ok: false, reason: "STALE_TIMESTAMP" });
+    expect(check(t - 301)).toEqual({ ok: false, reason: "STALE_TIMESTAMP" });
+  });
+
+  it("rejects a replay of a request signed 300 s ahead at t+361 and every later second until its signature expires", async () => {
+    vi.useFakeTimers();
+    at(t);
+    const request = signedAt(t + 300);
+    expect(await verifyMachineRequest(request)).toEqual({ ok: true });
+
+    // t+361 is past the old 360 s nonce TTL while the signature is still valid.
+    for (const offset of [1, 299, 360, 361, 362, 500, 599, 600]) {
+      at(t + offset);
+      expect(verifyMachineSignature(request), `signature at t+${offset}`).toEqual({ ok: true });
+      expect(await verifyMachineRequest(request), `replay at t+${offset}`).toEqual({ ok: false, reason: "REPLAY_NONCE" });
+    }
+    // From t+601 the signature itself is stale: the nonce is no longer the only defence.
+    at(t + 601);
+    expect(await verifyMachineRequest(request)).toEqual({ ok: false, reason: "STALE_TIMESTAMP" });
+  });
+
+  it("rejects a replay of a request signed 300 s behind until its signature expires", async () => {
+    vi.useFakeTimers();
+    at(t);
+    const request = signedAt(t - 300);
+    expect(await verifyMachineRequest(request)).toEqual({ ok: true });
+    at(t + 1);
+    expect(await verifyMachineRequest(request)).toEqual({ ok: false, reason: "STALE_TIMESTAMP" });
   });
 });
