@@ -13,8 +13,11 @@ import {
   Input,
   Select,
   StatusBadge,
+  Textarea,
 } from "@/components/ui";
 import { MapPin, Truck } from "@/components/ui/icons";
+import { formatDateTime } from "@/lib/format";
+import type { PickupDispatchView } from "@/lib/pickup";
 
 interface Option {
   id: string;
@@ -40,7 +43,18 @@ export interface TaskRow {
   status: string;
   reason: string;
   items: TaskItem[];
+  /** B05: compare-and-set version every field step carries. */
+  version: number;
+  assignedAt: string | null;
+  expectedStartAt: string | null;
+  closedReason: string | null;
+  dispatch: PickupDispatchView;
 }
+
+/** B05: shown while no task is assigned; tasks are dispatched by admins, never claimed. */
+export const EMPTY_TASKS_TITLE = "Menunggu penugasan admin";
+export const EMPTY_TASKS_DESCRIPTION =
+  "Admin organisasi mitra menugaskan setiap pickup kepada satu pengepul. Tugas yang ditugaskan kepada Anda akan muncul di sini.";
 
 const NEXT_ACTIONS: Record<string, { action: string; label: string; variant?: "primary" | "outline" }[]> = {
   ASSIGNED: [{ action: "start", label: "Berangkat" }],
@@ -60,6 +74,8 @@ export function PickupTaskList({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recordId, setRecordId] = useState<string | null>(null);
+  const [failId, setFailId] = useState<string | null>(null);
+  const [failReason, setFailReason] = useState("");
   const [item, setItem] = useState({
     wasteTypeId: "",
     itemCount: "",
@@ -67,21 +83,25 @@ export function PickupTaskList({
     notes: "",
   });
 
-  async function act(id: string, action: string) {
-    if (action === "fail" && !window.confirm("Tandai pickup ini gagal?")) return;
+  async function act(task: TaskRow, action: string, extra?: Record<string, unknown>) {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/pickups/${id}`, {
+      const res = await fetch(`/api/pickups/${task.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        // B05: every step carries the version this page showed.
+        body: JSON.stringify({ action, expectedVersion: task.version, ...extra }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setError(d?.error ?? "Gagal memproses tugas");
+        // The task changed (reassigned, cancelled, or another step): show the current state.
+        if (res.status === 409 || res.status === 403) router.refresh();
         return;
       }
+      setFailId(null);
+      setFailReason("");
       router.refresh();
     } finally {
       setBusy(false);
@@ -118,11 +138,7 @@ export function PickupTaskList({
 
   if (tasks.length === 0) {
     return (
-      <EmptyState
-        icon={Truck}
-        title="Tidak ada tugas pickup"
-        description="Tugas akan muncul saat admin organisasi mitra menugaskan Anda."
-      />
+      <EmptyState icon={Truck} title={EMPTY_TASKS_TITLE} description={EMPTY_TASKS_DESCRIPTION} />
     );
   }
 
@@ -161,6 +177,19 @@ export function PickupTaskList({
                 <p>Alasan: {t.reason}</p>
               </div>
 
+              <div className="space-y-0.5 rounded-xl border border-border px-3 py-2 text-sm">
+                <p className={t.dispatch.overdue ? "font-medium text-status-error" : "text-foreground"}>
+                  Langkah berikutnya: {t.dispatch.nextLabel}
+                </p>
+                {t.assignedAt ? <p className="text-xs text-muted">Ditugaskan {formatDateTime(t.assignedAt)}</p> : null}
+                <p className="text-xs text-muted">
+                  Tenggat mulai:{" "}
+                  {t.expectedStartAt ? formatDateTime(t.expectedStartAt) : "tidak ditentukan admin"}
+                  {t.dispatch.overdue ? " (terlambat)" : ""}
+                </p>
+                {t.closedReason ? <p className="text-xs text-muted">Alasan penutupan: {t.closedReason}</p> : null}
+              </div>
+
               {t.items.length > 0 ? (
                 <div className="rounded-xl bg-mint/50 px-3 py-2 text-xs text-brand-800 dark:text-brand-400">
                   <p className="mb-1 font-semibold">Material tercatat</p>
@@ -183,7 +212,7 @@ export function PickupTaskList({
                     size="sm"
                     variant={a.variant ?? "outline"}
                     disabled={busy}
-                    onClick={() => act(t.id, a.action)}
+                    onClick={() => act(t, a.action)}
                   >
                     {a.label}
                   </Button>
@@ -199,11 +228,48 @@ export function PickupTaskList({
                   </Button>
                 ) : null}
                 {canFail ? (
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => act(t.id, "fail")}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => {
+                      setFailId(failId === t.id ? null : t.id);
+                      setFailReason("");
+                    }}
+                  >
                     Gagal
                   </Button>
                 ) : null}
               </div>
+
+              {failId === t.id ? (
+                <div className="space-y-3 rounded-xl border border-border p-3">
+                  <FormField
+                    label="Alasan gagal"
+                    htmlFor={`fail-${t.id}`}
+                    hint="Wajib; dicatat dan dikirim ke admin agar tugas pengganti dibuat"
+                  >
+                    <Textarea
+                      id={`fail-${t.id}`}
+                      value={failReason}
+                      onChange={(e) => setFailReason(e.target.value)}
+                    />
+                  </FormField>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={busy || failReason.trim().length < 3}
+                      onClick={() => act(t, "fail", { reason: failReason })}
+                    >
+                      Tandai Gagal
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setFailId(null)}>
+                      Batal
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
 
               {recordId === t.id ? (
                 <div className="space-y-3 rounded-xl border border-border p-3">

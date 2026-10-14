@@ -360,6 +360,8 @@ enum NotificationType {
   MACHINE_FRAUD
   TRIP_STATUS
   TRASH_BAG_REWARD
+  PICKUP_STATUS
+  PICKUP_OVERDUE
 }
 
 // ============================================================
@@ -1083,6 +1085,20 @@ model PickupRequest {
   priority            Int                           @default(0)
   reason              PickupReason                  @default(FULL)
   notes               String?
+  /// B05: compare-and-set version; every dispatch/field transition increments it.
+  version             Int                           @default(0)
+  /// B05: when the current collector was dispatched (null while REQUESTED).
+  assignedAt          DateTime?
+  /// B05: start deadline the operator chose at dispatch (no default SLA).
+  expectedStartAt     DateTime?
+  /// B05: last overdue escalation; reset by every dispatch, so it fires once per version.
+  lastEscalatedAt     DateTime?
+  /// B05: required reason of a cancel/fail, shown to operators.
+  closedReason        String?
+  /// B05: the FAILED/CANCELLED task this one replaces (one replacement per task).
+  replacesPickupId    String?                       @unique
+  replacesPickup      PickupRequest?                @relation("PickupReplacement", fields: [replacesPickupId], references: [id])
+  replacedBy          PickupRequest?                @relation("PickupReplacement")
   createdAt           DateTime                      @default(now())
   updatedAt           DateTime                      @updatedAt
 
@@ -1090,6 +1106,7 @@ model PickupRequest {
 
   @@index([organizationId, status])
   @@index([assignedCollectorId])
+  @@index([status, expectedStartAt])
 }
 
 model PickupItem {

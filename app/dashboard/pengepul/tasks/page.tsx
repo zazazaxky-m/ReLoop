@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { wasteTypeOptions } from "@/lib/queries";
 import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 import { PickupTaskList, type TaskRow } from "@/components/pickup/PickupTaskList";
+import { describePickupDispatch } from "@/lib/pickup";
 
 export const metadata: Metadata = { title: "Tugas Pickup" };
 
@@ -37,6 +38,7 @@ export default async function PengepulTasksPage({
     wasteTypeOptions(),
   ]);
 
+  const now = new Date();
   const rows: TaskRow[] = pickups.map((p) => ({
     id: p.id,
     machineName: p.machine?.name ?? null,
@@ -54,6 +56,11 @@ export default async function PengepulTasksPage({
       actualWeightKg: it.actualWeightKg,
       notes: it.notes,
     })),
+    version: p.version,
+    assignedAt: p.assignedAt?.toISOString() ?? null,
+    expectedStartAt: p.expectedStartAt?.toISOString() ?? null,
+    closedReason: p.closedReason,
+    dispatch: describePickupDispatch(p, now),
   }));
 
   const pageMeta = buildPaginationMeta(total, pagination);
@@ -62,7 +69,7 @@ export default async function PengepulTasksPage({
     <div className="space-y-6">
       <PageHeader
         title="Tugas Pickup"
-        description="Lihat tugas pengambilan, perbarui progres, dan catat material."
+        description="Tugas pengambilan yang ditugaskan admin kepada Anda: perbarui progres dan catat material."
       />
       <PickupTaskList tasks={rows} wasteTypes={wasteTypes} />
       <PagePagination

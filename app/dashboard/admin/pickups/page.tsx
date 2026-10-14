@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { displayUserField } from "@/lib/display-user";
 import { buildPaginationMeta, parsePageSearchParams } from "@/lib/page-pagination";
 import { PickupManager, type PickupRow } from "@/components/pickup/PickupManager";
+import { describePickupDispatch } from "@/lib/pickup";
+import { escalateOnAdminRead } from "@/lib/pickup-dispatch";
 
 export const metadata: Metadata = { title: "Pickup" };
 
@@ -19,6 +21,8 @@ export default async function AdminPickupsPage({
   const pagination = parsePageSearchParams(params, { defaultLimit: 50 });
 
   const pickupWhere = { organizationId: orgId };
+  // B05: an admin read runs the once-per-version overdue escalation.
+  await escalateOnAdminRead(user);
 
   const [pickups, total, machines, partners] = await Promise.all([
     prisma.pickupRequest.findMany({
@@ -29,6 +33,7 @@ export default async function AdminPickupsPage({
       include: {
         machine: { select: { name: true, machineCode: true } },
         assignedCollector: { select: { name: true } },
+        replacedBy: { select: { id: true } },
         _count: { select: { items: true } },
       },
     }),
@@ -46,6 +51,7 @@ export default async function AdminPickupsPage({
     }),
   ]);
 
+  const now = new Date();
   const rows: PickupRow[] = pickups.map((p) => ({
     id: p.id,
     machineName: p.machine?.name ?? null,
@@ -56,6 +62,11 @@ export default async function AdminPickupsPage({
     priority: p.priority,
     assignedCollectorName: displayUserField(p.assignedCollector?.name) ?? null,
     itemCount: p._count.items,
+    version: p.version,
+    assignedAt: p.assignedAt?.toISOString() ?? null,
+    expectedStartAt: p.expectedStartAt?.toISOString() ?? null,
+    closedReason: p.closedReason,
+    dispatch: describePickupDispatch(p, now),
   }));
 
   const activePartners = partners.map((p) => ({
@@ -69,7 +80,7 @@ export default async function AdminPickupsPage({
     <div className="space-y-6">
       <PageHeader
         title="Pickup Request"
-        description="Jadwalkan pengambilan, tetapkan pengepul, dan pantau progresnya."
+        description="Admin menugaskan satu mitra pengepul aktif per tugas, menentukan tenggat mulai, dan memantau langkah berikutnya."
       />
       <PickupManager pickups={rows} machines={machines} activePartners={activePartners} />
       <PagePagination

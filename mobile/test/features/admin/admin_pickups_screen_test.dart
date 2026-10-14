@@ -100,6 +100,7 @@ void main() {
               {
                 'id': 'pk1',
                 'status': 'REQUESTED',
+                'version': 3,
                 'reason': 'FULL',
                 'priority': 2,
                 'notes': 'Segera ambil',
@@ -235,7 +236,9 @@ void main() {
     await tester.tap(find.text('Tugaskan').last);
     await tester.pumpAndSettle();
 
-    verify(() => mockApi.patch(any(), data: any(named: 'data'))).called(1);
+    // B05: the dispatch carries the version the list showed.
+    verify(() => mockApi.patch('/api/pickups/pk1',
+        data: {'action': 'assign', 'expectedVersion': 3, 'collectorUserId': 'cu1'})).called(1);
   });
 
   testWidgets('cancel pickup patches', (tester) async {
@@ -249,7 +252,73 @@ void main() {
 
     await tester.tap(find.text('Batalkan'));
     await tester.pumpAndSettle();
-    verify(() => mockApi.patch(any(), data: any(named: 'data'))).called(1);
+    expect(find.text('Alasan pembatalan'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'Alasan pembatalan'), 'Mesin dipindah');
+    await tester.tap(find.text('Batalkan Pickup'));
+    await tester.pumpAndSettle();
+    verify(() => mockApi.patch('/api/pickups/pk1',
+        data: {'action': 'cancel', 'expectedVersion': 3, 'reason': 'Mesin dipindah'})).called(1);
+  });
+
+  testWidgets('cancel without a reason is not sent', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
+    stubLoad();
+
+    await tester.pumpWidget(buildApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Batalkan'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Batalkan Pickup'));
+    await tester.pumpAndSettle();
+    expect(find.text('Alasan wajib diisi (3-500 karakter)'), findsOneWidget);
+    verifyNever(() => mockApi.patch(any(), data: any(named: 'data')));
+  });
+
+  testWidgets('shows PIC, next step and deadline; creates a replacement task', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
+    stubLoad(pickups: [
+      {
+        'id': 'pk5',
+        'status': 'ASSIGNED',
+        'version': 2,
+        'reason': 'FULL',
+        'priority': 0,
+        'machine': {'name': 'Mesin Dispatch', 'machineCode': 'MAC-D'},
+        'assignedCollector': {'name': 'Pengepul A'},
+        'assignedAt': '2026-10-14T01:00:00.000Z',
+        'expectedStartAt': '2026-10-14T03:00:00.000Z',
+        'dispatch': {'nextLabel': 'Terlambat: pengepul belum berangkat', 'overdue': true, 'needsReplacement': false},
+        '_count': {'items': 0},
+      },
+      {
+        'id': 'pk6',
+        'status': 'FAILED',
+        'version': 4,
+        'reason': 'FULL',
+        'priority': 0,
+        'closedReason': 'Akses jalan ditutup',
+        'machine': {'name': 'Mesin Gagal', 'machineCode': 'MAC-G'},
+        'assignedCollector': {'name': 'Pengepul B'},
+        'dispatch': {'nextLabel': 'Menunggu admin membuat tugas pengganti', 'overdue': false, 'needsReplacement': true},
+        '_count': {'items': 0},
+      },
+    ]);
+    when(() => mockApi.post('/api/pickups', data: any(named: 'data')))
+        .thenAnswer((_) async => ok('/api/pickups', {}));
+
+    await tester.pumpWidget(buildApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Langkah berikutnya: Terlambat: pengepul belum berangkat'), findsOneWidget);
+    expect(find.textContaining('PIC: Pengepul A'), findsOneWidget);
+    expect(find.textContaining('(terlambat)'), findsOneWidget);
+    expect(find.text('Ganti'), findsOneWidget);
+    expect(find.text('Alasan: Akses jalan ditutup'), findsOneWidget);
+
+    await tester.tap(find.text('Buat Pengganti'));
+    await tester.pumpAndSettle();
+    verify(() => mockApi.post('/api/pickups', data: {'replacesPickupId': 'pk6'})).called(1);
   });
 
   testWidgets('create pickup API error shows snackbar', (tester) async {
@@ -310,6 +379,9 @@ void main() {
     verify(() => mockApi.post('/api/pickups', data: any(named: 'data'))).called(1);
 
     await tester.tap(find.text('Batalkan'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Alasan pembatalan'), 'Uji galat');
+    await tester.tap(find.text('Batalkan Pickup'));
     await tester.pumpAndSettle();
     expect(find.text('Terjadi kesalahan pada server.'), findsOneWidget);
   });

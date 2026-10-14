@@ -33,7 +33,20 @@ vi.mock('@/lib/audit', () => ({ logAudit: vi.fn() }));
 
 vi.mock('@/lib/notifications', () => ({
   createNotification: vi.fn().mockResolvedValue({ id: 'n1' }),
+  sendPushToUsersBestEffort: vi.fn(),
 }));
+
+// The transactional dispatch logic runs against real PostgreSQL in
+// tests/integration/pickup-dispatch.test.ts; here only the route wiring.
+vi.mock('@/lib/pickup-dispatch', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/pickup-dispatch')>()),
+  assignPickup: vi.fn(),
+  transitionPickup: vi.fn(),
+  createReplacementPickup: vi.fn(),
+  escalateOnAdminRead: vi.fn().mockResolvedValue(undefined),
+}));
+
+import * as dispatch from '@/lib/pickup-dispatch';
 
 describe('/api/pickups endpoints', () => {
   beforeEach(() => {
@@ -46,34 +59,32 @@ describe('/api/pickups endpoints', () => {
   });
 
   describe('GET list', () => {
-    it('returns available open pickups for PENGEPUL (200)', async () => {
+    it('gives PENGEPUL no pool of unassigned tasks to claim (B05)', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'coll1', role: 'PENGEPUL' } as any);
       vi.mocked(rbac.activePartnerOrgIds).mockResolvedValue(['org1']);
-      vi.mocked(prisma.pickupRequest.count).mockResolvedValue(1);
-      vi.mocked(prisma.pickupRequest.findMany).mockResolvedValue([{ id: 'p1' }] as any);
 
       const res = await getList(makeReq('http://localhost/api/pickups?scope=available'));
       expect(res.status).toBe(200);
-      
-      expect(prisma.pickupRequest.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: {
-          organizationId: { in: ['org1'] },
-          assignedCollectorId: null,
-          status: { in: expect.any(Array) },
-        }
-      }));
+      expect(await res.json()).toEqual({
+        pickups: [],
+        pagination: expect.objectContaining({ total: 0 }),
+      });
+      expect(prisma.pickupRequest.findMany).not.toHaveBeenCalled();
+      expect(rbac.activePartnerOrgIds).not.toHaveBeenCalled();
     });
 
-    it('uses __none__ when PENGEPUL has no partner orgs', async () => {
-      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'coll1', role: 'PENGEPUL' } as any);
-      vi.mocked(rbac.activePartnerOrgIds).mockResolvedValue([]);
-      vi.mocked(prisma.pickupRequest.count).mockResolvedValue(0);
-      vi.mocked(prisma.pickupRequest.findMany).mockResolvedValue([]);
+    it('runs the lazy overdue escalation for admin reads and adds the dispatch view', async () => {
+      const admin = { id: 'a1', role: 'ADMIN', organizationId: 'org1' } as any;
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(admin);
+      vi.mocked(prisma.pickupRequest.count).mockResolvedValue(1);
+      vi.mocked(prisma.pickupRequest.findMany).mockResolvedValue([
+        { id: 'p1', status: 'ASSIGNED', expectedStartAt: new Date(Date.now() - 1000), replacedBy: null },
+      ] as any);
 
-      await getList(makeReq('http://localhost/api/pickups?scope=available'));
-      expect(prisma.pickupRequest.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: expect.objectContaining({ organizationId: { in: ['__none__'] } }),
-      }));
+      const res = await getList(makeReq('http://localhost/api/pickups'));
+      expect(dispatch.escalateOnAdminRead).toHaveBeenCalledWith(admin);
+      const body = await res.json();
+      expect(body.pickups[0].dispatch).toMatchObject({ overdue: true, nextActor: 'COLLECTOR', nextStatus: 'ON_THE_WAY' });
     });
 
     it('lists assigned pickups for PENGEPUL without available scope', async () => {
@@ -216,6 +227,21 @@ describe('/api/pickups endpoints', () => {
       }));
     });
 
+    it('creates a replacement for a closed task through the dispatch service', async () => {
+      const admin = { id: 'u1', role: 'ADMIN', organizationId: 'org1' } as any;
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(admin);
+      vi.mocked(dispatch.createReplacementPickup).mockResolvedValueOnce({ pickup: { id: 'p9' } as any, existing: false });
+      const created = await POST(makeReq('http://localhost/api/pickups', 'POST', { replacesPickupId: 'p1', priority: 3 }));
+      expect(created.status).toBe(201);
+      expect(dispatch.createReplacementPickup).toHaveBeenCalledWith(admin, 'p1', { priority: 3, notes: undefined });
+      expect(prisma.pickupRequest.create).not.toHaveBeenCalled();
+
+      vi.mocked(dispatch.createReplacementPickup).mockResolvedValueOnce({ pickup: { id: 'p9' } as any, existing: true });
+      const retry = await POST(makeReq('http://localhost/api/pickups', 'POST', { replacesPickupId: 'p1' }));
+      expect(retry.status).toBe(200);
+      expect(await retry.json()).toEqual({ pickup: { id: 'p9' }, existing: true });
+    });
+
     it('returns handled error on create failure', async () => {
       vi.mocked(rbac.requireApiUser).mockRejectedValue(new Error('create boom'));
       expect((await POST(makeReq('http://localhost/api/pickups', 'POST', {
@@ -253,6 +279,18 @@ describe('/api/pickups endpoints', () => {
       })).status).toBe(403);
     });
 
+    it('runs the lazy escalation for this pickup on admin detail reads', async () => {
+      const admin = { id: 'a1', role: 'ADMIN', organizationId: 'org1' } as any;
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(admin);
+      vi.mocked(prisma.pickupRequest.findUnique).mockResolvedValue({
+        id: 'p1', organizationId: 'org1', status: 'REQUESTED', expectedStartAt: null, replacedBy: null,
+      } as any);
+      const res = await getOne(makeReq('http://localhost/api/pickups/p1'), { params: Promise.resolve({ id: 'p1' }) });
+      expect(res.status).toBe(200);
+      expect(dispatch.escalateOnAdminRead).toHaveBeenCalledWith(admin, { pickupIds: ['p1'] });
+      expect((await res.json()).pickup.dispatch).toMatchObject({ nextActor: 'ADMIN', nextStatus: 'ASSIGNED' });
+    });
+
     it('returns pickup for assigned PENGEPUL', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'coll1', role: 'PENGEPUL' } as any);
       vi.mocked(prisma.pickupRequest.findUnique).mockResolvedValue({
@@ -275,139 +313,93 @@ describe('/api/pickups endpoints', () => {
   });
 
   describe('PATCH action', () => {
-    it('admin can assign collector (200)', async () => {
-      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin1', role: 'ADMIN', organizationId: 'org1' } as any);
-      vi.mocked(prisma.pickupRequest.findUnique).mockResolvedValue({ id: 'p1', organizationId: 'org1', status: 'REQUESTED' } as any);
-      vi.mocked(rbac.assertActivePartnership).mockResolvedValue({ id: 'partner_1' } as any);
-      
-      const { mockTx } = await import('@/lib/prisma') as any;
-      mockTx.pickupRequest.update.mockResolvedValue({ id: 'p1', status: 'ASSIGNED' });
+    const params = { params: Promise.resolve({ id: 'p1' }) };
+    const patchReq = (body: unknown) => makeReq('http://localhost/api/pickups/p1', 'PATCH', body);
+    const admin = { id: 'admin1', role: 'ADMIN', organizationId: 'org1' } as any;
+    const collector = { id: 'coll1', role: 'PENGEPUL', organizationId: null } as any;
+    const assigned = { id: 'p1', status: 'ASSIGNED', version: 3, expectedStartAt: null, assignedCollectorId: 'coll1' };
 
-      const res = await PATCH(makeReq('http://localhost/api/pickups/p1', 'PATCH', {
-        action: 'assign',
-        collectorUserId: 'coll1'
-      }), { params: Promise.resolve({ id: 'p1' }) });
-      
+    it('maps the existing collectorUserId field to assignPickup and returns the new version', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(admin);
+      vi.mocked(dispatch.assignPickup).mockResolvedValue(assigned as any);
+
+      const res = await PATCH(patchReq({
+        action: 'assign', collectorUserId: 'coll1', expectedVersion: 2, expectedStartAt: '2026-11-01T08:00:00+07:00',
+      }), params);
+
       expect(res.status).toBe(200);
-      expect(mockTx.pickupRequest.update).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({ status: 'ASSIGNED', assignedCollectorId: 'coll1' })
-      }));
+      expect(dispatch.assignPickup).toHaveBeenCalledWith(admin, 'p1', {
+        collectorId: 'coll1', expectedVersion: 2, expectedStartAt: '2026-11-01T08:00:00+07:00',
+      });
+      expect((await res.json()).pickup).toMatchObject({ version: 3, dispatch: { nextActor: 'COLLECTOR' } });
     });
 
-    it('completing resets machine (200)', async () => {
-      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'coll1', role: 'PENGEPUL' } as any);
-      vi.mocked(prisma.pickupRequest.findUnique).mockResolvedValue({ 
-        id: 'p1', 
-        assignedCollectorId: 'coll1', 
-        status: 'COLLECTED', 
-        machineId: 'm1' 
-      } as any);
-      
-      const { mockTx } = await import('@/lib/prisma') as any;
-      mockTx.pickupRequest.update.mockResolvedValue({ id: 'p1', status: 'COMPLETED' });
-      mockTx.machine.findUnique.mockResolvedValue({ id: 'm1', status: 'FULL' });
-
-      const res = await PATCH(makeReq('http://localhost/api/pickups/p1', 'PATCH', {
-        action: 'complete',
-      }), { params: Promise.resolve({ id: 'p1' }) });
-      
-      expect(res.status).toBe(200);
-      expect(mockTx.machine.update).toHaveBeenCalledWith(expect.objectContaining({
-        where: { id: 'm1' },
-        data: expect.objectContaining({ fillLevelPercent: 0, status: 'ONLINE' })
-      }));
+    it('refuses a legacy assign without expectedVersion with an upgrade hint (409)', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(admin);
+      const res = await PATCH(patchReq({ action: 'assign', collectorUserId: 'coll1' }), params);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: dispatch.PICKUP_VERSION_REQUIRED, code: 'PICKUP_VERSION_REQUIRED' });
+      expect(dispatch.assignPickup).not.toHaveBeenCalled();
     });
 
-    it('returns 404 when patching missing pickup', async () => {
-      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 's1', role: 'SUPERADMIN' } as any);
-      vi.mocked(prisma.pickupRequest.findUnique).mockResolvedValue(null);
-      expect((await PATCH(makeReq('http://localhost/api/pickups/p1', 'PATCH', {
-        action: 'cancel',
-      }), { params: Promise.resolve({ id: 'p1' }) })).status).toBe(404);
-    });
-
-    it('forbids ADMIN outside org on patch', async () => {
-      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'a1', role: 'ADMIN', organizationId: 'org1' } as any);
-      vi.mocked(prisma.pickupRequest.findUnique).mockResolvedValue({
-        id: 'p1',
-        organizationId: 'org2',
-        status: 'REQUESTED',
-      } as any);
-      expect((await PATCH(makeReq('http://localhost/api/pickups/p1', 'PATCH', {
-        action: 'cancel',
-      }), { params: Promise.resolve({ id: 'p1' }) })).status).toBe(403);
-    });
-
-    it('rejects invalid transition', async () => {
-      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'coll1', role: 'PENGEPUL' } as any);
-      vi.mocked(prisma.pickupRequest.findUnique).mockResolvedValue({
-        id: 'p1',
-        assignedCollectorId: 'coll1',
-        status: 'REQUESTED',
-      } as any);
-      expect((await PATCH(makeReq('http://localhost/api/pickups/p1', 'PATCH', {
-        action: 'complete',
-      }), { params: Promise.resolve({ id: 'p1' }) })).status).toBe(409);
+    it('never lets a collector self-assign (403 before any version check)', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(collector);
+      const res = await PATCH(patchReq({ action: 'assign', collectorUserId: 'coll1' }), params);
+      expect(res.status).toBe(403);
+      expect(dispatch.assignPickup).not.toHaveBeenCalled();
     });
 
     it('requires collectorUserId on assign', async () => {
-      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin1', role: 'ADMIN', organizationId: 'org1' } as any);
-      vi.mocked(prisma.pickupRequest.findUnique).mockResolvedValue({
-        id: 'p1',
-        organizationId: 'org1',
-        status: 'REQUESTED',
-      } as any);
-      expect((await PATCH(makeReq('http://localhost/api/pickups/p1', 'PATCH', {
-        action: 'assign',
-      }), { params: Promise.resolve({ id: 'p1' }) })).status).toBe(422);
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(admin);
+      expect((await PATCH(patchReq({ action: 'assign', expectedVersion: 0 }), params)).status).toBe(422);
+      expect(dispatch.assignPickup).not.toHaveBeenCalled();
     });
 
-    it('keeps non-FULL machine status on complete', async () => {
-      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'coll1', role: 'PENGEPUL' } as any);
-      vi.mocked(prisma.pickupRequest.findUnique).mockResolvedValue({
-        id: 'p1',
-        assignedCollectorId: 'coll1',
-        status: 'COLLECTED',
-        machineId: 'm1',
-      } as any);
-      const { mockTx } = await import('@/lib/prisma') as any;
-      mockTx.pickupRequest.update.mockResolvedValue({ id: 'p1', status: 'COMPLETED' });
-      mockTx.machine.findUnique.mockResolvedValue({ id: 'm1', status: 'ONLINE' });
+    it('passes field steps, versions and reasons to transitionPickup', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(collector);
+      vi.mocked(dispatch.transitionPickup).mockResolvedValue({ ...assigned, status: 'FAILED', closedReason: 'Mobil mogok' } as any);
 
-      await PATCH(makeReq('http://localhost/api/pickups/p1', 'PATCH', {
-        action: 'complete',
-      }), { params: Promise.resolve({ id: 'p1' }) });
-
-      expect(mockTx.machine.update).toHaveBeenCalledWith(expect.objectContaining({
-        data: expect.objectContaining({ status: 'ONLINE' }),
-      }));
-    });
-
-    it('skips machine reset when machine row missing', async () => {
-      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'coll1', role: 'PENGEPUL' } as any);
-      vi.mocked(prisma.pickupRequest.findUnique).mockResolvedValue({
-        id: 'p1',
-        assignedCollectorId: 'coll1',
-        status: 'COLLECTED',
-        machineId: 'm1',
-      } as any);
-      const { mockTx } = await import('@/lib/prisma') as any;
-      mockTx.pickupRequest.update.mockResolvedValue({ id: 'p1', status: 'COMPLETED' });
-      mockTx.machine.findUnique.mockResolvedValue(null);
-      mockTx.machine.update.mockClear();
-
-      const res = await PATCH(makeReq('http://localhost/api/pickups/p1', 'PATCH', {
-        action: 'complete',
-      }), { params: Promise.resolve({ id: 'p1' }) });
+      const res = await PATCH(patchReq({ action: 'fail', expectedVersion: 3, reason: 'Mobil mogok', notes: 'catatan' }), params);
       expect(res.status).toBe(200);
-      expect(mockTx.machine.update).not.toHaveBeenCalled();
+      expect(dispatch.transitionPickup).toHaveBeenCalledWith(collector, 'p1', {
+        action: 'fail', expectedVersion: 3, reason: 'Mobil mogok', notes: 'catatan',
+      });
+
+      await PATCH(patchReq({ action: 'start' }), params);
+      expect(dispatch.transitionPickup).toHaveBeenLastCalledWith(collector, 'p1', {
+        action: 'start', expectedVersion: undefined, reason: undefined, notes: undefined,
+      });
+    });
+
+    it('answers a stale version with 409 and a machine-readable code', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(collector);
+      vi.mocked(dispatch.transitionPickup).mockRejectedValue(dispatch.versionConflict());
+      const res = await PATCH(patchReq({ action: 'complete', expectedVersion: 1 }), params);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'Tugas telah diperbarui; muat ulang', code: 'PICKUP_VERSION_CONFLICT' });
+    });
+
+    it('keeps plain HttpError statuses (404, 403, 409) from the service', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(admin);
+      for (const status of [404, 403, 409]) {
+        vi.mocked(dispatch.transitionPickup).mockRejectedValueOnce(new (rbac.HttpError as any)(status, 'pesan'));
+        const res = await PATCH(patchReq({ action: 'cancel', expectedVersion: 0, reason: 'Alasan' }), params);
+        expect(res.status).toBe(status);
+        expect(await res.json()).toEqual({ error: 'pesan' });
+      }
+    });
+
+    it('rejects a malformed expectedVersion before the service', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue(admin);
+      for (const expectedVersion of ['1', -1, 1.5]) {
+        expect((await PATCH(patchReq({ action: 'cancel', expectedVersion, reason: 'Alasan' }), params)).status).toBe(422);
+      }
+      expect(dispatch.transitionPickup).not.toHaveBeenCalled();
     });
 
     it('returns handled error on patch failure', async () => {
       vi.mocked(rbac.requireApiUser).mockRejectedValue(new Error('patch boom'));
-      expect((await PATCH(makeReq('http://localhost/api/pickups/p1', 'PATCH', {
-        action: 'start',
-      }), { params: Promise.resolve({ id: 'p1' }) })).status).toBe(500);
+      expect((await PATCH(patchReq({ action: 'start' }), params)).status).toBe(500);
     });
   });
 });

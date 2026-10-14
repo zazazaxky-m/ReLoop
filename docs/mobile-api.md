@@ -717,6 +717,82 @@ admin organisasi menekan "Kirim ulang undangan" pada halaman Travel Agent.
 Status verifikasi terlihat pada kolom "Verifikasi" di halaman itu dan pada
 halaman profil pengguna.
 
+## Pickup dispatch (B05)
+
+Pickup memakai **dispatch admin**: ADMIN (organisasi sendiri) atau SUPERADMIN
+menugaskan satu pengepul yang kemitraannya `ACTIVE`; pengepul yang ditugaskan
+menjalankan langkah lapangan. Tidak ada endpoint klaim/self-assign untuk
+pengepul. `GET /api/pickups?scope=available` untuk PENGEPUL kini selalu
+menjawab `{ "pickups": [], "pagination": … }` (bentuk sama, agar aplikasi lama
+tidak menampilkan tombol klaim yang tidak berfungsi).
+
+**Field baru** pada setiap `pickup` (aditif): `version` (int, naik pada setiap
+keputusan), `assignedAt`, `expectedStartAt` (tenggat mulai yang dipilih admin,
+`null` = tanpa tenggat; tidak ada SLA bawaan), `lastEscalatedAt`,
+`closedReason` (alasan batal/gagal), `replacesPickupId`. `GET /api/pickups` dan
+`GET /api/pickups/:id` menambahkan `replacedBy` dan objek turunan
+`dispatch: { nextStatus, nextActor: "ADMIN"|"COLLECTOR"|null, nextLabel,
+overdue, needsReplacement }` untuk menampilkan PIC, status berikutnya dan
+keterlambatan.
+
+**`PATCH /api/pickups/:id`** body: `action`, `expectedVersion` (versi yang
+dilihat klien), `collectorUserId` (assign; field lama, disimpan sebagai
+`assignedCollectorId`), `expectedStartAt` (assign, ISO-8601 dengan offset,
+di masa depan dan paling lama satu tahun), `reason` (cancel/fail, wajib 3-500
+karakter), `notes`. Respons `{ pickup }` membawa `version` baru.
+
+| Aksi | Peran | Dari status | `expectedVersion` |
+|---|---|---|---|
+| `assign` | ADMIN/SUPERADMIN | REQUESTED, ASSIGNED (ganti pengepul hanya sebelum berangkat) | wajib |
+| `start` / `arrive` / `collect` / `complete` | pengepul yang ditugaskan (atau SUPERADMIN) | ASSIGNED / ON_THE_WAY / ARRIVED / COLLECTED | dikirim klien baru; lihat masa transisi |
+| `fail` | pengepul yang ditugaskan (atau SUPERADMIN) | ASSIGNED … COLLECTED | wajib, plus `reason` |
+| `cancel` | ADMIN/SUPERADMIN | REQUESTED, ASSIGNED, ON_THE_WAY, ARRIVED | wajib, plus `reason` |
+
+Kesalahan: **409** `{ error: "Tugas telah diperbarui; muat ulang", code:
+"PICKUP_VERSION_CONFLICT" }` bila `expectedVersion` berbeda dari versi saat ini
+(semua aksi); **409** `{ code: "PICKUP_VERSION_REQUIRED" }` bila assign/cancel/
+fail tanpa `expectedVersion` (pesan meminta muat ulang atau perbarui aplikasi);
+409 tanpa `code` untuk status yang tidak mengizinkan aksi (mis. assign setelah
+pengepul berangkat); **403** bila pengepul bukan lagi yang ditugaskan, atau
+kemitraannya tidak aktif (diperiksa di dalam transaksi sebelum setiap aksi);
+**422** alasan kosong atau tenggat tidak valid. Klien memuat ulang daftar pada
+409/403 dan tidak mengulang permintaan yang sama.
+
+**Masa transisi klien.** Aplikasi lama yang tidak mengirim `expectedVersion`
+tetap dapat menjalankan `start`, `arrive`, `collect` dan `complete`, dan hanya
+itu: server menerimanya hanya bila pengguna adalah pengepul yang saat ini
+ditugaskan, kemitraannya aktif, dan status saat ini adalah status asal aksi
+tersebut. Penulisannya tetap bersyarat pada versi yang dibaca di bawah lock
+dan menaikkan versi; audit mencatat `expectedVersionProvided: false`.
+`expectedVersion` yang dikirim tetapi usang selalu ditolak 409. Assign, cancel
+dan fail tidak pernah diterima tanpa versi. Pada rilis berikutnya (setelah
+aplikasi lama tidak dipakai) `expectedVersion` diwajibkan untuk semua aksi.
+
+**Pengganti tugas.** Setelah cancel/fail, admin membuat tugas pengganti dengan
+`POST /api/pickups { "replacesPickupId": "<id>" }`: 201 tugas REQUESTED baru
+(organisasi, mesin, alasan dan prioritas disalin), 200 `existing: true` bila
+pengganti sudah ada (satu pengganti per tugas), 409 bila tugas belum ditutup
+atau mesinnya sudah punya tugas terbuka.
+
+**Notifikasi** (dikirim setelah commit): `PICKUP_ASSIGNED` ke pengepul yang
+ditugaskan; `PICKUP_STATUS` ke pengepul lama saat dialihkan dan ke pengepul
+yang ditugaskan saat dibatalkan; `PICKUP_STATUS` ke admin aktif organisasi saat
+tugas gagal; `PICKUP_OVERDUE` ke admin aktif organisasi saat terlambat. Tidak
+ada notifikasi ke organisasi lain, pengguna lain, atau superadmin.
+
+**Eskalasi terlambat.** Tugas `ASSIGNED` yang `expectedStartAt`-nya terlewati
+tanpa `start` ditandai `dispatch.overdue` dan memicu satu `PICKUP_OVERDUE` per
+(pickup, versi): klaimnya satu UPDATE bersyarat pada versi dan
+`lastEscalatedAt IS NULL`; setiap assign mengosongkan `lastEscalatedAt` dan
+menaikkan versi. Eskalasi tidak pernah menugaskan ulang. Pemeriksaan berjalan
+otomatis saat admin membuka daftar/detail pickup (web dan API), dan oleh
+runner `npm run pickups:escalate` (`scripts/process-pickup-escalations.ts`,
+opsi `--limit 1..1000`, default 200; keluaran JSON berisi id pickup, versi dan
+id organisasi saja; exit 0 selesai, 2 argumen salah, 1 gagal). Repositori ini
+tidak menjadwalkannya: operasi menjalankannya berkala (cron atau scheduler
+CI, mis. tiap 5 menit) dengan `DATABASE_URL` produksi. Menjalankannya berulang
+aman (idempoten).
+
 ## Strategi Caching & Offline (Khusus Pengepul)
 
 Mengingat **Pengepul** sering beroperasi di area dengan konektivitas rendah saat melakukan pengambilan (*pickup*) dari mesin RVM atau tempat wisata, aplikasi seluler dirancang untuk mendukung *Offline Tolerance* secara terbatas:

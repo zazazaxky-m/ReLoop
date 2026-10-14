@@ -56,6 +56,15 @@ import { HttpError } from "./rbac";
  * lock. An operator topup/correction or residual release locks the account
  * alone (a prefix-free suffix of the order is allowed: nothing earlier is
  * taken afterwards).
+ * Pickup dispatch (B05, lib/pickup-dispatch.ts) moves no money: a transition
+ * that writes the machine (complete) locks the Machine first (immutable
+ * PickupRequest.machineId), then the PickupRequest; every other dispatch or
+ * field transition locks the PickupRequest alone. Under the pickup lock it
+ * holds the collector's OrganizationCollectorPartner row FOR SHARE, so a
+ * partnership cannot be suspended between the check and COMMIT. No
+ * transaction locks a PickupRequest before a Machine, and partnership
+ * mutations lock no pickup. The overdue escalation is one conditional UPDATE
+ * per (pickup, version) and takes no other lock.
  */
 
 /**
@@ -160,4 +169,18 @@ export async function lockDepositItem(tx: Prisma.TransactionClient, depositItemI
   const rows = await tx.$queryRaw<{ id: string }[]>`
     SELECT id FROM "DepositItem" WHERE id = ${depositItemId} FOR NO KEY UPDATE`;
   if (rows.length !== 1) throw new HttpError(404, "Item setoran tidak ditemukan");
+}
+
+/**
+ * Locks one pickup request for a dispatch or field transition (B05). A
+ * transition that also writes the machine (complete) must already hold
+ * `lockMachine(tx, pickup.machineId)` (Machine before PickupRequest). Re-read
+ * status, version, assignee and partnership through the same `tx` afterwards.
+ * FOR NO KEY UPDATE: foreign-key inserts that only reference the pickup
+ * (PickupItem rows, a replacement task) are not blocked by it.
+ */
+export async function lockPickupRequest(tx: Prisma.TransactionClient, pickupId: string): Promise<void> {
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "PickupRequest" WHERE id = ${pickupId} FOR NO KEY UPDATE`;
+  if (rows.length !== 1) throw new HttpError(404, "Pickup tidak ditemukan");
 }
