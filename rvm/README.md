@@ -173,9 +173,17 @@ dan dikirim batch ke `POST /api/machine-events` (HMAC). Respons protokol v2
   tidak pernah men-dead-letter event (server bisa jadi yang salah).
 - **Urutan per sesi.** Backend menentukan item sebuah event dari riwayat sesi,
   jadi event sebuah sesi ditahan selama event sebelumnya dari sesi yang sama
-  masih menunggu retry (di mesin) dan dijawab `TEMPORARY_FAILURE` dalam batch
-  yang sama setelah event sebelumnya gagal sementara (di server). Sesi lain dan
-  event tanpa sesi tetap berjalan; event yang di-dead-letter tidak menahan sesi.
+  masih menunggu retry (di mesin) dan dijawab `SESSION_HELD` (retryable) dalam
+  batch yang sama setelah event sebelumnya gagal sementara (di server). Sesi lain
+  dan event tanpa sesi tetap berjalan; event yang di-dead-letter tidak menahan sesi.
+- **Batas gagal per event.** Error sementara yang dilaporkan server untuk event
+  itu sendiri dihitung di `outbox.server_failures`; setelah
+  `MAX_SERVER_FAILURES` (20) kali berturut-turut event dipindah ke dead-letter
+  dengan alasan `RETRY_LIMIT:<kode>` agar sesinya tidak tertahan selamanya.
+  Kegagalan jaringan, respons rusak, dan `SESSION_HELD` tidak dihitung, sehingga
+  gangguan koneksi panjang tidak memindahkan apa pun ke dead-letter. Kirim ulang
+  oleh teknisi mengembalikan hitungan ke 0. Watermark penutupan sesi tetap
+  menunggu event itu, jadi hold dana sesi tidak dilepas.
 - **Batas waktu tetap.** Satu `flush_once` tetap satu request HTTP dengan
   timeout 5 s, sehingga angka latensi `STOP_ALL` di atas tidak berubah.
 - **Loop sinkronisasi tidak pernah berhenti.** Body respons yang terpotong
@@ -185,8 +193,10 @@ dan dikirim batch ke `POST /api/machine-events` (HMAC). Respons protokol v2
   `lastError`, lalu dicoba lagi pada iterasi berikutnya.
 
 **Tampilan operator.** Panel maintenance kiosk (PIN) menampilkan jumlah event
-menunggu, yang ditolak permanen (jenis, alasan, jumlah percobaan) dan waktu
-sinkron terakhir yang berhasil; tombol **Kirim ulang event ditolak**
+menunggu, yang ditolak permanen atau gagal berulang (jenis, alasan, jumlah
+percobaan), error pengiriman terakhir (`outboxError`, terpisah dari
+`lastError` yang direset polling sesi 2 s) dan waktu sinkron terakhir yang
+berhasil; tombol **Kirim ulang event ditolak**
 (`retry-dead-letter`, wajib token maintenance; tanpa `ids` = semua, atau
 `ids` berupa daftar ID outbox positif, selain itu ditolak 422) mengembalikan event ke antrean
 dengan `localEventId` dan payload yang sama, menyimpan riwayat `attempts` dan

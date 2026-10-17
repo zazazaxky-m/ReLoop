@@ -149,8 +149,9 @@
       <div class="section-heading compact"><div><span>Sinkronisasi event</span><strong>Antrean ke server</strong></div><em id="outboxLastSuccess">Belum pernah sinkron</em></div>
       <div class="outbox-stats">
         <div><span>Menunggu dikirim</span><b id="outboxPending">0</b></div>
-        <div><span>Ditolak permanen</span><b id="outboxDeadLetter">0</b></div>
+        <div><span>Ditolak atau gagal berulang</span><b id="outboxDeadLetter">0</b></div>
       </div>
+      <p id="outboxError" class="outbox-error" role="status"></p>
       <ul id="deadLetterList" class="dead-letter-list"></ul>
       <div class="maintenance-grid">
         <button id="retryDeadLetter" data-command="retry-dead-letter" disabled>Kirim ulang event ditolak</button>

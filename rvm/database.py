@@ -20,6 +20,9 @@ SENT = "sent"
 DEAD_LETTER = "dead_letter"
 
 RETRY_BACKOFF_CAP_SECONDS = 60
+# Consecutive server-reported transient errors on one event before it is
+# dead-lettered (kept for an operator retry) so its session can move on.
+MAX_SERVER_FAILURES = 20
 
 
 def retry_delay(attempts: int, rand: Callable[[], float] = random.random) -> float:
@@ -54,7 +57,8 @@ CREATE TABLE IF NOT EXISTS outbox (
   sent_at REAL,
   delivery_status TEXT NOT NULL DEFAULT 'pending'
     CHECK (delivery_status IN ('pending','sent','dead_letter')),
-  dead_lettered_at REAL
+  dead_lettered_at REAL,
+  server_failures INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS outbox_pending_idx
 ON outbox(sent_at, next_attempt_at, id);
@@ -117,6 +121,7 @@ OUTBOX_V2_COLUMNS = (
      "ALTER TABLE outbox ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'pending' "
      "CHECK (delivery_status IN ('pending','sent','dead_letter'))"),
     ("dead_lettered_at", "ALTER TABLE outbox ADD COLUMN dead_lettered_at REAL"),
+    ("server_failures", "ALTER TABLE outbox ADD COLUMN server_failures INTEGER NOT NULL DEFAULT 0"),
 )
 OUTBOX_V2_INDEXES = (
     "CREATE INDEX IF NOT EXISTS outbox_delivery_idx ON outbox(delivery_status, next_attempt_at, id)",
@@ -155,6 +160,8 @@ class EdgeDatabase:
         if legacy and "delivery_status" not in legacy:
             # Copy the untouched pre-v2 database aside before any schema change.
             self.backup_path = self._backup("pre-outbox-v2")
+        elif legacy and "server_failures" not in legacy:
+            self.backup_path = self._backup("pre-outbox-retry-limit")
         leases = self._table_columns("leases")
         if leases and "version" not in leases:
             # Lease protocol v2 (B01b): the same backup-before-DDL rule.
@@ -320,24 +327,41 @@ class EdgeDatabase:
                 (time.time(), *db_ids),
             )
 
-    def mark_failed(self, db_ids: list[int], error: str) -> None:
+    def mark_failed(self, db_ids: list[int], error: str, *, server_failure: bool = False) -> list[int]:
         """Transient failure: stays pending, retried with the same
-        localEventId after retry_delay(attempts)."""
+        localEventId after retry_delay(attempts). A `server_failure` (the
+        server answered with an error for this very event) also counts toward
+        MAX_SERVER_FAILURES; at the limit the event is dead-lettered with
+        reason RETRY_LIMIT:<code>, kept for an operator retry, so it no longer
+        holds its session. Network and protocol failures never count. Returns
+        the dead-lettered ids."""
         if not db_ids:
-            return
+            return []
+        dead: list[int] = []
+        now = time.time()
         with self._lock, self._conn:
             for db_id in db_ids:
                 row = self._conn.execute(
-                    f"SELECT attempts FROM outbox WHERE id=? AND delivery_status='{PENDING}'",
+                    f"SELECT attempts,server_failures FROM outbox WHERE id=? AND delivery_status='{PENDING}'",
                     (db_id,),
                 ).fetchone()
                 if not row:
                     continue
                 attempts = int(row["attempts"]) + 1
+                failures = int(row["server_failures"]) + (1 if server_failure else 0)
+                if failures >= MAX_SERVER_FAILURES:
+                    self._conn.execute(
+                        f"UPDATE outbox SET delivery_status='{DEAD_LETTER}',dead_lettered_at=?,attempts=?,"
+                        "server_failures=?,last_error=? WHERE id=?",
+                        (now, attempts, failures, f"RETRY_LIMIT:{error}"[:500], db_id),
+                    )
+                    dead.append(db_id)
+                    continue
                 self._conn.execute(
-                    "UPDATE outbox SET attempts=?,next_attempt_at=?,last_error=? WHERE id=?",
-                    (attempts, time.time() + retry_delay(attempts), error[:500], db_id),
+                    "UPDATE outbox SET attempts=?,server_failures=?,next_attempt_at=?,last_error=? WHERE id=?",
+                    (attempts, failures, now + retry_delay(attempts), error[:500], db_id),
                 )
+        return dead
 
     def mark_dead_letter(self, ids: list[int], reason: str) -> None:
         """Permanent rejection: the record is kept (payload untouched) for the
@@ -355,7 +379,8 @@ class EdgeDatabase:
     def retry_dead_letters(self, ids: list[int] | None = None) -> list[int]:
         """Requeues dead-lettered events (all, or the given ids) for immediate
         delivery with the same localEventId and payload. Attempts and the last
-        error stay as history. Returns the requeued ids."""
+        error stay as history; the server-failure count starts over. Returns
+        the requeued ids."""
         query = f"SELECT id FROM outbox WHERE delivery_status='{DEAD_LETTER}'"
         params: tuple[Any, ...] = ()
         if ids is not None:
@@ -368,7 +393,7 @@ class EdgeDatabase:
             if requeued:
                 marks = ",".join("?" for _ in requeued)
                 self._conn.execute(
-                    f"UPDATE outbox SET delivery_status='{PENDING}',next_attempt_at=0 "
+                    f"UPDATE outbox SET delivery_status='{PENDING}',next_attempt_at=0,server_failures=0 "
                     f"WHERE id IN ({marks}) AND delivery_status='{DEAD_LETTER}'",
                     requeued,
                 )

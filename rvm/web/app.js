@@ -111,18 +111,20 @@ function renderSecurityAlert(alert){
 }
 
 const outboxReasons={INVALID_EVENT:"Format event tidak dikenali server",EVENT_REJECTED:"Ditolak oleh aturan server"};
+const outboxReason=r=>String(r??"").startsWith("RETRY_LIMIT")?"Gagal berulang di server, perlu pengecekan":(outboxReasons[r]||"Ditolak server");
 const outboxEvents={HEARTBEAT:"Status berkala",STATUS_CHANGED:"Perubahan status",FILL_LEVEL_UPDATED:"Level isi",ITEM_DETECTED:"Item terdeteksi",WEIGHT_MEASURED:"Berat item",IMAGE_CLASSIFIED:"Klasifikasi gambar",ITEM_ACCEPTED_POINT:"Item diterima",ITEM_REJECTED:"Item ditolak",SENSOR_SEQUENCE:"Urutan sensor",FRAUD_DETECTED:"Indikasi fraud",VANDALISM_DETECTED:"Indikasi vandalisme",SAFE_STATE_ENTERED:"Mode aman"};
 function renderOutbox(server){
   $("outboxPending").textContent=Number(server?.queueDepth||0);
   $("outboxDeadLetter").textContent=Number(server?.deadLetterDepth||0);
   const last=Number(server?.lastSuccessAt||0);
   $("outboxLastSuccess").textContent=last?"Sinkron terakhir "+new Date(last*1000).toLocaleString("id-ID"):"Belum pernah sinkron";
+  $("outboxError").textContent=server?.outboxError?"Pengiriman terakhir gagal: "+String(server.outboxError):"";
   const list=clear($("deadLetterList")),items=Array.isArray(server?.deadLetters)?server.deadLetters:[];
   if(!items.length)list.append(el("li",{className:"empty"},"Tidak ada event yang ditolak permanen."));
   for(const item of items){
     list.append(el("li",{},
       el("b",{},outboxEvents[item.eventType]||label(item.eventType)),
-      el("span",{},outboxReasons[item.reason]||"Ditolak server"),
+      el("span",{},outboxReason(item.reason)),
       el("small",{},`${Number(item.attempts||0)}x percobaan · ${String(item.occurredAt??"")}`),
     ));
   }

@@ -217,10 +217,13 @@ describe("machine-events v2 error classification", () => {
       ],
     });
     const retry = (localEventId: string) => ({ localEventId, status: "error", error: "TEMPORARY_FAILURE", retryable: true });
+    // Held events get their own code so the machine never counts them toward
+    // its retry limit: only the failing event itself does (rvm/sync.py).
+    const held = (localEventId: string) => ({ localEventId, status: "error", error: "SESSION_HELD", retryable: true });
     expect((await res.json()).results).toEqual([
       retry("s1-detect"),
       { localEventId: "s2-detect", status: "accepted", eventId: "srv-s2-detect" },
-      retry("s1-accept"),
+      held("s1-accept"),
       { localEventId: "heartbeat", status: "accepted", eventId: "srv-heartbeat" },
     ]);
     // The held event never reached the reward path out of order.

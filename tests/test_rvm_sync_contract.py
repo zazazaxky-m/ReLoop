@@ -842,5 +842,97 @@ class DeadLetterRetryValidationTest(KioskApiCase):
         self.assertEqual(outcome(self.c.db), {"acked": [], "pending": [E3], "deadLetter": [E4]})
 
 
+
+class RetryLimitTest(WorkerCase):
+    """A session cannot wait forever behind one event the server keeps failing:
+    after MAX_SERVER_FAILURES server-reported transient errors on that event
+    it is dead-lettered (kept, visible, operator retry) and its session moves
+    on. Network failures, malformed responses and SESSION_HELD (an event only
+    waiting behind an earlier one) never count."""
+
+    def server_round(self, poison):
+        make_due(self.db)
+        rows = self.db.pending(20)
+        self.worker.apply_event_results(rows, v2(*(
+            failed(r["localEventId"]) if r["localEventId"] == poison else failed(r["localEventId"], "SESSION_HELD")
+            for r in rows)))
+
+    def session_pair(self):
+        a1 = self.db.enqueue("ITEM_DETECTED", {}, "2026-10-13T08:00:01Z", "sess-a")
+        a2 = self.db.enqueue("WEIGHT_MEASURED", {}, "2026-10-13T08:00:02Z", "sess-a")
+        return a1, a2
+
+    def test_poison_event_is_dead_lettered_at_the_limit_and_frees_its_session(self):
+        limit = database_module.MAX_SERVER_FAILURES
+        a1, a2 = self.session_pair()
+        for _ in range(limit - 1):
+            self.server_round(a1)
+        self.assertEqual(outcome(self.db)["pending"], sorted([a1, a2]))
+
+        self.server_round(a1)
+
+        self.assertEqual(outcome(self.db), {"acked": [], "pending": [a2], "deadLetter": [a1]})
+        self.assertEqual(self.db.dead_letters(5)[0]["reason"], "RETRY_LIMIT:TEMPORARY_FAILURE")
+        make_due(self.db)
+        self.assertEqual([r["localEventId"] for r in self.db.pending(20)], [a2])
+
+    def test_network_and_malformed_failures_never_count_toward_the_limit(self):
+        limit = database_module.MAX_SERVER_FAILURES
+        a1, _ = self.session_pair()
+
+        def down(*_a, **_k):
+            raise urllib.error.URLError("network down")
+
+        for _ in range(limit * 2):
+            make_due(self.db)
+            self.flush(down)
+            make_due(self.db)
+            self.worker.apply_event_results(self.db.pending(20), {"protocolVersion": 1})
+        self.assertEqual(outcome(self.db)["deadLetter"], [])
+        self.server_round(a1)
+        self.assertEqual(outcome(self.db)["deadLetter"], [])
+
+    def test_operator_retry_restarts_the_count(self):
+        limit = database_module.MAX_SERVER_FAILURES
+        a1, a2 = self.session_pair()
+        for _ in range(limit):
+            self.server_round(a1)
+        self.assertEqual(self.db.retry_dead_letters(), [outbox(self.db)[a1]["id"]])
+        for _ in range(limit - 1):
+            self.server_round(a1)
+        self.assertEqual(outcome(self.db)["pending"], sorted([a1, a2]))
+
+    def test_outbox_error_is_not_wiped_by_a_successful_session_poll(self):
+        a1, _ = self.session_pair()
+        self.server_round(a1)
+        with mock.patch("rvm.sync.urllib.request.urlopen", lambda *_a, **_k: Resp(200, b"{}")):
+            self.worker.fetch_machine_session()
+        status = self.worker.status()
+        self.assertIsNone(status["lastError"])
+        self.assertEqual(status["outboxError"], "SESSION_HELD,TEMPORARY_FAILURE")
+
+
+class RetryLimitUpgradeTest(unittest.TestCase):
+    def test_upgrade_adds_the_failure_counter_keeping_rows_after_a_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "rvm.db")
+            db = EdgeDatabase(path)
+            db.enqueue("ITEM_DETECTED", {}, "2026-10-13T08:00:01Z", "sess-a", None, "kept-pending")
+            db.close()
+            raw = sqlite3.connect(path)
+            raw.execute("ALTER TABLE outbox DROP COLUMN server_failures")
+            raw.commit()
+            raw.close()
+
+            upgraded = EdgeDatabase(path)
+            try:
+                self.assertIn("server_failures", upgraded._outbox_columns())
+                self.assertIsNotNone(upgraded.backup_path)
+                self.assertEqual(outcome(upgraded)["pending"], ["kept-pending"])
+                self.assertEqual(outbox(upgraded)["kept-pending"]["server_failures"], 0)
+            finally:
+                upgraded.close()
+
+
 if __name__ == "__main__":
     unittest.main()

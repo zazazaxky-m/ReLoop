@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
       }
       const evt = parsed.data;
       if (evt.sessionId && heldSessions.has(evt.sessionId)) {
-        results.push(eventFailure(evt.localEventId, { error: "TEMPORARY_FAILURE", retryable: true }));
+        results.push(eventFailure(evt.localEventId, { error: "SESSION_HELD", retryable: true }));
         continue;
       }
 

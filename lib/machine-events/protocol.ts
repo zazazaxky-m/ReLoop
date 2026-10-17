@@ -24,7 +24,13 @@ export type MachineEventErrorCode =
   /** Well-formed but deterministically refused by the data/rules. Permanent. */
   | "EVENT_REJECTED"
   /** Database availability, contention or an unclassified failure. Retry. */
-  | "TEMPORARY_FAILURE";
+  | "TEMPORARY_FAILURE"
+  /**
+   * Not attempted: an earlier event of the same session failed transiently in
+   * this batch, so this one waits to be resent in order. Retry; the machine
+   * does not count it toward its per-event retry limit.
+   */
+  | "SESSION_HELD";
 
 export type MachineEventResult =
   | { localEventId: string; status: "accepted" | "duplicate"; eventId: string }

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import RvmConfig
-from .database import EdgeDatabase
+from .database import MAX_SERVER_FAILURES, EdgeDatabase
 from .lease import LEASE_PROTOCOL_HEADER, LEASE_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 # POST /api/machine-events protocol v2 (tests/fixtures/contracts/machine-events.v2.json).
 PROTOCOL_VERSION = 2
 ACK_STATUSES = frozenset({"accepted", "duplicate"})
+# Backend code for an event held behind an earlier failed event of its session.
+SESSION_HELD = "SESSION_HELD"
 # A whole-batch rejection that one bad event could cause. The batch is then
 # sent one event at a time for a while so that event only holds back itself.
 ENVELOPE_REJECTION_STATUSES = frozenset({400, 413, 422})
@@ -46,6 +48,9 @@ class SyncWorker:
         self.online = False
         self.last_sync_at: float | None = None
         self.last_error: str | None = None
+        # Outbox delivery error only: the 2 s session/display polls reset
+        # last_error, so the operator view would never see a stuck event.
+        self.outbox_error: str | None = None
         self._thread: threading.Thread | None = None
         self._last_media_sync = 0.0
         self._isolate_until = 0.0
@@ -127,7 +132,7 @@ class SyncWorker:
             # server committed: the retry reuses the localEventId and is
             # answered as duplicate.
             self.online = False
-            self.last_error = str(exc)
+            self.last_error = self.outbox_error = str(exc)
             self.db.mark_failed(ids, self.last_error)
             return False
         if not 200 <= status < 300:
@@ -145,12 +150,12 @@ class SyncWorker:
         if status in ENVELOPE_REJECTION_STATUSES and len(rows) > 1:
             self._isolate_until = time.time() + ISOLATION_SECONDS
         self.online = False
-        self.last_error = f"HTTP_{status}"
+        self.last_error = self.outbox_error = f"HTTP_{status}"
         self.db.mark_failed([row["db_id"] for row in rows], self.last_error)
         return False
 
     def _keep_pending(self, ids: list[int], reason: str) -> bool:
-        self.last_error = reason
+        self.last_error = self.outbox_error = reason
         self.db.mark_failed(ids, reason)
         return False
 
@@ -200,6 +205,10 @@ class SyncWorker:
 
         dead: dict[str, list[int]] = {}
         retry: dict[str, list[int]] = {}
+        # Transient errors the server reported for the event itself count
+        # toward MAX_SERVER_FAILURES; SESSION_HELD only means "waiting behind
+        # an earlier event of the session" and never does.
+        server_retry: dict[str, list[int]] = {}
         for result in results:
             local_id = result["localEventId"]
             if local_id in acked:
@@ -208,7 +217,12 @@ class SyncWorker:
                 code = _error_code(result.get("error"))
                 # Only an explicit `retryable: false` is permanent; a missing
                 # or non-boolean flag is transient (compatibility phase).
-                target = dead if result.get("retryable") is False else retry
+                if result.get("retryable") is False:
+                    target = dead
+                elif code == SESSION_HELD:
+                    target = retry
+                else:
+                    target = server_retry
                 target.setdefault(code, []).append(sent[local_id])
             else:
                 retry.setdefault("MALFORMED_RESULT", []).append(sent[local_id])
@@ -220,6 +234,11 @@ class SyncWorker:
             self.db.mark_dead_letter(dead_ids, code)
         for code, retry_ids in retry.items():
             self.db.mark_failed(retry_ids, code)
+        for code, retry_ids in server_retry.items():
+            limited = self.db.mark_failed(retry_ids, code, server_failure=True)
+            if limited:
+                logger.warning("dead-lettered %d event(s) after %d server failures (%s)",
+                               len(limited), MAX_SERVER_FAILURES, code)
 
         self.online = True
         if ids:
@@ -227,8 +246,8 @@ class SyncWorker:
             self.last_sync_at = now
             self.db.set_json(LAST_SUCCESS_KEY, now)
         complete = len(ids) == len(rows)
-        failures = sorted(set(dead) | set(retry))
-        self.last_error = None if complete else ",".join(failures)
+        failures = sorted(set(dead) | set(retry) | set(server_retry))
+        self.last_error = self.outbox_error = None if complete else ",".join(failures)
         return complete
 
     def flush_captures(self) -> bool:
@@ -501,6 +520,7 @@ class SyncWorker:
             "online": self.online,
             "lastSyncAt": self.last_sync_at,
             "lastError": self.last_error,
+            "outboxError": self.outbox_error,
             "queueDepth": self.db.queue_depth(),
             "captureQueueDepth": self.db.capture_queue_depth(),
             # Operator view (kiosk maintenance panel, remote REFRESH_STATE).
