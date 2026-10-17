@@ -453,6 +453,53 @@ class SessionLeaseRenewalTest(SafetyAssertions):
                 finally:
                     controller.db.close()
 
+    def test_renewal_waits_until_half_the_lease_remains(self):
+        """The server re-signs the lease on every 2 s poll; the row is only
+        rewritten once half of the renewal's TTL or less remains."""
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                first = bound_lease("session-r", lease_id="lease-r-1", ttl=300)
+                self.assertTrue(controller.activate_lease(first))
+                # A fresher lease (later expiry) while most of the TTL remains: no rewrite.
+                self.poll(controller, bound_lease("session-r", lease_id="lease-r-2", ttl=310))
+                self.assertEqual(controller.db.active_lease()["id"], "lease-r-1")
+
+                real = time.time
+                with mock.patch("rvm.controller.time.time", lambda: real() + 160):
+                    later = bound_lease("session-r", lease_id="lease-r-3", ttl=300)
+                    self.poll(controller, later)
+                    self.assertEqual(controller.db.active_lease()["id"], "lease-r-3")
+            finally:
+                controller.db.close()
+
+    def test_a_short_lease_near_its_end_is_always_renewed(self):
+        """Half of a 10 s TTL is 5 s, less than two polls: the 30 s margin
+        renews it before it can lapse and reopen the gate on reactivation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                self.assertTrue(controller.activate_lease(bound_lease("session-r", lease_id="lease-r-1", ttl=20)))
+                self.poll(controller, bound_lease("session-r", lease_id="lease-r-2", ttl=25))
+                self.assertEqual(controller.db.active_lease()["id"], "lease-r-2")
+            finally:
+                controller.db.close()
+
+    def test_a_refused_renewal_is_audited_once_per_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                self.assertTrue(controller.activate_lease(bound_lease("session-r", lease_id="lease-r-1", ttl=60)))
+                for n in range(3):
+                    tampered = bound_lease("session-r", lease_id=f"lease-r-bad-{n}", ttl=600)
+                    tampered["expiresAt"] += 60
+                    self.poll(controller, tampered)
+                refused = controller.db._conn.execute(
+                    "SELECT COUNT(*) FROM audit WHERE action='LEASE_REFUSED'").fetchone()[0]
+                self.assertEqual(refused, 1)
+            finally:
+                controller.db.close()
+
     def test_renewal_with_a_bad_signature_is_refused(self):
         tampered = bound_lease("session-r", lease_id="lease-r-2", ttl=600)
         tampered["expiresAt"] += 60  # no longer matches its signature
