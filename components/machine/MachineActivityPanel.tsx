@@ -136,7 +136,7 @@ function SyncStatusView({ status }: { status: MachineSyncStatus | null }) {
     value == null ? "Belum dilaporkan" : `${value} event`;
   const rows: [string, string][] = [
     ["Menunggu dikirim mesin", events(status.pending)],
-    ["Ditolak permanen (tersimpan di mesin)", events(status.deadLetter)],
+    ["Ditolak atau gagal berulang (tersimpan di mesin)", events(status.deadLetter)],
     ["Sinkron berhasil terakhir", formatDateTime(status.lastSuccessAt)],
     ["Event terakhir diterima server", formatDateTime(status.lastReceivedAt)],
     ["Dilaporkan mesin pada", formatDateTime(status.reportedAt)],
@@ -145,9 +145,10 @@ function SyncStatusView({ status }: { status: MachineSyncStatus | null }) {
     <div className="space-y-3">
       {status.deadLetter ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-400">
-          {status.deadLetter} event ditolak server dan disimpan di mesin tanpa
-          diubah. Teknisi dapat meninjau dan mengirim ulang dari panel
-          maintenance mesin (PIN).
+          {status.deadLetter} event ditolak server atau gagal berulang dan
+          disimpan di mesin tanpa diubah; event berikutnya dari sesi yang sama
+          menunggu di belakangnya. Teknisi dapat meninjau dan mengirim ulang
+          dari panel maintenance mesin (PIN).
         </div>
       ) : null}
       <dl className="divide-y divide-border text-sm">
