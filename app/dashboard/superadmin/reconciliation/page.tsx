@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { RewardCaseResolveForm } from "@/components/admin/RewardCaseResolveForm";
 import { MetricCard, PageHeader, StatusBadge } from "@/components/ui";
 import { AlertTriangle, Clock, Coins, Info, ShieldCheck, Wallet } from "@/components/ui/icons";
 import { requirePageUser } from "@/lib/rbac";
@@ -365,8 +366,9 @@ export default async function ReconciliationPage() {
         </h2>
         <p className="text-sm text-muted">
           Koreksi yang tidak dipaksakan ke ledger: saldo setoran yang sudah dicairkan, atau reward untuk akun yang
-          sudah dihapus. Nominalnya belum termasuk dalam angka kewajiban di atas. Selesaikan bersama tim keuangan;
-          ledger tidak pernah didebit paksa.
+          sudah dihapus. Nominalnya belum termasuk dalam angka kewajiban di atas. Selama terbuka, kasus &quot;Saldo sudah
+          dicairkan&quot; menahan pencairan pengguna sebesar nominalnya. Selesaikan bersama tim keuangan lalu catat
+          hasilnya; ledger tidak pernah didebit paksa.
         </p>
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-sm">
@@ -376,12 +378,13 @@ export default async function ReconciliationPage() {
                 <th className="px-4 py-2 font-semibold">Alasan</th>
                 <th className="px-4 py-2 text-right font-semibold">Nominal</th>
                 <th className="px-4 py-2 font-semibold">Dibuka</th>
+                <th className="px-4 py-2 font-semibold">Tindakan</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {report.rewardCases.recent.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-6 text-center text-muted" colSpan={4}>
+                  <td className="px-4 py-6 text-center text-muted" colSpan={5}>
                     Tidak ada kasus terbuka.
                   </td>
                 </tr>
@@ -398,6 +401,12 @@ export default async function ReconciliationPage() {
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{formatRupiah(rewardCase.amount)}</td>
                     <td className="px-4 py-2.5 text-muted">{formatDateTime(rewardCase.createdAt)}</td>
+                    <td className="px-4 py-2.5 align-top">
+                      <RewardCaseResolveForm
+                        caseId={rewardCase.id}
+                        holdsWithdrawals={rewardCase.reasonCode === "ANOMALY_ALREADY_PAID_OUT"}
+                      />
+                    </td>
                   </tr>
                 ))
               )}
