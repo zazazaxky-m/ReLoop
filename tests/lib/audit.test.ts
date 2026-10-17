@@ -91,6 +91,20 @@ describe('audit', () => {
   });
 
   describe('redactAuditMetadata', () => {
+    it('redacts email and phone keys at any depth (the chain cannot be erased later)', () => {
+      expect(redactAuditMetadata({
+        email: 'a@b.test',
+        nested: { Phone: '081234567890', EMAIL: 'c@d.test' },
+        emailChanged: true,
+        role: 'USER',
+      })).toEqual({
+        email: '[REDACTED]',
+        nested: { Phone: '[REDACTED]', EMAIL: '[REDACTED]' },
+        emailChanged: true,
+        role: 'USER',
+      });
+    });
+
     it('returns undefined if no metadata provided', () => {
       expect(redactAuditMetadata(null)).toBeUndefined();
     });

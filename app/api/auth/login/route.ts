@@ -7,7 +7,7 @@ import { logAudit } from "@/lib/audit";
 import { dashboardPath, type AppRole } from "@/lib/roles";
 import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { userWhereEmail } from "@/lib/encryption";
+import { keyedFingerprint, userWhereEmail } from "@/lib/encryption";
 import {
   requiresMfaAtLogin,
   signMfaChallenge,
@@ -42,7 +42,9 @@ export async function POST(req: NextRequest) {
         actorId: null,
         action: "LOGIN_FAILED",
         entityType: "User",
-        entityId: email,
+        // Keyed fingerprint, not the typed address: the audit chain is
+        // immutable and must not keep emails past an erasure request.
+        entityId: keyedFingerprint("login-email", email),
         metadata: { ip, reason: "invalid_credentials" },
       });
       return jsonError(401, "Email atau password salah");

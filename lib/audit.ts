@@ -26,6 +26,9 @@ const SENSITIVE_METADATA_KEYS = new Set([
   "accountidentifier",
   "totpsecret",
   "qrcode",
+  // Personal data: the hash chain cannot be rewritten on erasure.
+  "email",
+  "phone",
 ]);
 
 /** Strips sensitive keys from audit metadata before persistence. */

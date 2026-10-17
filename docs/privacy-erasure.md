@@ -87,8 +87,10 @@ A04 dapat memuat email yang diketik (`ACCOUNT_DELETION_REQUESTED`,
 rantai checksum, dan sejak A05 database menolak perubahan pada arsip legacy
 (versi 1); penanganannya diputuskan pemilik kebijakan (owner:
 product/legal + security). Sejak A04, catatan operator pencairan hanya dicatat
-sebagai `hasNote`; `LOGIN_FAILED` masih memakai email yang diketik dan menjadi
-tindak lanjut tim auth.
+sebagai `hasNote`. Entri baru `LOGIN_FAILED` memakai sidik jari berkunci email
+(`keyedFingerprint("login-email", …)`) sebagai `entityId`, `USER_CREATE` tidak
+lagi mencatat email, dan `redactAuditMetadata` mengganti key `email`/`phone` di
+metadata audit mana pun dengan `[REDACTED]`.
 
 ## Prosedur operasional
 

@@ -143,6 +143,8 @@ describe('/api/users API', () => {
         data: expect.objectContaining({ email: 'new@a.com', role: 'USER', passwordHash: 'hashed' })
       }));
       expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'USER_CREATE', actorId: 'admin' }));
+      const created = vi.mocked(audit.logAudit).mock.calls.find(([entry]) => entry.action === 'USER_CREATE')![0];
+      expect(JSON.stringify(created).toLowerCase()).not.toContain('new@a.com');
     });
 
     it('creates PENGEPUL with organizationId successfully', async () => {

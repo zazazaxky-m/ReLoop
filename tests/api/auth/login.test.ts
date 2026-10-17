@@ -77,6 +77,10 @@ describe('POST /api/auth/login', () => {
     
     expect(res.status).toBe(401);
     expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'LOGIN_FAILED' }));
+    // The audit chain is immutable: the typed address must never be written to it.
+    const failed = vi.mocked(audit.logAudit).mock.calls.find(([entry]) => entry.action === 'LOGIN_FAILED')![0];
+    expect(JSON.stringify(failed).toLowerCase()).not.toContain('test@example.com');
+    expect(failed.entityId).toMatch(/^[0-9a-f]{16,}$/);
   });
 
   it('fails if password incorrect (401)', async () => {

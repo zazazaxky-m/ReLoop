@@ -89,7 +89,7 @@ export async function POST(req: Request) {
       action: "USER_CREATE",
       entityType: "User",
       entityId: user.id,
-      metadata: { role: user.role, email: user.email },
+      metadata: { role: user.role },
     });
 
     return jsonOk({ user: { id: user.id, email: user.email, role: user.role } }, 201);
