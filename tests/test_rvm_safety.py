@@ -411,28 +411,63 @@ class SessionLeaseRenewalTest(SafetyAssertions):
             finally:
                 controller.db.close()
 
-    def test_renewal_that_changes_the_signed_bound_or_signature_is_refused(self):
-        tampered = bound_lease("session-r", lease_id="lease-r-2", ttl=600)
-        tampered["expiresAt"] += 60  # no longer matches its signature
+    def test_renewal_with_a_changed_signed_bound_is_adopted_mid_item_without_touching_outputs(self):
+        """Refusing it would let the lease expire mid-item and the next poll
+        re-activate the session, reopening the gate with the item inside. The
+        bound is signed by the server; the consumed counter is per session, so
+        adopting it never resets the budget."""
         cases = {
-            "ceiling": bound_lease("session-r", lease_id="lease-r-2", ttl=600, ceiling=5000),
-            "reservation": bound_lease("session-r", lease_id="lease-r-2", ttl=600, reservation="res-2"),
-            "max-items": bound_lease("session-r", lease_id="lease-r-2", ttl=600, max_items=50),
-            "signature": tampered,
+            "ceiling": dict(ceiling=5000),
+            "reservation": dict(reservation="res-late"),
+            "max-items": dict(max_items=50),
         }
-        for name, renewed in cases.items():
+        for name, change in cases.items():
             with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
                 controller = make_controller(tmp)
                 try:
-                    first = bound_lease("session-r", lease_id="lease-r-1", ttl=60)
-                    self.assertTrue(controller.activate_lease(first))
+                    self.assertTrue(controller.activate_lease(bound_lease("session-r", lease_id="lease-r-1", ttl=60)))
+                    controller.db.ensure_session("session-r")
+                    consumed_before = controller.db.session_consumption("session-r")
+                    controller.set_state(MachineState.PROCESSING, "test-item")
+                    controller.hardware.set_input_gate(False)
+                    controller.hardware.set_conveyor("FORWARD")
+                    opened_before = len(events_of(controller, "CHAMBER_OPENED"))
+
+                    renewed = bound_lease("session-r", lease_id="lease-r-2", ttl=600, **change)
                     self.poll(controller, renewed)
+
                     active = controller.db.active_lease()
-                    self.assertEqual(active["id"], "lease-r-1")
-                    self.assertEqual(int(active["expires_at"]), first["expiresAt"])
-                    self.assertEqual(controller.state, MachineState.SESSION_ACTIVE)
+                    self.assertEqual(active["id"], "lease-r-2")
+                    self.assertEqual(int(active["expires_at"]), renewed["expiresAt"])
+                    self.assertEqual(active["ceiling_rupiah"], renewed["ceilingRupiah"])
+                    self.assertEqual(active["reservation_id"], renewed["reservationId"])
+                    self.assertEqual(active["max_items"], renewed["maxItems"])
+                    self.assertEqual(controller.db.session_consumption("session-r"), consumed_before)
+                    self.assertEqual(controller.state, MachineState.PROCESSING)
+                    self.assertFalse(controller.hardware.input_gate_open)
+                    self.assertEqual(controller.hardware.conveyor, "FORWARD")
+                    self.assertEqual(len(events_of(controller, "CHAMBER_OPENED")), opened_before)
+                    audited = controller.db._conn.execute(
+                        "SELECT COUNT(*) FROM audit WHERE action='LEASE_BOUND_CHANGED'").fetchone()[0]
+                    self.assertEqual(audited, 1)
                 finally:
                     controller.db.close()
+
+    def test_renewal_with_a_bad_signature_is_refused(self):
+        tampered = bound_lease("session-r", lease_id="lease-r-2", ttl=600)
+        tampered["expiresAt"] += 60  # no longer matches its signature
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                first = bound_lease("session-r", lease_id="lease-r-1", ttl=60)
+                self.assertTrue(controller.activate_lease(first))
+                self.poll(controller, tampered)
+                active = controller.db.active_lease()
+                self.assertEqual(active["id"], "lease-r-1")
+                self.assertEqual(int(active["expires_at"]), first["expiresAt"])
+                self.assertEqual(controller.state, MachineState.SESSION_ACTIVE)
+            finally:
+                controller.db.close()
 
 
 # --------------------------------------------------------------------------- #

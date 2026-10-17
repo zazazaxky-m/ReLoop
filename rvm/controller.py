@@ -581,11 +581,13 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         return self.lease_refusal(lease) is None
 
     def renew_lease(self, lease: dict[str, Any]) -> bool:
-        """Extends the running session's lease from a fresh server lease for the
-        same session. The lease must verify and carry the same signed bound
-        (a renewal never resets the budget); only the expiry and the lease row
-        change. Never touches the state, the latch or an output. Caller holds
-        self._lock."""
+        """Extends the running session's lease from a fresh, verified server
+        lease for the same session; only the lease row changes. A changed
+        signed bound (e.g. a reservation that appeared after deploy) is adopted
+        and audited: refusing it would let the lease expire mid-item and the
+        next poll re-activate the session, reopening the gate. The consumed
+        counter is per session, so the budget is never reset. Never touches
+        the state, the latch or an output. Caller holds self._lock."""
         current = self.db.active_lease()
         if not current or not isinstance(lease, dict) or str(current["session_id"]) != str(lease.get("sessionId")):
             return False
@@ -595,15 +597,20 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             return False
         if float(lease["expiresAt"]) <= float(current["expires_at"]):
             return False
-        if (
-            current["reservation_id"] != lease.get("reservationId")
-            or current["policy_version"] != lease.get("policyVersion")
-            or current["ceiling_rupiah"] != lease.get("ceilingRupiah")
-            or current["max_items"] != lease.get("maxItems")
-        ):
-            self.db.audit("LEASE_REFUSED", {"reason": "LEASE_BOUND_CHANGED", "renewal": True})
-            return False
+        bound_fields = (
+            ("reservation_id", "reservationId"),
+            ("policy_version", "policyVersion"),
+            ("ceiling_rupiah", "ceilingRupiah"),
+            ("max_items", "maxItems"),
+        )
+        changed = {
+            remote: {"from": current[local], "to": lease.get(remote)}
+            for local, remote in bound_fields
+            if current[local] != lease.get(remote)
+        }
         self.db.renew_lease({**lease, "status": "ACTIVE"})
+        if changed:
+            self.db.audit("LEASE_BOUND_CHANGED", {"sessionId": str(current["session_id"]), "changes": changed})
         return True
 
     def activate_lease(self, lease: dict[str, Any]) -> bool:
