@@ -46,6 +46,21 @@ describe("POST /api/reward-cases/[id]/resolve (real PostgreSQL)", () => {
     expect((await request("after")).status).toBe(201);
   });
 
+  it("the reconciliation report tells the operator whose money it is and what resolving releases", async () => {
+    await f.seedBalance(20_000);
+    const open = await openDebitCase(5_000);
+
+    const report = await call("superadmin", "GET", "/api/reports/reconciliation");
+
+    expect(report.status).toBe(200);
+    const row = report.body.report.rewardCases.recent.find((c: Json) => c.id === open.id);
+    expect(row).toMatchObject({
+      ownerName: expect.any(String),
+      itemStatus: null,
+      withdrawableIfResolved: 5_000,
+    });
+  });
+
   it("a repeated resolution is idempotent and keeps the first outcome", async () => {
     const open = await openDebitCase(1_000);
     expect((await resolve("superadmin", open.id, { note: NOTE })).status).toBe(200);

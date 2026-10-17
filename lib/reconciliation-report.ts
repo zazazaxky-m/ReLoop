@@ -1,12 +1,14 @@
 import {
   Prisma,
   RedemptionStatus as RedemptionStatuses,
+  type DepositItemStatus,
   type LedgerEntryType,
   type LedgerStatus,
   type RedemptionStatus,
 } from "@prisma/client";
 import { computeBalance, expectedReserveStatus, type LedgerGroup, type WalletBalance } from "./ledger";
 import { prisma } from "./prisma";
+import { CASE_ALREADY_PAID_OUT, releasedByResolving } from "./reward-credit";
 import { readFundingVisibility, type FundingVisibility } from "./reward-funding";
 
 /**
@@ -345,6 +347,12 @@ export interface ReconciliationReport extends LiabilitySummary {
       entryType: LedgerEntryType;
       reasonCode: string;
       createdAt: Date;
+      /** Owner's display name (null when the account no longer exists). */
+      ownerName: string | null;
+      /** Status of the deposit item the case is about, if any. */
+      itemStatus: DepositItemStatus | null;
+      /** Rupiah resolving this case makes withdrawable for the owner right now. */
+      withdrawableIfResolved: number;
     }>;
   };
   /**
@@ -520,6 +528,30 @@ export async function getReconciliationReport(hooks: ReconciliationReportHooks =
         amount: true, entryType: true, reasonCode: true, createdAt: true,
       },
     });
+    const caseOwnerIds = [...new Set(recent.map((open) => open.userId))];
+    const caseItemIds = [...new Set(recent.flatMap((open) => (open.depositItemId ? [open.depositItemId] : [])))];
+    const [caseOwners, caseItems, ownerDebitCases] = await Promise.all([
+      tx.user.findMany({ where: { id: { in: caseOwnerIds } }, select: { id: true, name: true } }),
+      tx.depositItem.findMany({ where: { id: { in: caseItemIds } }, select: { id: true, status: true } }),
+      tx.rewardReconciliationCase.findMany({
+        where: { userId: { in: caseOwnerIds }, status: "OPEN", reasonCode: CASE_ALREADY_PAID_OUT },
+        select: { id: true, userId: true, depositItemId: true, amount: true },
+      }),
+    ]);
+    const ownerNames = new Map(caseOwners.map((owner) => [owner.id, owner.name]));
+    const itemStatuses = new Map(caseItems.map((item) => [item.id, item.status]));
+    const recentWithContext = recent.map((open) => ({
+      ...open,
+      ownerName: ownerNames.get(open.userId) ?? null,
+      itemStatus: open.depositItemId ? itemStatuses.get(open.depositItemId) ?? null : null,
+      withdrawableIfResolved: open.reasonCode === CASE_ALREADY_PAID_OUT
+        ? releasedByResolving(
+          open.id,
+          ownerDebitCases.filter((debit) => debit.userId === open.userId),
+          userBalances.get(open.userId)?.available ?? 0,
+        )
+        : 0,
+    }));
     const caseTotals = await tx.rewardReconciliationCase.aggregate({
       where: { status: "OPEN" },
       _count: { _all: true },
@@ -535,7 +567,7 @@ export async function getReconciliationReport(hooks: ReconciliationReportHooks =
       mismatchedRequests,
       reservesWithoutRequest,
       redemptionTotals,
-      rewardCases: { open: caseTotals._count._all, openAmount: caseTotals._sum.amount ?? 0, recent },
+      rewardCases: { open: caseTotals._count._all, openAmount: caseTotals._sum.amount ?? 0, recent: recentWithContext },
       funding,
       generatedAt: new Date().toISOString(),
     });

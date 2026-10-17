@@ -9,6 +9,8 @@ import {
   applyRewardEffect,
   checkRewardFunding,
   creditReward,
+  heldByCases,
+  releasedByResolving,
   type CreditRewardInput,
 } from '@/lib/reward-credit';
 
@@ -192,5 +194,24 @@ describe('creditReward / applyRewardEffect', () => {
       expect(await checkRewardFunding(mockTx, { ...earn, amount: 0 })).toEqual({ status: 'ZERO' });
       expect(funding.commitRewardAgainstBudget).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('withdrawal hold of open debit cases', () => {
+  const debit = (id: string, depositItemId: string | null, amount: number) => ({ id, depositItemId, amount });
+
+  it('counts one deposit item once, at its largest open case', () => {
+    expect(heldByCases([debit('c1', 'i1', 100), debit('c2', 'i1', 80), debit('c3', null, 50)])).toBe(150);
+    expect(heldByCases([])).toBe(0);
+  });
+
+  it('says how much resolving one case makes withdrawable, clamped to the available balance', () => {
+    const cases = [debit('c1', 'i1', 100), debit('c2', 'i2', 300)];
+    expect(releasedByResolving('c1', cases, 1_000)).toBe(100);
+    // Only 250 of the 400 held is actually available: resolving c2 frees 150.
+    expect(releasedByResolving('c2', cases, 250)).toBe(150);
+    expect(releasedByResolving('c1', cases, 0)).toBe(0);
+    // Another open case on the same item still holds the money.
+    expect(releasedByResolving('c1', [debit('c1', 'i1', 100), debit('c2', 'i1', 100)], 1_000)).toBe(0);
   });
 });

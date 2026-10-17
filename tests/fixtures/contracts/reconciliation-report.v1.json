@@ -62,7 +62,10 @@
             "amount": 2500,
             "entryType": "REVERSE",
             "reasonCode": "ANOMALY_ALREADY_PAID_OUT",
-            "createdAt": "2026-10-13T08:00:00.000Z"
+            "createdAt": "2026-10-13T08:00:00.000Z",
+            "ownerName": "Pengguna Audit",
+            "itemStatus": "REJECTED",
+            "withdrawableIfResolved": 2500
           }
         ]
       },

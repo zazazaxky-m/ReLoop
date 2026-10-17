@@ -3,6 +3,7 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Label, Textarea } from "@/components/ui";
+import { formatRupiah } from "@/lib/format";
 
 type ErrorBody = { error?: unknown; issues?: { message?: unknown }[] } | null;
 
@@ -17,7 +18,16 @@ function errorMessage(body: ErrorBody): string {
  * SUPERADMIN closes one reward reconciliation case with a written outcome
  * (POST /api/reward-cases/[id]/resolve). The ledger is never changed.
  */
-export function RewardCaseResolveForm({ caseId, holdsWithdrawals }: { caseId: string; holdsWithdrawals: boolean }) {
+export function RewardCaseResolveForm({
+  caseId,
+  holdsWithdrawals,
+  releasedIfResolved,
+}: {
+  caseId: string;
+  holdsWithdrawals: boolean;
+  /** Rupiah resolving makes withdrawable for the owner right now (reconciliation report). */
+  releasedIfResolved: number;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -76,10 +86,13 @@ export function RewardCaseResolveForm({ caseId, holdsWithdrawals }: { caseId: st
         aria-describedby={error ? `${hintId} ${errorId}` : hintId}
       />
       <p id={hintId} className="text-xs text-muted">
-        {holdsWithdrawals
-          ? "Menyelesaikan kasus melepas tahanan pencairan pengguna sebesar nominalnya; ledger tidak diubah. "
-          : "Ledger tidak diubah. "}
-        Tulis hasilnya, misalnya dana dikembalikan atau dihapusbukukan (minimal 10 karakter).
+        {holdsWithdrawals && releasedIfResolved > 0
+          ? `Menyelesaikan kasus ini membuat ${formatRupiah(releasedIfResolved)} dari saldo pengguna dapat dicairkan. Lakukan hanya bila dana itu memang hak pengguna atau sudah dipulihkan; ledger tidak diubah. `
+          : holdsWithdrawals
+            ? "Menyelesaikan kasus ini tidak mengubah saldo yang dapat dicairkan pengguna saat ini; ledger tidak diubah. "
+            : "Ledger tidak diubah. "}
+        Tulis hasil penanganan, misalnya setoran ternyata sah, dana sudah dipulihkan, atau dihapusbukukan (minimal 10
+        karakter). Jangan tulis nomor rekening atau data pribadi.
       </p>
       {error ? (
         <p id={errorId} role="alert" className="text-xs text-red-700 dark:text-red-400">

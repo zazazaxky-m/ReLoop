@@ -20,6 +20,13 @@ const PROBLEM_LABELS: Record<PayoutMismatchProblem, string> = {
   OWNER_MISMATCH: "Pemilik berbeda",
 };
 
+const ITEM_STATUS_LABELS: Record<string, string> = {
+  PENDING: "menunggu",
+  ACCEPTED: "diterima",
+  REJECTED: "ditolak",
+  REVIEW: "sedang ditinjau",
+};
+
 function signedRupiah(value: number) {
   if (value === 0) return formatRupiah(0);
   return `${value > 0 ? "+" : "−"}${formatRupiah(Math.abs(value))}`;
@@ -366,15 +373,16 @@ export default async function ReconciliationPage() {
         </h2>
         <p className="text-sm text-muted">
           Koreksi yang tidak dipaksakan ke ledger: saldo setoran yang sudah dicairkan, atau reward untuk akun yang
-          sudah dihapus. Nominalnya belum termasuk dalam angka kewajiban di atas. Selama terbuka, kasus &quot;Saldo sudah
-          dicairkan&quot; menahan pencairan pengguna sebesar nominalnya. Selesaikan bersama tim keuangan lalu catat
-          hasilnya; ledger tidak pernah didebit paksa.
+          sudah dihapus. Nominalnya belum termasuk dalam angka kewajiban di atas. Selama terbuka, kasus &quot;Debit
+          tidak tertutup saldo&quot; menahan pencairan pengguna; menyelesaikannya membuat saldo itu dapat dicairkan
+          tanpa mengubah ledger. Selesaikan bersama tim keuangan lalu catat hasilnya.
         </p>
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-sm">
             <thead className="bg-surface-soft text-left text-xs uppercase text-muted">
               <tr>
                 <th className="px-4 py-2 font-semibold">Kunci</th>
+                <th className="px-4 py-2 font-semibold">Pemilik</th>
                 <th className="px-4 py-2 font-semibold">Alasan</th>
                 <th className="px-4 py-2 text-right font-semibold">Nominal</th>
                 <th className="px-4 py-2 font-semibold">Dibuka</th>
@@ -384,7 +392,7 @@ export default async function ReconciliationPage() {
             <tbody className="divide-y divide-border">
               {report.rewardCases.recent.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-6 text-center text-muted" colSpan={5}>
+                  <td className="px-4 py-6 text-center text-muted" colSpan={6}>
                     Tidak ada kasus terbuka.
                   </td>
                 </tr>
@@ -393,11 +401,25 @@ export default async function ReconciliationPage() {
                   <tr key={rewardCase.id}>
                     <td className="px-4 py-2.5 font-mono text-xs text-foreground">{rewardCase.businessKey}</td>
                     <td className="px-4 py-2.5 text-foreground">
+                      {rewardCase.ownerName ?? "Akun tidak ditemukan"}
+                      <span className="block font-mono text-xs text-muted">{rewardCase.userId}</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-foreground">
                       {rewardCase.reasonCode === "RECIPIENT_ERASED"
                         ? "Akun penerima sudah dihapus"
                         : rewardCase.reasonCode === "ANOMALY_ALREADY_PAID_OUT"
-                          ? "Saldo sudah dicairkan"
+                          ? "Debit tidak tertutup saldo"
                           : rewardCase.reasonCode}
+                      {rewardCase.reasonCode === "ANOMALY_ALREADY_PAID_OUT" ? (
+                        <span className="block text-xs text-muted">
+                          Saldo pengguna sedang ditahan untuk pencairan atau sudah dicairkan saat koreksi dibuat.
+                        </span>
+                      ) : null}
+                      {rewardCase.itemStatus ? (
+                        <span className="block text-xs text-muted">
+                          Item {ITEM_STATUS_LABELS[rewardCase.itemStatus] ?? rewardCase.itemStatus}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{formatRupiah(rewardCase.amount)}</td>
                     <td className="px-4 py-2.5 text-muted">{formatDateTime(rewardCase.createdAt)}</td>
@@ -405,6 +427,7 @@ export default async function ReconciliationPage() {
                       <RewardCaseResolveForm
                         caseId={rewardCase.id}
                         holdsWithdrawals={rewardCase.reasonCode === "ANOMALY_ALREADY_PAID_OUT"}
+                        releasedIfResolved={rewardCase.withdrawableIfResolved}
                       />
                     </td>
                   </tr>

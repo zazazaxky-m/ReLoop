@@ -229,12 +229,36 @@ export async function heldByOpenDebitCases(
     where: { userId, status: "OPEN", reasonCode: CASE_ALREADY_PAID_OUT },
     select: { id: true, depositItemId: true, amount: true },
   });
+  return heldByCases(cases);
+}
+
+export interface OpenDebitCase {
+  id: string;
+  depositItemId: string | null;
+  amount: number;
+}
+
+/** Rupiah held by one user's OPEN debit cases: each deposit item once, at its largest case. */
+export function heldByCases(cases: readonly OpenDebitCase[]): number {
   const perItem = new Map<string, number>();
   for (const open of cases) {
     const key = open.depositItemId ?? `case:${open.id}`;
     perItem.set(key, Math.max(perItem.get(key) ?? 0, open.amount));
   }
   return [...perItem.values()].reduce((sum, amount) => sum + amount, 0);
+}
+
+/**
+ * Rupiah that resolving `caseId` makes withdrawable right now for its owner,
+ * given the owner's OPEN debit cases and current available balance: the hold
+ * only ever covers what is available, and another open case on the same item
+ * keeps holding it.
+ */
+export function releasedByResolving(caseId: string, ownerCases: readonly OpenDebitCase[], available: number): number {
+  const spendable = Math.max(0, available);
+  const before = Math.min(spendable, heldByCases(ownerCases));
+  const after = Math.min(spendable, heldByCases(ownerCases.filter((open) => open.id !== caseId)));
+  return before - after;
 }
 
 /**

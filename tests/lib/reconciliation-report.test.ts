@@ -256,6 +256,8 @@ describe('getReconciliationReport', () => {
         return [];
       }),
       organization: { findMany: vi.fn(async () => { statements.push('organizations'); return []; }) },
+      user: { findMany: vi.fn(async () => []) },
+      depositItem: { findMany: vi.fn(async () => []) },
       rewardReconciliationCase: {
         findMany: vi.fn(async () => []),
         aggregate: vi.fn(async () => ({ _count: { _all: 0 }, _sum: { amount: null } })),
