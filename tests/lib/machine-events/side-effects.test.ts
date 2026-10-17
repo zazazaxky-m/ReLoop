@@ -22,7 +22,9 @@ vi.mock('@/lib/machine-events/item', () => ({
   resolveOrCreateUnknownWasteType: vi.fn(),
 }));
 vi.mock('@/lib/machine-events/acceptance', () => ({ handleAcceptance: vi.fn(), handleItemRejected: vi.fn(), recordItemEvidence: vi.fn() }));
-vi.mock('@/lib/machine-state', () => ({
+vi.mock('@/lib/machine-state', async (importOriginal) => ({
+  // Real transition table: SAFE_STATE handling depends on it.
+  canTransitionSession: (await importOriginal<typeof import('@/lib/machine-state')>()).canTransitionSession,
   transitionSession: vi.fn(),
   validateSensorSequence: vi.fn(),
 }));
@@ -308,12 +310,24 @@ describe('processEventSideEffects', () => {
 
   it('handles SAFE_STATE_ENTERED updates machine and session', async () => {
     mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'ACTIVE', startedAt: new Date() });
-    vi.mocked(machineState.transitionSession).mockReturnValue('SAFE_STATE' as any);
-    
+
     await processEventSideEffects(mockTx, mockMachine, { eventType: 'SAFE_STATE_ENTERED', sessionId: 's1' } as any, 'evt1');
-    
+
     expect(mockTx.machine.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ERROR' } }));
-    expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'SAFE_STATE' }) }));
+    expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { status: 'REVIEW', anomalyCount: { increment: 1 } },
+    }));
+  });
+
+  it('keeps a REVIEW session in REVIEW on SAFE_STATE_ENTERED instead of rejecting the event', async () => {
+    mockTx.depositSession.findUnique.mockResolvedValue({ id: 's1', status: 'REVIEW', startedAt: new Date() });
+
+    await processEventSideEffects(mockTx, mockMachine, { eventType: 'SAFE_STATE_ENTERED', sessionId: 's1' } as any, 'evt1');
+
+    expect(mockTx.machine.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ERROR' } }));
+    expect(mockTx.depositSession.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { status: 'REVIEW', anomalyCount: { increment: 1 } },
+    }));
   });
 
   it('ITEM_DETECTED trusts linked wasteTypeId from kiosk', async () => {

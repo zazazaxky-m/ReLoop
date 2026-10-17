@@ -1,5 +1,6 @@
 import type { MachineStatus, Prisma } from "@prisma/client";
 import {
+  canTransitionSession,
   transitionSession,
   validateSensorSequence,
   type SensorSequencePayload,
@@ -391,10 +392,13 @@ export async function processEventSideEffects(
           where: { id: input.sessionId },
         });
         if (session && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(session.status)) {
+          // The RVM emits VANDALISM_DETECTED first, which already moved the
+          // session to REVIEW; a latch never fails ingestion on the state
+          // machine (it would be dead-lettered and its ERROR status lost).
           await tx.depositSession.update({
             where: { id: session.id },
             data: {
-              status: transitionSession(session.status, "SAFE_STATE"),
+              status: canTransitionSession(session.status, "SAFE_STATE") ?? session.status,
               anomalyCount: { increment: 1 },
             },
           });

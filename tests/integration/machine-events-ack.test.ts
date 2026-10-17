@@ -185,6 +185,41 @@ describe("POST /api/machine-events protocol v2 (real PostgreSQL)", () => {
     expect(await earnings(session.id)).toHaveLength(1);
     expect(await f.db.machineEvent.count({ where: { localEventId: { in: events.map((e) => e.localEventId) } } })).toBe(3);
   });
+
+  it("accepts an in-session safety latch: the VANDALISM_DETECTED + SAFE_STATE_ENTERED pair the RVM emits is never dead-lettered", async () => {
+    await warmRoute();
+    const session = await f.db.depositSession.create({
+      data: { userId: f.ids.userA, machineId: f.ids.machineA, status: "ACTIVE" },
+    });
+    // Same pair, same order and payloads as RvmController.enter_safe_state.
+    const latch = (eventType: string, payload: Record<string, unknown>, second: number): EdgeEvent => ({
+      localEventId: randomUUID(),
+      eventType,
+      payload,
+      sessionId: session.id,
+      depositItemId: null,
+      occurredAt: new Date(Date.UTC(2026, 9, 13, 9, 0, second)).toISOString(),
+    });
+    const events = [
+      latch("VANDALISM_DETECTED", { reason: "SERVICE_PANEL_FORCED_OPEN" }, 1),
+      latch("SAFE_STATE_ENTERED", {
+        reason: "SERVICE_PANEL_FORCED_OPEN",
+        category: "VANDALISM",
+        outputsDisabled: ["input_gate", "conveyor", "compactor"],
+        stopFailed: false,
+      }, 2),
+    ];
+
+    const response = await postBatch(events);
+
+    expect(response.status).toBe(200);
+    expect(machineEventsResponseV2.parse(response.body).results.map((r) => [r.localEventId, r.status]))
+      .toEqual(events.map((e) => [e.localEventId, "accepted"]));
+    expect(await f.db.depositSession.findUniqueOrThrow({ where: { id: session.id } }))
+      .toMatchObject({ status: "REVIEW", anomalyCount: 2 });
+    expect((await f.db.machine.findUniqueOrThrow({ where: { id: f.ids.machineA } })).status).toBe("ERROR");
+    expect(await f.db.machineEvent.count({ where: { localEventId: { in: events.map((e) => e.localEventId) } } })).toBe(2);
+  });
 });
 
 /** Real SyncWorker + EdgeDatabase against the real Next server. The first
