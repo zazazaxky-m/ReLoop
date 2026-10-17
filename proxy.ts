@@ -35,6 +35,23 @@ const PUBLIC_API_PREFIXES = [
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * Public endpoints a browser form uses to sign in, sign out or recover a
+ * password. They need no session but get the same Origin check as signed-in
+ * writes: a cross-site POST (JSON fits in an enctype=text/plain form) must not
+ * log the victim's browser into an attacker's account, which would then
+ * accept the victim's invitation (A03). The mobile app and server clients
+ * send no Origin and are unaffected.
+ */
+const BROWSER_AUTH_PATHS = new Set([
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/logout",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
+  "/api/auth/mfa/verify",
+]);
+
 function isPublicApiPath(pathname: string): boolean {
   if (PUBLIC_API_EXACT.has(pathname)) return true;
   return PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
@@ -118,7 +135,9 @@ export async function proxy(req: NextRequest) {
 
   if (pathname.startsWith("/api/")) {
     if (isPublicApiPath(pathname)) {
-      response = NextResponse.next({ request: { headers: requestHeaders } });
+      response = BROWSER_AUTH_PATHS.has(pathname) && !isSameOriginUnsafeRequest(req)
+        ? NextResponse.json({ error: "Permintaan tidak valid" }, { status: 403 })
+        : NextResponse.next({ request: { headers: requestHeaders } });
     } else if (!isSameOriginUnsafeRequest(req)) {
       response = NextResponse.json(
         { error: "Permintaan tidak valid" },

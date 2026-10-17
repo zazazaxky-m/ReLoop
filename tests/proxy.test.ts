@@ -262,10 +262,32 @@ describe("proxy Origin check against the configured public origin (P01)", () => 
     expect(await write(api(BIND), { "sec-fetch-site": "same-origin" })).toBe(200);
     expect(await write(api(BIND), { "sec-fetch-site": "cross-site" })).toBe(403);
     expect(await write(api(BIND), { origin: "https://evil.test" }, "GET")).toBe(200);
-    // Public paths skip the check; the route itself decides.
-    expect((await proxy(new NextRequest(`${BIND}/api/auth/login`, { method: "POST", headers: { origin: "https://evil.test" } }))).status).toBe(200);
+    // Non-auth public paths (machines, token-authorized forms) skip the check; the route itself decides.
+    expect((await proxy(new NextRequest(`${BIND}/api/machine-events`, { method: "POST", headers: { origin: "https://evil.test" } }))).status).toBe(200);
     // Origin passes, session still required.
     expect((await proxy(new NextRequest(api(BIND), { method: "PATCH", headers: { origin: PUBLIC } }))).status).toBe(401);
+  });
+
+  it("refuses cross-site writes to the browser auth endpoints (login CSRF)", async () => {
+    env("production", PUBLIC);
+    const post = async (path: string, headers: Record<string, string>) =>
+      (await proxy(new NextRequest(`${BIND}${path}`, { method: "POST", headers }))).status;
+    for (const path of [
+      "/api/auth/login",
+      "/api/auth/register",
+      "/api/auth/mfa/verify",
+      "/api/auth/logout",
+      "/api/auth/forgot-password",
+      "/api/auth/reset-password",
+    ]) {
+      // A cross-site form (enctype=text/plain carries JSON) must not log the
+      // victim's browser into an attacker's account.
+      expect(await post(path, { origin: "https://evil.test" }), path).toBe(403);
+      expect(await post(path, { "sec-fetch-site": "cross-site" }), path).toBe(403);
+      expect(await post(path, { origin: PUBLIC }), path).toBe(200);
+      // The mobile app and server-side clients send no Origin.
+      expect(await post(path, {}), path).toBe(200);
+    }
   });
 
   it("in development accepts the configured origin and loopback origins on the dev server's port", async () => {
