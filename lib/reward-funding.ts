@@ -1167,6 +1167,12 @@ export async function fundingAccountsForPayout(tx: Prisma.TransactionClient, use
  * (`confirmed - held` is reduced by zero either way). Idempotent per
  * redemption. The caller holds User -> every account of
  * `fundingAccountsForPayout` -> Redemption.
+ *
+ * B02 attributes FIFO over all credits (legacy first), which can differ from
+ * this funded-first order. These PAYOUT rows are immutable: B02 reconciles
+ * the difference with paired CORRECTION entries (task B02 in
+ * docs/superpowers/plans/2026-10-13-reloop-05-business.md), never by editing
+ * or deleting them.
  */
 export async function settlePayoutFunding(
   tx: Prisma.TransactionClient,

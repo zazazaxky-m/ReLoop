@@ -137,12 +137,14 @@ remaining-=take;
 ```
 ADJUST positif menjadi lot baru dengan source yang sama; ADJUST negatif menyerap sisa available lot terkait, tidak mengubah paid history. Jika tidak cukup, buat reconciliation case dan freeze issuance/affected payout sampai keputusan operator, bukan saldo negatif baru.
 Backfill chronological earning+reserve+settlement dari snapshot; output rows count, sum credit/debit, legacy bucket, funding gap dan digest. Apply idempotent melalui unique keys dalam maintenance window monetary writes paused. Saldo user before/after harus identik. Historical obligations dimasukkan held/opening obligation; confirmed cash hanya dari bukti pendanaan nyata. Funding gap tidak diisi dengan fake topup. Flag enforcement B01 aktif hanya setelah owner menyetujui pendanaan/policy dan negative gaps diselesaikan atau menjadi managed exception dengan cap issuance0.
+Sejak B01, setiap payout sukses sudah menulis `FundingEntry` PAYOUT yang immutable lewat `settlePayoutFunding` (`lib/reward-funding.ts`), dengan atribusi ke funded commit lebih dulu (terlama), sisanya ke bucket legacy. Atribusi itu bisa berbeda dari FIFO `(createdAt,id)` B02 yang membebankan kredit legacy lebih dulu. Backfill tidak boleh mengubah atau menghapus baris PAYOUT tersebut: selisih per organisasi dikoreksi dengan pasangan `FundingEntry` CORRECTION (debit akun yang kelebihan, kredit akun yang kekurangan) ber-reference `b02-reattribution:<redemptionId>`, ikut dalam dry-run/digest, dan total per organisasi + bucket legacy sesudah koreksi sama dengan hasil FIFO.
 
 - [ ] **4. Lengkapi cases berikut, lalu jalankan ulang perintah test di langkah 2 sampai lulus.**
 
   - [ ] Cross-org partial reserve/paid/reversal, signed adjustment dan pending earning tidak dialokasikan sebagai available.
   - [ ] Sum lot balances sama ledger; sum org+unallocated sama global pada setiap state.
   - [ ] Dry-run tidak menulis; second apply tidak menggandakan; snapshot berubah membuat digest mismatch abort.
+  - [ ] Payout parsial user yang punya saldo legacy dan funded sebelum B02: koreksi CORRECTION membuat total per organisasi sesuai FIFO tanpa mengubah baris PAYOUT B01; apply kedua tidak menggandakan koreksi.
   - [ ] Payout dan new earning selama backfill diblok atau memakai mode dual-write yang teruji; tidak terjadi missed window.
   - [ ] Legacy funds missing/negative balances menghasilkan daftar kasus, bukan auto-write saldo atau attribution palsu.
 
