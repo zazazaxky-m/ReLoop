@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib, hmac, tempfile, time, unittest
+import http.client
 import threading
 import urllib.error
 from unittest import mock
@@ -871,6 +872,96 @@ class NetworkIndependenceTest(SafetyAssertions):
                 controller.running = False
                 controller.db.close()
 
+
+    def test_remote_loop_survives_failures_and_still_runs_stop_all(self):
+        """A broken poll or result report must not kill the only thread that
+        executes remote STOP_ALL; the next good delivery still stops outputs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                self.assertTrue(controller.activate_lease(signed_lease()))
+                controller.hardware.set_conveyor("FORWARD")
+                stop = {"id": "cmd-stop", "command": "STOP_ALL", "payload": {}}
+                deliveries: list = [
+                    http.client.IncompleteRead(b"{"),
+                    RuntimeError("unexpected"),
+                    stop,
+                ]
+
+                def fetch_remote_command():
+                    item = deliveries.pop(0)
+                    if not deliveries:
+                        controller.running = False
+                    if isinstance(item, Exception):
+                        raise item
+                    return item
+
+                reports: list = []
+
+                def report_remote_command(command_id, **report):
+                    reports.append(command_id)
+                    raise http.client.RemoteDisconnected("closed")
+
+                controller.sync.fetch_remote_command = fetch_remote_command
+                controller.sync.report_remote_command = report_remote_command
+                controller.running = True
+                with mock.patch("rvm.remote.time.sleep", lambda *_a: None):
+                    controller._remote_loop()
+
+                self.assertEqual(deliveries, [])
+                self.assertEqual(reports, ["cmd-stop"])
+                self.assert_outputs_off(controller)
+            finally:
+                controller.running = False
+                controller.db.close()
+
+    def test_remote_command_fetch_and_report_tolerate_malformed_responses(self):
+        """Truncated bodies, non-object JSON and non-object commands are a
+        failed poll (None), never an exception that escapes the sync client."""
+
+        class Response:
+            status = 200
+
+            def __init__(self, body: bytes | Exception):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def read(self):
+                if isinstance(self.body, Exception):
+                    raise self.body
+                return self.body
+
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                for body in (
+                    b"[]",
+                    b'"text"',
+                    b'{"command": "STOP_ALL"}',
+                    b'{"command": ["STOP_ALL"]}',
+                    b"\xff\xfe",
+                    http.client.IncompleteRead(b'{"command"'),
+                ):
+                    with self.subTest(body=body):
+                        with mock.patch(
+                            "rvm.sync.urllib.request.urlopen",
+                            lambda *_a, body=body, **_k: Response(body),
+                        ):
+                            self.assertIsNone(controller.sync.fetch_remote_command())
+
+                def disconnected(*_a, **_k):
+                    raise http.client.RemoteDisconnected("closed")
+
+                with mock.patch("rvm.sync.urllib.request.urlopen", disconnected):
+                    self.assertIsNone(controller.sync.fetch_remote_command())
+                    self.assertFalse(controller.sync.report_remote_command("cmd", True))
+            finally:
+                controller.db.close()
 
     def test_remote_io_commands_are_bounded_by_http_timeouts(self):
         """A slow server cannot hold the single remote-command loop forever:

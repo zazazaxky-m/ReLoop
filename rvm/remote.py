@@ -5,33 +5,50 @@ attributes."""
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from .states import MachineState, describe_interlocks
 
+logger = logging.getLogger(__name__)
+
 
 class RvmRemoteMixin:
     def _remote_loop(self) -> None:
+        # This thread is the only executor of remote STOP_ALL: a failed poll or
+        # report is logged and retried on the next 2 s pass, never fatal, so
+        # the latency documented in rvm/README.md still holds.
+        errors = 0
         while self.running:
-            command = self.sync.fetch_remote_command()
-            if command:
-                command_id = str(command.get("id", ""))
-                cached = self.db.get_json(f"remote_result:{command_id}")
-                if cached:
-                    self.sync.report_remote_command(command_id, **cached)
-                else:
-                    try:
-                        result = self.execute_remote_command(
-                            str(command.get("command", "")),
-                            dict(command.get("payload") or {}),
-                        )
-                        report = {"success": True, "result": result, "error": None}
-                    except Exception as exc:
-                        report = {"success": False, "result": {}, "error": str(exc)}
-                    self.db.set_json(f"remote_result:{command_id}", report)
-                    self.sync.report_remote_command(command_id, **report)
+            try:
+                self._poll_remote_command()
+                errors = 0
+            except Exception:
+                errors += 1
+                if errors == 1:
+                    logger.error("remote command poll failed", exc_info=True)
             time.sleep(2)
+
+    def _poll_remote_command(self) -> None:
+        command = self.sync.fetch_remote_command()
+        if not command:
+            return
+        command_id = str(command.get("id", ""))
+        cached = self.db.get_json(f"remote_result:{command_id}")
+        if cached:
+            self.sync.report_remote_command(command_id, **cached)
+            return
+        try:
+            result = self.execute_remote_command(
+                str(command.get("command", "")),
+                dict(command.get("payload") or {}),
+            )
+            report = {"success": True, "result": result, "error": None}
+        except Exception as exc:
+            report = {"success": False, "result": {}, "error": str(exc)}
+        self.db.set_json(f"remote_result:{command_id}", report)
+        self.sync.report_remote_command(command_id, **report)
 
     def _remote_snapshot(self) -> dict[str, Any]:
         state = self.public_state()

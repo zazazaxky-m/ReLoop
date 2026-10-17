@@ -345,13 +345,15 @@ class SyncWorker:
         try:
             with urllib.request.urlopen(request, timeout=3) as response:
                 payload = json.loads(response.read() or b"{}")
-                self.online = True
-                self.last_error = None
-                return payload.get("command")
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError) as exc:
+            # ValueError covers truncated/invalid JSON and undecodable bytes.
             self.online = False
             self.last_error = str(exc)
             return None
+        self.online = True
+        self.last_error = None
+        command = payload.get("command") if isinstance(payload, dict) else None
+        return command if isinstance(command, dict) else None
 
     def report_remote_command(
         self,
@@ -386,7 +388,7 @@ class SyncWorker:
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
                 return 200 <= response.status < 300
-        except (urllib.error.URLError, TimeoutError, OSError):
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError):
             return False
 
     def _signed_get(self, route: str, timeout: int = 10) -> bytes:
