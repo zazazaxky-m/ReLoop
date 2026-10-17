@@ -20,6 +20,8 @@ export type ErasureStatus =
 export interface ErasureObligations {
   /** Spendable balance in rupiah. */
   available: number;
+  /** Part of `available` an open reconciliation case holds; only the ReLoop team can settle it. */
+  heldForReview: number;
   /** Earnings still under review, in rupiah. */
   pending: number;
   /** Balance held by payout requests in progress, in rupiah. */
@@ -55,9 +57,15 @@ export function formatRupiah(amount: number): string {
 /** What the owner must settle before the erasure can continue. */
 export function resolutionSteps(o: ErasureObligations): string[] {
   const steps: string[] = [];
-  if (o.available > 0) {
+  const withdrawable = o.available - o.heldForReview;
+  if (withdrawable > 0) {
     steps.push(
-      `Cairkan saldo tersedia ${formatRupiah(o.available)} melalui menu Dompet. Jika saldo di bawah minimum pencairan, hubungi privacy@reloop.id agar tim kami membantu menyelesaikannya.`,
+      `Cairkan saldo tersedia ${formatRupiah(withdrawable)} melalui menu Dompet. Jika saldo di bawah minimum pencairan, hubungi privacy@reloop.id agar tim kami membantu menyelesaikannya.`,
+    );
+  }
+  if (o.heldForReview > 0) {
+    steps.push(
+      `Saldo ${formatRupiah(o.heldForReview)} sedang ditahan untuk pemeriksaan; tim kami akan menyelesaikannya lebih dulu.`,
     );
   }
   if (o.openRedemptions > 0) {

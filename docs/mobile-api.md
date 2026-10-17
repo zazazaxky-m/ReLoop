@@ -72,6 +72,13 @@ nama, atau mengubah tipe field wajib membuat versi baru.
 
 ## Pengajuan pencairan dan idempotency (M01)
 
+`GET /api/wallet` juga mengembalikan `heldForReview` (bagian `balance.available`
+yang ditahan kasus rekonsiliasi terbuka) dan `withdrawable`
+(`available - heldForReview`). Pencairan di atas `withdrawable` ditolak 422
+dengan pesan "Saldo tersedia tidak mencukupi: Rp… sedang ditahan untuk
+pemeriksaan". Aplikasi mobile sebaiknya memakai `withdrawable` sebagai batas
+nominal pencairan.
+
 `POST /api/redemptions` (role USER) menerima:
 
 ```json

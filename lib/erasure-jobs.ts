@@ -25,6 +25,7 @@ import { ERASED_ACCOUNT_IDENTIFIER, ERASED_DESTINATION_DATA } from "./payout-des
 import { prisma } from "./prisma";
 import { HttpError } from "./rbac";
 import { proofStorageRoot, resolveProofPath } from "./redemption-proof";
+import { heldByOpenDebitCases } from "./reward-credit";
 import { runWalletTransaction } from "./wallet-service";
 
 /**
@@ -123,8 +124,10 @@ async function readObligations(tx: Tx, userId: string): Promise<ErasureObligatio
     where: { userId, OR: [{ status: { in: [...OPEN_SESSION] } }, { items: { some: { status: "REVIEW" } } }] },
   });
   const openTrips = await tx.trip.count({ where: { userId, status: { in: [...OPEN_TRIP] } } });
+  const heldByCases = await heldByOpenDebitCases(tx, userId);
   return {
     available: balance.available,
+    heldForReview: Math.min(Math.max(0, balance.available), heldByCases),
     pending: balance.pending,
     reserved: balance.reserved,
     openRedemptions,
@@ -147,7 +150,7 @@ function parseObligations(value: Prisma.JsonValue | null): ErasureObligations | 
   const v = value as Record<string, unknown>;
   const n = (key: string) => (typeof v[key] === "number" ? (v[key] as number) : 0);
   return {
-    available: n("available"), pending: n("pending"), reserved: n("reserved"),
+    available: n("available"), heldForReview: n("heldForReview"), pending: n("pending"), reserved: n("reserved"),
     openRedemptions: n("openRedemptions"), openSessions: n("openSessions"), openTrips: n("openTrips"),
   };
 }

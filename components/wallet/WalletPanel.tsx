@@ -39,11 +39,14 @@ export function WalletPanel({
   accounts,
   redemptions,
   available,
+  heldForReview = 0,
   minRedemption,
 }: {
   accounts: AccountRow[];
   redemptions: RedemptionRow[];
   available: number;
+  /** Part of `available` an open reconciliation case holds; it cannot be withdrawn. */
+  heldForReview?: number;
   minRedemption: number;
 }) {
   const router = useRouter();
@@ -133,7 +136,8 @@ export function WalletPanel({
     }
   }
 
-  const canRedeem = accounts.length > 0 && available >= minRedemption;
+  const withdrawable = Math.max(0, available - heldForReview);
+  const canRedeem = accounts.length > 0 && withdrawable >= minRedemption;
 
   return (
     <div className="space-y-6">
@@ -222,21 +226,27 @@ export function WalletPanel({
           <CardTitle>Cairkan Saldo</CardTitle>
         </CardHeader>
         <CardContent>
+          {heldForReview > 0 ? (
+            <p className="mb-3 text-sm text-muted">
+              {formatRupiah(heldForReview)} dari saldo tersedia sedang ditahan untuk pemeriksaan dan belum dapat
+              dicairkan. Tim kami akan menyelesaikannya.
+            </p>
+          ) : null}
           {accounts.length === 0 ? (
             <p className="text-sm text-muted">Tambahkan akun pencairan terlebih dahulu.</p>
-          ) : available < minRedemption ? (
+          ) : withdrawable < minRedemption ? (
             <p className="text-sm text-muted">
-              Saldo tersedia {formatRupiah(available)} belum mencapai minimum{" "}
+              Saldo yang dapat dicairkan {formatRupiah(withdrawable)} belum mencapai minimum{" "}
               {formatRupiah(minRedemption)}.
             </p>
           ) : (
             <form onSubmit={requestRedemption} className="grid gap-3 sm:grid-cols-3">
-              <FormField label="Jumlah (Rp)" htmlFor="r-amount" required hint={`Maks ${formatRupiah(available)}`}>
+              <FormField label="Jumlah (Rp)" htmlFor="r-amount" required hint={`Maks ${formatRupiah(withdrawable)}`}>
                 <Input
                   id="r-amount"
                   type="number"
                   min={minRedemption}
-                  max={available}
+                  max={withdrawable}
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   required
