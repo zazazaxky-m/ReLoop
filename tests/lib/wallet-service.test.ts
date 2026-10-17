@@ -34,6 +34,7 @@ interface FakeState {
   account: { id: string; userId: string; status: string; provider: string; accountIdentifier?: string; accountName?: string | null } | null;
   existing: Record<string, unknown> | null;
   ledger: { entryType: string; status: string; _sum: { amount: number } }[];
+  openCases?: { id: string; depositItemId: string | null; amount: number }[];
   minRedemption: string | null;
 }
 
@@ -76,6 +77,12 @@ function fakeTx(state: FakeState) {
       findUnique: vi.fn(async () => {
         calls.push('read:min_redemption');
         return state.minRedemption === null ? null : { value: state.minRedemption };
+      }),
+    },
+    rewardReconciliationCase: {
+      findMany: vi.fn(async () => {
+        calls.push('read:openCases');
+        return state.openCases ?? [];
       }),
     },
     rewardLedger: {
@@ -150,6 +157,7 @@ describe('requestRedemption', () => {
       'read:PayoutAccount',
       'read:min_redemption',
       'read:balance',
+      'read:openCases',
       'write:Redemption',
       'write:RewardLedger',
     ]);
@@ -219,6 +227,27 @@ describe('requestRedemption', () => {
     await expect(requestRedemption(actor, input)).rejects.toMatchObject({ status, message });
     expect(tx.redemption.create).not.toHaveBeenCalled();
     expect(logAudit).not.toHaveBeenCalled();
+  });
+
+  it('keeps money held by open debit cases out of reach, counting each deposit item once', async () => {
+    const { tx } = useTransaction(defaults({
+      ledger: [{ entryType: 'EARN', status: 'AVAILABLE', _sum: { amount: 80_000 } }],
+      openCases: [
+        { id: 'c1', depositItemId: 'item-1', amount: 20_000 },
+        { id: 'c2', depositItemId: 'item-1', amount: 20_000 },
+        { id: 'c3', depositItemId: null, amount: 15_000 },
+      ],
+    }));
+    await expect(requestRedemption(actor, { ...input, amount: 50_000 })).rejects.toMatchObject({
+      status: 422,
+      message: 'Saldo tersedia tidak mencukupi: Rp35.000 sedang ditahan untuk pemeriksaan',
+    });
+    expect(tx.redemption.create).not.toHaveBeenCalled();
+    expect(tx.rewardReconciliationCase.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: 'user_1', status: 'OPEN', reasonCode: 'ANOMALY_ALREADY_PAID_OUT' },
+    }));
+    useTransaction(defaults({ openCases: [{ id: 'c1', depositItemId: 'item-1', amount: 20_000 }] }));
+    await expect(requestRedemption(actor, { ...input, amount: 50_000, idempotencyKey: 'k2' })).resolves.toMatchObject({ idempotent: false });
   });
 
   it('keeps a committed request successful when the audit write fails after commit', async () => {

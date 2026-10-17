@@ -22,6 +22,7 @@ import {
 } from "./payout-destination";
 import { prisma } from "./prisma";
 import { HttpError, type CurrentUser } from "./rbac";
+import { heldByOpenDebitCases } from "./reward-credit";
 import { fundingAccountsForPayout, settlePayoutFunding } from "./reward-funding";
 
 /**
@@ -200,8 +201,17 @@ export async function requestRedemption(
       }
 
       const balance = await getWalletBalance(userId, tx);
-      if (balance.available < input.amount) {
-        throw new HttpError(422, "Saldo tersedia tidak mencukupi");
+      // Money a refused reversal or fraud hold still owes stays out of reach
+      // until an operator settles the case (reviewer finding: re-reserving it
+      // after a cancel/fail paid out a rejected deposit).
+      const held = await heldByOpenDebitCases(tx, userId);
+      if (balance.available - held < input.amount) {
+        throw new HttpError(
+          422,
+          held > 0
+            ? `Saldo tersedia tidak mencukupi: Rp${held.toLocaleString("id-ID")} sedang ditahan untuk pemeriksaan`
+            : "Saldo tersedia tidak mencukupi",
+        );
       }
 
       const redemption = await tx.redemption.create({

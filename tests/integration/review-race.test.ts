@@ -243,4 +243,27 @@ describe("PATCH /api/deposit-reviews/[id] decides once (EX-01)", () => {
     expect(report.status).toBe(200);
     expect(report.body.report.rewardCases).toMatchObject({ open: 1, openAmount: 100 });
   });
+
+  it("a refused reversal still keeps the rejected money from being withdrawn after the reserve is released", async () => {
+    await warmUp();
+    const item = await heldItem({ earn: { amount: 100, status: "AVAILABLE" } });
+    const payout = await f.processingRedemption(20_000);
+    const rejected = await review(item.id, { action: "reject" });
+    expect(rejected.body.reconciliationCase).toMatchObject({ status: "OPEN", amount: 100 });
+    // A second case for the same item (fraud hold) must not double the hold.
+    await f.db.rewardReconciliationCase.create({ data: {
+      businessKey: `fraud:${item.id}:hold:v1`, userId: f.ids.userA, depositItemId: item.id, amount: 100,
+      entryType: "EARN", reasonCode: "ANOMALY_ALREADY_PAID_OUT" } });
+
+    // The payout fails: the reserve comes back, including the rejected 100.
+    expect((await call("superadmin", "PATCH", `/api/redemptions/${payout}`, { action: "fail" })).status).toBe(200);
+    expect((await getWalletBalance(f.ids.userA)).available).toBe(20_000);
+
+    const request = (amount: number, idempotencyKey: string) => call("userA", "POST", "/api/redemptions", {
+      amount, payoutAccountId: f.ids.payoutAccountA, idempotencyKey });
+    const all = await request(20_000, "again-all");
+    expect(all.status).toBe(422);
+    expect(all.body.error).toContain("ditahan");
+    expect((await request(19_900, "again-rest")).status).toBe(201);
+  });
 });

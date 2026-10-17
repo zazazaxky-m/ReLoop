@@ -213,6 +213,30 @@ export async function openRewardReconciliationCase(
   });
 }
 
+/**
+ * Rupiah a user may not withdraw because a debit (a review reversal or a fraud
+ * hold) was refused into an OPEN reconciliation case: the earning stays
+ * AVAILABLE in the ledger until an operator settles the case, so once a
+ * reserve is released this keeps the money from being reserved again. One
+ * deposit item counts once even when it carries both a fraud and a review
+ * case. The caller holds `lockUser(tx, userId)`.
+ */
+export async function heldByOpenDebitCases(
+  tx: Prisma.TransactionClient,
+  userId: string,
+): Promise<number> {
+  const cases = await tx.rewardReconciliationCase.findMany({
+    where: { userId, status: "OPEN", reasonCode: CASE_ALREADY_PAID_OUT },
+    select: { id: true, depositItemId: true, amount: true },
+  });
+  const perItem = new Map<string, number>();
+  for (const open of cases) {
+    const key = open.depositItemId ?? `case:${open.id}`;
+    perItem.set(key, Math.max(perItem.get(key) ?? 0, open.amount));
+  }
+  return [...perItem.values()].reduce((sum, amount) => sum + amount, 0);
+}
+
 // ---------------------------------------------------------------------------
 // Writer
 // ---------------------------------------------------------------------------
