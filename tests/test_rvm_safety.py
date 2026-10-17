@@ -364,6 +364,78 @@ class LatchedLeaseEventsTest(SafetyAssertions):
 
 
 # --------------------------------------------------------------------------- #
+# same-session lease renewal: extends the expiry, never touches state/outputs
+# --------------------------------------------------------------------------- #
+def bound_lease(session_id: str, *, lease_id: str, ttl: int, ceiling: int = 1000,
+                reservation: str = "res-1", max_items: int = 5) -> dict:
+    """A signed lease v2 carrying a money bound (reservation, ceiling, max items)."""
+    now = int(time.time())
+    policy = {"version": 1, "mode": "COMPLIANCE_ONLY", "multiplierBps": 10000, "wasteTypes": []}
+    lease = sign_lease_v2(SECRET, {
+        "id": lease_id, "machineCode": "TEST-001", "sessionId": session_id, "userRef": None,
+        "issuedAt": now, "expiresAt": now + ttl, "reservationId": reservation,
+        "policyVersion": policy_version(policy), "ceilingRupiah": ceiling, "maxItems": max_items,
+    })
+    lease["policy"] = policy
+    return lease
+
+
+class SessionLeaseRenewalTest(SafetyAssertions):
+    def poll(self, controller: RvmController, lease: dict) -> None:
+        controller.sync.fetch_machine_session = lambda: {"lease": lease, "session": {"id": lease["sessionId"]}}
+        controller.sync.fetch_display = lambda: None
+        controller._poll_server_session()
+
+    def test_same_session_renewal_extends_the_lease_mid_item_without_touching_state_or_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = make_controller(tmp)
+            try:
+                first = bound_lease("session-r", lease_id="lease-r-1", ttl=60)
+                self.assertTrue(controller.activate_lease(first))
+                # An item is mid-processing when the server renews the lease.
+                controller.set_state(MachineState.PROCESSING, "test-item")
+                controller.hardware.set_input_gate(False)
+                controller.hardware.set_conveyor("FORWARD")
+                opened_before = len(events_of(controller, "CHAMBER_OPENED"))
+
+                renewed = bound_lease("session-r", lease_id="lease-r-2", ttl=600)
+                self.poll(controller, renewed)
+
+                active = controller.db.active_lease()
+                self.assertEqual(active["session_id"], "session-r")
+                self.assertEqual(int(active["expires_at"]), renewed["expiresAt"])
+                self.assertEqual(controller.state, MachineState.PROCESSING)
+                self.assertFalse(controller.hardware.input_gate_open)
+                self.assertEqual(controller.hardware.conveyor, "FORWARD")
+                self.assertEqual(len(events_of(controller, "CHAMBER_OPENED")), opened_before)
+            finally:
+                controller.db.close()
+
+    def test_renewal_that_changes_the_signed_bound_or_signature_is_refused(self):
+        tampered = bound_lease("session-r", lease_id="lease-r-2", ttl=600)
+        tampered["expiresAt"] += 60  # no longer matches its signature
+        cases = {
+            "ceiling": bound_lease("session-r", lease_id="lease-r-2", ttl=600, ceiling=5000),
+            "reservation": bound_lease("session-r", lease_id="lease-r-2", ttl=600, reservation="res-2"),
+            "max-items": bound_lease("session-r", lease_id="lease-r-2", ttl=600, max_items=50),
+            "signature": tampered,
+        }
+        for name, renewed in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                controller = make_controller(tmp)
+                try:
+                    first = bound_lease("session-r", lease_id="lease-r-1", ttl=60)
+                    self.assertTrue(controller.activate_lease(first))
+                    self.poll(controller, renewed)
+                    active = controller.db.active_lease()
+                    self.assertEqual(active["id"], "lease-r-1")
+                    self.assertEqual(int(active["expires_at"]), first["expiresAt"])
+                    self.assertEqual(controller.state, MachineState.SESSION_ACTIVE)
+                finally:
+                    controller.db.close()
+
+
+# --------------------------------------------------------------------------- #
 # every actuator path goes through the interlock
 # --------------------------------------------------------------------------- #
 class ActuatorPathTest(SafetyAssertions):

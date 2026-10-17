@@ -240,6 +240,10 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 elif lease and local_lease and str(local_lease["session_id"]) != str(lease["sessionId"]):
                     self.db.deactivate_leases()
                     self.activate_lease(lease)
+                elif lease and local_lease:
+                    # Same session: only the expiry moves; a mid-item renewal
+                    # must not reopen the gate or reset the state.
+                    self.renew_lease(lease)
                 elif not lease and local_lease:
                     self.db.deactivate_leases()
                     self._processing_started_at = None
@@ -575,6 +579,32 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
 
     def verify_lease(self, lease: dict[str, Any]) -> bool:
         return self.lease_refusal(lease) is None
+
+    def renew_lease(self, lease: dict[str, Any]) -> bool:
+        """Extends the running session's lease from a fresh server lease for the
+        same session. The lease must verify and carry the same signed bound
+        (a renewal never resets the budget); only the expiry and the lease row
+        change. Never touches the state, the latch or an output. Caller holds
+        self._lock."""
+        current = self.db.active_lease()
+        if not current or not isinstance(lease, dict) or str(current["session_id"]) != str(lease.get("sessionId")):
+            return False
+        refusal = self.lease_refusal(lease)
+        if refusal:
+            self.db.audit("LEASE_REFUSED", {"reason": refusal, "renewal": True})
+            return False
+        if float(lease["expiresAt"]) <= float(current["expires_at"]):
+            return False
+        if (
+            current["reservation_id"] != lease.get("reservationId")
+            or current["policy_version"] != lease.get("policyVersion")
+            or current["ceiling_rupiah"] != lease.get("ceilingRupiah")
+            or current["max_items"] != lease.get("maxItems")
+        ):
+            self.db.audit("LEASE_REFUSED", {"reason": "LEASE_BOUND_CHANGED", "renewal": True})
+            return False
+        self.db.renew_lease({**lease, "status": "ACTIVE"})
+        return True
 
     def activate_lease(self, lease: dict[str, Any]) -> bool:
         refusal = self.lease_refusal(lease)

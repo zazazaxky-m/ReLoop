@@ -489,30 +489,45 @@ class EdgeDatabase:
         """Stores the lease with its signed fields (B01b): a renewal of the
         same session replaces the row; the consumed counter lives in
         `session_consumption`, keyed by session, and is never reset here."""
-        policy = lease.get("policy")
+        with self._lock, self._conn:
+            self._write_lease_row(lease)
+
+    def renew_lease(self, lease: dict[str, Any]) -> None:
+        """Replaces the session's active lease row with its renewal in one
+        transaction: readers never see the session without a lease, and the
+        newest row wins even when both were issued in the same second."""
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO leases"
-                "(id,session_id,user_ref,issued_at,expires_at,status,signature,"
-                "version,machine_code,reservation_id,policy_version,ceiling_rupiah,max_items,policy_json)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    lease["id"],
-                    lease["sessionId"],
-                    lease.get("userRef"),
-                    lease["issuedAt"],
-                    lease["expiresAt"],
-                    lease["status"],
-                    lease["signature"],
-                    int(lease.get("version") or 1),
-                    lease.get("machineCode"),
-                    lease.get("reservationId"),
-                    lease.get("policyVersion"),
-                    lease.get("ceilingRupiah"),
-                    lease.get("maxItems"),
-                    json.dumps(policy, separators=(",", ":"), ensure_ascii=False) if policy is not None else None,
-                ),
+                "UPDATE leases SET status='CANCELLED' WHERE status='ACTIVE' AND session_id=? AND id<>?",
+                (lease["sessionId"], lease["id"]),
             )
+            self._write_lease_row(lease)
+
+    def _write_lease_row(self, lease: dict[str, Any]) -> None:
+        """Caller holds self._lock inside a `with self._conn` transaction."""
+        policy = lease.get("policy")
+        self._conn.execute(
+            "INSERT OR REPLACE INTO leases"
+            "(id,session_id,user_ref,issued_at,expires_at,status,signature,"
+            "version,machine_code,reservation_id,policy_version,ceiling_rupiah,max_items,policy_json)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                lease["id"],
+                lease["sessionId"],
+                lease.get("userRef"),
+                lease["issuedAt"],
+                lease["expiresAt"],
+                lease["status"],
+                lease["signature"],
+                int(lease.get("version") or 1),
+                lease.get("machineCode"),
+                lease.get("reservationId"),
+                lease.get("policyVersion"),
+                lease.get("ceilingRupiah"),
+                lease.get("maxItems"),
+                json.dumps(policy, separators=(",", ":"), ensure_ascii=False) if policy is not None else None,
+            ),
+        )
 
     def active_lease(self) -> dict[str, Any] | None:
         now = time.time()

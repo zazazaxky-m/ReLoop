@@ -322,6 +322,13 @@ oleh `tests/test_rvm_lease_contract.py` dan `tests/contracts/machine-lease-contr
   (`consumed_rupiah`, `consumed_items`): perpanjangan lease (sesi sama, expiry
   baru) dan restart **tidak pernah** mereset counter; penerimaan item dan
   kenaikan counter ditulis dalam satu transaksi SQLite.
+- **Perpanjangan lease sesi yang sama** (`RvmController.renew_lease`) hanya
+  memajukan `expires_at`: lease baru harus lolos verifikasi v2 dan membawa
+  bound bertanda tangan yang sama (`reservationId`, `policyVersion`,
+  `ceilingRupiah`, `maxItems`); bila tidak, perpanjangan ditolak
+  (`LEASE_REFUSED`, `renewal: true`) dan lease lama berjalan sampai habis.
+  Perpanjangan tidak mengubah state, latch, atau output, sehingga item yang
+  sedang diproses tidak membuat gate terbuka ulang.
 - **Bound sesi.** Setiap `ITEM_ACCEPTED_POINT` mengonsumsi batas maksimal yang
   dapat dibayar server untuk jenis itu (ITEM: tarif x multiplier; KG: tarif x
   berat maksimal jenis, atau `max_item_weight_grams` mesin bila server tidak
