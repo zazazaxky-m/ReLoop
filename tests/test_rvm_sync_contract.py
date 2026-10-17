@@ -915,7 +915,42 @@ class RetryLimitTest(WorkerCase):
             self.worker.fetch_machine_session()
         status = self.worker.status()
         self.assertIsNone(status["lastError"])
-        self.assertEqual(status["outboxError"], "SESSION_HELD,TEMPORARY_FAILURE")
+        self.assertEqual(status["outboxError"], "TEMPORARY_FAILURE")
+        self.assertEqual(status["outboxErrorLabel"], "Server sedang bermasalah; event akan dikirim ulang")
+
+    def test_outbox_error_stays_while_the_event_is_stuck_and_clears_once_it_is_acked(self):
+        a1, _ = self.session_pair()
+        self.server_round(a1)
+        # A later batch (a heartbeat) goes through completely.
+        hb = self.db.enqueue("HEARTBEAT", {}, "2026-10-13T08:00:09Z")
+        self.worker.apply_event_results([r for r in self.db.pending(20) if r["localEventId"] == hb], v2(ok(hb)))
+        self.assertEqual(self.worker.status()["outboxError"], "TEMPORARY_FAILURE")
+        make_due(self.db)
+        rows = self.db.pending(20)
+        self.worker.apply_event_results(rows, v2(*(ok(r["localEventId"]) for r in rows)))
+        status = self.worker.status()
+        self.assertIsNone(status["outboxError"])
+        self.assertIsNone(status["outboxErrorLabel"])
+
+    def test_outbox_error_label_is_indonesian_for_every_kind_of_failure(self):
+        from rvm.sync import outbox_error_label
+        cases = {
+            "TEMPORARY_FAILURE": "Server sedang bermasalah; event akan dikirim ulang",
+            "SESSION_HELD,TEMPORARY_FAILURE": "Menunggu event sebelumnya dari sesi yang sama",
+            "INVALID_EVENT": "Format event tidak dikenali server",
+            "EVENT_REJECTED": "Ditolak oleh aturan server",
+            "PROTOCOL_MISMATCH": "Jawaban server tidak dikenali",
+            "MALFORMED_RESPONSE": "Jawaban server rusak",
+            "MISSING_RESULT": "Server tidak menjawab sebagian event",
+            "HTTP_502": "Server menolak pengiriman (HTTP 502)",
+            "SOME_NEW_CODE": "Server menolak event",
+            "<urlopen error [Errno 111] Connection refused>": "Server tidak dapat dihubungi",
+            "timed out": "Server tidak dapat dihubungi",
+        }
+        for raw, label in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(outbox_error_label(raw), label)
+        self.assertIsNone(outbox_error_label(None))
 
 
 class RetryLimitUpgradeTest(unittest.TestCase):

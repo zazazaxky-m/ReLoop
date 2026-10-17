@@ -402,6 +402,17 @@ class EdgeDatabase:
                 )
         return requeued
 
+    def oldest_delivery_error(self) -> str | None:
+        """last_error of the oldest pending event that failed at least once:
+        the event holding the queue. Survives later successful batches and
+        clears only once that event is acknowledged or dead-lettered."""
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT last_error FROM outbox WHERE delivery_status='{PENDING}' AND attempts>0 "
+                "AND last_error IS NOT NULL ORDER BY id LIMIT 1"
+            ).fetchone()
+        return str(row["last_error"]) if row else None
+
     def queue_depth(self) -> int:
         """Events still to deliver (dead letters are counted separately)."""
         return self._count(PENDING)

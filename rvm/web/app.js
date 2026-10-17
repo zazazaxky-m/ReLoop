@@ -118,7 +118,7 @@ function renderOutbox(server){
   $("outboxDeadLetter").textContent=Number(server?.deadLetterDepth||0);
   const last=Number(server?.lastSuccessAt||0);
   $("outboxLastSuccess").textContent=last?"Sinkron terakhir "+new Date(last*1000).toLocaleString("id-ID"):"Belum pernah sinkron";
-  $("outboxError").textContent=server?.outboxError?"Pengiriman terakhir gagal: "+String(server.outboxError):"";
+  $("outboxError").textContent=server?.outboxErrorLabel?"Pengiriman tertunda: "+String(server.outboxErrorLabel):"";
   const list=clear($("deadLetterList")),items=Array.isArray(server?.deadLetters)?server.deadLetters:[];
   if(!items.length)list.append(el("li",{className:"empty"},"Tidak ada event yang ditolak permanen."));
   for(const item of items){

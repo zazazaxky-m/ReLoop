@@ -40,6 +40,34 @@ def _error_code(value: Any) -> str:
     return value if isinstance(value, str) and _ERROR_CODE.fullmatch(value) else "SERVER_ERROR"
 
 
+OUTBOX_ERROR_LABELS = {
+    "TEMPORARY_FAILURE": "Server sedang bermasalah; event akan dikirim ulang",
+    SESSION_HELD: "Menunggu event sebelumnya dari sesi yang sama",
+    "INVALID_EVENT": "Format event tidak dikenali server",
+    "EVENT_REJECTED": "Ditolak oleh aturan server",
+    "PROTOCOL_MISMATCH": "Jawaban server tidak dikenali",
+    "MALFORMED_RESPONSE": "Jawaban server rusak",
+    "MALFORMED_RESULT": "Jawaban server rusak",
+    "MISSING_RESULT": "Server tidak menjawab sebagian event",
+}
+
+
+def outbox_error_label(raw: str | None) -> str | None:
+    """Indonesian operator label for a stored delivery error. The raw value
+    (server code, HTTP status or network exception text) stays in the outbox
+    row and the log; the kiosk shows only this label."""
+    if not raw:
+        return None
+    code = raw.split(",")[0].strip()
+    if code in OUTBOX_ERROR_LABELS:
+        return OUTBOX_ERROR_LABELS[code]
+    if re.fullmatch(r"HTTP_\d{3}", code):
+        return f"Server menolak pengiriman (HTTP {code[5:]})"
+    if _ERROR_CODE.fullmatch(code):
+        return "Server menolak event"
+    return "Server tidak dapat dihubungi"
+
+
 class SyncWorker:
     def __init__(self, config: RvmConfig, db: EdgeDatabase):
         self.config = config
@@ -48,9 +76,6 @@ class SyncWorker:
         self.online = False
         self.last_sync_at: float | None = None
         self.last_error: str | None = None
-        # Outbox delivery error only: the 2 s session/display polls reset
-        # last_error, so the operator view would never see a stuck event.
-        self.outbox_error: str | None = None
         self._thread: threading.Thread | None = None
         self._last_media_sync = 0.0
         self._isolate_until = 0.0
@@ -132,7 +157,7 @@ class SyncWorker:
             # server committed: the retry reuses the localEventId and is
             # answered as duplicate.
             self.online = False
-            self.last_error = self.outbox_error = str(exc)
+            self.last_error = str(exc)
             self.db.mark_failed(ids, self.last_error)
             return False
         if not 200 <= status < 300:
@@ -150,12 +175,12 @@ class SyncWorker:
         if status in ENVELOPE_REJECTION_STATUSES and len(rows) > 1:
             self._isolate_until = time.time() + ISOLATION_SECONDS
         self.online = False
-        self.last_error = self.outbox_error = f"HTTP_{status}"
+        self.last_error = f"HTTP_{status}"
         self.db.mark_failed([row["db_id"] for row in rows], self.last_error)
         return False
 
     def _keep_pending(self, ids: list[int], reason: str) -> bool:
-        self.last_error = self.outbox_error = reason
+        self.last_error = reason
         self.db.mark_failed(ids, reason)
         return False
 
@@ -247,7 +272,7 @@ class SyncWorker:
             self.db.set_json(LAST_SUCCESS_KEY, now)
         complete = len(ids) == len(rows)
         failures = sorted(set(dead) | set(retry) | set(server_retry))
-        self.last_error = self.outbox_error = None if complete else ",".join(failures)
+        self.last_error = None if complete else ",".join(failures)
         return complete
 
     def flush_captures(self) -> bool:
@@ -516,11 +541,15 @@ class SyncWorker:
             return None
 
     def status(self) -> dict:
+        stuck = self.db.oldest_delivery_error()
         return {
             "online": self.online,
             "lastSyncAt": self.last_sync_at,
             "lastError": self.last_error,
-            "outboxError": self.outbox_error,
+            # From the queue itself, not last_error (reset by the 2 s session
+            # polls and by any later complete batch).
+            "outboxError": stuck,
+            "outboxErrorLabel": outbox_error_label(stuck),
             "queueDepth": self.db.queue_depth(),
             "captureQueueDepth": self.db.capture_queue_depth(),
             # Operator view (kiosk maintenance panel, remote REFRESH_STATE).

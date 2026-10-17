@@ -202,8 +202,10 @@ dan dikirim batch ke `POST /api/machine-events` (HMAC). Respons protokol v2
 
 **Tampilan operator.** Panel maintenance kiosk (PIN) menampilkan jumlah event
 menunggu, yang ditolak permanen atau gagal berulang (jenis, alasan, jumlah
-percobaan), error pengiriman terakhir (`outboxError`, terpisah dari
-`lastError` yang direset polling sesi 2 s) dan waktu sinkron terakhir yang
+percobaan), alasan antrean tertunda (`outboxErrorLabel` berbahasa Indonesia,
+diambil dari `last_error` event pending tertua yang pernah gagal, sehingga tidak
+hilang karena polling sesi 2 s atau batch heartbeat yang berhasil; kode mentah
+tetap di `outboxError`, baris outbox dan log) dan waktu sinkron terakhir yang
 berhasil; tombol **Kirim ulang event ditolak**
 (`retry-dead-letter`, wajib token maintenance; tanpa `ids` = semua, atau
 `ids` berupa daftar ID outbox positif, selain itu ditolak 422) mengembalikan event ke antrean
