@@ -287,17 +287,20 @@ class EdgeDatabase:
 
     def pending(self, limit: int) -> list[dict[str, Any]]:
         """Due pending events in enqueue order. An event of a deposit session
-        is held while an earlier pending event of the same session is still
-        backing off: the backend resolves an item event against the session's
-        history, so it must arrive in order. Other sessions and session-less
-        events are not held, and dead-lettered events hold nothing."""
+        is held while an earlier event of the same session is still backing
+        off, or was dead-lettered at the retry limit (RETRY_LIMIT:*): the
+        backend resolves an item event against the session's history, so it
+        must arrive in order, and an operator retry then resends the session
+        in order. Other sessions and session-less events are not held, and a
+        permanent rejection (retryable: false) holds nothing."""
         now = time.time()
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM outbox o WHERE o.delivery_status='pending' AND o.next_attempt_at<=? "
                 "AND (o.session_id IS NULL OR NOT EXISTS ("
-                "  SELECT 1 FROM outbox e WHERE e.session_id=o.session_id "
-                "  AND e.delivery_status='pending' AND e.id<o.id AND e.next_attempt_at>?)) "
+                "  SELECT 1 FROM outbox e WHERE e.session_id=o.session_id AND e.id<o.id AND ("
+                "    (e.delivery_status='pending' AND e.next_attempt_at>?)"
+                f"    OR (e.delivery_status='{DEAD_LETTER}' AND e.last_error LIKE 'RETRY_LIMIT:%')))) "
                 "ORDER BY o.id LIMIT ?",
                 (now, now, limit),
             ).fetchall()

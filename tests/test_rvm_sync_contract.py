@@ -844,11 +844,12 @@ class DeadLetterRetryValidationTest(KioskApiCase):
 
 
 class RetryLimitTest(WorkerCase):
-    """A session cannot wait forever behind one event the server keeps failing:
-    after MAX_SERVER_FAILURES server-reported transient errors on that event
-    it is dead-lettered (kept, visible, operator retry) and its session moves
-    on. Network failures, malformed responses and SESSION_HELD (an event only
-    waiting behind an earlier one) never count."""
+    """One event the server keeps failing no longer retries silently forever:
+    after MAX_SERVER_FAILURES server-reported transient errors it is
+    dead-lettered as RETRY_LIMIT (kept, visible, operator retry) while the
+    rest of its session waits behind it in order. Network failures, malformed
+    responses and SESSION_HELD (an event only waiting behind an earlier one)
+    never count."""
 
     def server_round(self, poison):
         make_due(self.db)
@@ -862,7 +863,7 @@ class RetryLimitTest(WorkerCase):
         a2 = self.db.enqueue("WEIGHT_MEASURED", {}, "2026-10-13T08:00:02Z", "sess-a")
         return a1, a2
 
-    def test_poison_event_is_dead_lettered_at_the_limit_and_frees_its_session(self):
+    def test_poison_event_is_dead_lettered_at_the_limit_and_its_session_waits_in_order(self):
         limit = database_module.MAX_SERVER_FAILURES
         a1, a2 = self.session_pair()
         for _ in range(limit - 1):
@@ -873,8 +874,13 @@ class RetryLimitTest(WorkerCase):
 
         self.assertEqual(outcome(self.db), {"acked": [], "pending": [a2], "deadLetter": [a1]})
         self.assertEqual(self.db.dead_letters(5)[0]["reason"], "RETRY_LIMIT:TEMPORARY_FAILURE")
+        # The backend resolves a2's item from a1: a2 waits behind the
+        # retry-limited a1 instead of arriving out of order.
         make_due(self.db)
-        self.assertEqual([r["localEventId"] for r in self.db.pending(20)], [a2])
+        self.assertEqual(self.db.pending(20), [])
+        # The operator retry resends the session in order.
+        self.db.retry_dead_letters()
+        self.assertEqual([r["localEventId"] for r in self.db.pending(20)], [a1, a2])
 
     def test_network_and_malformed_failures_never_count_toward_the_limit(self):
         limit = database_module.MAX_SERVER_FAILURES

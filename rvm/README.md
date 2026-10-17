@@ -179,11 +179,19 @@ dan dikirim batch ke `POST /api/machine-events` (HMAC). Respons protokol v2
 - **Batas gagal per event.** Error sementara yang dilaporkan server untuk event
   itu sendiri dihitung di `outbox.server_failures`; setelah
   `MAX_SERVER_FAILURES` (20) kali berturut-turut event dipindah ke dead-letter
-  dengan alasan `RETRY_LIMIT:<kode>` agar sesinya tidak tertahan selamanya.
-  Kegagalan jaringan, respons rusak, dan `SESSION_HELD` tidak dihitung, sehingga
-  gangguan koneksi panjang tidak memindahkan apa pun ke dead-letter. Kirim ulang
-  oleh teknisi mengembalikan hitungan ke 0. Watermark penutupan sesi tetap
-  menunggu event itu, jadi hold dana sesi tidak dilepas.
+  dengan alasan `RETRY_LIMIT:<kode>` sehingga terlihat dan dapat dikirim ulang
+  teknisi, bukan dicoba diam-diam selamanya. Event berikutnya dari sesi yang
+  sama tetap menunggu di belakangnya (urutan per sesi tidak boleh dilanggar),
+  dan kirim ulang oleh teknisi mengirim sesi itu kembali sesuai urutan serta
+  mengembalikan hitungan ke 0. Kegagalan jaringan, respons rusak, dan
+  `SESSION_HELD` tidak dihitung, sehingga gangguan koneksi panjang tidak
+  memindahkan apa pun ke dead-letter. Watermark penutupan sesi tetap menunggu
+  event itu, jadi hold dana sesi tidak dilepas.
+- **Urutan deploy.** Server yang menjawab `SESSION_HELD` harus dirilis lebih
+  dulu daripada worker RVM ini. Worker baru yang berbicara dengan server lama
+  akan menghitung jawaban `TEMPORARY_FAILURE` untuk event yang hanya tertahan,
+  sehingga seluruh sesi itu dapat ikut masuk dead-letter dan perlu dikirim
+  ulang teknisi.
 - **Batas waktu tetap.** Satu `flush_once` tetap satu request HTTP dengan
   timeout 5 s, sehingga angka latensi `STOP_ALL` di atas tidak berubah.
 - **Loop sinkronisasi tidak pernah berhenti.** Body respons yang terpotong
