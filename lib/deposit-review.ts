@@ -34,7 +34,7 @@ import {
   resolveRewardRateAt,
   validateWeight,
 } from "./reward";
-import { applyRewardEffect, type CreditEntryType } from "./reward-credit";
+import { applyRewardEffect, resolveItemDebitCases, type CreditEntryType } from "./reward-credit";
 import {
   closeWatermarkedSessionIfSettled,
   findReservationByKey,
@@ -573,6 +573,12 @@ export async function decideDepositReview(
       });
       ledgerEntry = effect.entry;
       reconciliationCase = effect.reconciliationCase;
+    }
+    // The decision settled the item's money (approved, or the reversal was
+    // applied): a fraud hold or correction parked as a case for this item is
+    // no longer owed. A decision refused into a case keeps them open.
+    if (!reconciliationCase) {
+      await resolveItemDebitCases(tx, { depositItemId: itemId, resolvedById: actor.id });
     }
     // 5. B01: the review hold held the approvable ceiling; the decision
     // settles the obligation to the target (approve) or releases it (reject).

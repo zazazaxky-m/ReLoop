@@ -237,6 +237,30 @@ export async function heldByOpenDebitCases(
   return [...perItem.values()].reduce((sum, amount) => sum + amount, 0);
 }
 
+/**
+ * Closes the item's OPEN debit cases (a parked fraud hold, an earlier refused
+ * correction) once a review decision settled the item's money: the earning
+ * was approved, or the reversal was applied. Without this the hold in
+ * `heldByOpenDebitCases` would never lift. The caller holds the owner's User
+ * lock and only calls this when the decision itself was not refused into a
+ * case.
+ */
+export async function resolveItemDebitCases(
+  tx: Prisma.TransactionClient,
+  input: { depositItemId: string; resolvedById: string },
+): Promise<number> {
+  const { count } = await tx.rewardReconciliationCase.updateMany({
+    where: { depositItemId: input.depositItemId, status: "OPEN", reasonCode: CASE_ALREADY_PAID_OUT },
+    data: {
+      status: "RESOLVED",
+      resolvedAt: new Date(),
+      resolvedById: input.resolvedById,
+      note: "Diselesaikan oleh keputusan review item",
+    },
+  });
+  return count;
+}
+
 // ---------------------------------------------------------------------------
 // Writer
 // ---------------------------------------------------------------------------

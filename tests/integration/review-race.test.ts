@@ -266,4 +266,44 @@ describe("PATCH /api/deposit-reviews/[id] decides once (EX-01)", () => {
     expect(all.body.error).toContain("ditahan");
     expect((await request(19_900, "again-rest")).status).toBe(201);
   });
+
+  describe("a review decision settles the item's parked fraud hold", () => {
+    async function parkedFraudHold() {
+      await warmUp();
+      const item = await heldItem({ earn: { amount: 100, status: "AVAILABLE" } });
+      const payout = await f.processingRedemption(20_000);
+      // FRAUD_DETECTED met the reserved balance: the hold became a case.
+      await f.db.rewardReconciliationCase.create({ data: {
+        businessKey: `fraud:${item.id}:hold:v1`, userId: f.ids.userA, depositItemId: item.id, amount: 100,
+        entryType: "EARN", reasonCode: "ANOMALY_ALREADY_PAID_OUT" } });
+      expect((await call("superadmin", "PATCH", `/api/redemptions/${payout}`, { action: "fail" })).status).toBe(200);
+      return item;
+    }
+    const request = (amount: number, idempotencyKey: string) => call("userA", "POST", "/api/redemptions", {
+      amount, payoutAccountId: f.ids.payoutAccountA, idempotencyKey });
+    const openCases = (itemId: string) =>
+      f.db.rewardReconciliationCase.count({ where: { depositItemId: itemId, status: "OPEN" } });
+
+    it("approval releases the held earning for withdrawal", async () => {
+      const item = await parkedFraudHold();
+      expect((await request(20_000, "before-approve")).status).toBe(422);
+
+      expect((await review(item.id, { action: "approve" })).status).toBe(200);
+
+      expect(await openCases(item.id)).toBe(0);
+      expect((await request(20_000, "after-approve")).status).toBe(201);
+    });
+
+    it("a rejection that collects the reversal stops holding the amount", async () => {
+      const item = await parkedFraudHold();
+
+      const rejected = await review(item.id, { action: "reject" });
+      expect(rejected.status).toBe(200);
+      expect(rejected.body.reconciliationCase).toBeNull();
+      expect((await getWalletBalance(f.ids.userA)).available).toBe(19_900);
+
+      expect(await openCases(item.id)).toBe(0);
+      expect((await request(19_900, "after-reject")).status).toBe(201);
+    });
+  });
 });

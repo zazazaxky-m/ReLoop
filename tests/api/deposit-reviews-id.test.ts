@@ -52,7 +52,7 @@ vi.mock('@/lib/wallet-service', () => ({
   runWalletTransaction: vi.fn((fn: (tx: unknown) => unknown) => fn(mockTx)),
   afterCommitSafely: vi.fn(async (_label: string, effect: () => Promise<unknown>) => { await effect(); }),
 }));
-vi.mock('@/lib/reward-credit', () => ({ applyRewardEffect: vi.fn() }));
+vi.mock('@/lib/reward-credit', () => ({ applyRewardEffect: vi.fn(), resolveItemDebitCases: vi.fn() }));
 vi.mock('@/lib/reward', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/reward')>();
   return {
@@ -241,6 +241,8 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
     expect(funding.settleOrCommitReward).toHaveBeenCalledWith(mockTx, {
       businessKey: 'deposit-item:di1:earn', source: { sourceType: 'SESSION', sourceId: 's1' }, targetRupiah: 100, reviewPending: false });
     expect(effect()).toEqual(expect.objectContaining({ funding: { settledByCaller: true } }));
+    // The decision settled the item: its parked debit cases are closed.
+    expect(credit.resolveItemDebitCases).toHaveBeenCalledWith(mockTx, { depositItemId: 'di1', resolvedById: 'a1' });
 
     vi.clearAllMocks();
     expect((await patch({ action: 'reject' })).status).toBe(200);
@@ -253,6 +255,8 @@ describe('/api/deposit-reviews/[id] PATCH', () => {
       { id: 'le1', entryType: 'EARN', status: 'AVAILABLE', amount: 100, userId: 'u1' }]);
     expect((await patch({ action: 'reject' })).status).toBe(200);
     expect(funding.settleOrCommitReward).toHaveBeenCalledWith(mockTx, expect.objectContaining({ targetRupiah: null }));
+    // A decision refused into a case leaves the item's money owed.
+    expect(credit.resolveItemDebitCases).not.toHaveBeenCalled();
   });
 
   it("closes a watermarked session's remainder after the settlement, in the same transaction (B01b I1)", async () => {
