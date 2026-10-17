@@ -349,10 +349,11 @@ oleh `tests/test_rvm_lease_contract.py` dan `tests/contracts/machine-lease-contr
   `ceilingRupiah`, `maxItems`) diadopsi dan diaudit `LEASE_BOUND_CHANGED`;
   counter konsumsi per sesi tidak direset. Perpanjangan tidak mengubah state,
   latch, atau output, sehingga item yang sedang diproses tidak membuat gate
-  terbuka ulang. Karena server menandatangani ulang lease di setiap poll 2 s,
-  baris lease baru ditulis ulang bila sisa masa berlakunya ≤ separuh TTL lease
-  baru (minimal 30 s, `RENEWAL_MARGIN_SECONDS`), dan satu penolakan perpanjangan
-  diaudit sekali per sesi.
+  terbuka ulang. Setiap expiry yang lebih baru langsung diterapkan (baris lease
+  ditulis ulang di poll yang memajukan expiry): lease lokal yang tertinggal dari
+  server membuat koneksi yang pulih setelah putus mengaktifkan ulang sesi dan
+  membuka gate saat item masih di dalam. Satu penolakan perpanjangan diaudit
+  sekali per sesi.
 - **Bound sesi.** Setiap `ITEM_ACCEPTED_POINT` mengonsumsi batas maksimal yang
   dapat dibayar server untuk jenis itu (ITEM: tarif x multiplier; KG: tarif x
   berat maksimal jenis, atau `max_item_weight_grams` mesin bila server tidak

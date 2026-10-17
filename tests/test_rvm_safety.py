@@ -453,29 +453,48 @@ class SessionLeaseRenewalTest(SafetyAssertions):
                 finally:
                     controller.db.close()
 
-    def test_renewal_waits_until_half_the_lease_remains(self):
-        """The server re-signs the lease on every 2 s poll; the row is only
-        rewritten once half of the renewal's TTL or less remains."""
-        with tempfile.TemporaryDirectory() as tmp:
+    def test_a_network_outage_shorter_than_the_server_deadline_never_reopens_the_gate(self):
+        """Every lease is capped at the session deadline (idle 180 s). The
+        machine must hold a lease as long as the server's, or a reconnect
+        inside the gap re-activates the session and reopens the gate mid-item
+        (reviewer simulation of a throttled renewal)."""
+        base = time.time()
+        clock = {"t": 0.0}
+        deadline = {"at": 120.0}  # session started at t=-60
+
+        def server_lease():
+            now = int(time.time())
+            return signed_lease("session-o", lease_id="lease-o", ttl=min(300, int(base + deadline["at"]) - now))
+
+        with mock.patch("rvm.controller.time.time", lambda: base + clock["t"]), \
+                tempfile.TemporaryDirectory() as tmp:
             controller = make_controller(tmp)
             try:
-                first = bound_lease("session-r", lease_id="lease-r-1", ttl=300)
-                self.assertTrue(controller.activate_lease(first))
-                # A fresher lease (later expiry) while most of the TTL remains: no rewrite.
-                self.poll(controller, bound_lease("session-r", lease_id="lease-r-2", ttl=310))
-                self.assertEqual(controller.db.active_lease()["id"], "lease-r-1")
-
-                real = time.time
-                with mock.patch("rvm.controller.time.time", lambda: real() + 160):
-                    later = bound_lease("session-r", lease_id="lease-r-3", ttl=300)
-                    self.poll(controller, later)
-                    self.assertEqual(controller.db.active_lease()["id"], "lease-r-3")
+                self.assertTrue(controller.activate_lease(server_lease()))
+                opened_before = len(events_of(controller, "CHAMBER_OPENED"))
+                deadline["at"] = 180.0  # an item at t=0 moved the deadline
+                for t in range(0, 176, 2):
+                    clock["t"] = float(t)
+                    if not 60 <= t < 150:
+                        controller.sync.fetch_machine_session = lambda: {"lease": server_lease(), "session": {"id": "session-o"}}
+                        controller.sync.fetch_display = lambda: None
+                        controller._poll_server_session()
+                    if t == 60:
+                        controller.set_state(MachineState.PROCESSING, "item-in-chamber")
+                        controller.hardware.set_input_gate(False)
+                        controller.hardware.set_conveyor("FORWARD")
+                    with controller._lock:
+                        controller._expire_lease()
+                    self.assertNotEqual(controller.state, MachineState.SYNC_PENDING, f"lease lapsed at t={t}")
+                self.assertEqual(controller.state, MachineState.PROCESSING)
+                self.assertFalse(controller.hardware.input_gate_open)
+                self.assertEqual(len(events_of(controller, "CHAMBER_OPENED")), opened_before)
             finally:
                 controller.db.close()
 
     def test_a_short_lease_near_its_end_is_always_renewed(self):
-        """Half of a 10 s TTL is 5 s, less than two polls: the 30 s margin
-        renews it before it can lapse and reopen the gate on reactivation."""
+        """A short lease near the session deadline is extended as soon as the
+        server's expiry moves, so it cannot lapse between polls."""
         with tempfile.TemporaryDirectory() as tmp:
             controller = make_controller(tmp)
             try:

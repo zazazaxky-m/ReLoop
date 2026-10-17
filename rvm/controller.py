@@ -29,9 +29,6 @@ from .sync import LAST_SUCCESS_KEY, SyncWorker
 
 logger = logging.getLogger(__name__)
 
-# A running session's lease is always renewed once this little time remains.
-RENEWAL_MARGIN_SECONDS = 30
-
 INVALID_DEAD_LETTER_IDS = "ID event tidak valid: kirim daftar ID event berupa angka positif"
 
 
@@ -593,9 +590,12 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         and audited: refusing it would let the lease expire mid-item and the
         next poll re-activate the session, reopening the gate. The consumed
         counter is per session, so the budget is never reset. Never touches
-        the state, the latch or an output. To spare the SD card it only
-        rewrites the row once half the TTL or less remains, and audits one
-        refusal once per session. Caller holds self._lock."""
+        the state, the latch or an output. Every later expiry is applied at
+        once: a local lease that trails the server's lets a reconnect after an
+        outage re-activate the session and reopen the gate mid-item, so the
+        row is rewritten on each poll that moves the expiry. One refused
+        renewal is audited once per session and reason. Caller holds
+        self._lock."""
         current = self.db.active_lease()
         if not current or not isinstance(lease, dict) or str(current["session_id"]) != str(lease.get("sessionId")):
             return False
@@ -619,14 +619,6 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             for local, remote in bound_fields
             if current[local] != lease.get(remote)
         }
-        # The server re-signs on every poll: rewrite the row only once half of
-        # the renewal's TTL (never less than RENEWAL_MARGIN_SECONDS, so a short
-        # lease near the session deadline cannot lapse between 2 s polls) or
-        # less remains. A changed bound is adopted at once.
-        ttl = float(lease["expiresAt"]) - float(lease["issuedAt"])
-        threshold = max(ttl / 2, RENEWAL_MARGIN_SECONDS)
-        if not changed and float(current["expires_at"]) - time.time() > threshold:
-            return False
         self.db.renew_lease({**lease, "status": "ACTIVE"})
         if changed:
             self.db.audit("LEASE_BOUND_CHANGED", {"sessionId": str(current["session_id"]), "changes": changed})
