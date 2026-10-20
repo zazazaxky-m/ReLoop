@@ -14,7 +14,13 @@ import {
   Select,
   type Column,
 } from "@/components/ui";
+import { REVIEW_LEGACY_ROW, REVIEW_LEGACY_VERSION_MISMATCH } from "@/lib/deposit-review-contract";
 import { formatDateTime, formatRupiah } from "@/lib/format";
+import { UNKNOWN_WASTE_TYPE_NAME } from "@/lib/machine-events/shared";
+
+/** Unknown-type items (by reason, or by the fallback type itself) need a real type to approve (M04). */
+const needsReclassification = (row: { validationReasonCode: string | null; wasteType: { name: string } }) =>
+  row.validationReasonCode === "UNKNOWN_WASTE_TYPE" || row.wasteType.name === UNKNOWN_WASTE_TYPE_NAME;
 
 export interface ReviewQueueRow {
   id: string;
@@ -24,6 +30,8 @@ export interface ReviewQueueRow {
   aiConfidence: number | null;
   validationReasonCode: string | null;
   createdAt: string | Date;
+  /** Row version shown to the operator; sent back with a legacy approval (M04). */
+  updatedAt: string | Date;
   wasteType: { id: string; name: string; unit: string };
   pendingLedgerAmount: number;
   session: {
@@ -55,34 +63,48 @@ export function ReviewQueue({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
   const [actionKind, setActionKind] = useState<"approve" | "reject" | null>(null);
   const [wasteTypeId, setWasteTypeId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [note, setNote] = useState("");
+  // Item the server refused as a pre-cutover legacy row (ended session, no
+  // usable acceptance record): a superadmin may approve it explicitly as
+  // "setoran lama", for the row version shown here (M04).
+  const [legacyOfferId, setLegacyOfferId] = useState<string | null>(null);
 
   function openAction(row: ReviewQueueRow, kind: "approve" | "reject") {
     setActionId(row.id);
     setActionKind(kind);
-    setWasteTypeId(row.validationReasonCode === "UNKNOWN_WASTE_TYPE" ? "" : row.wasteType.id);
+    setWasteTypeId(needsReclassification(row) ? "" : row.wasteType.id);
     setQuantity(String(row.quantity));
     setNote("");
     setError(null);
+    setLegacyOfferId(null);
   }
 
   function closeAction() {
     setActionId(null);
     setActionKind(null);
+    setLegacyOfferId(null);
   }
 
-  async function run(id: string, action: "approve" | "reject") {
-    const isUnknown = items.find((i) => i.id === id)?.validationReasonCode === "UNKNOWN_WASTE_TYPE";
+  async function run(id: string, action: "approve" | "reject", legacy = false) {
+    const row = items.find((i) => i.id === id);
+    const isUnknown = row ? needsReclassification(row) : false;
     if (action === "approve" && isUnknown && !wasteTypeId) {
       setError("Pilih jenis sampah sebelum menyetujui item ini.");
       return;
     }
+    const legacyApproval = action === "approve" && legacy;
+    if (legacyApproval && !row) {
+      setError("Item tidak lagi ada di antrean. Muat ulang halaman.");
+      return;
+    }
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch(`/api/deposit-reviews/${id}`, {
         method: "PATCH",
@@ -92,12 +114,30 @@ export function ReviewQueue({
           wasteTypeId: action === "approve" && wasteTypeId ? wasteTypeId : undefined,
           quantity: action === "approve" && quantity ? Number(quantity) : undefined,
           note: note || undefined,
+          legacy: legacyApproval ? true : undefined,
+          // The row version the superadmin is looking at: the server refuses the
+          // approval if the item changed since (then the page must be reloaded).
+          itemVersion: legacyApproval && row ? new Date(row.updatedAt).toISOString() : undefined,
         }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setError(d?.error ?? "Gagal memproses peninjauan");
+        if (action === "approve" && !legacy && d?.error === REVIEW_LEGACY_ROW) setLegacyOfferId(id);
+        if (legacyApproval && d?.error === REVIEW_LEGACY_VERSION_MISMATCH) {
+          setLegacyOfferId(null);
+          router.refresh();
+        }
         return;
+      }
+      const result = await res.json().catch(() => null);
+      const reconciliationCase = result?.reconciliationCase as { amount?: number; reasonCode?: string } | null | undefined;
+      if (reconciliationCase) {
+        setNotice(
+          reconciliationCase.reasonCode === "RECIPIENT_ERASED"
+            ? "Keputusan tersimpan. Akun penerima sudah dihapus, jadi reward tidak dikreditkan dan kasus rekonsiliasi dibuka untuk tim keuangan."
+            : `Keputusan tersimpan. Saldo dari setoran ini sudah dicairkan, jadi selisih Rp${(reconciliationCase.amount ?? 0).toLocaleString("id-ID")} tidak dipotong otomatis; kasus rekonsiliasi dibuka untuk tim keuangan.`,
+        );
       }
       closeAction();
       router.refresh();
@@ -169,10 +209,16 @@ export function ReviewQueue({
   ];
 
   const activeRow = items.find((i) => i.id === actionId) ?? null;
-  const needsWasteType = activeRow?.validationReasonCode === "UNKNOWN_WASTE_TYPE";
+  const needsWasteType = activeRow ? needsReclassification(activeRow) : false;
 
   return (
     <div className="space-y-4">
+      {notice ? (
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/30 dark:bg-amber-950/20 px-3.5 py-2.5 text-sm text-foreground">
+          {notice}
+        </div>
+      ) : null}
+
       {error ? (
         <div className="rounded-xl border border-red-200 bg-red-50 dark:border-red-900/30 dark:bg-red-950/20 px-3.5 py-2.5 text-sm text-status-error">
           {error}
@@ -231,14 +277,26 @@ export function ReviewQueue({
                 />
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button disabled={busy} onClick={() => run(activeRow.id, actionKind)}>
                 {actionKind === "approve" ? "Konfirmasi Setujui" : "Konfirmasi Tolak"}
               </Button>
+              {actionKind === "approve" && legacyOfferId === activeRow.id ? (
+                <Button variant="secondary" disabled={busy} onClick={() => run(activeRow.id, "approve", true)}>
+                  Setujui sebagai setoran lama
+                </Button>
+              ) : null}
               <Button variant="ghost" onClick={closeAction}>
                 Batal
               </Button>
             </div>
+            {actionKind === "approve" && legacyOfferId === activeRow.id ? (
+              <p className="text-xs text-muted">
+                Setoran lama dihargai dengan tarif yang berlaku pada waktu setoran tercatat, dari berat yang tampil di atas,
+                dan dicatat di log audit atas nama Anda. Persetujuan berlaku untuk item persis seperti yang tampil sekarang;
+                bila item berubah sejak dimuat, persetujuan ditolak dan halaman perlu dimuat ulang.
+              </p>
+            ) : null}
             <p className="text-xs text-muted">
               Menyetujui menghitung ulang reward penuh dan mencairkan saldo tertahan.
               Menolak menandai item REJECTED dan membatalkan reward yang tertahan.

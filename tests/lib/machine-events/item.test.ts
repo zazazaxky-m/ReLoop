@@ -62,6 +62,18 @@ describe('machine-events item utils', () => {
     });
   });
 
+  describe('an event whose named item was rejected by ingest (R03)', () => {
+    it('never substitutes the session\'s latest item', async () => {
+      mockTx.depositItem.findFirst.mockResolvedValue({ id: 'other-item' });
+      const cache = createDepositItemCache();
+      cache.set('s1', 'cached-item');
+      const input = { sessionId: 's1', depositItemId: null, itemReferenceRejected: true } as any;
+      expect(await resolveDepositItemId(mockTx, input, cache)).toBeNull();
+      expect(await resolveFraudDepositItemId(mockTx, input)).toBeNull();
+      expect(mockTx.depositItem.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
   describe('resolveDepositItemId', () => {
     it('returns input.depositItemId if provided and sets cache', async () => {
       const cache = createDepositItemCache();

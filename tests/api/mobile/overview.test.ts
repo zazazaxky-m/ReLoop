@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { GET } from '@/app/api/mobile/overview/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
+import { getLiabilitySummary } from '@/lib/reconciliation-report';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -49,6 +50,13 @@ vi.mock('@/lib/security-events', () => ({
 vi.mock('@/lib/ledger', () => ({
   getWalletBalance: vi.fn().mockResolvedValue({ totalAvailable: 500 }),
   getLedgerHistory: vi.fn().mockResolvedValue([]),
+}));
+
+const liability = {
+  availableLiability: 15000, pendingLiability: 2000, reservedLiability: 3000, paidTotal: 40000, totalObligation: 20000,
+};
+vi.mock('@/lib/reconciliation-report', () => ({
+  getLiabilitySummary: vi.fn(async () => liability),
 }));
 
 vi.mock('@/lib/trip', () => ({
@@ -162,7 +170,6 @@ describe('/api/mobile/overview GET', () => {
     vi.mocked(prisma.machine.count).mockResolvedValue(10);
     vi.mocked(prisma.user.count).mockResolvedValue(100);
     vi.mocked(prisma.depositItem.count).mockResolvedValue(500);
-    vi.mocked(prisma.rewardLedger.aggregate).mockResolvedValue({ _sum: { amount: 15000 } } as any);
     vi.mocked(prisma.organizationCollectorPartner.count).mockResolvedValue(2);
     vi.mocked(prisma.redemption.count).mockResolvedValue(3);
 
@@ -175,7 +182,10 @@ describe('/api/mobile/overview GET', () => {
     expect(data.machineCount).toBe(10);
     expect(data.userCount).toBe(100);
     expect(data.depositCount).toBe(500);
+    // M05: the old field now carries the net spendable liability; the breakdown is additive.
     expect(data.rewardAvailable).toBe(15000);
+    expect(data.rewardLiability).toEqual(liability);
+    expect(prisma.rewardLedger.aggregate).not.toHaveBeenCalled();
     expect(data.pendingPartners).toBe(2);
     expect(data.pendingRedemptions).toBe(3);
   });
@@ -218,19 +228,22 @@ describe('/api/mobile/overview GET', () => {
     expect(data.tourismSummary.complianceRate).toBe(0);
   });
 
-  it('defaults SUPERADMIN rewardAvailable to 0 when aggregate is null', async () => {
+  it('reports SUPERADMIN rewardAvailable 0 when nothing is spendable', async () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 's1', role: 'SUPERADMIN' } as any);
     vi.mocked(prisma.organization.count).mockResolvedValue(0);
     vi.mocked(prisma.machine.count).mockResolvedValue(0);
     vi.mocked(prisma.user.count).mockResolvedValue(0);
     vi.mocked(prisma.depositItem.count).mockResolvedValue(0);
-    vi.mocked(prisma.rewardLedger.aggregate).mockResolvedValue({ _sum: { amount: null } } as any);
+    vi.mocked(getLiabilitySummary).mockResolvedValueOnce({
+      availableLiability: 0, pendingLiability: 0, reservedLiability: 0, paidTotal: 100000, totalObligation: 0,
+    });
     vi.mocked(prisma.organizationCollectorPartner.count).mockResolvedValue(0);
     vi.mocked(prisma.redemption.count).mockResolvedValue(0);
 
     const res = await GET();
     const data = await res.json();
     expect(data.rewardAvailable).toBe(0);
+    expect(data.rewardLiability.paidTotal).toBe(100000);
   });
 
   it('handles unexpected errors', async () => {

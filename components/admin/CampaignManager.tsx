@@ -18,7 +18,7 @@ import {
   type Column,
 } from "@/components/ui";
 import { Plus } from "@/components/ui/icons";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatRupiah } from "@/lib/format";
 
 const TYPES = [
   ["MACHINE_DEPOSIT", "Setor Mesin"],
@@ -40,6 +40,8 @@ export interface CampaignRow {
   description: string | null;
   campaignType: string;
   rewardMode: string;
+  /** EVENT / SCHOOL_PROGRAM may run at machines only with this (M04). */
+  supportsMachine?: boolean;
   visibility: string;
   allowedEmailDomains: string[];
   startAt: string | Date | null;
@@ -48,6 +50,11 @@ export interface CampaignRow {
   status: string;
   sessionCount: number;
   organizationName: string | null;
+  /** B01: program reward budget (null = no cap) and per-session ceiling (null = not configured). */
+  rewardBudgetRupiah?: number | null;
+  maxRewardPerSessionRupiah?: number | null;
+  heldRupiah?: number;
+  spentRupiah?: number;
 }
 
 function toDateInput(v: string | Date | null): string {
@@ -61,13 +68,23 @@ const EMPTY = {
   description: "",
   campaignType: "MACHINE_DEPOSIT",
   rewardMode: "MONEY_REWARD",
+  supportsMachine: false,
   visibility: "PUBLIC",
   domains: "",
   startAt: "",
   endAt: "",
   rewardMultiplier: "",
   status: "DRAFT",
+  rewardBudgetRupiah: "",
+  maxRewardPerSessionRupiah: "",
 };
+
+/** Integer rupiah from a form field; empty clears the cap. */
+function rupiahOrNull(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return Number(trimmed);
+}
 
 export function CampaignManager({
   campaigns,
@@ -103,12 +120,15 @@ export function CampaignManager({
       description: row.description ?? "",
       campaignType: row.campaignType,
       rewardMode: row.rewardMode,
+      supportsMachine: row.supportsMachine ?? false,
       visibility: row.visibility,
       domains: row.allowedEmailDomains.join("\n"),
       startAt: toDateInput(row.startAt),
       endAt: toDateInput(row.endAt),
       rewardMultiplier: row.rewardMultiplier?.toString() ?? "",
       status: row.status,
+      rewardBudgetRupiah: row.rewardBudgetRupiah?.toString() ?? "",
+      maxRewardPerSessionRupiah: row.maxRewardPerSessionRupiah?.toString() ?? "",
     });
     setEditId(row.id);
     setError(null);
@@ -129,12 +149,16 @@ export function CampaignManager({
         description: form.description || null,
         campaignType: form.campaignType,
         rewardMode: form.rewardMode,
+        supportsMachine:
+          form.campaignType === "EVENT" || form.campaignType === "SCHOOL_PROGRAM" ? form.supportsMachine : false,
         visibility: form.visibility,
         allowedEmailDomains: form.visibility === "PRIVATE" ? domains : [],
         startAt: form.startAt ? new Date(form.startAt).toISOString() : null,
         endAt: form.endAt ? new Date(form.endAt).toISOString() : null,
         rewardMultiplier: form.rewardMultiplier ? Number(form.rewardMultiplier) : null,
         status: form.status,
+        rewardBudgetRupiah: rupiahOrNull(form.rewardBudgetRupiah),
+        maxRewardPerSessionRupiah: rupiahOrNull(form.maxRewardPerSessionRupiah),
       };
       const url = editId ? `/api/campaigns/${editId}` : "/api/campaigns";
       const res = await fetch(url, {
@@ -208,6 +232,26 @@ export function CampaignManager({
       key: "multiplier",
       header: "Multiplier",
       render: (r) => (r.rewardMultiplier ? `${r.rewardMultiplier}x` : "1x"),
+    },
+    {
+      key: "budget",
+      header: "Kuota reward",
+      render: (r) =>
+        r.rewardMode === "MONEY_REWARD" ? (
+          <div className="text-xs">
+            <p className="text-foreground">
+              {r.rewardBudgetRupiah == null ? "Tanpa kuota" : formatRupiah(r.rewardBudgetRupiah)}
+            </p>
+            <p className="text-muted">
+              Terpakai {formatRupiah(r.spentRupiah ?? 0)} · ditahan {formatRupiah(r.heldRupiah ?? 0)}
+              {r.maxRewardPerSessionRupiah == null
+                ? " · batas per sesi belum diisi"
+                : ` · maks ${formatRupiah(r.maxRewardPerSessionRupiah)}/sesi`}
+            </p>
+          </div>
+        ) : (
+          <span className="text-xs text-muted">-</span>
+        ),
     },
     { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
     {
@@ -294,6 +338,17 @@ export function CampaignManager({
                     ))}
                   </Select>
                 </FormField>
+                {form.campaignType === "EVENT" || form.campaignType === "SCHOOL_PROGRAM" ? (
+                  <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm sm:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={form.supportsMachine}
+                      onChange={(e) => setForm((f) => ({ ...f, supportsMachine: e.target.checked }))}
+                      className="h-4 w-4 accent-brand-500"
+                    />
+                    Program ini dapat dipakai untuk setoran di mesin
+                  </label>
+                ) : null}
                 {form.visibility === "PRIVATE" ? (
                   <FormField
                     label="Domain email diizinkan"
@@ -357,6 +412,40 @@ export function CampaignManager({
                     ))}
                   </Select>
                 </FormField>
+                {form.rewardMode === "MONEY_REWARD" ? (
+                  <>
+                    <FormField
+                      label="Kuota reward program (Rp)"
+                      htmlFor="c-budget"
+                      hint="Minimal Rp1. Wajib diisi sebelum program berhadiah diaktifkan saat penegakan dana aktif (tanpa kuota program tidak menerima setoran). Reservasi baru ditolak saat kuota habis."
+                    >
+                      <Input
+                        id="c-budget"
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={form.rewardBudgetRupiah}
+                        onChange={(e) => setForm((f) => ({ ...f, rewardBudgetRupiah: e.target.value }))}
+                        placeholder="misal 5000000"
+                      />
+                    </FormField>
+                    <FormField
+                      label="Batas reward per sesi mesin (Rp)"
+                      htmlFor="c-session-cap"
+                      hint="Minimal Rp1; dana sebesar ini direservasi setiap sesi setoran dimulai. Wajib diisi sebelum program berhadiah di mesin diaktifkan. Mode reward dan multiplier tidak dapat dinaikkan selama masih ada sesi/trip berjalan."
+                    >
+                      <Input
+                        id="c-session-cap"
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={form.maxRewardPerSessionRupiah}
+                        onChange={(e) => setForm((f) => ({ ...f, maxRewardPerSessionRupiah: e.target.value }))}
+                        placeholder="misal 20000"
+                      />
+                    </FormField>
+                  </>
+                ) : null}
               </div>
               <FormField label="Deskripsi" htmlFor="c-desc">
                 <Textarea

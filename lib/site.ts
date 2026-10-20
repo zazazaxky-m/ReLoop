@@ -12,3 +12,37 @@ export function siteUrl(): URL {
 export function absoluteUrl(path = "/"): string {
   return new URL(path, siteUrl()).toString();
 }
+
+/** Answer when links cannot be built safely (no configured base URL in production). */
+export const LINK_BASE_UNAVAILABLE = "Layanan sedang tidak tersedia. Coba lagi nanti.";
+
+/**
+ * Origin for links sent by email (password reset, account-deletion
+ * confirmation). Only the configured NEXT_PUBLIC_BASE_URL is trusted, never the
+ * request Host header, which the client controls: a forged Host would put a
+ * live token on the attacker's domain. Outside production an unset value falls
+ * back to the local default; in production (or with an unparsable value) this
+ * returns null and the caller must fail closed without sending anything.
+ */
+export function emailLinkBase(): string | null {
+  const configured = process.env.NEXT_PUBLIC_BASE_URL?.trim();
+  if (!configured) return process.env.NODE_ENV === "production" ? null : "http://localhost:3000";
+  try {
+    const url = new URL(configured);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The origin browsers use to reach this app (scheme://host[:port] of
+ * NEXT_PUBLIC_BASE_URL), under the same rules as emailLinkBase(): never derived
+ * from the request, local default outside production, null in production when
+ * unset or invalid. The proxy's CSRF Origin check trusts only this (P01).
+ */
+export function publicOrigin(): string | null {
+  const base = emailLinkBase();
+  return base ? new URL(base).origin : null;
+}

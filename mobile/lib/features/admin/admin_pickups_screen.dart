@@ -1,6 +1,8 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
+import '../../shared/format.dart';
 import '../../shared/widgets/reloop_card.dart';
 import '../../shared/widgets/reloop_button.dart';
 import '../../shared/widgets/status_badge.dart';
@@ -48,16 +50,66 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
     }
   }
 
-  Future<void> _act(String id, String action, {String? collectorUserId}) async {
+  /// B05: every dispatch decision carries the `version` this screen loaded.
+  Future<void> _act(Map<String, dynamic> pickup, String action,
+      {String? collectorUserId, String? reason, String? expectedStartAt}) async {
+    final id = (pickup['id'] as String?) ?? '';
     try {
       final api = context.read<ApiClient>();
       final body = <String, dynamic>{'action': action};
+      final version = (pickup['version'] as num?)?.toInt();
+      if (version != null) body['expectedVersion'] = version;
       if (collectorUserId != null) body['collectorUserId'] = collectorUserId;
+      if (reason != null) body['reason'] = reason;
+      if (expectedStartAt != null) body['expectedStartAt'] = expectedStartAt;
       await api.patch('/api/pickups/$id', data: body);
       await _load();
     } catch (e) {
       if (mounted) _showError(ApiClient.getErrorMessage(e));
+      // 409: another admin changed the task; show the current version.
+      if (e is DioException && e.response?.statusCode == 409 && mounted) await _load();
     }
+  }
+
+  Future<void> _createReplacement(String closedId) async {
+    try {
+      final api = context.read<ApiClient>();
+      await api.post('/api/pickups', data: {'replacesPickupId': closedId});
+      await _load();
+    } catch (e) {
+      if (mounted) _showError(ApiClient.getErrorMessage(e));
+    }
+  }
+
+  Future<void> _cancelPickup(Map<String, dynamic> pickup) async {
+    var reasonText = '';
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Batalkan pickup ini?'),
+        content: TextField(
+          onChanged: (v) => reasonText = v,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'Alasan pembatalan',
+            hintText: 'Wajib; dikirim ke pengepul yang ditugaskan',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Kembali')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, reasonText.trim()),
+            child: const Text('Batalkan Pickup'),
+          ),
+        ],
+      ),
+    );
+    if (reason == null || !mounted) return;
+    if (reason.length < 3) {
+      _showError('Alasan wajib diisi (3-500 karakter)');
+      return;
+    }
+    await _act(pickup, 'cancel', reason: reason);
   }
 
   Future<void> _createPickup() async {
@@ -136,35 +188,63 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
     }
   }
 
-  Future<void> _assignCollector(String pickupId) async {
+  Future<void> _assignCollector(Map<String, dynamic> pickup) async {
     String? collectorId;
+    DateTime? deadline;
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
           title: Text('Tugaskan Pengepul'),
-          content: DropdownButtonFormField<String>(
-            initialValue: collectorId,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Pengepul'),
-            items: [
-              const DropdownMenuItem(value: null, child: Text('Pilih pengepul...')),
-              ..._partners.map((p) {
-                final c = p['collectorUser'] as Map<String, dynamic>?;
-                final name = c?['name'] as String? ?? '';
-                final email = c?['email'] as String? ?? '';
-                final id = c?['id'] as String? ?? '';
-                return DropdownMenuItem(value: id, child: Text('$name ($email)', overflow: TextOverflow.ellipsis));
-              }),
-            ],
-            onChanged: (v) => setSt(() => collectorId = v),
-          ),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<String>(
+              initialValue: collectorId,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Pengepul'),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('Pilih pengepul...')),
+                ..._partners.map((p) {
+                  final c = p['collectorUser'] as Map<String, dynamic>?;
+                  final name = c?['name'] as String? ?? '';
+                  final email = c?['email'] as String? ?? '';
+                  final id = c?['id'] as String? ?? '';
+                  return DropdownMenuItem(value: id, child: Text('$name ($email)', overflow: TextOverflow.ellipsis));
+                }),
+              ],
+              onChanged: (v) => setSt(() => collectorId = v),
+            ),
+            const SizedBox(height: 12),
+            // B05: the start deadline is chosen by the admin; there is no default.
+            TextButton.icon(
+              icon: const Icon(Icons.schedule),
+              label: Text(deadline == null
+                  ? 'Tenggat mulai (opsional)'
+                  : 'Tenggat mulai: ${formatDateTime(deadline!)}'),
+              onPressed: () async {
+                final now = DateTime.now();
+                final day = await showDatePicker(
+                  context: ctx,
+                  initialDate: now,
+                  firstDate: now,
+                  lastDate: now.add(const Duration(days: 365)),
+                );
+                if (day == null || !ctx.mounted) return;
+                final time = await showTimePicker(context: ctx, initialTime: TimeOfDay.fromDateTime(now));
+                if (time == null || !ctx.mounted) return;
+                setSt(() => deadline = DateTime(day.year, day.month, day.day, time.hour, time.minute));
+              },
+            ),
+          ]),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Batal')),
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                if (collectorId != null) _act(pickupId, 'assign', collectorUserId: collectorId);
+                if (collectorId != null) {
+                  _act(pickup, 'assign',
+                      collectorUserId: collectorId,
+                      expectedStartAt: deadline?.toUtc().toIso8601String());
+                }
               },
               child: Text('Tugaskan'),
             ),
@@ -221,6 +301,12 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
     final priority = (pickup['priority'] as num?)?.toInt() ?? 0;
     final itemCount = (pickup['_count']?['items'] as num?)?.toInt() ?? 0;
     final id = (pickup['id'] as String?) ?? '';
+    final dispatch = pickup['dispatch'] as Map<String, dynamic>?;
+    final overdue = dispatch?['overdue'] == true;
+    final nextLabel = dispatch?['nextLabel'] as String?;
+    final assignedAt = pickup['assignedAt'] as String?;
+    final deadline = pickup['expectedStartAt'] as String?;
+    final closedReason = pickup['closedReason'] as String?;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -251,19 +337,48 @@ class _AdminPickupsScreenState extends State<AdminPickupsScreen> {
               _chip('${collector['name']}', context),
             ],
           ]),
+          // B05: who acts next (PIC), when they were dispatched and the admin's deadline.
+          if (nextLabel != null) ...[
+            const SizedBox(height: 6),
+            Text('Langkah berikutnya: $nextLabel',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: overdue ? FontWeight.w700 : FontWeight.w500,
+                    color: overdue ? ReLoopColors.statusError : context.reloopForeground)),
+          ],
+          if (collector != null)
+            Text('PIC: ${collector['name']}${assignedAt != null ? ' · ditugaskan ${formatDateTimeIso(assignedAt)}' : ''}',
+                style: TextStyle(fontSize: 11, color: context.reloopMuted)),
+          if (deadline != null || status == 'ASSIGNED')
+            Text(deadline != null
+                    ? 'Tenggat mulai: ${formatDateTimeIso(deadline)}${overdue ? ' (terlambat)' : ''}'
+                    : 'Tenggat mulai: tanpa tenggat',
+                style: TextStyle(fontSize: 11, color: overdue ? ReLoopColors.statusError : context.reloopMuted)),
+          if (closedReason != null)
+            Text('Alasan: $closedReason', style: TextStyle(fontSize: 11, color: context.reloopMuted)),
           if (pickup['notes'] != null) ...[
             const SizedBox(height: 4),
             Text(pickup['notes'] as String, maxLines: 2, overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 11, color: context.reloopMutedSoft, fontStyle: FontStyle.italic)),
           ],
-          if (status == 'REQUESTED' || status == 'ASSIGNED') ...[
+          if (['REQUESTED', 'ASSIGNED', 'ON_THE_WAY', 'ARRIVED'].contains(status)) ...[
             const SizedBox(height: 8),
             Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-              ReLoopButton(label: 'Tugaskan', variant: ReLoopButtonVariant.outline, size: ReLoopButtonSize.sm, expanded: false,
-                  onPressed: () => _assignCollector(id)),
-              const SizedBox(width: 8),
+              // Reassignment only before field work starts.
+              if (status == 'REQUESTED' || status == 'ASSIGNED') ...[
+                ReLoopButton(label: status == 'ASSIGNED' ? 'Ganti' : 'Tugaskan', variant: ReLoopButtonVariant.outline, size: ReLoopButtonSize.sm, expanded: false,
+                    onPressed: () => _assignCollector(pickup)),
+                const SizedBox(width: 8),
+              ],
               ReLoopButton(label: 'Batalkan', variant: ReLoopButtonVariant.ghost, size: ReLoopButtonSize.sm, expanded: false,
-                  onPressed: () => _act(id, 'cancel')),
+                  onPressed: () => _cancelPickup(pickup)),
+            ]),
+          ],
+          if (dispatch?['needsReplacement'] == true) ...[
+            const SizedBox(height: 8),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              ReLoopButton(label: 'Buat Pengganti', variant: ReLoopButtonVariant.outline, size: ReLoopButtonSize.sm, expanded: false,
+                  onPressed: () => _createReplacement(id)),
             ]),
           ],
         ]),

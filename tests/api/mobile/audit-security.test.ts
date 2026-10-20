@@ -110,4 +110,19 @@ describe('/api/mobile/audit-security GET', () => {
     const data = await res.json();
     expect(data.auditLogs[0].actor).toBeNull();
   });
+
+  it('serializes the BigInt chain position (A05) as a string instead of failing', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 's1', role: 'SUPERADMIN' } as any);
+    vi.mocked(prisma.auditLog.findMany).mockResolvedValue([
+      { id: 'al1', actorId: null, chainVersion: 2, chainSequence: 9007199254740993n },
+      { id: 'al2', actorId: null, chainVersion: 1, chainSequence: null },
+    ] as any);
+    vi.mocked(getSecurityEvents).mockResolvedValue([] as any);
+    vi.mocked(getSecuritySummary).mockResolvedValue({} as any);
+
+    const res = await GET(new Request('http://localhost/api/mobile/audit-security'));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.auditLogs.map((l: any) => [l.chainVersion, l.chainSequence])).toEqual([[2, '9007199254740993'], [1, null]]);
+  });
 });

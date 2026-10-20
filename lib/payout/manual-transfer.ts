@@ -1,4 +1,4 @@
-import type { PayoutProvider, PayoutResult } from "./types";
+import type { PayoutIdempotencyKey, PayoutProvider, PayoutResult } from "./types";
 
 /** MVP default: superadmin marks transfer manually in the admin UI. */
 export class ManualTransferProvider implements PayoutProvider {
@@ -7,7 +7,7 @@ export class ManualTransferProvider implements PayoutProvider {
   async disburse(_params: {
     accountIdentifier: string;
     amount: number;
-    idempotencyKey: string;
+    idempotencyKey: PayoutIdempotencyKey;
     note?: string;
   }): Promise<PayoutResult> {
     return {

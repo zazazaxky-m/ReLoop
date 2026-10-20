@@ -1,6 +1,8 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import bcrypt from "bcryptjs";
 import { randomUUID, createHash } from "node:crypto";
+import { appendAuditEntry } from "../lib/audit";
 import { generateIngestSecret } from "../lib/machine-auth";
 
 function token() {
@@ -11,16 +13,9 @@ const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
 const hoursAgo = (n: number) => new Date(Date.now() - n * 3_600_000);
 const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000);
 
-// ---------- Audit checksum chain helper ----------
-const AUDIT_CHECKSUM_SECRET = process.env.AUDIT_CHECKSUM_SECRET ?? "audit-secret-change-me";
-let lastAuditChecksum: string | null = null;
-
-function checksumChain(previousHash: string | null, payload: string): string {
-  return createHash("sha256")
-    .update(`${previousHash ?? ""}${payload}${AUDIT_CHECKSUM_SECRET}`)
-    .digest("hex");
-}
-
+// ---------- Audit chain helper ----------
+// Demo history goes through the production writer (lib/audit.ts), so the seeded
+// chain is a valid v2 chain; only the demo timestamps are backdated.
 async function seedAuditLog(input: {
   actorId?: string | null;
   action: string;
@@ -29,29 +24,8 @@ async function seedAuditLog(input: {
   metadata?: Record<string, unknown> | null;
   createdAt?: Date;
 }) {
-  const ts = input.createdAt ?? new Date();
-  const canonical = JSON.stringify({
-    ts: ts.toISOString(),
-    actor: input.actorId,
-    action: input.action,
-    entity: `${input.entityType}:${input.entityId}`,
-    meta: input.metadata,
-  });
-  const checksum = checksumChain(lastAuditChecksum, canonical);
-  const entry = await prisma.auditLog.create({
-    data: {
-      actorId: input.actorId ?? null,
-      action: input.action,
-      entityType: input.entityType,
-      entityId: input.entityId ?? null,
-      metadataJson: (input.metadata ?? undefined) as object | undefined,
-      previousHash: lastAuditChecksum,
-      checksum,
-      createdAt: ts,
-    },
-  });
-  lastAuditChecksum = checksum;
-  return entry;
+  const { createdAt, ...entry } = input;
+  return prisma.$transaction((tx) => appendAuditEntry(tx, entry, { createdAt }));
 }
 
 async function wipe() {
@@ -274,11 +248,13 @@ async function main() {
   // ==========================================================
   // Reward rates (global / per item)
   // ==========================================================
+  // Rates start before the oldest demo acceptance (20 days ago), so every recorded
+  // rate covers its item's acceptedAt (reviewItemsWithRateOutsideAcceptance stays empty).
   const rateOrganik = await prisma.rewardRate.create({
-    data: { wasteTypeId: organik.id, unit: "KG", pointsPerItem: 100, minWeightGrams: 100, maxWeightGrams: 50000, active: true },
+    data: { wasteTypeId: organik.id, unit: "KG", pointsPerItem: 100, minWeightGrams: 100, maxWeightGrams: 50000, active: true, effectiveFrom: daysAgo(60) },
   });
   const rateAnorganik = await prisma.rewardRate.create({
-    data: { wasteTypeId: anorganik.id, unit: "KG", pointsPerItem: 150, minWeightGrams: 100, maxWeightGrams: 50000, active: true },
+    data: { wasteTypeId: anorganik.id, unit: "KG", pointsPerItem: 150, minWeightGrams: 100, maxWeightGrams: 50000, active: true, effectiveFrom: daysAgo(60) },
   });
   // Campaign-specific boosted rate
   // (will be linked after campaign creation below)
@@ -403,7 +379,7 @@ async function main() {
 
   // Campaign-specific boosted reward rate
   await prisma.rewardRate.create({
-    data: { wasteTypeId: anorganik.id, campaignId: campaignPublic.id, organizationId: orgA.id, unit: "KG", pointsPerItem: 200, minWeightGrams: 100, maxWeightGrams: 50000, active: true },
+    data: { wasteTypeId: anorganik.id, campaignId: campaignPublic.id, organizationId: orgA.id, unit: "KG", pointsPerItem: 200, minWeightGrams: 100, maxWeightGrams: 50000, active: true, effectiveFrom: daysAgo(60) },
   });
 
   // ==========================================================
@@ -657,6 +633,41 @@ async function main() {
   // ==========================================================
   // Deposit sessions & items — User 1 (Warga Pangandaran)
   // ==========================================================
+  // Machine events need a per-machine unique localEventId (used below for the
+  // deposit flow, heartbeats and security events too).
+  let eventCounter = 0;
+  const localEvent = (prefix: string) => `${prefix}-${++eventCounter}`;
+
+  /**
+   * Acceptance contract (M04, lib/machine-events/acceptance.ts): every item
+   * the machine accepted, or held for review at its acceptance point, carries
+   * the ITEM_ACCEPTED_POINT event that priced it (`acceptanceEventId`), the
+   * time (`acceptedAt`) and the rate (`rewardRateId`); its EARN is keyed
+   * `deposit-item:<id>:earn`. Demo rows follow the same shape so that
+   * `npm run reconcile:wallet` lists none of them as legacy rows.
+   */
+  const recordAcceptance = async (input: {
+    machine: { id: string; machineCode: string };
+    sessionId: string;
+    itemId: string;
+    occurredAt: Date;
+    payload: Prisma.InputJsonObject;
+  }) => {
+    const event = await prisma.machineEvent.create({
+      data: {
+        machineId: input.machine.id, sessionId: input.sessionId, depositItemId: input.itemId,
+        localEventId: localEvent(`ACCEPT-${input.machine.machineCode}`),
+        eventType: "ITEM_ACCEPTED_POINT",
+        payloadJson: input.payload,
+        occurredAt: input.occurredAt, receivedAt: new Date(input.occurredAt.getTime() + 500),
+      },
+    });
+    await prisma.depositItem.update({ where: { id: input.itemId }, data: { acceptanceEventId: event.id } });
+    return event;
+  };
+  // Same key as lib/ledger.ts depositItemEarnKey (kept inline: the seed does not load the app's Next-bound modules).
+  const earnKey = (depositItemId: string) => `deposit-item:${depositItemId}:earn`;
+
   const sessionA = await prisma.depositSession.create({
     data: {
       userId: user.id, machineId: m1.id, campaignId: campaignPublic.id, status: "COMPLETED",
@@ -669,10 +680,12 @@ async function main() {
   const a2 = await prisma.depositItem.create({
     data: { sessionId: sessionA.id, wasteTypeId: anorganik.id, quantity: 16, measuredWeightGrams: 180, rewardRateId: rateAnorganik.id, rewardAmount: 4000, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(2), createdAt: daysAgo(2) },
   });
+  // a1's acceptance event is part of the full deposit flow seeded below.
+  await recordAcceptance({ machine: m1, sessionId: sessionA.id, itemId: a2.id, occurredAt: new Date(daysAgo(2).getTime() + 30000), payload: { rewardAmount: 4000, wasteType: "Anorganik" } });
   await prisma.rewardLedger.createMany({
     data: [
-      { userId: user.id, organizationId: orgA.id, sessionId: sessionA.id, depositItemId: a1.id, campaignId: campaignPublic.id, entryType: "EARN", amount: 4000, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: a1.id, createdAt: daysAgo(2) },
-      { userId: user.id, organizationId: orgA.id, sessionId: sessionA.id, depositItemId: a2.id, campaignId: campaignPublic.id, entryType: "EARN", amount: 4000, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: a2.id, createdAt: daysAgo(2) },
+      { userId: user.id, organizationId: orgA.id, sessionId: sessionA.id, depositItemId: a1.id, campaignId: campaignPublic.id, entryType: "EARN", amount: 4000, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: a1.id, businessKey: earnKey(a1.id), createdAt: daysAgo(2) },
+      { userId: user.id, organizationId: orgA.id, sessionId: sessionA.id, depositItemId: a2.id, campaignId: campaignPublic.id, entryType: "EARN", amount: 4000, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: a2.id, businessKey: earnKey(a2.id), createdAt: daysAgo(2) },
     ],
   });
 
@@ -688,15 +701,24 @@ async function main() {
   const b2 = await prisma.depositItem.create({
     data: { sessionId: sessionB.id, wasteTypeId: anorganik.id, quantity: 6, measuredWeightGrams: 140, rewardRateId: rateAnorganik.id, rewardAmount: 1500, status: "ACCEPTED", source: "PYTHON_SIMULATOR", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(1), createdAt: daysAgo(1) },
   });
-  // Anomaly item: reward held PENDING for review.
+  // Anomaly item (2.7 kg, inside the Anorganik window). Timeline, as the
+  // machine-event code produces it: the FRAUD_DETECTED below (a retrieval
+  // attempt, REVERSE_MOTION, at +25 s) put the session under review and
+  // flagged the still-pending item; at its acceptance point (+30 s) the policy
+  // then held 50% of the base reward as EARN/PENDING with reason
+  // ANOMALY_REVIEW (lib/machine-events/acceptance.ts overwrites the fraud
+  // reason at acceptance; the flag stays).
   const b3 = await prisma.depositItem.create({
-    data: { sessionId: sessionB.id, wasteTypeId: anorganik.id, quantity: 1, measuredWeightGrams: 90000, rewardAmount: 200, status: "REVIEW", source: "PYTHON_SIMULATOR", validationReasonCode: "WEIGHT_OVER_MAX_OR_STRING_PULL", externalFraudFlag: true, createdAt: daysAgo(1) },
+    data: { sessionId: sessionB.id, wasteTypeId: anorganik.id, quantity: 1, measuredWeightGrams: 2700, rewardRateId: rateAnorganik.id, baseRewardAmount: 400, complianceMultiplier: 0.5, rewardAmount: 200, status: "REVIEW", source: "PYTHON_SIMULATOR", validationReasonCode: "ANOMALY_REVIEW", externalFraudFlag: true, acceptedAt: daysAgo(1), createdAt: daysAgo(1) },
   });
+  await recordAcceptance({ machine: m1, sessionId: sessionB.id, itemId: b1.id, occurredAt: new Date(daysAgo(1).getTime() + 10000), payload: { rewardAmount: 3000, wasteType: "Organik" } });
+  await recordAcceptance({ machine: m1, sessionId: sessionB.id, itemId: b2.id, occurredAt: new Date(daysAgo(1).getTime() + 20000), payload: { rewardAmount: 1500, wasteType: "Anorganik" } });
+  await recordAcceptance({ machine: m1, sessionId: sessionB.id, itemId: b3.id, occurredAt: new Date(daysAgo(1).getTime() + 30000), payload: { rewardAmount: 200, wasteType: "Anorganik", review: "ANOMALY_REVIEW" } });
   await prisma.rewardLedger.createMany({
     data: [
-      { userId: user.id, organizationId: orgA.id, sessionId: sessionB.id, depositItemId: b1.id, entryType: "EARN", amount: 3000, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: b1.id, createdAt: daysAgo(1) },
-      { userId: user.id, organizationId: orgA.id, sessionId: sessionB.id, depositItemId: b2.id, entryType: "EARN", amount: 1500, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: b2.id, createdAt: daysAgo(1) },
-      { userId: user.id, organizationId: orgA.id, sessionId: sessionB.id, depositItemId: b3.id, entryType: "EARN", amount: 200, status: "PENDING", reasonCode: "ANOMALY_REVIEW", referenceType: "DepositItem", referenceId: b3.id, createdAt: daysAgo(1) },
+      { userId: user.id, organizationId: orgA.id, sessionId: sessionB.id, depositItemId: b1.id, entryType: "EARN", amount: 3000, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: b1.id, businessKey: earnKey(b1.id), createdAt: daysAgo(1) },
+      { userId: user.id, organizationId: orgA.id, sessionId: sessionB.id, depositItemId: b2.id, entryType: "EARN", amount: 1500, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: b2.id, businessKey: earnKey(b2.id), createdAt: daysAgo(1) },
+      { userId: user.id, organizationId: orgA.id, sessionId: sessionB.id, depositItemId: b3.id, entryType: "EARN", amount: 200, status: "PENDING", reasonCode: "ANOMALY_REVIEW", referenceType: "DepositItem", referenceId: b3.id, businessKey: earnKey(b3.id), createdAt: daysAgo(1) },
     ],
   });
 
@@ -715,10 +737,12 @@ async function main() {
   const c2 = await prisma.depositItem.create({
     data: { sessionId: sessionC.id, wasteTypeId: anorganik.id, quantity: 8, measuredWeightGrams: 350, rewardRateId: rateAnorganik.id, rewardAmount: 2400, status: "ACCEPTED", source: "MACHINE", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(3), createdAt: daysAgo(3) },
   });
+  await recordAcceptance({ machine: m3, sessionId: sessionC.id, itemId: c1.id, occurredAt: new Date(daysAgo(3).getTime() + 10000), payload: { rewardAmount: 2000, wasteType: "Organik" } });
+  await recordAcceptance({ machine: m3, sessionId: sessionC.id, itemId: c2.id, occurredAt: new Date(daysAgo(3).getTime() + 20000), payload: { rewardAmount: 2400, wasteType: "Anorganik" } });
   await prisma.rewardLedger.createMany({
     data: [
-      { userId: user2.id, organizationId: orgB.id, sessionId: sessionC.id, depositItemId: c1.id, campaignId: campaignSchool.id, entryType: "EARN", amount: 2000, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: c1.id, createdAt: daysAgo(3) },
-      { userId: user2.id, organizationId: orgB.id, sessionId: sessionC.id, depositItemId: c2.id, campaignId: campaignSchool.id, entryType: "EARN", amount: 2400, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: c2.id, createdAt: daysAgo(3) },
+      { userId: user2.id, organizationId: orgB.id, sessionId: sessionC.id, depositItemId: c1.id, campaignId: campaignSchool.id, entryType: "EARN", amount: 2000, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: c1.id, businessKey: earnKey(c1.id), createdAt: daysAgo(3) },
+      { userId: user2.id, organizationId: orgB.id, sessionId: sessionC.id, depositItemId: c2.id, campaignId: campaignSchool.id, entryType: "EARN", amount: 2400, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: c2.id, businessKey: earnKey(c2.id), createdAt: daysAgo(3) },
     ],
   });
 
@@ -765,8 +789,9 @@ async function main() {
   const d1 = await prisma.depositItem.create({
     data: { sessionId: sessionD.id, wasteTypeId: anorganik.id, quantity: 25, measuredWeightGrams: 600, rewardRateId: rateAnorganik.id, rewardAmount: 7500, status: "ACCEPTED", source: "MACHINE", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(5), createdAt: daysAgo(5) },
   });
+  await recordAcceptance({ machine: m1, sessionId: sessionD.id, itemId: d1.id, occurredAt: new Date(daysAgo(5).getTime() + 10000), payload: { rewardAmount: 7500, wasteType: "Anorganik" } });
   await prisma.rewardLedger.create({
-    data: { userId: user3.id, organizationId: orgA.id, sessionId: sessionD.id, depositItemId: d1.id, campaignId: campaignPublic.id, entryType: "EARN", amount: 7500, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: d1.id, createdAt: daysAgo(5) },
+    data: { userId: user3.id, organizationId: orgA.id, sessionId: sessionD.id, depositItemId: d1.id, campaignId: campaignPublic.id, entryType: "EARN", amount: 7500, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: d1.id, businessKey: earnKey(d1.id), createdAt: daysAgo(5) },
   });
 
   const sessionE = await prisma.depositSession.create({
@@ -778,8 +803,9 @@ async function main() {
   const e1 = await prisma.depositItem.create({
     data: { sessionId: sessionE.id, wasteTypeId: organik.id, quantity: 12, measuredWeightGrams: 400, rewardRateId: rateOrganik.id, rewardAmount: 2400, status: "ACCEPTED", source: "MACHINE", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(4), createdAt: daysAgo(4) },
   });
+  await recordAcceptance({ machine: m2, sessionId: sessionE.id, itemId: e1.id, occurredAt: new Date(daysAgo(4).getTime() + 10000), payload: { rewardAmount: 2400, wasteType: "Organik" } });
   await prisma.rewardLedger.create({
-    data: { userId: user3.id, organizationId: orgA.id, sessionId: sessionE.id, depositItemId: e1.id, entryType: "EARN", amount: 2400, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: e1.id, createdAt: daysAgo(4) },
+    data: { userId: user3.id, organizationId: orgA.id, sessionId: sessionE.id, depositItemId: e1.id, entryType: "EARN", amount: 2400, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: e1.id, businessKey: earnKey(e1.id), createdAt: daysAgo(4) },
   });
 
   // Historical session from ended campaign
@@ -792,8 +818,9 @@ async function main() {
   const f1 = await prisma.depositItem.create({
     data: { sessionId: sessionF.id, wasteTypeId: organik.id, quantity: 30, measuredWeightGrams: 800, rewardRateId: rateOrganik.id, rewardAmount: 6000, status: "ACCEPTED", source: "MACHINE", validationReasonCode: "ACCEPTED", acceptedAt: daysAgo(20), createdAt: daysAgo(20) },
   });
+  await recordAcceptance({ machine: m1, sessionId: sessionF.id, itemId: f1.id, occurredAt: new Date(daysAgo(20).getTime() + 10000), payload: { rewardAmount: 6000, wasteType: "Organik" } });
   await prisma.rewardLedger.create({
-    data: { userId: user.id, organizationId: orgA.id, sessionId: sessionF.id, depositItemId: f1.id, campaignId: campaignEnded.id, entryType: "EARN", amount: 6000, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: f1.id, createdAt: daysAgo(20) },
+    data: { userId: user.id, organizationId: orgA.id, sessionId: sessionF.id, depositItemId: f1.id, campaignId: campaignEnded.id, entryType: "EARN", amount: 6000, status: "AVAILABLE", reasonCode: "DEPOSIT_ACCEPTED", referenceType: "DepositItem", referenceId: f1.id, businessKey: earnKey(f1.id), createdAt: daysAgo(20) },
   });
 
   // ==========================================================
@@ -891,8 +918,7 @@ async function main() {
   // ==========================================================
   // Machine Events (heartbeats, deposit flow, security events)
   // ==========================================================
-  let eventCounter = 0;
-  const localEvent = (prefix: string) => `${prefix}-${++eventCounter}`;
+  // (localEvent / recordAcceptance are defined with the deposit sessions above.)
 
   // --- Heartbeats (recent) ---
   for (const m of [m1, m2, m3]) {
@@ -943,14 +969,8 @@ async function main() {
       occurredAt: new Date(daysAgo(2).getTime() + 12000), receivedAt: new Date(daysAgo(2).getTime() + 12500),
     },
   });
-  await prisma.machineEvent.create({
-    data: {
-      machineId: m1.id, sessionId: sessionA.id, depositItemId: a1.id, localEventId: localEvent("SESS-A"),
-      eventType: "ITEM_ACCEPTED_POINT",
-      payloadJson: { rewardAmount: 4000, wasteType: "Organik" },
-      occurredAt: new Date(daysAgo(2).getTime() + 15000), receivedAt: new Date(daysAgo(2).getTime() + 15500),
-    },
-  });
+  // The acceptance point that priced a1 (acceptance contract: a1.acceptanceEventId points at it).
+  await recordAcceptance({ machine: m1, sessionId: sessionA.id, itemId: a1.id, occurredAt: new Date(daysAgo(2).getTime() + 15000), payload: { rewardAmount: 4000, wasteType: "Organik" } });
   await prisma.machineEvent.create({
     data: {
       machineId: m1.id, sessionId: sessionA.id, localEventId: localEvent("SESS-A"),
@@ -979,18 +999,22 @@ async function main() {
   });
 
   // --- Security events (fraud & vandalism for superadmin dashboard) ---
+  // b3's fraud signal: a retrieval attempt on the 2.7 kg item, reported
+  // before its acceptance point (see the b3 comment above). Same payload
+  // shape as rvm/controller.py report_fraud("REVERSE_MOTION", ...).
+  const b3FraudAt = new Date(daysAgo(1).getTime() + 25000);
   await prisma.machineEvent.create({
     data: {
       machineId: m1.id, sessionId: sessionB.id, depositItemId: b3.id,
       localEventId: localEvent("FRAUD-M1"),
       eventType: "FRAUD_DETECTED",
       payloadJson: {
-        reason: "WEIGHT_OVER_MAX_OR_STRING_PULL",
-        measuredWeightGrams: 90000,
-        maxWeightGrams: 50000,
+        reason: "REVERSE_MOTION",
+        retrievalAttempt: true,
+        measuredWeightGrams: 2700,
         confidence: 0.97,
       },
-      occurredAt: daysAgo(1), receivedAt: daysAgo(1),
+      occurredAt: b3FraudAt, receivedAt: new Date(b3FraudAt.getTime() + 500),
     },
   });
   await prisma.machineEvent.create({
@@ -1085,13 +1109,13 @@ async function main() {
       sessionId: sessionB.id,
       localCaptureId: "cap-m1-003",
       kind: "fraud_alert",
-      reason: "weight_anomaly",
+      reason: "reverse_motion",
       scenePath: `machines/${m1.machineCode}/captures/scene-003.jpg`,
       facePathsJson: [`machines/${m1.machineCode}/captures/face-003-a.jpg`, `machines/${m1.machineCode}/captures/face-003-b.jpg`],
-      metadataJson: { fraudType: "WEIGHT_OVER_MAX_OR_STRING_PULL", measuredWeight: 90000 },
+      metadataJson: { fraudType: "REVERSE_MOTION", retrievalAttempt: true, measuredWeight: 2700, depositItemId: b3.id },
       faceCount: 2,
       personDetected: true,
-      occurredAt: daysAgo(1),
+      occurredAt: b3FraudAt,
     },
   });
   await prisma.machineCapture.create({
@@ -1455,8 +1479,8 @@ async function main() {
     actorId: null,
     action: "FRAUD_DETECTED",
     entityType: "MachineEvent",
-    metadata: { machineCode: "RLP-001", reason: "WEIGHT_OVER_MAX_OR_STRING_PULL", sessionId: sessionB.id },
-    createdAt: daysAgo(1),
+    metadata: { machineCode: "RLP-001", reason: "REVERSE_MOTION", sessionId: sessionB.id, depositItemId: b3.id, measuredWeightGrams: 2700 },
+    createdAt: b3FraudAt,
   });
   await seedAuditLog({
     actorId: superadmin.id,

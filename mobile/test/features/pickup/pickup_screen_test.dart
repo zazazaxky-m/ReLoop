@@ -59,7 +59,6 @@ void main() {
 
   void stubCollectorApis({
     List<Map<String, dynamic>>? pickups,
-    List<Map<String, dynamic>>? available,
   }) {
     when(() => mockApi.get('/api/pickups', queryParameters: {'scope': 'collector'}))
         .thenAnswer(
@@ -96,18 +95,7 @@ void main() {
         },
       ),
     );
-    when(() => mockApi.get('/api/pickups', queryParameters: {'scope': 'available'}))
-        .thenAnswer(
-      (_) async => Response(
-        requestOptions: RequestOptions(path: '/api/pickups'),
-        data: {
-          'pickups': available ??
-              [
-                pickup(id: 'av1', status: 'REQUESTED'),
-              ],
-        },
-      ),
-    );
+    // B05: no `scope: available` stub; the screen must never ask for a claim pool.
   }
 
   Widget buildApp() {
@@ -136,12 +124,34 @@ void main() {
     expect(find.text('P1'), findsOneWidget);
   });
 
-  testWidgets('assigns available task', (tester) async {
+  testWidgets('admin dispatch: no self-claim tab, empty state waits for admin', (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 1800));
-    stubCollectorApis();
-    when(() => mockApi.patch('/api/pickups/av1', data: any(named: 'data'))).thenAnswer(
+    stubCollectorApis(pickups: []);
+
+    await tester.pumpWidget(buildApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Menunggu penugasan admin'), findsOneWidget);
+    expect(find.textContaining('Admin organisasi mitra menugaskan'), findsOneWidget);
+    expect(find.text('Tersedia'), findsNothing);
+    expect(find.text('Ambil Tugas Ini'), findsNothing);
+    verifyNever(() => mockApi.get('/api/pickups', queryParameters: {'scope': 'available'}));
+  });
+
+  testWidgets('field steps carry the loaded version and show the admin deadline', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1800));
+    stubCollectorApis(pickups: [
+      {
+        ...pickup(id: 'pk1', status: 'ASSIGNED'),
+        'version': 4,
+        'assignedAt': '2026-10-14T01:00:00.000Z',
+        'expectedStartAt': '2026-10-14T03:00:00.000Z',
+        'dispatch': {'nextLabel': 'Menunggu pengepul berangkat', 'overdue': false},
+      },
+    ]);
+    when(() => mockApi.patch('/api/pickups/pk1', data: any(named: 'data'))).thenAnswer(
       (_) async => Response(
-        requestOptions: RequestOptions(path: '/api/pickups/av1'),
+        requestOptions: RequestOptions(path: '/api/pickups/pk1'),
         data: {'ok': true},
       ),
     );
@@ -149,14 +159,13 @@ void main() {
     await tester.pumpWidget(buildApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Tersedia'));
-    await tester.pumpAndSettle();
-    expect(find.text('Ambil Tugas Ini'), findsOneWidget);
+    expect(find.text('Langkah berikutnya: Menunggu pengepul berangkat'), findsOneWidget);
+    expect(find.textContaining('Tenggat mulai:'), findsOneWidget);
+    expect(find.textContaining('Ditugaskan admin'), findsOneWidget);
 
-    await tester.tap(find.text('Ambil Tugas Ini'));
+    await tester.tap(find.text('Mulai Perjalanan'));
     await tester.pumpAndSettle();
-
-    verify(() => mockApi.patch('/api/pickups/av1', data: {'action': 'assign'})).called(1);
+    verify(() => mockApi.patch('/api/pickups/pk1', data: {'action': 'start', 'expectedVersion': 4})).called(1);
   });
 
   testWidgets('starts assigned pickup and confirms fail cancel', (tester) async {
@@ -237,13 +246,6 @@ void main() {
     when(() => mockApi.get('/api/waste-types')).thenThrow(
       DioException(
         requestOptions: RequestOptions(path: '/api/waste-types'),
-        type: DioExceptionType.connectionError,
-      ),
-    );
-    when(() => mockApi.get('/api/pickups', queryParameters: {'scope': 'available'}))
-        .thenThrow(
-      DioException(
-        requestOptions: RequestOptions(path: '/api/pickups'),
         type: DioExceptionType.connectionError,
       ),
     );
@@ -348,10 +350,28 @@ void main() {
     await tester.tap(find.text('Gagal'));
     await tester.pumpAndSettle();
     expect(find.text('Gagalkan Pickup?'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'Alasan gagal'), 'Mobil mogok');
     await tester.tap(find.text('Ya, Gagalkan'));
     await tester.pumpAndSettle();
-    verify(() => mockApi.patch('/api/pickups/pk1', data: {'action': 'fail'}))
+    verify(() => mockApi.patch('/api/pickups/pk1', data: {'action': 'fail', 'reason': 'Mobil mogok'}))
         .called(1);
+  });
+
+  testWidgets('fail without a reason is not sent', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1800));
+    stubCollectorApis(
+      pickups: [pickup(id: 'pk1', status: 'ASSIGNED')],
+    );
+
+    await tester.pumpWidget(buildApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Gagal'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ya, Gagalkan'));
+    await tester.pumpAndSettle();
+    expect(find.text('Alasan wajib diisi (3-500 karakter)'), findsOneWidget);
+    verifyNever(() => mockApi.patch(any(), data: any(named: 'data')));
   });
 
   testWidgets('reason labels and empty tabs', (tester) async {
@@ -371,17 +391,12 @@ void main() {
           'reason': 'MANUAL',
         },
       ],
-      available: [],
     );
 
     await tester.pumpWidget(buildApp());
     await tester.pumpAndSettle();
 
     expect(find.text('Terjadwal'), findsOneWidget);
-
-    await tester.tap(find.text('Tersedia'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Tidak ada tugas baru'), findsOneWidget);
 
     await tester.tap(find.text('Selesai/Gagal'));
     await tester.pumpAndSettle();
@@ -439,7 +454,7 @@ void main() {
     }
   });
 
-  testWidgets('non-pengepul skips available scope', (tester) async {
+  testWidgets('never requests a self-claim pool (non-pengepul)', (tester) async {
     when(() => mockAuth.user).thenReturn(
       CurrentUser(
         id: 'u1',
@@ -491,9 +506,10 @@ void main() {
     await tester.tap(find.text('Gagal'));
     await tester.pumpAndSettle();
     expect(find.text('Gagalkan Pickup?'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'Alasan gagal'), 'Akses ditutup');
     await tester.tap(find.text('Ya, Gagalkan'));
     await tester.pumpAndSettle();
-    verify(() => mockApi.patch('/api/pickups/pk1', data: {'action': 'fail'}))
+    verify(() => mockApi.patch('/api/pickups/pk1', data: {'action': 'fail', 'reason': 'Akses ditutup'}))
         .called(1);
   });
 
@@ -557,6 +573,7 @@ void main() {
 
     await tester.tap(find.text('Gagal'));
     await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Alasan gagal'), 'Mobil mogok');
     await tester.tap(find.text('Ya, Gagalkan'));
     await tester.pumpAndSettle();
     expect(

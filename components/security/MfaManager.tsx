@@ -23,14 +23,80 @@ interface SetupPayload {
   otpauthUrl: string;
   qrDataUrl?: string;
   message?: string;
+  /** True when an active factor is being replaced (it stays active until confirm). */
+  replacement?: boolean;
+  expiresAt?: string;
+}
+
+/** Proof forms shown while MFA is active. */
+type ProofMode = "idle" | "replace" | "disable";
+
+function CodeInput({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <FormField label={label} htmlFor={id} required>
+      <Input
+        id={id}
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        pattern="[0-9]{6}"
+        maxLength={6}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, ""))}
+        placeholder="000000"
+        required
+      />
+    </FormField>
+  );
+}
+
+function PasswordInput({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <FormField label="Password saat ini" htmlFor={id} required>
+      <Input
+        id={id}
+        type="password"
+        autoComplete="current-password"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required
+      />
+    </FormField>
+  );
+}
+
+function expiryLabel(expiresAt?: string): string | null {
+  if (!expiresAt) return null;
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
 
 export function MfaManager() {
   const router = useRouter();
   const [status, setStatus] = useState<MfaStatus | null>(null);
   const [setup, setSetup] = useState<SetupPayload | null>(null);
+  const [mode, setMode] = useState<ProofMode>("idle");
+  const [password, setPassword] = useState("");
+  const [currentCode, setCurrentCode] = useState("");
   const [enableCode, setEnableCode] = useState("");
-  const [disableCode, setDisableCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -51,20 +117,40 @@ export function MfaManager() {
     return () => window.clearTimeout(id);
   }, [loadStatus]);
 
-  async function startSetup() {
+  function resetProof(nextMode: ProofMode = "idle") {
+    setMode(nextMode);
+    setPassword("");
+    setCurrentCode("");
+    setError(null);
+    setMessage(null);
+  }
+
+  /** First setup (password) or replacement (password + code of the active factor). */
+  async function startSetup(e: React.FormEvent) {
+    e.preventDefault();
     setBusy(true);
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/auth/mfa/setup", { method: "POST" });
+      const body = status?.mfaEnabled
+        ? { currentPassword: password, currentCode }
+        : { currentPassword: password };
+      const res = await fetch("/api/auth/mfa/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       const data = await res.json();
+      setCurrentCode("");
       if (!res.ok) {
         setError(data?.error ?? "Gagal memulai setup MFA");
         return;
       }
+      setPassword("");
+      setMode("idle");
       setSetup(data);
       setEnableCode("");
-      setMessage("Scan QR di aplikasi authenticator, lalu masukkan kode 6 digit.");
+      setMessage(data?.message ?? "Scan QR di aplikasi authenticator, lalu masukkan kode 6 digit.");
     } catch {
       setError("Tidak dapat terhubung ke server");
     } finally {
@@ -84,15 +170,44 @@ export function MfaManager() {
         body: JSON.stringify({ code: enableCode }),
       });
       const data = await res.json();
+      setEnableCode("");
       if (!res.ok) {
+        // 409: the setup expired or was cancelled; the active factor is unchanged.
+        if (res.status === 409) setSetup(null);
         setError(data?.error ?? "Kode MFA tidak valid");
         return;
       }
       setSetup(null);
-      setEnableCode("");
-      setMessage("MFA berhasil diaktifkan.");
+      setMessage(data?.message ?? "MFA berhasil diaktifkan.");
       await loadStatus();
       router.refresh();
+    } catch {
+      setError("Tidak dapat terhubung ke server");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Discards only the pending setup; an active factor keeps working. */
+  async function cancelSetup() {
+    const replacement = Boolean(setup?.replacement);
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/auth/mfa/setup", { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error ?? "Gagal membatalkan setup MFA");
+        return;
+      }
+      setSetup(null);
+      setEnableCode("");
+      setMessage(
+        replacement
+          ? "Penggantian dibatalkan. Perangkat MFA lama tetap aktif."
+          : "Setup MFA dibatalkan.",
+      );
     } catch {
       setError("Tidak dapat terhubung ke server");
     } finally {
@@ -109,15 +224,17 @@ export function MfaManager() {
       const res = await fetch("/api/auth/mfa/disable", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: disableCode }),
+        body: JSON.stringify({ currentPassword: password, code: currentCode }),
       });
       const data = await res.json();
+      setCurrentCode("");
       if (!res.ok) {
-        setError(data?.error ?? "Kode MFA tidak valid");
+        setError(data?.error ?? "Password atau kode MFA tidak valid");
         return;
       }
-      setDisableCode("");
-      setMessage("MFA berhasil dinonaktifkan.");
+      setPassword("");
+      setMode("idle");
+      setMessage(data?.message ?? "MFA berhasil dinonaktifkan.");
       await loadStatus();
       router.refresh();
     } catch {
@@ -136,6 +253,8 @@ export function MfaManager() {
       </Card>
     );
   }
+
+  const expiry = expiryLabel(setup?.expiresAt);
 
   return (
     <div className="space-y-4">
@@ -161,29 +280,14 @@ export function MfaManager() {
             </div>
           ) : null}
 
-          {status.mfaEnabled ? (
-            <form onSubmit={disableMfa} className="space-y-3">
-              <p className="text-sm text-muted">
-                MFA aktif. Masukkan kode dari aplikasi authenticator untuk menonaktifkan.
-              </p>
-              <FormField label="Kode MFA" htmlFor="disable-code" required>
-                <Input
-                  id="disable-code"
-                  inputMode="numeric"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  value={disableCode}
-                  onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, ""))}
-                  placeholder="000000"
-                  required
-                />
-              </FormField>
-              <Button type="submit" variant="secondary" disabled={busy}>
-                {busy ? "Memproses..." : "Nonaktifkan MFA"}
-              </Button>
-            </form>
-          ) : setup ? (
+          {setup ? (
             <form onSubmit={enableMfa} className="space-y-4">
+              <p className="text-sm text-muted">
+                {setup.replacement
+                  ? "Penggantian perangkat MFA. Perangkat lama tetap aktif sampai kode dari perangkat baru dikonfirmasi."
+                  : "Setup MFA pertama. MFA baru aktif setelah kode dikonfirmasi."}
+                {expiry ? ` Setup ini berlaku sampai pukul ${expiry}.` : null}
+              </p>
               {setup.qrDataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -197,43 +301,87 @@ export function MfaManager() {
                 <p className="mt-1 break-all font-mono">{setup.secret}</p>
                 <p className="mt-2 break-all">{setup.otpauthUrl}</p>
               </div>
-              <FormField label="Kode verifikasi" htmlFor="enable-code" required>
-                <Input
-                  id="enable-code"
-                  inputMode="numeric"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  value={enableCode}
-                  onChange={(e) => setEnableCode(e.target.value.replace(/\D/g, ""))}
-                  placeholder="000000"
-                  required
-                />
-              </FormField>
+              <CodeInput
+                id="enable-code"
+                label={setup.replacement ? "Kode dari perangkat baru" : "Kode verifikasi"}
+                value={enableCode}
+                onChange={setEnableCode}
+              />
               <div className="flex flex-wrap gap-2">
                 <Button type="submit" disabled={busy}>
-                  {busy ? "Memverifikasi..." : "Aktifkan MFA"}
+                  {busy
+                    ? "Memverifikasi..."
+                    : setup.replacement
+                      ? "Konfirmasi penggantian"
+                      : "Aktifkan MFA"}
                 </Button>
                 <Button
                   type="button"
                   variant="secondary"
                   disabled={busy}
-                  onClick={() => setSetup(null)}
+                  onClick={() => void cancelSetup()}
                 >
                   Batal
                 </Button>
               </div>
             </form>
+          ) : status.mfaEnabled ? (
+            mode === "idle" ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted">
+                  MFA aktif. Mengganti perangkat atau menonaktifkan MFA memerlukan password dan
+                  kode dari aplikasi authenticator yang aktif. Jika perangkat hilang, hubungi
+                  tim operasional ReLoop untuk pemulihan dengan verifikasi identitas.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => resetProof("replace")} disabled={busy}>
+                    Ganti perangkat authenticator
+                  </Button>
+                  <Button variant="secondary" onClick={() => resetProof("disable")} disabled={busy}>
+                    Nonaktifkan MFA
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={mode === "replace" ? startSetup : disableMfa} className="space-y-3">
+                <p className="text-sm text-muted">
+                  {mode === "replace"
+                    ? "Konfirmasi identitas Anda. Perangkat lama tetap aktif sampai perangkat baru dikonfirmasi."
+                    : "Konfirmasi identitas Anda untuk menonaktifkan MFA. Sesi di perangkat lain akan dikeluarkan."}
+                </p>
+                <PasswordInput id="mfa-current-password" value={password} onChange={setPassword} />
+                <CodeInput
+                  id="mfa-current-code"
+                  label="Kode MFA saat ini"
+                  value={currentCode}
+                  onChange={setCurrentCode}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button type="submit" variant={mode === "disable" ? "danger" : "primary"} disabled={busy}>
+                    {busy
+                      ? "Memproses..."
+                      : mode === "replace"
+                        ? "Lanjutkan penggantian"
+                        : "Nonaktifkan MFA"}
+                  </Button>
+                  <Button type="button" variant="secondary" disabled={busy} onClick={() => resetProof("idle")}>
+                    Batal
+                  </Button>
+                </div>
+              </form>
+            )
           ) : (
-            <div className="space-y-3">
+            <form onSubmit={startSetup} className="space-y-3">
               <p className="text-sm text-muted">
                 {status.requiredForRole
-                  ? "Akun admin disarankan mengaktifkan MFA sebelum mengelola operasi sensitif."
+                  ? "Akun admin disarankan mengaktifkan MFA sebelum mengelola operasi sensitif. Masukkan password untuk memulai."
                   : "MFA hanya tersedia untuk peran admin."}
               </p>
-              <Button onClick={() => void startSetup()} disabled={busy}>
+              <PasswordInput id="mfa-setup-password" value={password} onChange={setPassword} />
+              <Button type="submit" disabled={busy}>
                 {busy ? "Menyiapkan..." : "Mulai setup MFA"}
               </Button>
-            </div>
+            </form>
           )}
         </CardContent>
       </Card>

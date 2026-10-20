@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { CheckCircle } from "@/components/ui/icons";
+import { safeNextPath } from "@/lib/link-token";
 
 export const metadata: Metadata = {
   title: "Masuk",
@@ -12,9 +13,9 @@ export const metadata: Metadata = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reset?: string }>;
+  searchParams: Promise<{ reset?: string; next?: string }>;
 }) {
-  const { reset } = await searchParams;
+  const { reset, next } = await searchParams;
 
   return (
     <div className="space-y-7">
@@ -35,7 +36,7 @@ export default async function LoginPage({
           Kata sandi berhasil diperbarui. Silakan masuk.
         </div>
       ) : null}
-      <AuthForm mode="login" />
+      <AuthForm mode="login" next={safeNextPath(next)} />
     </div>
   );
 }

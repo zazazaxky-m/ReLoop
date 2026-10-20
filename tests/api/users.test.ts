@@ -97,6 +97,13 @@ describe('/api/users API', () => {
       expect(res.status).toBe(422);
     });
 
+    it('refuses the reserved erased-account domain (422)', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin' } as any);
+      const res = await POST(makePostReq({ name: 'Test', email: 'erased-x@invalid.reloop', password: 'password1234', role: 'USER' }));
+      expect(res.status).toBe(422);
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
     it('fails if email already registered (409)', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'admin' } as any);
       vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'existing' } as any);
@@ -136,6 +143,8 @@ describe('/api/users API', () => {
         data: expect.objectContaining({ email: 'new@a.com', role: 'USER', passwordHash: 'hashed' })
       }));
       expect(audit.logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'USER_CREATE', actorId: 'admin' }));
+      const created = vi.mocked(audit.logAudit).mock.calls.find(([entry]) => entry.action === 'USER_CREATE')![0];
+      expect(JSON.stringify(created).toLowerCase()).not.toContain('new@a.com');
     });
 
     it('creates PENGEPUL with organizationId successfully', async () => {

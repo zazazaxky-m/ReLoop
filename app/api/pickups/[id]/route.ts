@@ -1,20 +1,35 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { requireApiUser, HttpError } from "@/lib/rbac";
+import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import {
-  requireApiUser,
-  assertActivePartnership,
-  HttpError,
-} from "@/lib/rbac";
-import { handleApiError, jsonOk } from "@/lib/api";
-import { resolvePickupTransition, type PickupAction } from "@/lib/pickup";
-import { logAudit } from "@/lib/audit";
-import { createNotification } from "@/lib/notifications";
+  PickupDispatchError,
+  assignPickup,
+  escalateOnAdminRead,
+  transitionPickup,
+  versionRequired,
+  withDispatch,
+} from "@/lib/pickup-dispatch";
 
 const patchSchema = z.object({
   action: z.enum(["assign", "start", "arrive", "collect", "complete", "fail", "cancel"]),
-  collectorUserId: z.string().optional(),
+  /** Existing request field; stored as PickupRequest.assignedCollectorId. */
+  collectorUserId: z.string().max(128).optional(),
+  /** B05: the PickupRequest.version the client last saw (compare-and-set). */
+  expectedVersion: z.number().int().min(0).max(2_147_483_647).optional(),
+  /** B05 (assign): start deadline chosen by the operator, ISO-8601 with offset. */
+  expectedStartAt: z.string().max(64).nullable().optional(),
+  /** B05 (cancel/fail): required reason. */
+  reason: z.string().max(1000).optional(),
   notes: z.string().max(500).optional(),
 });
+
+function pickupErrorResponse(error: unknown) {
+  if (error instanceof PickupDispatchError) {
+    return jsonError(error.status, error.message, { code: error.code });
+  }
+  return handleApiError(error);
+}
 
 export async function GET(
   _req: Request,
@@ -24,6 +39,9 @@ export async function GET(
     const user = await requireApiUser(["ADMIN", "PENGEPUL", "SUPERADMIN"]);
     const { id } = await params;
 
+    // B05: admin detail reads run the once-per-version overdue escalation.
+    await escalateOnAdminRead(user, { pickupIds: [id] });
+
     const pickup = await prisma.pickupRequest.findUnique({
       where: { id },
       include: {
@@ -31,6 +49,7 @@ export async function GET(
         organization: { select: { id: true, name: true, address: true, contactName: true, contactPhone: true } },
         assignedCollector: { select: { id: true, name: true, phone: true } },
         items: { include: { wasteType: { select: { name: true } } } },
+        replacedBy: { select: { id: true, status: true } },
       },
     });
     if (!pickup) throw new HttpError(404, "Pickup tidak ditemukan");
@@ -43,7 +62,7 @@ export async function GET(
       throw new HttpError(403, "Pickup tidak ditugaskan kepada Anda");
     }
 
-    return jsonOk({ pickup });
+    return jsonOk({ pickup: withDispatch(pickup) });
   } catch (error) {
     return handleApiError(error);
   }
@@ -58,88 +77,30 @@ export async function PATCH(
     const { id } = await params;
     const body = patchSchema.parse(await req.json());
 
-    const pickup = await prisma.pickupRequest.findUnique({ where: { id } });
-    if (!pickup) throw new HttpError(404, "Pickup tidak ditemukan");
-
-    const isOrgAdmin =
-      user.role === "ADMIN" && user.organizationId === pickup.organizationId;
-    const isAssignedCollector = pickup.assignedCollectorId === user.id;
-
-    if (user.role === "ADMIN" && !isOrgAdmin) {
-      throw new HttpError(403, "Di luar scope organisasi Anda");
-    }
-
-    const resolution = resolvePickupTransition(body.action as PickupAction, {
-      status: pickup.status,
-      role: user.role,
-      isAssignedCollector,
-      isOrgAdmin,
-    });
-    if (!resolution.ok) {
-      throw new HttpError(409, resolution.error!);
-    }
-
-    // --- assign: validate the collector has an ACTIVE partnership ---
-    let assignedCollectorId = pickup.assignedCollectorId;
-    let collectorPartnerId = pickup.collectorPartnerId;
+    let pickup;
     if (body.action === "assign") {
-      if (!body.collectorUserId) throw new HttpError(422, "collectorUserId wajib diisi");
-      const partner = await assertActivePartnership(
-        body.collectorUserId,
-        pickup.organizationId,
-      );
-      assignedCollectorId = body.collectorUserId;
-      collectorPartnerId = partner.id;
-    }
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const row = await tx.pickupRequest.update({
-        where: { id },
-        data: {
-          status: resolution.to!,
-          assignedCollectorId,
-          collectorPartnerId,
-          notes: body.notes ?? undefined,
-        },
-      });
-
-      // On completion, reset the machine so it can accept deposits again.
-      if (body.action === "complete" && pickup.machineId) {
-        const machine = await tx.machine.findUnique({ where: { id: pickup.machineId } });
-        if (machine) {
-          await tx.machine.update({
-            where: { id: pickup.machineId },
-            data: {
-              fillLevelPercent: 0,
-              status: machine.status === "FULL" ? "ONLINE" : machine.status,
-            },
-          });
-        }
+      if (user.role !== "ADMIN" && user.role !== "SUPERADMIN") {
+        throw new HttpError(403, "Penugasan pengepul dilakukan oleh admin organisasi");
       }
-
-      return row;
-    });
-
-    if (body.action === "assign" && assignedCollectorId) {
-      await createNotification({
-        userId: assignedCollectorId,
-        type: "PICKUP_ASSIGNED",
-        title: "Tugas pickup baru",
-        body: "Anda ditugaskan untuk mengambil setoran dari sebuah mesin. Cek daftar tugas Anda.",
-        data: { pickupId: id },
+      // No permissive fallback: a dispatch decision always carries the operator's version.
+      if (body.expectedVersion === undefined) throw versionRequired();
+      if (!body.collectorUserId) throw new HttpError(422, "collectorUserId wajib diisi");
+      pickup = await assignPickup(user, id, {
+        collectorId: body.collectorUserId,
+        expectedVersion: body.expectedVersion,
+        expectedStartAt: body.expectedStartAt ?? undefined,
+      });
+    } else {
+      pickup = await transitionPickup(user, id, {
+        action: body.action,
+        expectedVersion: body.expectedVersion,
+        reason: body.reason,
+        notes: body.notes,
       });
     }
 
-    await logAudit({
-      actorId: user.id,
-      action: `PICKUP_${body.action.toUpperCase()}`,
-      entityType: "PickupRequest",
-      entityId: id,
-      metadata: { from: pickup.status, to: resolution.to, assignedCollectorId },
-    });
-
-    return jsonOk({ pickup: updated });
+    return jsonOk({ pickup: withDispatch(pickup) });
   } catch (error) {
-    return handleApiError(error);
+    return pickupErrorResponse(error);
   }
 }

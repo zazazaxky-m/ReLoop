@@ -10,6 +10,8 @@ import {
   canValidateTripStage,
   getTripTravelAgentGateBlockReason,
   getInvitedTravelAgentTripFilters,
+  aggregateBagCondition,
+  evaluateTripBags,
 } from "@/lib/trip";
 import { prisma } from "@/lib/prisma";
 
@@ -201,6 +203,48 @@ describe("trip", () => {
         getTripTravelAgentGateBlockReason({ travelAgentId: "ta1", organizationId: "org1" }),
       ).resolves.toMatch(/ditangguhkan atau dihapus/);
     });
+
+    it("reads the link through a transaction client when one is given", async () => {
+      const tx = { travelAgentOrganization: { findUnique: vi.fn().mockResolvedValue({ status: "INVITED" }) } };
+      await expect(
+        getTripTravelAgentGateBlockReason({ travelAgentId: "ta1", organizationId: "org1" }, tx as any),
+      ).resolves.toBeNull();
+      expect(tx.travelAgentOrganization.findUnique).toHaveBeenCalled();
+      expect(prisma.travelAgentOrganization.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("aggregateBagCondition", () => {
+    it("ignores unreviewed bags and derives the trip condition", () => {
+      expect(aggregateBagCondition([])).toBeNull();
+      expect(aggregateBagCondition([null, undefined])).toBeNull();
+      expect(aggregateBagCondition(["NOT_RETURNED", "NOT_RETURNED", null])).toBe("NOT_RETURNED");
+      expect(aggregateBagCondition(["GOOD", null, "GOOD"])).toBe("GOOD");
+      expect(aggregateBagCondition(["GOOD", "POOR", "PARTIAL"])).toBe("POOR");
+      expect(aggregateBagCondition(["GOOD", "PARTIAL"])).toBe("PARTIAL");
+      expect(aggregateBagCondition(["GOOD", "NOT_RETURNED"])).toBe("PARTIAL");
+    });
+  });
+
+  describe("evaluateTripBags", () => {
+    it("scores and prices a trip from its bag rows only (one row = one unit)", () => {
+      expect(evaluateTripBags({ statuses: ["GOOD", "POOR", "PARTIAL", null], appCompleted: true,
+        rewardMode: "MONEY_REWARD", hasRecipient: true, rewardMultiplier: null })).toEqual({
+        assignedCount: 4, reviewedCount: 3, returnedCount: 3, rewardableCount: 2, conditionStatus: "POOR",
+        // app 30 + some returned 20 + POOR 0 = 50 -> 2 x 2.000 x 50%.
+        compliance: { score: 50, status: "NEEDS_REVIEW" }, rewardAmount: 2_000 });
+    });
+
+    it("earns nothing without a recipient, for COMPLIANCE_ONLY, or without rewardable bags", () => {
+      const base = { statuses: ["GOOD"] as const, appCompleted: true, rewardMultiplier: 2 };
+      expect(evaluateTripBags({ ...base, rewardMode: "MONEY_REWARD", hasRecipient: true }).rewardAmount).toBe(4_000);
+      expect(evaluateTripBags({ ...base, rewardMode: "MONEY_REWARD", hasRecipient: false }).rewardAmount).toBe(0);
+      expect(evaluateTripBags({ ...base, rewardMode: "COMPLIANCE_ONLY", hasRecipient: true }).rewardAmount).toBe(0);
+      expect(evaluateTripBags({ statuses: ["NOT_RETURNED"], appCompleted: false, rewardMode: "MONEY_REWARD",
+        hasRecipient: true }).rewardAmount).toBe(0);
+      expect(evaluateTripBags({ statuses: [], appCompleted: true, rewardMode: "MONEY_REWARD", hasRecipient: true }))
+        .toMatchObject({ assignedCount: 0, reviewedCount: 0, conditionStatus: null, rewardAmount: 0 });
+    });
   });
 
   describe("getInvitedTravelAgentTripFilters", () => {
@@ -222,6 +266,11 @@ describe("trip", () => {
       await expect(getInvitedTravelAgentTripFilters("u1")).resolves.toEqual([
         { travelAgentId: "ta1", organizationId: "org1" },
       ]);
+      // A03: only memberships verified from the invited mailbox, by a verified account email.
+      expect(prisma.travelAgentUser.findMany).toHaveBeenCalledWith({
+        where: { userId: "u1", verifiedAt: { not: null }, user: { emailVerifiedAt: { not: null } } },
+        select: { travelAgentId: true },
+      });
       expect(prisma.travelAgentOrganization.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { travelAgentId: { in: ["ta1", "ta2"] }, status: "INVITED" },

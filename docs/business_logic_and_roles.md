@@ -73,14 +73,16 @@ Ditujukan untuk **Rombongan Bus Pariwisata** (misal rombongan study tour atau wi
 5.  **Validasi & Reward:** Admin men-scan QR code di kantong tersebut. Sistem otomatis tahu bahwa kantong ini milik Trip A (yang dipimpin Tour Guide A). Admin menimbang berat total sampah, menyimpannya di gudang, lalu menyetujui validasinya.
 6.  **Pencairan (Redeem):** Poin hasil timbangan langsung masuk ke akun si Tour Guide. Tour Guide bisa menggunakan poin ini untuk membeli suvenir, atau menjadikannya komisi pribadi. (Wisatawan mendapat keuntungan intrinsik berwisata secara ramah lingkungan).
 
-### Skenario C: Penjemputan Sampah Massal (Pickup by Pengepul)
+### Skenario C: Penjemputan Sampah Massal (Pickup, dispatch oleh Admin)
 Melanjutkan dari Skenario A & B, sampah yang terkumpul akhirnya menumpuk di tempat wisata.
-1.  Saat gudang atau Mesin Pintar sudah penuh, sistem otomatis memberi alert atau Admin menekan tombol **Request Pickup**.
-2.  Notifikasi Pickup masuk ke aplikasi Mobile para **Pengepul** di wilayah tersebut.
-3.  Seorang Pengepul (Self-Assign) mengambil *task* tersebut, lalu menyalakan status **"On The Way"**.
-4.  Pengepul tiba dengan mobil pick-up, memuat berkarung-karung sampah (yang sudah di-scan & diverifikasi oleh sistem) ke atas mobil.
-5.  Pengepul menekan tombol **Collect** di aplikasinya, mencatat total muatan, dan menyelesaikan tugasnya.
-6.  Pengepul membayar Admin wisata atas sampah curah tersebut.
+Pickup memakai model **dispatch admin**: setiap tugas dimiliki tepat satu Pengepul yang ditugaskan Admin. Pengepul **tidak** mengambil (self-assign/klaim) tugas sendiri.
+1.  Saat gudang atau Mesin Pintar sudah penuh, sistem membuat permintaan pickup (status **Diminta**) dan memberi notifikasi kepada Admin organisasi, atau Admin menekan tombol **Buat Pickup**.
+2.  **Admin** (atau Superadmin) menugaskan satu **Pengepul** yang kemitraannya **ACTIVE** dengan organisasi tersebut, dan boleh menentukan **tenggat mulai**. Tidak ada tenggat bawaan; tenggat dipilih Admin saat dispatch. Notifikasi tugas hanya dikirim ke Pengepul yang ditugaskan.
+3.  Pengepul yang ditugaskan menyalakan status **"Dalam Perjalanan"**, lalu **Tiba**, **Ambil** (mencatat muatan) dan **Selesai**. Hanya pengepul yang sedang ditugaskan, dengan kemitraan yang masih aktif, yang dapat menjalankan langkah ini.
+4.  Admin hanya dapat **mengganti** Pengepul sebelum pekerjaan lapangan dimulai (status Diminta/Ditugaskan). Pengepul lama diberi tahu dan langkahnya ditolak sejak itu. Setelah Pengepul berangkat, penggantian dilakukan dengan **Batalkan** (Admin, sebelum material dimuat) atau **Gagal** (Pengepul). Keduanya **wajib disertai alasan** yang dicatat di audit, lalu Admin membuat **tugas pengganti** yang tertaut ke tugas lama (satu pengganti per tugas).
+5.  Jika tenggat mulai terlewati tanpa keberangkatan, tugas ditandai **terlambat** dan Admin aktif organisasi itu menerima satu peringatan per versi penugasan. Sistem tidak pernah menugaskan ulang otomatis; Admin yang memutuskan.
+6.  Setiap keputusan membawa versi tugas yang dilihat operator (`expectedVersion`). Keputusan dari tampilan lama ditolak dengan pesan "Tugas telah diperbarui; muat ulang" (detail kontrak: `docs/mobile-api.md`, bagian "Pickup dispatch (B05)").
+7.  Pengepul membayar Admin wisata atas sampah curah tersebut.
 
 ---
 

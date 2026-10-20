@@ -39,6 +39,7 @@ export default async function SuperadminWasteTypesPage() {
     maxWeightGrams: w.maxWeightGrams,
     defaultRewardPerItem: w.defaultRewardPerItem,
     description: w.description,
+    aiAcceptedLabels: w.aiAcceptedLabels ?? [],
     active: w.active,
     organizationId: w.organizationId,
     organizationName: w.organizationId ? (orgNameById.get(w.organizationId) ?? null) : null,

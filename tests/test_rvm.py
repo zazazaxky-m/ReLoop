@@ -21,6 +21,19 @@ from rvm.controller import MachineState, RvmController, SIMULATION_SCENARIOS
 from rvm.database import EdgeDatabase
 from rvm.hardware import MockHardware
 from rvm.sync import SyncWorker
+from rvm.lease import policy_version, sign_lease_v2
+
+
+def v2_lease(controller, lease_id: str, session_id: str, now: int, ttl: int = 60) -> dict:
+    """A signed lease v2 without a money bound, for this controller's machine (B01b)."""
+    policy = {"version": 1, "mode": "COMPLIANCE_ONLY", "multiplierBps": 10000, "wasteTypes": []}
+    lease = sign_lease_v2(controller.config.machine_secret, {
+        "id": lease_id, "machineCode": controller.config.machine_code, "sessionId": session_id, "userRef": None,
+        "issuedAt": int(now), "expiresAt": int(now) + ttl, "reservationId": None,
+        "policyVersion": policy_version(policy), "ceilingRupiah": None, "maxItems": None,
+    })
+    lease["policy"] = policy
+    return lease
 
 
 class DatabaseTest(unittest.TestCase):
@@ -187,6 +200,9 @@ class ControllerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             controller = self.make_controller(tmp)
             controller.config.camera_enabled = True
+            # An enabled camera is part of the interlock: it must be online
+            # before a lease may open the gate.
+            controller.camera.status.online = True
             captures = []
             controller._capture_camera_evidence = (
                 lambda kind, reason, session_id: captures.append(
@@ -194,18 +210,7 @@ class ControllerTest(unittest.TestCase):
                 )
             )
             now = int(time.time())
-            lease = {
-                "id": "lease-capture-hooks",
-                "sessionId": "session-capture-hooks",
-                "issuedAt": now,
-                "expiresAt": now + 60,
-            }
-            canonical = ".".join(
-                str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
-            )
-            lease["signature"] = hmac.new(
-                b"test-secret", canonical.encode(), hashlib.sha256
-            ).hexdigest()
+            lease = v2_lease(controller, "lease-capture-hooks", "session-capture-hooks", now)
             self.assertTrue(controller.activate_lease(lease))
             controller.report_fraud("REVERSE_MOTION", {})
             controller.enter_safe_state("HIGH_IMPACT_DETECTED", {})
@@ -227,16 +232,7 @@ class ControllerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             controller = self.make_controller(tmp)
             now = int(time.time())
-            lease = {
-                "id": "lease-1",
-                "sessionId": "session-1",
-                "issuedAt": now,
-                "expiresAt": now + 60,
-            }
-            canonical = ".".join(str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt"))
-            lease["signature"] = hmac.new(
-                b"test-secret", canonical.encode(), hashlib.sha256
-            ).hexdigest()
+            lease = v2_lease(controller, "lease-1", "session-1", now)
             self.assertTrue(controller.activate_lease(lease))
             self.assertEqual(controller.state, MachineState.SESSION_ACTIVE)
             controller.db.close()
@@ -276,18 +272,7 @@ class ControllerTest(unittest.TestCase):
             hardware = controller.hardware
             self.assertIsInstance(hardware, MockHardware)
             now = int(time.time())
-            lease = {
-                "id": "lease-camera",
-                "sessionId": "session-camera",
-                "issuedAt": now,
-                "expiresAt": now + 60,
-            }
-            canonical = ".".join(
-                str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
-            )
-            lease["signature"] = hmac.new(
-                b"test-secret", canonical.encode(), hashlib.sha256
-            ).hexdigest()
+            lease = v2_lease(controller, "lease-camera", "session-camera", now)
             self.assertTrue(controller.activate_lease(lease))
 
             hardware.patch(item_present=True)
@@ -308,18 +293,7 @@ class ControllerTest(unittest.TestCase):
             hardware = controller.hardware
             self.assertIsInstance(hardware, MockHardware)
             now = int(time.time())
-            lease = {
-                "id": "lease-can",
-                "sessionId": "session-can",
-                "issuedAt": now,
-                "expiresAt": now + 60,
-            }
-            canonical = ".".join(
-                str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
-            )
-            lease["signature"] = hmac.new(
-                b"test-secret", canonical.encode(), hashlib.sha256
-            ).hexdigest()
+            lease = v2_lease(controller, "lease-can", "session-can", now)
             self.assertTrue(controller.activate_lease(lease))
             controller._simulation_waste_type_key = "anorganik"
             hardware.patch(item_present=True)
@@ -336,18 +310,7 @@ class ControllerTest(unittest.TestCase):
             controller = self.make_controller(tmp)
             hardware = controller.hardware
             now = int(time.time())
-            lease = {
-                "id": "lease-kiosk",
-                "sessionId": "session-kiosk",
-                "issuedAt": now,
-                "expiresAt": now + 60,
-            }
-            canonical = ".".join(
-                str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
-            )
-            lease["signature"] = hmac.new(
-                b"test-secret", canonical.encode(), hashlib.sha256
-            ).hexdigest()
+            lease = v2_lease(controller, "lease-kiosk", "session-kiosk", now)
             self.assertTrue(controller.activate_lease(lease))
 
             # Selecting a waste type while no session is active must fail.
@@ -389,18 +352,7 @@ class ControllerTest(unittest.TestCase):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
                 controller = self.make_controller(tmp)
                 now = int(time.time())
-                lease = {
-                    "id": f"lease-{scenario}",
-                    "sessionId": f"session-{scenario}",
-                    "issuedAt": now,
-                    "expiresAt": now + 60,
-                }
-                canonical = ".".join(
-                    str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
-                )
-                lease["signature"] = hmac.new(
-                    b"test-secret", canonical.encode(), hashlib.sha256
-                ).hexdigest()
+                lease = v2_lease(controller, f"lease-{scenario}", f"session-{scenario}", now)
                 self.assertTrue(controller.activate_lease(lease))
                 controller.start()
                 try:
@@ -467,18 +419,7 @@ class ControllerTest(unittest.TestCase):
             hardware = controller.hardware
             self.assertIsInstance(hardware, MockHardware)
             now = int(time.time())
-            lease = {
-                "id": "lease-telemetry",
-                "sessionId": "session-telemetry",
-                "issuedAt": now,
-                "expiresAt": now + 60,
-            }
-            canonical = ".".join(
-                str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
-            )
-            lease["signature"] = hmac.new(
-                b"test-secret", canonical.encode(), hashlib.sha256
-            ).hexdigest()
+            lease = v2_lease(controller, "lease-telemetry", "session-telemetry", now)
             self.assertTrue(controller.activate_lease(lease))
 
             for values in (

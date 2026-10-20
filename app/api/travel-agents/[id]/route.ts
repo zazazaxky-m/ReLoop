@@ -37,7 +37,7 @@ export async function PATCH(
     if (link.status === "PENDING" && data.organizationStatus !== "REMOVED") {
       throw new HttpError(
         422,
-        "Agent PENDING hanya bisa dihapus dari daftar, atau menunggu akun terdaftar",
+        "Agent PENDING hanya bisa dihapus dari daftar, atau menunggu undangan diterima",
       );
     }
 

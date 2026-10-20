@@ -9,7 +9,7 @@ import { logAudit } from "@/lib/audit";
 import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { dashboardPath, type AppRole } from "@/lib/roles";
-import { verifyMfaChallenge, verifyMfaLoginCode } from "@/lib/mfa";
+import { consumeMfaChallenge, MfaChallengeStoreUnavailable, verifyMfaChallenge, verifyMfaLoginCode } from "@/lib/mfa";
 
 const schema = z.object({
   challengeToken: z.string().min(1),
@@ -23,6 +23,7 @@ export async function POST(req: Request) {
   try {
     const ip = getClientIp(req);
     const rl = await checkRateLimit(`mfa-verify:${ip}`, RATE_LIMIT, RATE_WINDOW_MS);
+    if (rl.unavailable) return jsonError(503, "Layanan masuk sementara tidak tersedia. Silakan coba lagi.");
     if (!rl.allowed) {
       return jsonError(429, "Terlalu banyak percobaan MFA. Coba lagi nanti.");
     }
@@ -46,6 +47,13 @@ export async function POST(req: Request) {
     const user = await prisma.user.findUnique({ where: { id: challenge.userId } });
     if (!user || user.status !== "ACTIVE") {
       return jsonError(403, "Akun tidak aktif");
+    }
+
+    if (user.tokenVersion !== challenge.tokenVersion || !user.mfaEnabled) {
+      return jsonError(401, "Sesi MFA tidak valid. Silakan login ulang.");
+    }
+    if (!await consumeMfaChallenge(challenge.challengeId, challenge.expiresAt)) {
+      return jsonError(401, "Sesi MFA tidak valid. Silakan login ulang.");
     }
 
     await setSessionCookie(
@@ -72,6 +80,7 @@ export async function POST(req: Request) {
       redirectTo: dashboardPath(user.role as AppRole),
     });
   } catch (error) {
+    if (error instanceof MfaChallengeStoreUnavailable) return jsonError(503, error.message);
     return handleApiError(error);
   }
 }

@@ -5,33 +5,50 @@ attributes."""
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
-from .states import MachineState
+from .states import MachineState, describe_interlocks
+
+logger = logging.getLogger(__name__)
 
 
 class RvmRemoteMixin:
     def _remote_loop(self) -> None:
+        # This thread is the only executor of remote STOP_ALL: a failed poll or
+        # report is logged and retried on the next 2 s pass, never fatal, so
+        # the latency documented in rvm/README.md still holds.
+        errors = 0
         while self.running:
-            command = self.sync.fetch_remote_command()
-            if command:
-                command_id = str(command.get("id", ""))
-                cached = self.db.get_json(f"remote_result:{command_id}")
-                if cached:
-                    self.sync.report_remote_command(command_id, **cached)
-                else:
-                    try:
-                        result = self.execute_remote_command(
-                            str(command.get("command", "")),
-                            dict(command.get("payload") or {}),
-                        )
-                        report = {"success": True, "result": result, "error": None}
-                    except Exception as exc:
-                        report = {"success": False, "result": {}, "error": str(exc)}
-                    self.db.set_json(f"remote_result:{command_id}", report)
-                    self.sync.report_remote_command(command_id, **report)
+            try:
+                self._poll_remote_command()
+                errors = 0
+            except Exception:
+                errors += 1
+                if errors == 1:
+                    logger.error("remote command poll failed", exc_info=True)
             time.sleep(2)
+
+    def _poll_remote_command(self) -> None:
+        command = self.sync.fetch_remote_command()
+        if not command:
+            return
+        command_id = str(command.get("id", ""))
+        cached = self.db.get_json(f"remote_result:{command_id}")
+        if cached:
+            self.sync.report_remote_command(command_id, **cached)
+            return
+        try:
+            result = self.execute_remote_command(
+                str(command.get("command", "")),
+                dict(command.get("payload") or {}),
+            )
+            report = {"success": True, "result": result, "error": None}
+        except Exception as exc:
+            report = {"success": False, "result": {}, "error": str(exc)}
+        self.db.set_json(f"remote_result:{command_id}", report)
+        self.sync.report_remote_command(command_id, **report)
 
     def _remote_snapshot(self) -> dict[str, Any]:
         state = self.public_state()
@@ -42,65 +59,83 @@ class RvmRemoteMixin:
         self, command: str, payload: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         payload = payload or {}
-        with self._lock:
-            if command == "REFRESH_STATE":
-                pass
-            elif command == "CAPTURE_SNAPSHOT":
-                if not self.config.camera_enabled:
-                    raise ValueError("Kamera mesin tidak aktif")
-                evidence = self.camera.capture_evidence(
-                    "REMOTE", "SUPERADMIN_SNAPSHOT", self.session_id()
-                )
-                if not evidence:
-                    raise ValueError("Frame kamera belum tersedia")
-                self.db.enqueue_capture(evidence)
-                self.sync.flush_captures()
-            elif command == "SYNC_NOW":
-                self.sync.flush_once()
-                self.sync.flush_captures()
-            elif command == "STOP_ALL":
-                self.hardware.all_stop()
-            elif command == "OPEN_GATE":
-                if self.state != MachineState.SESSION_ACTIVE or not self.db.active_lease():
-                    raise ValueError("Gate hanya dapat dibuka saat sesi aktif")
-                if self._active_alert:
-                    raise ValueError("Gate tidak dapat dibuka selama alert aktif")
-                self.hardware.set_input_gate(True)
-            elif command == "CLOSE_GATE":
-                self.hardware.set_input_gate(False)
-            elif command == "RESET_ALERT":
-                sensor = self.hardware.read()
-                unsafe = []
-                if sensor.service_panel_open:
-                    unsafe.append("service panel masih terbuka")
-                if sensor.collection_door_open:
-                    unsafe.append("pintu kolektor masih terbuka")
-                if sensor.vibration_g >= self.config.vibration_threshold_g:
-                    unsafe.append("getaran masih tinggi")
-                if sensor.temperature_c >= self.config.max_temperature_c:
-                    unsafe.append("suhu masih tinggi")
-                if self.config.camera_enabled and not self.camera.status.online:
-                    unsafe.append("kamera masih offline")
-                if self.config.camera_enabled and self.camera.status.occluded:
-                    unsafe.append("kamera masih tertutup")
-                if unsafe:
-                    raise ValueError("Reset ditolak: " + ", ".join(unsafe))
-                self._reset_mock_state(deactivate_lease=False)
-            elif command == "ENTER_MAINTENANCE":
-                self.hardware.all_stop()
-                self.set_state(MachineState.MAINTENANCE, "remote-superadmin")
-            elif command == "RESUME_OPERATION":
-                if self.db.get_json("safe_reason") or self._active_alert:
-                    raise ValueError("Reset alert sebelum melanjutkan operasi")
-                if self.db.active_lease():
-                    self.set_state(MachineState.SESSION_ACTIVE, "remote-resume")
-                    self.hardware.set_input_gate(True)
-                else:
-                    self.set_state(MachineState.IDLE, "remote-resume")
-            else:
-                raise ValueError("Perintah remote tidak diizinkan")
-            self.db.audit(
-                "REMOTE_COMMAND_EXECUTED",
-                {"command": command, "payload": payload},
+        if command == "STOP_ALL":
+            # Outputs off at once, never behind the controller lock; then once
+            # more under it so a guarded write already in flight cannot leave
+            # an output running after STOP_ALL returns. A failed stop latches
+            # SAFE_STATE and is reported back as a failed command.
+            self._safe_all_stop()
+            with self._lock:
+                if not self._safe_all_stop():
+                    raise RuntimeError(
+                        "STOP_ALL gagal: output tidak dapat dimatikan, mesin dikunci di safe state"
+                    )
+        elif command in {"CAPTURE_SNAPSHOT", "SYNC_NOW"}:
+            # Camera and network I/O: run outside the safety critical section
+            # so a slow or hanging server never delays the sensor loop,
+            # safe-state entry or STOP_ALL.
+            self._execute_io_command(command)
+        else:
+            with self._lock:
+                self._execute_state_command(command)
+        self.db.audit(
+            "REMOTE_COMMAND_EXECUTED",
+            {"command": command, "payload": payload},
+        )
+        return self._remote_snapshot()
+
+    def _execute_io_command(self, command: str) -> None:
+        if command == "CAPTURE_SNAPSHOT":
+            if not self.config.camera_enabled:
+                raise ValueError("Kamera mesin tidak aktif")
+            evidence = self.camera.capture_evidence(
+                "REMOTE", "SUPERADMIN_SNAPSHOT", self.session_id()
             )
-            return self._remote_snapshot()
+            if not evidence:
+                raise ValueError("Frame kamera belum tersedia")
+            self.db.enqueue_capture(evidence)
+            self.sync.flush_captures()
+        else:  # SYNC_NOW
+            self.sync.flush_once()
+            self.sync.flush_captures()
+
+    def _execute_state_command(self, command: str) -> None:
+        if command == "REFRESH_STATE":
+            pass
+        elif command == "OPEN_GATE":
+            if self.state != MachineState.SESSION_ACTIVE or not self.db.active_lease():
+                raise ValueError("Gate hanya dapat dibuka saat sesi aktif")
+            if self._active_alert:
+                raise ValueError("Gate tidak dapat dibuka selama alert aktif")
+            if self._gate_bound_block():
+                raise ValueError("Gate tidak dapat dibuka: batas sesi sudah tercapai")
+            if not self.try_open_input_gate("remote-open-gate"):
+                raise ValueError("Gate tidak dapat dibuka: interlock keselamatan aktif")
+        elif command == "CLOSE_GATE":
+            self._close_output(lambda: self.hardware.set_input_gate(False))
+        elif command == "RESET_ALERT":
+            unsafe = self._unsafe_conditions(self.hardware.read())
+            if unsafe:
+                raise ValueError("Reset ditolak: " + describe_interlocks(unsafe))
+            self._reset_mock_state(deactivate_lease=False)
+        elif command == "ENTER_MAINTENANCE":
+            if not self._safe_all_stop():
+                raise RuntimeError(
+                    "Output tidak dapat dimatikan, mesin dikunci di safe state"
+                )
+            self.set_state(MachineState.MAINTENANCE, "remote-superadmin")
+        elif command == "RESUME_OPERATION":
+            if self.db.get_json("safe_reason") or self._active_alert:
+                raise ValueError("Reset alert sebelum melanjutkan operasi")
+            # Leave maintenance only with every output confirmed stopped.
+            if not self._safe_all_stop():
+                raise RuntimeError(
+                    "Output tidak dapat dimatikan, mesin dikunci di safe state"
+                )
+            if self.db.active_lease():
+                self.set_state(MachineState.SESSION_ACTIVE, "remote-resume")
+                self.try_open_input_gate("remote-resume")
+            else:
+                self.set_state(MachineState.IDLE, "remote-resume")
+        else:
+            raise ValueError("Perintah remote tidak diizinkan")

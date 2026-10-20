@@ -59,6 +59,18 @@ export function emailLookupHash(email: string): string {
     .digest("hex");
 }
 
+/**
+ * Keyed, non-reversible fingerprint of `value` (HMAC-SHA256 with the
+ * application key, separated per `domain`). Lets a record keep "was it this
+ * value?" matching after the value itself was erased.
+ */
+export function keyedFingerprint(domain: string, value: string): string {
+  return createHmac("sha256", getKey())
+    .update(`reloop-${domain}-v1`)
+    .update(value)
+    .digest("hex");
+}
+
 /** Prisma unique where for user-by-email (use instead of { email }). */
 export function userWhereEmail(email: string): { emailLookup: string } {
   return { emailLookup: emailLookupHash(email) };

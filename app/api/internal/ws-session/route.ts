@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { verifySessionToken } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { resolveWsSessionIdentity } from "@/lib/ws-session";
 
 const schema = z.object({
   token: z.string().min(1),
@@ -21,7 +21,12 @@ function authorized(req: NextRequest): boolean {
   );
 }
 
-/** Internal-only: validates a session JWT against live DB role/tokenVersion. */
+/**
+ * Internal-only live verifier for the realtime gateway (R04). Answers
+ * `{ userId, role, organizationId, tokenVersion, expiresAt }` for a current
+ * session (strict JWT check, then live DB status/tokenVersion/role/org), or
+ * `null`, which the gateway treats as a definitive revocation.
+ */
 export async function POST(req: NextRequest) {
   try {
     if (!authorized(req)) {
@@ -31,22 +36,16 @@ export async function POST(req: NextRequest) {
     const { token } = schema.parse(await req.json());
     const payload = await verifySessionToken(token);
     if (!payload) {
-      return jsonOk({ role: null });
+      return jsonOk(null);
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: { role: true, status: true, tokenVersion: true },
-    });
-
-    if (!user || user.status !== "ACTIVE") {
-      return jsonOk({ role: null });
-    }
-    if ((payload.tokenVersion ?? 0) !== (user.tokenVersion ?? 0)) {
-      return jsonOk({ role: null });
-    }
-
-    return jsonOk({ role: user.role });
+    return jsonOk(
+      await resolveWsSessionIdentity({
+        sub: payload.sub,
+        tokenVersion: payload.tokenVersion,
+        expiresAt: payload.expiresAt,
+      }),
+    );
   } catch (error) {
     return handleApiError(error);
   }

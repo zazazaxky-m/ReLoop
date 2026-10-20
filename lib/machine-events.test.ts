@@ -12,6 +12,8 @@ vi.mock('./prisma', () => {
     machineWasteType: { findFirst: vi.fn() },
     pickupRequest: { findFirst: vi.fn(), create: vi.fn() },
     rewardLedger: { updateMany: vi.fn() },
+    // R03: ITEM_DETECTED locks the session row before re-reading it.
+    $queryRaw: vi.fn().mockResolvedValue([{ id: 'sess1' }]),
   };
   return {
     prisma: {
@@ -113,7 +115,7 @@ describe('lib/machine-events', () => {
 
       const { mockTx } = await import('./prisma') as any;
       mockTx.machineEvent.create.mockResolvedValue({ id: 'evt_new' });
-      mockTx.depositSession.findUnique.mockResolvedValue({ id: 'sess1', status: 'ACTIVE' });
+      mockTx.depositSession.findUnique.mockResolvedValue({ id: 'sess1', status: 'ACTIVE', startedAt: new Date() });
       mockTx.machineWasteType.findFirst.mockResolvedValue({ id: 'link1' });
       mockTx.depositItem.create.mockResolvedValue({ id: 'item1' });
 
@@ -144,7 +146,7 @@ describe('lib/machine-events', () => {
 
       const { mockTx } = await import('./prisma') as any;
       mockTx.machineEvent.create.mockResolvedValue({ id: 'evt_new' });
-      mockTx.depositSession.findUnique.mockResolvedValue({ id: 'sess1', status: 'ACTIVE' });
+      mockTx.depositSession.findUnique.mockResolvedValue({ id: 'sess1', status: 'ACTIVE', startedAt: new Date() });
       mockTx.wasteType.findFirst.mockResolvedValue(null);
       mockTx.wasteType.create.mockResolvedValue({ id: 'wt-unknown' });
       mockTx.depositItem.create.mockResolvedValue({ id: 'item1' });

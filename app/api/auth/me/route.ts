@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { z } from "zod";
 
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
@@ -9,15 +10,30 @@ import {
 } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
-import { requireApiUser } from "@/lib/rbac";
+import { HttpError, requireApiUser } from "@/lib/rbac";
 import { passwordSchema } from "@/lib/password-policy";
 import type { AppRole } from "@/lib/roles";
 import { userWhereEmail } from "@/lib/encryption";
+import { accountEmailSchema } from "@/lib/account-email";
+import { lockUser } from "@/lib/db-locks";
+import { PENDING_MFA_CLEARED } from "@/lib/mfa";
+import { runWalletTransaction } from "@/lib/wallet-service";
+import { deliverEmailOutboxSafely } from "@/lib/email-outbox";
+import { clearMailboxProof, queueEmailVerification } from "@/lib/invitations";
+
+/**
+ * The only User fields PATCH returns. Never secrets (totpSecret,
+ * pendingTotp*), passwordHash, emailLookup or tokenVersion (A02 fix 1, I1).
+ */
+const PROFILE_SELECT = {
+  id: true, name: true, email: true, phone: true, role: true, organizationId: true,
+  status: true, payoutEligible: true, createdAt: true, updatedAt: true,
+} as const;
 
 const patchSchema = z.object({
   name: z.string().min(2).max(80).optional(),
   phone: z.string().max(40).nullable().optional(),
-  email: z.string().email("Email tidak valid").optional(),
+  email: accountEmailSchema().optional(),
   currentPassword: z.string().min(1).optional(),
   newPassword: passwordSchema.optional(),
 });
@@ -34,6 +50,7 @@ export async function GET() {
         role: true,
         organizationId: true,
         tokenVersion: true,
+        emailVerifiedAt: true,
       },
     });
     if (dbUser) {
@@ -48,7 +65,8 @@ export async function GET() {
         }),
       );
     }
-    return jsonOk({ user });
+    // A03: additive; mobile and web show the verification prompt from it.
+    return jsonOk({ user: { ...user, emailVerified: Boolean(dbUser?.emailVerifiedAt) } });
   } catch (error) {
     return handleApiError(error);
   }
@@ -86,24 +104,42 @@ export async function PATCH(req: Request) {
       }
     }
 
-    const updated = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        ...(data.name !== undefined ? { name: data.name.trim() } : {}),
-        ...(data.phone !== undefined
-          ? { phone: data.phone?.trim() || null }
-          : {}),
-        ...(changingEmail
-          ? { email: normalizedEmail, tokenVersion: { increment: 1 } }
-          : {}),
-        ...(changingPassword
-          ? {
-              passwordHash: await hashPassword(data.newPassword!),
-              tokenVersion: { increment: 1 },
-            }
-          : {}),
-      },
+    // Hash before the transaction (CPU only). Under the User lock the
+    // password checked above must still be current; a credential change also
+    // discards any pending MFA setup (A02).
+    const newPasswordHash = changingPassword ? await hashPassword(data.newPassword!) : undefined;
+    const { updated, outboxId } = await runWalletTransaction(async (tx) => {
+      await lockUser(tx, user.id);
+      if (changingEmail || changingPassword) {
+        const current = await tx.user.findUniqueOrThrow({ where: { id: user.id }, select: { passwordHash: true } });
+        if (current.passwordHash !== user.passwordHash) {
+          throw new HttpError(409, "Data akun berubah. Muat ulang lalu coba lagi.");
+        }
+      }
+      const row = await tx.user.update({
+        where: { id: user.id },
+        data: {
+          ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+          ...(data.phone !== undefined
+            ? { phone: data.phone?.trim() || null }
+            : {}),
+          // A03: the new address is unproven until its verification link is
+          // used; travel-agent memberships stop granting access (clearMailboxProof).
+          ...(changingEmail
+            ? { email: normalizedEmail, emailVerifiedAt: null, tokenVersion: { increment: 1 } }
+            : {}),
+          ...(changingPassword
+            ? { passwordHash: newPasswordHash, tokenVersion: { increment: 1 } }
+            : {}),
+          ...(changingEmail || changingPassword ? PENDING_MFA_CLEARED : {}),
+        },
+        select: { ...PROFILE_SELECT, tokenVersion: true },
+      });
+      if (!changingEmail) return { updated: row, outboxId: null };
+      await clearMailboxProof(tx, user.id);
+      return { updated: row, outboxId: await queueEmailVerification(tx, user.id) };
     });
+    if (outboxId) after(() => deliverEmailOutboxSafely(outboxId));
 
     await setSessionCookie(buildSessionPayload({
       id: updated.id,
@@ -127,8 +163,11 @@ export async function PATCH(req: Request) {
       },
     });
 
-    const { passwordHash: _, ...safeUser } = updated;
-    return jsonOk({ user: safeUser });
+    // Explicit allowlist: only PROFILE_SELECT fields leave, whatever the row holds.
+    const { id, name, email, phone, role, organizationId, status, payoutEligible, createdAt, updatedAt } = updated;
+    return jsonOk({
+      user: { id, name, email, phone, role, organizationId, status, payoutEligible, createdAt, updatedAt },
+    });
   } catch (error) {
     return handleApiError(error);
   }

@@ -19,14 +19,19 @@ vi.mock('./prisma', () => ({
       findMany: vi.fn(),
     },
     payoutAccount: {
-      deleteMany: vi.fn(),
+      findMany: vi.fn(async () => []),
     },
+    trip: { findMany: vi.fn(async () => []) },
+    notification: { findMany: vi.fn(async () => []) },
+    deletionRequest: { findMany: vi.fn(async () => []) },
     rewardLedger: {
       updateMany: vi.fn(),
       findMany: vi.fn(),
     },
     redemption: {
       findMany: vi.fn(),
+      updateMany: vi.fn(),
+      count: vi.fn(),
     },
   },
 }));
@@ -94,55 +99,7 @@ describe('lib/gdpr', () => {
     });
   });
 
-  describe('Data Erasure', () => {
-    it('throws error if user not found', async () => {
-      vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
-      await expect(gdpr.processErasureRequest('user_not_found')).rejects.toThrow('User not found');
-    });
-
-    it('processes erasure correctly for existing user', async () => {
-      vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'user_1' } as any);
-      
-      const result = await gdpr.processErasureRequest('user_1');
-      
-      // Check redaction
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: 'user_1' },
-        data: expect.objectContaining({
-          name: '[REDACTED]',
-          status: 'INACTIVE',
-        }),
-      });
-
-      // Check anonymization
-      expect(prisma.depositSession.updateMany).toHaveBeenCalledWith({
-        where: { userId: 'user_1' },
-        data: { userId: '[REDACTED]' },
-      });
-
-      expect(prisma.rewardLedger.updateMany).toHaveBeenCalledWith({
-        where: { userId: 'user_1' },
-        data: { actorId: '[REDACTED]' },
-      });
-
-      // Check deletion
-      expect(prisma.payoutAccount.deleteMany).toHaveBeenCalledWith({
-        where: { userId: 'user_1' },
-      });
-
-      // Check audit
-      expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
-        action: 'DATA_ERASURE',
-        entityId: 'user_1',
-      }));
-
-      // Check return payload
-      expect(result.steps).toContain('profile_redacted');
-      expect(result.steps).toContain('sessions_anonymized');
-      expect(result.steps).toContain('payout_accounts_deleted');
-      expect(result.steps).toContain('ledger_anonymized');
-    });
-  });
+  // Account erasure moved to lib/erasure-jobs.ts (covered by tests/integration/erasure.test.ts).
 
   describe('Data Export', () => {
     it('exports all user related data', async () => {

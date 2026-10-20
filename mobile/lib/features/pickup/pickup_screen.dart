@@ -1,8 +1,10 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/auth_provider.dart';
 import '../../core/models.dart';
+import '../../shared/format.dart';
 import '../../shared/widgets/reloop_card.dart';
 import '../../shared/widgets/reloop_button.dart';
 import '../../shared/widgets/status_badge.dart';
@@ -19,7 +21,6 @@ class PickupScreen extends StatefulWidget {
 class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   List<dynamic> _pickups = [];
-  List<dynamic> _availablePickups = [];
   List<dynamic> _wasteTypes = [];
   bool _isLoading = true;
   String? _error;
@@ -30,7 +31,8 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    // B05: pickup is admin dispatch; there is no pool of tasks to claim.
+    _tabController = TabController(length: 2, vsync: this);
     _loadAll();
   }
 
@@ -55,26 +57,17 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
         queryParams['scope'] = 'collector';
       }
 
-      final futures = <Future<dynamic>>[
+      final results = await Future.wait([
         api.get('/api/pickups', queryParameters: queryParams),
         api.get('/api/waste-types'),
-      ];
-      if (auth.user?.role == AppRole.PENGEPUL) {
-        futures.add(api.get('/api/pickups', queryParameters: {'scope': 'available'}));
-      }
-
-      final results = await Future.wait(futures);
+      ]);
 
       final pickupsData = results[0].data as Map<String, dynamic>;
       final wasteData = results[1].data as Map<String, dynamic>;
-      final availableData = results.length > 2 ? results[2].data as Map<String, dynamic> : null;
 
       setState(() {
         _pickups = (pickupsData['pickups'] as List? ?? []).cast<dynamic>();
         _wasteTypes = (wasteData['wasteTypes'] as List? ?? []).cast<dynamic>();
-        if (availableData != null) {
-          _availablePickups = (availableData['pickups'] as List? ?? []).cast<dynamic>();
-        }
         _isLoading = false;
       });
     } catch (e) {
@@ -85,13 +78,17 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     }
   }
 
-  Future<void> _updatePickupStatus(String pickupId, String action, {String? notes}) async {
+  /// B05: every step carries the `version` of the task this screen loaded.
+  Future<void> _updatePickupStatus(String pickupId, String action, {String? notes, String? reason}) async {
     try {
       final api = context.read<ApiClient>();
       final body = <String, dynamic>{'action': action};
+      final version = _versionOf(pickupId);
+      if (version != null) body['expectedVersion'] = version;
       // coverage:ignore-start
       if (notes != null) body['notes'] = notes;
       // coverage:ignore-end
+      if (reason != null) body['reason'] = reason;
       await api.patch('/api/pickups/$pickupId', data: body);
       await _loadAll();
     } catch (e) {
@@ -103,7 +100,18 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
           ),
         );
       }
+      // 409/403: the task changed (another step, reassigned or cancelled); reload it.
+      final status = e is DioException ? e.response?.statusCode : null;
+      if ((status == 409 || status == 403) && mounted) await _loadAll();
     }
+  }
+
+  int? _versionOf(String pickupId) {
+    for (final p in _pickups) {
+      final map = p as Map<String, dynamic>;
+      if (map['id'] == pickupId) return (map['version'] as num?)?.toInt();
+    }
+    return null;
   }
 
   Future<void> _recordMaterial(String pickupId) async {
@@ -150,11 +158,26 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
   }
 
   Future<void> _confirmFail(String pickupId) async {
+    var reason = '';
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Gagalkan Pickup?'),
-        content: const Text('Apakah Anda yakin ingin menandai pickup ini sebagai gagal?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Apakah Anda yakin ingin menandai pickup ini sebagai gagal?'),
+            const SizedBox(height: 12),
+            TextField(
+              maxLines: 2,
+              onChanged: (v) => reason = v,
+              decoration: const InputDecoration(
+                labelText: 'Alasan gagal',
+                hintText: 'Wajib; dikirim ke admin untuk tugas pengganti',
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -169,9 +192,17 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
       ),
     );
 
-    if (confirm == true && mounted) {
-      await _updatePickupStatus(pickupId, 'fail');
+    if (confirm != true || !mounted) return;
+    if (reason.trim().length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Alasan wajib diisi (3-500 karakter)'),
+          backgroundColor: ReLoopColors.danger,
+        ),
+      );
+      return;
     }
+    await _updatePickupStatus(pickupId, 'fail', reason: reason.trim());
   }
 
   void _toggleMaterialForm(String pickupId) {
@@ -213,7 +244,6 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
               tabAlignment: TabAlignment.start,
               tabs: const [
                 Tab(text: 'Tugas Aktif'),
-                Tab(text: 'Tersedia'),
                 Tab(text: 'Selesai/Gagal'),
               ],
             ),
@@ -271,14 +301,20 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     return TabBarView(
       controller: _tabController,
       children: [
-        _buildList(activeTasks, isCollector, context, emptyMessage: 'Tidak ada tugas aktif'),
-        _buildList(_availablePickups, isCollector, context, emptyMessage: 'Tidak ada tugas baru dari mitra', isAvailableTasks: true),
+        _buildList(
+          activeTasks,
+          isCollector,
+          context,
+          emptyMessage: 'Menunggu penugasan admin',
+          emptyHint: 'Admin organisasi mitra menugaskan setiap pickup kepada satu pengepul. '
+              'Tugas yang ditugaskan kepada Anda akan muncul di sini.',
+        ),
         _buildList(doneTasks, isCollector, context, emptyMessage: 'Tidak ada riwayat tugas'),
       ],
     );
   }
 
-  Widget _buildList(List<dynamic> list, bool isCollector, BuildContext context, {required String emptyMessage, bool isAvailableTasks = false}) {
+  Widget _buildList(List<dynamic> list, bool isCollector, BuildContext context, {required String emptyMessage, String? emptyHint}) {
     if (list.isEmpty) {
       return ListView(
         children: [
@@ -294,6 +330,15 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
                     emptyMessage,
                     style: TextStyle(color: context.reloopMutedSoft, fontSize: 14),
                   ),
+                  if (emptyHint != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(32, 6, 32, 0),
+                      child: Text(
+                        emptyHint,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: context.reloopMutedSoft, fontSize: 12),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -303,11 +348,11 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     }
     return ListView(
       padding: const EdgeInsets.all(16),
-      children: list.map((p) => _buildPickupCard(p, isCollector, context, isAvailableTasks: isAvailableTasks)).toList(),
+      children: list.map((p) => _buildPickupCard(p, isCollector, context)).toList(),
     );
   }
 
-  Widget _buildPickupCard(dynamic p, bool isCollector, BuildContext context, {bool isAvailableTasks = false}) {
+  Widget _buildPickupCard(dynamic p, bool isCollector, BuildContext context) {
     final pickup = p as Map<String, dynamic>;
     final machine = pickup['machine'] as Map<String, dynamic>?;
     final org = pickup['organization'] as Map<String, dynamic>?;
@@ -318,6 +363,12 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
     final recordedItems = pickup['items'] as List<dynamic>? ?? [];
     final pickupId = (pickup['id'] as String?) ?? '';
     final isFormExpanded = _expandedForms[pickupId] == true;
+    final dispatch = pickup['dispatch'] as Map<String, dynamic>?;
+    final overdue = dispatch?['overdue'] == true;
+    final nextLabel = dispatch?['nextLabel'] as String?;
+    final assignedAt = pickup['assignedAt'] as String?;
+    final deadline = pickup['expectedStartAt'] as String?;
+    final closedReason = pickup['closedReason'] as String?;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -493,18 +544,37 @@ class _PickupScreenState extends State<PickupScreen> with SingleTickerProviderSt
               ),
             ],
 
-            if (isAvailableTasks) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ReLoopButton(
-                  label: 'Ambil Tugas Ini',
-                  icon: Icons.front_hand,
-                  variant: ReLoopButtonVariant.primary,
-                  onPressed: () => _updatePickupStatus(pickupId, 'assign'),
+            // B05: the next step, when admin dispatched it, and the admin's start deadline.
+            if (nextLabel != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Langkah berikutnya: $nextLabel',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: overdue ? FontWeight.w700 : FontWeight.w500,
+                  color: overdue ? ReLoopColors.statusError : context.reloopForeground,
                 ),
               ),
-            ] else if (isCollector) ...[
+            ],
+            if (assignedAt != null)
+              Text(
+                'Ditugaskan admin ${formatDateTimeIso(assignedAt)}',
+                style: TextStyle(fontSize: 11, color: context.reloopMutedSoft),
+              ),
+            if (deadline != null)
+              Text(
+                'Tenggat mulai: ${formatDateTimeIso(deadline)}${overdue ? ' (terlambat)' : ''}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: overdue ? ReLoopColors.statusError : context.reloopMutedSoft,
+                ),
+              ),
+            if (closedReason != null)
+              Text(
+                'Alasan penutupan: $closedReason',
+                style: TextStyle(fontSize: 11, color: context.reloopMutedSoft),
+              ),
+            if (isCollector) ...[
               const SizedBox(height: 12),
               _buildActionButtons(pickupId, status, isFormExpanded, context),
             ],

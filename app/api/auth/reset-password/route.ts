@@ -1,13 +1,15 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
 import { hashPassword, clearSessionCookie } from "@/lib/auth";
 import { handleApiError, jsonError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
 import { getClientIp } from "@/lib/client-ip";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { passwordSchema } from "@/lib/password-policy";
-import { consumePasswordResetToken } from "@/lib/password-reset";
+import { consumePasswordResetToken, findPasswordResetTokenOwner } from "@/lib/password-reset";
+import { lockUser } from "@/lib/db-locks";
+import { PENDING_MFA_CLEARED } from "@/lib/mfa";
+import { runWalletTransaction } from "@/lib/wallet-service";
 
 const schema = z.object({
   token: z.string().min(1, "Token tidak valid"),
@@ -31,21 +33,30 @@ export async function POST(req: NextRequest) {
 
     const data = schema.parse(await req.json());
 
-    const userId = await consumePasswordResetToken(data.token);
-    if (!userId) {
-      return jsonError(
-        400,
-        "Tautan reset tidak valid atau sudah kedaluwarsa. Silakan minta tautan baru.",
-      );
-    }
+    const invalidLink = () => jsonError(
+      400,
+      "Tautan reset tidak valid atau sudah kedaluwarsa. Silakan minta tautan baru.",
+    );
+    // The token's owner is immutable: read it, lock that User, then claim the
+    // token inside the same transaction as the password change, so a failure
+    // (e.g. a lock_timeout 503) rolls the claim back and the link stays usable.
+    const ownerId = await findPasswordResetTokenOwner(data.token);
+    if (!ownerId) return invalidLink();
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        passwordHash: await hashPassword(data.password),
-        tokenVersion: { increment: 1 },
-      },
+    // Hash before the transaction (CPU only); the write also discards any
+    // pending MFA setup, under the same User lock as the MFA routes.
+    const passwordHash = await hashPassword(data.password);
+    const userId = await runWalletTransaction(async (tx) => {
+      await lockUser(tx, ownerId);
+      const claimedBy = await consumePasswordResetToken(data.token, tx);
+      if (claimedBy !== ownerId) return null; // used or expired meanwhile
+      await tx.user.update({
+        where: { id: ownerId },
+        data: { passwordHash, tokenVersion: { increment: 1 }, ...PENDING_MFA_CLEARED },
+      });
+      return ownerId;
     });
+    if (!userId) return invalidLink();
 
     await clearSessionCookie();
 

@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
 
 jobs:
   gitleaks:
@@ -403,6 +403,52 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  dependency-gate:
+    name: Dependency advisory gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # Fixtures prove the gate fails on an untriaged critical, honours dated
+      # exceptions and fails closed on bad input. A gate that cannot fail would
+      # make the audit below meaningless.
+      - name: Advisory gate self-test
+        run: node --test tests/dependency-gate.test.mjs
+
+      # npm audit exits non-zero when it finds anything; the JSON is the
+      # evidence, so a non-zero exit here is expected. An audit that cannot
+      # reach the registry writes an error body, which the gate rejects.
+      - name: npm audit (full tree and production tree)
+        run: |
+          mkdir -p reports
+          npm audit --json > reports/npm-audit-current.json || true
+          npm audit --omit=dev --json > reports/npm-audit-runtime.json || true
+
+      - name: Advisory gate (high/critical must be fixed or have a dated exception)
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/check-dependency-advisories.mjs \
+            reports/npm-audit-current.json \
+            docs/security/dependency-triage.json \
+            --runtime reports/npm-audit-runtime.json | tee reports/advisory-gate.txt
+
+      - name: Upload advisory gate artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-gate-report
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
   zap:
     name: OWASP ZAP baseline (optional)
     runs-on: ubuntu-latest
@@ -440,6 +486,7 @@ jobs:
       - trivy-image
       - checkov
       - npm-audit
+      - dependency-gate
       - zap
     if: always()
     steps:
@@ -465,6 +512,7 @@ jobs:
             echo "| Trivy images | ${{ needs.trivy-image.result }} |"
             echo "| Checkov | ${{ needs.checkov.result }} |"
             echo "| npm audit | ${{ needs.npm-audit.result }} |"
+            echo "| Dependency advisory gate | ${{ needs.dependency-gate.result }} |"
             echo "| ZAP | ${{ needs.zap.result }} |"
             echo ""
             echo "SARIF uploaded to **Security** tab (when GHAS / public repo allows)."
@@ -503,6 +551,7 @@ jobs:
               `| Trivy images | ${{ needs.trivy-image.result }} |`,
               `| Checkov | ${{ needs.checkov.result }} |`,
               `| npm audit | ${{ needs.npm-audit.result }} |`,
+              `| Dependency advisory gate | ${{ needs.dependency-gate.result }} |`,
               '',
               'Details: **Actions → Security Scan → Artifacts** and **Security** tab (SARIF).',
               '',

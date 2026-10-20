@@ -2,18 +2,11 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { POST } from '@/app/api/manual-validations/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
+import * as tripHelpers from '@/lib/trip';
+import * as tripValidation from '@/lib/trip-validation';
+import * as walletService from '@/lib/wallet-service';
 
-vi.mock('@/lib/prisma', () => ({
-  prisma: {
-    trip: { findUnique: vi.fn(), update: vi.fn() },
-    trashBagAssignment: { findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn() },
-    manualValidation: { create: vi.fn(), findFirst: vi.fn() },
-    rewardLedger: { create: vi.fn(), findFirst: vi.fn() },
-    travelAgentUser: { findMany: vi.fn().mockResolvedValue([]) },
-    travelAgentOrganization: { findMany: vi.fn().mockResolvedValue([]) },
-    $transaction: vi.fn(),
-  },
-}));
+vi.mock('@/lib/prisma', () => ({ prisma: { trip: { findUnique: vi.fn() } } }));
 
 vi.mock('@/lib/rbac', () => ({
   requireApiUser: vi.fn(),
@@ -25,28 +18,54 @@ vi.mock('@/lib/rbac', () => ({
 }));
 
 vi.mock('@/lib/audit', () => ({ logAudit: vi.fn() }));
-vi.mock('@/lib/tourism', () => ({
-  calculateCompliance: vi.fn().mockReturnValue({ score: 100, status: 'COMPLIANT' }),
-}));
-vi.mock('@/lib/trip', () => ({
-  TRASH_BAG_REWARD_PER_BAG: 100,
-  isRewardableCondition: vi.fn((s) => s === 'GOOD' || s === 'PARTIAL'),
-  computeTrashBagRewardAmount: vi.fn(({ rewardableBagCount, complianceScore, rewardMultiplier, rewardPerBag }) => {
-    const perBag = rewardPerBag ?? 100;
-    const mult = rewardMultiplier != null && rewardMultiplier > 0 ? rewardMultiplier : 1;
-    return Math.floor(rewardableBagCount * perBag * mult * (complianceScore / 100));
-  }),
-  canValidateTripStage: vi.fn(() => ({ ok: true })),
-  getTripTravelAgentGateBlockReason: vi.fn(async () => null),
-}));
-
 vi.mock('@/lib/notifications', () => ({ createNotification: vi.fn() }));
 vi.mock('@/lib/format', () => ({ formatRupiah: (n: number) => `Rp ${n}` }));
+vi.mock('@/lib/trip', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/trip')>()),
+  getTripTravelAgentGateBlockReason: vi.fn(async () => null),
+}));
+vi.mock('@/lib/wallet-service', () => ({
+  runWalletTransaction: vi.fn(),
+  afterCommitSafely: vi.fn(async (_label: string, effect: () => Promise<unknown>) => { await effect(); }),
+}));
+vi.mock('@/lib/trip-validation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/trip-validation')>()),
+  lockTripAggregate: vi.fn(),
+  validateTripBags: vi.fn(),
+  markUnreviewedBagsNotReturned: vi.fn(),
+  refreshTripOutcome: vi.fn(),
+  tripNotificationRecipients: vi.fn(async () => []),
+}));
 
 const makeReq = (body: any) => new Request('http://localhost', { method: 'POST', body: JSON.stringify(body) });
 
-describe('/api/manual-validations POST', () => {
-  beforeEach(() => vi.clearAllMocks());
+function lockedTrip(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 't1', status: 'COMPLETED', userId: 'u1', campaignId: 'c1', travelAgentId: null, groupName: null,
+    complianceScore: 100, complianceStatus: 'COMPLIANT',
+    campaign: { organizationId: 'org1', rewardMode: 'COMPLIANCE_ONLY', rewardMultiplier: 1, name: 'Camp' },
+    bagAssignments: [
+      { id: 'b1', bagQrCode: 'QR1', status: 'GOOD' },
+      { id: 'b2', bagQrCode: 'QR2', status: 'GOOD' },
+      { id: 'b3', bagQrCode: 'QR3', status: 'GOOD' },
+    ],
+    ...overrides,
+  };
+}
+
+let tx: any;
+
+describe('/api/manual-validations POST (roles, scope, pickup)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(prisma.trip.findUnique).mockResolvedValue({ id: 't1', campaign: { organizationId: 'org1' } } as any);
+    tx = {
+      manualValidation: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn(async ({ data }: any) => ({ id: 'mv1', ...data })) },
+      trip: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    };
+    vi.mocked(walletService.runWalletTransaction).mockImplementation(async (fn: any) => fn(tx));
+    vi.mocked(tripValidation.lockTripAggregate).mockResolvedValue(lockedTrip() as any);
+  });
 
   it('returns 403 when USER role tries to validate', async () => {
     vi.mocked(rbac.requireApiUser).mockRejectedValue(new (rbac as any).HttpError(403, 'Forbidden'));
@@ -59,145 +78,73 @@ describe('/api/manual-validations POST', () => {
     vi.mocked(prisma.trip.findUnique).mockResolvedValue(null);
     const res = await POST(makeReq({ tripId: 't1' }));
     expect(res.status).toBe(404);
+    expect(walletService.runWalletTransaction).not.toHaveBeenCalled();
+  });
+
+  it('checks the admin organization scope before taking any lock', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'a2', role: 'ADMIN', organizationId: 'org2' } as any);
+    vi.mocked(rbac.assertOrgScope).mockImplementationOnce(() => {
+      throw new (rbac as any).HttpError(403, 'Di luar scope organisasi Anda');
+    });
+    const res = await POST(makeReq({ tripId: 't1', validationStage: 'CHECK_OUT', bags: [{ id: 'b1', status: 'GOOD' }] }));
+    expect(res.status).toBe(403);
+    expect(rbac.assertOrgScope).toHaveBeenCalledWith(expect.objectContaining({ id: 'a2' }), 'org1');
+    expect(walletService.runWalletTransaction).not.toHaveBeenCalled();
   });
 
   it('restricts PENGEPUL to BANK_SAMPAH_PICKUP stage only', async () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'p1', role: 'PENGEPUL' } as any);
-    vi.mocked(prisma.trip.findUnique).mockResolvedValue({
-      id: 't1', status: 'COMPLETED', campaign: { organizationId: 'org1' },
-    } as any);
     vi.mocked(rbac.assertActivePartnership).mockResolvedValue({} as any);
 
     const res = await POST(makeReq({ tripId: 't1', validationStage: 'CHECK_OUT' }));
     expect(res.status).toBe(403);
     const data = await res.json();
     expect(data.error).toContain('Bank Sampah');
+    expect(walletService.runWalletTransaction).not.toHaveBeenCalled();
   });
 
-  it('validates bagQrCode if provided', async () => {
-    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'a1', role: 'ADMIN' } as any);
-    vi.mocked(prisma.trip.findUnique).mockResolvedValue({
-      id: 't1', status: 'ACTIVE', campaign: { organizationId: 'org1' },
-    } as any);
-    vi.mocked(prisma.trashBagAssignment.findUnique).mockResolvedValue({ tripId: 't2' } as any);
+  it('rejects a PENGEPUL without an active partnership for the trip organization', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'p2', role: 'PENGEPUL' } as any);
+    vi.mocked(rbac.assertActivePartnership).mockRejectedValueOnce(
+      new (rbac as any).HttpError(403, 'Kemitraan pengepul belum aktif untuk organisasi ini'));
+    const res = await POST(makeReq({ tripId: 't1', validationStage: 'BANK_SAMPAH_PICKUP' }));
+    expect(res.status).toBe(403);
+    expect(rbac.assertActivePartnership).toHaveBeenCalledWith('p2', 'org1');
+  });
 
-    const res = await POST(makeReq({ tripId: 't1', bagQrCode: 'QR123' }));
+  it('validates bagQrCode against the locked bag rows of the trip', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'a1', role: 'ADMIN' } as any);
+    vi.mocked(tripValidation.lockTripAggregate).mockResolvedValue(lockedTrip({ status: 'PLANNED' }) as any);
+    const res = await POST(makeReq({ tripId: 't1', validationStage: 'CHECK_IN', bagQrCode: 'QR-OTHER-TRIP' }));
     expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('QR trash bag tidak valid untuk trip ini');
+    expect(tx.manualValidation.create).not.toHaveBeenCalled();
   });
 
-  it('records CHECK_IN and updates trip', async () => {
-    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'a1', role: 'ADMIN' } as any);
-    vi.mocked(prisma.trip.findUnique).mockResolvedValue({
-      id: 't1',
-      status: 'PLANNED',
-      campaign: { organizationId: 'org1', rewardMode: 'MONEY_REWARD' },
-      _count: { bagAssignments: 5 }
-    } as any);
-
-    vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
-      const mockTx = {
-        manualValidation: { create: vi.fn().mockResolvedValue({ id: 'mv1' }) },
-        trip: { update: vi.fn() },
-      };
-      return fn(mockTx);
-    });
-
-    const res = await POST(makeReq({ tripId: 't1', validationStage: 'CHECK_IN' }));
-    expect(res.status).toBe(201);
-  });
-
-  it('records CHECK_OUT with multiple bag status updates and calculates reward', async () => {
-    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'a1', role: 'ADMIN' } as any);
-    vi.mocked(prisma.trip.findUnique).mockResolvedValue({
-      id: 't1',
-      status: 'ACTIVE',
-      userId: 'u1',
-      campaign: { organizationId: 'org1', rewardMode: 'MONEY_REWARD', rewardMultiplier: 1 },
-      _count: { bagAssignments: 3 }
-    } as any);
-
-    vi.mocked(prisma.trashBagAssignment.findMany).mockResolvedValue([{ id: 'b1' }, { id: 'b2' }] as any);
-
-    const bagUpdates: Array<{ id: string; data: { status: string; returnedAt: Date | null } }> = [];
-    vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
-      const mockTx = {
-        trashBagAssignment: {
-          update: vi.fn(async ({ where, data }: any) => {
-            bagUpdates.push({ id: where.id, data });
-          }),
-        },
-        manualValidation: { create: vi.fn().mockResolvedValue({ id: 'mv1' }) },
-        trip: { update: vi.fn() },
-        rewardLedger: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
-      };
-      const res = await fn(mockTx);
-      expect(mockTx.rewardLedger.create).toHaveBeenCalled();
-      return res;
-    });
-
-    const res = await POST(makeReq({
-      tripId: 't1',
-      validationStage: 'CHECK_OUT',
-      bags: [
-        { id: 'b1', status: 'GOOD' },
-        { id: 'b2', status: 'NOT_RETURNED' },
-      ]
-    }));
-    
-    expect(res.status).toBe(201);
-    const data = await res.json();
-    expect(data.rewardAmount).toBeGreaterThan(0);
-    expect(bagUpdates).toEqual([
-      expect.objectContaining({
-        id: 'b1',
-        data: expect.objectContaining({ status: 'GOOD', returnedAt: expect.any(Date) }),
-      }),
-      expect.objectContaining({
-        id: 'b2',
-        data: expect.objectContaining({ status: 'NOT_RETURNED', returnedAt: null }),
-      }),
-    ]);
-  });
-
-  it('records validation with conditionStatus=null and appCompleted=true', async () => {
-    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'a1', role: 'ADMIN' } as any);
-    vi.mocked(prisma.trip.findUnique).mockResolvedValue({
-      id: 't1',
-      status: 'COMPLETED',
-      campaign: { organizationId: 'org1', rewardMode: 'MONEY_REWARD' },
-      _count: { bagAssignments: 5 }
-    } as any);
-    vi.mocked(prisma.manualValidation.findFirst).mockResolvedValue(null);
-
-    let createdVal: any;
-    vi.mocked(prisma.$transaction).mockImplementation(async (fn: any) => {
-      const mockTx = {
-        manualValidation: { create: vi.fn().mockImplementation((args: any) => {
-          createdVal = args.data;
-          return { id: 'mv1' };
-        }) },
-        trip: { update: vi.fn() },
-        rewardLedger: { findFirst: vi.fn(), create: vi.fn() },
-      };
-      return fn(mockTx);
-    });
-
-    const res = await POST(makeReq({ tripId: 't1', validationStage: 'BANK_SAMPAH_PICKUP', appCompleted: true }));
-    expect(res.status).toBe(201);
-    expect(createdVal.conditionStatus).toBeNull();
-    expect(createdVal.appCompleted).toBe(true);
-  });
-
-  it('rejects duplicate BANK_SAMPAH_PICKUP', async () => {
+  it('records a pickup with conditionStatus=null without changing the trip', async () => {
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'p1', role: 'PENGEPUL' } as any);
-    vi.mocked(prisma.trip.findUnique).mockResolvedValue({
-      id: 't1',
-      status: 'COMPLETED',
-      campaign: { organizationId: 'org1', rewardMode: 'COMPLIANCE_ONLY' },
-      _count: { bagAssignments: 3 },
-    } as any);
     vi.mocked(rbac.assertActivePartnership).mockResolvedValue({} as any);
-    vi.mocked(prisma.manualValidation.findFirst).mockResolvedValue({ id: 'existing' } as any);
+    const res = await POST(makeReq({ tripId: 't1', validationStage: 'BANK_SAMPAH_PICKUP', returnedBagCount: 3, appCompleted: true }));
+    expect(res.status).toBe(201);
+    const created = tx.manualValidation.create.mock.calls[0][0].data;
+    expect(created).toMatchObject({ conditionStatus: null, appCompleted: true, gateType: 'BANK_SAMPAH', returnedBagCount: 3 });
+    expect(tx.trip.updateMany).not.toHaveBeenCalled();
+    // Pickup after COMPLETED is allowed even if the agent was suspended later.
+    expect(tripHelpers.getTripTravelAgentGateBlockReason).not.toHaveBeenCalled();
+  });
+
+  it('caps the pickup count at the issued bag rows', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'p1', role: 'PENGEPUL' } as any);
+    vi.mocked(rbac.assertActivePartnership).mockResolvedValue({} as any);
+    const res = await POST(makeReq({ tripId: 't1', validationStage: 'BANK_SAMPAH_PICKUP', returnedBagCount: 4 }));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe(tripValidation.RETURNED_COUNT_EXCEEDS_ISSUED);
+  });
+
+  it('rejects duplicate BANK_SAMPAH_PICKUP (checked under the trip lock)', async () => {
+    vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'p1', role: 'PENGEPUL' } as any);
+    vi.mocked(rbac.assertActivePartnership).mockResolvedValue({} as any);
+    tx.manualValidation.findFirst.mockResolvedValue({ id: 'existing' });
 
     const res = await POST(makeReq({
       tripId: 't1',
@@ -209,24 +156,22 @@ describe('/api/manual-validations POST', () => {
     expect(res.status).toBe(422);
     const data = await res.json();
     expect(data.error).toContain('sudah dicatat');
+    expect(tx.manualValidation.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { tripId: 't1', validationStage: 'BANK_SAMPAH_PICKUP' } }));
   });
 
-  it('rejects gate validation when travel agent is suspended', async () => {
-    const tripHelpers = await import('@/lib/trip');
+  it('re-checks the travel agent gate through the transaction', async () => {
     vi.mocked(tripHelpers.getTripTravelAgentGateBlockReason).mockResolvedValueOnce(
       'Travel agent trip ini sudah ditangguhkan atau dihapus dari organisasi',
     );
     vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'a1', role: 'ADMIN' } as any);
-    vi.mocked(prisma.trip.findUnique).mockResolvedValue({
-      id: 't1',
-      status: 'ACTIVE',
-      travelAgentId: 'ta1',
-      campaign: { organizationId: 'org1', rewardMode: 'COMPLIANCE_ONLY' },
-      _count: { bagAssignments: 2 },
-    } as any);
+    vi.mocked(tripValidation.lockTripAggregate).mockResolvedValue(lockedTrip({ status: 'ACTIVE', travelAgentId: 'ta1' }) as any);
 
-    const res = await POST(makeReq({ tripId: 't1', validationStage: 'CHECK_OUT' }));
+    const res = await POST(makeReq({ tripId: 't1', validationStage: 'CHECK_OUT', bags: [{ id: 'b1', status: 'GOOD' }] }));
     expect(res.status).toBe(422);
+    expect(tripHelpers.getTripTravelAgentGateBlockReason).toHaveBeenCalledWith(
+      { travelAgentId: 'ta1', organizationId: 'org1' }, tx);
+    expect(tripValidation.validateTripBags).not.toHaveBeenCalled();
   });
 
   it('handles unexpected errors', async () => {

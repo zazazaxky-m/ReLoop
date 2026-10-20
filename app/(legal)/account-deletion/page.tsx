@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { Info, Trash } from "@/components/ui/icons";
 import { AccountDeletionForm } from "@/components/legal/AccountDeletionForm";
+import { ERASED_DATA, RETAINED_DATA } from "@/lib/erasure-copy";
 
 export const metadata: Metadata = {
   title: "Hapus Akun",
   description:
-    "Ajukan permintaan penghapusan akun ReLoop dan semua data pribadi Anda. Proses selesai dalam 7 hari kerja.",
+    "Ajukan penghapusan akun ReLoop: data pribadi dihapus setelah Anda mengonfirmasi, catatan transaksi disimpan tanpa identitas Anda.",
   alternates: { canonical: "/account-deletion" },
   robots: { index: true, follow: true },
 };
@@ -23,9 +24,8 @@ export default function AccountDeletionPage() {
           </h1>
           <p className="mt-3 text-sm leading-6 text-muted sm:text-[15px]">
             Kami menghormati keputusan Anda untuk berhenti menggunakan ReLoop.
-            Halaman ini menjelaskan proses, jenis data yang akan dihapus, dan
-            jangka waktu retensi. Permintaan biasanya diproses dalam waktu 7
-            (tujuh) hari kerja.
+            Halaman ini menjelaskan proses, data yang dihapus, dan data yang
+            tetap disimpan beserta alasannya.
           </p>
         </header>
 
@@ -35,66 +35,55 @@ export default function AccountDeletionPage() {
           </h2>
           <ol className="mt-4 list-decimal space-y-2 pl-5 text-[15px] leading-7 text-muted">
             <li>
-              Isi formulir di samping dengan email akun ReLoop yang ingin
-              dihapus.
+              Dari aplikasi: buka Profil lalu Hapus Akun. Karena Anda sudah
+              masuk, permintaan langsung terverifikasi.
             </li>
             <li>
-              Tim kami akan memverifikasi identitas Anda dengan mengirim email
-              konfirmasi ke alamat tersebut.
+              Tanpa masuk: isi formulir di samping. Kami mengirim tautan
+              konfirmasi sekali pakai (berlaku 24 jam) ke email akun tersebut.
+              Tidak ada data yang dihapus sebelum tautan itu dibuka dan
+              dikonfirmasi.
             </li>
             <li>
-              Setelah identitas terverifikasi, kami akan menonaktifkan akun
-              Anda dan menjadwalkan penghapusan data pribadi.
+              Jika masih ada saldo, pencairan, sesi setoran, atau trip yang
+              belum selesai, status menjadi &quot;ditunda&quot;: belum ada data
+              yang dihapus, akun tetap aktif, dan Anda mendapat daftar hal yang
+              perlu diselesaikan. Penghapusan dilanjutkan otomatis setelah
+              semuanya selesai. Saldo tidak dihanguskan.
             </li>
             <li>
-              Anda akan menerima email kedua yang mengonfirmasi bahwa proses
-              telah selesai.
+              Setelah dijalankan, status menjadi &quot;selesai&quot; hanya bila
+              semua langkah berhasil, termasuk penghapusan berkas bukti
+              transfer. Jika ada langkah yang gagal, status menjadi &quot;belum
+              selesai&quot; dan sistem mencobanya ulang otomatis.
+            </li>
+            <li>
+              Tidak bisa masuk dan tidak bisa membuka email akun? Hubungi
+              privacy@reloop.id; tim kami memverifikasi identitas Anda secara
+              terpisah sebelum memproses permintaan.
             </li>
           </ol>
         </section>
 
         <section className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
           <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground">
-            Data yang akan dihapus
+            Data yang dihapus
           </h2>
           <ul className="mt-4 list-disc space-y-1.5 pl-5 text-[15px] leading-7 text-muted">
-            <li>Profil akun (nama, email, nomor telepon, foto profil)</li>
-            <li>Akun pencairan (DANA / OVO / GoPay / Bank) yang tersimpan</li>
-            <li>
-              Riwayat setoran, validasi, dan saldo reward (akan dianonimkan;
-              data agregat yang tidak dapat diidentifikasi dapat dipertahankan
-              untuk analitik)
-            </li>
-            <li>Riwayat pencairan poin (redemptions)</li>
-            <li>Riwayat travel program dan partnership</li>
-            <li>Notifikasi, preferensi, dan token push notification</li>
-            <li>Foto dokumentasi laporan (jika ada)</li>
+            {ERASED_DATA.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
           </ul>
         </section>
 
         <section className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
           <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground">
-            Periode retensi
+            Data yang tetap disimpan dan alasannya
           </h2>
           <ul className="mt-4 list-disc space-y-1.5 pl-5 text-[15px] leading-7 text-muted">
-            <li>
-              <span className="font-semibold text-foreground">30 hari</span>{" "}
-              sejak permintaan disetujui: data pribadi dihapus atau
-              dianonimkan (nama menjadi &quot;[REDACTED]&quot;, email menjadi
-              redacted-&lt;id&gt;@reloop.id, token &amp; password dihapus).
-            </li>
-            <li>
-              <span className="font-semibold text-foreground">Sampai 7 tahun</span>:
-              catatan audit log (tanpa data pribadi) dan data transaksi
-              keuangan yang diwajibkan oleh peraturan perpajakan dan
-              anti-pencucian uang Indonesia.
-            </li>
-            <li>
-              <span className="font-semibold text-foreground">Tanpa batas</span>:
-              data agregat yang sepenuhnya anonim (misalnya statistik total
-              kilogram sampah yang disetorkan per bulan) untuk keperluan
-              analitik dan pelaporan dampak lingkungan.
-            </li>
+            {RETAINED_DATA.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
           </ul>
         </section>
 
@@ -105,9 +94,10 @@ export default function AccountDeletionPage() {
               Penting
             </p>
             <p className="mt-1">
-              Setelah 30 hari, akun dan data tidak dapat dipulihkan. Sisa
-              saldo reward yang belum dicairkan akan hangus. Untuk hanya
-              menghapus sebagian data tanpa menutup akun, gunakan halaman{" "}
+              Penghapusan tidak dapat dibatalkan setelah selesai. Email yang
+              sama dapat dipakai untuk mendaftar akun baru, tanpa riwayat akun
+              lama. Untuk hanya menghapus sebagian data tanpa menutup akun,
+              gunakan halaman{" "}
               <a
                 href="/data-deletion"
                 className="font-semibold underline-offset-2 hover:underline"
@@ -126,8 +116,8 @@ export default function AccountDeletionPage() {
             Formulir Penghapusan Akun
           </h2>
           <p className="mt-1 text-sm text-muted">
-            Kami akan menghubungi Anda melalui email untuk verifikasi
-            identitas.
+            Kami mengirim tautan konfirmasi ke email akun. Tidak ada data yang
+            dihapus sebelum Anda mengonfirmasi.
           </p>
           <div className="mt-5">
             <AccountDeletionForm />

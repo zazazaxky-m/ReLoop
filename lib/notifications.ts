@@ -1,5 +1,6 @@
 import type { NotificationType, Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
+import { auditTransportSink, captureTransport } from "./test-transport";
 
 export interface CreateNotificationParams {
   userId: string;
@@ -106,7 +107,29 @@ export async function markNotificationsRead(
 let firebaseApp: unknown = null;
 let firebaseUnavailable = false;
 
+/** Audit test runs record push in the runner's capture sink instead of FCM. */
+function auditCaptureMessaging(sink: string) {
+  return {
+    async sendEachForMulticast(message: {
+      tokens: string[];
+      notification: { title: string; body: string };
+      data?: Record<string, string>;
+    }) {
+      captureTransport(sink, {
+        kind: "push",
+        tokens: message.tokens,
+        title: message.notification.title,
+        body: message.notification.body,
+        ...(message.data ? { data: message.data } : {}),
+      });
+      return { successCount: message.tokens.length, failureCount: 0, responses: [] };
+    },
+  };
+}
+
 async function getFirebaseMessaging(): Promise<any | null> {
+  const sink = auditTransportSink();
+  if (sink) return auditCaptureMessaging(sink);
   if (firebaseUnavailable) return null;
   if (firebaseApp) return (firebaseApp as any).messaging();
 

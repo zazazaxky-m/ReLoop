@@ -21,6 +21,7 @@ import urllib.request
 from rvm.api import LocalApiServer
 from rvm.camera import CameraStatus, CameraWorker
 from rvm.config import RvmConfig
+from rvm.lease import policy_version, sign_lease_v2
 from rvm.controller import MachineState, RvmController
 from rvm.database import EdgeDatabase
 from rvm.fraud import RvmFraudMixin
@@ -44,16 +45,16 @@ def controller_in(tmp: str, **overrides) -> RvmController:
     return RvmController(RvmConfig(**base))
 
 
-def signed_lease(secret: str, session_id: str = "session-1", expires: int | None = None):
+def signed_lease(secret, session_id="session-1", expires=None, machine_code="TEST-001"):
+    """A signed lease v2 without a money bound (B01b; the v1 form is refused by the worker)."""
     now = int(time.time())
-    lease = {
-        "id": f"lease-{session_id}",
-        "sessionId": session_id,
-        "issuedAt": now,
-        "expiresAt": expires if expires is not None else now + 60,
-    }
-    canonical = ".".join(str(lease[k]) for k in ("id", "sessionId", "issuedAt", "expiresAt"))
-    lease["signature"] = hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+    policy = {"version": 1, "mode": "COMPLIANCE_ONLY", "multiplierBps": 10000, "wasteTypes": []}
+    lease = sign_lease_v2(secret, {
+        "id": f"lease-{session_id}", "machineCode": machine_code, "sessionId": session_id, "userRef": None,
+        "issuedAt": now, "expiresAt": int(expires) if expires is not None else now + 60, "reservationId": None,
+        "policyVersion": policy_version(policy), "ceilingRupiah": None, "maxItems": None,
+    })
+    lease["policy"] = policy
     return lease
 
 
@@ -228,6 +229,64 @@ class HardwareTest(unittest.TestCase):
             else:
                 sys.modules["gpiozero"] = real
 
+    def test_gpio_outputs_boot_off_and_all_stop_survives_failing_output(self):
+        fake = types.ModuleType("gpiozero")
+        outputs = []
+
+        class Input:
+            def __init__(self, *a, **k): self.is_pressed = False
+
+        class Output:
+            def __init__(self, *a, **k):
+                self.initial_value = k.get("initial_value")
+                self._value = bool(self.initial_value)
+                self.fail = False
+                outputs.append(self)
+
+            @property
+            def value(self): return self._value
+
+            @value.setter
+            def value(self, v):
+                if self.fail:
+                    raise OSError("gpio write failed")
+                self._value = bool(v)
+
+            def on(self): self.value = True
+            def off(self): self.value = False
+        fake.Button = Input
+        fake.DigitalOutputDevice = Output
+        fake.DistanceSensor = Input
+        pins = {
+            "chamber": 1, "item_beam": 2, "acceptance_beam": 3, "service_panel": 4,
+            "collection_door": 5, "input_gate": 6, "conveyor_forward": 7,
+            "conveyor_reverse": 8, "compactor": 9,
+        }
+        real = sys.modules.get("gpiozero")
+        sys.modules["gpiozero"] = fake
+        try:
+            hw = GpioHardware(RvmConfig(machine_secret="x", gpio_pins=pins))
+        finally:
+            if real is None:
+                sys.modules.pop("gpiozero", None)
+            else:
+                sys.modules["gpiozero"] = real
+        # Boot / crash restart: every actuator starts de-energised.
+        self.assertEqual(len(outputs), 4)
+        self.assertTrue(all(output.initial_value is False for output in outputs))
+        self.assertFalse(any(output.value for output in outputs))
+
+        hw.set_input_gate(True)
+        hw.set_conveyor("FORWARD")
+        hw.set_compactor(True)
+        hw.gate.fail = True
+        with self.assertRaisesRegex(OSError, "gpio write failed"):
+            hw.all_stop()
+        # A failing gate output must not leave the conveyor or compactor running.
+        self.assertFalse(hw.conveyor_fwd.value)
+        self.assertFalse(hw.conveyor_rev.value)
+        self.assertFalse(hw.compactor.value)
+
     def test_gpio_full_read(self):
         fake = types.ModuleType("gpiozero")
 
@@ -357,6 +416,11 @@ class FraudTest(unittest.TestCase):
             c = controller_in(tmp, camera_enabled=True)
             c._camera_alert("CAMERA_OCCLUDED", {})
             self.assertEqual(c.state, MachineState.SAFE_STATE)
+            # The latch only resets once the enabled camera is healthy again.
+            with self.assertRaisesRegex(ValueError, "kamera masih offline"):
+                c._reset_mock_state()
+            self.assertEqual(c.state, MachineState.SAFE_STATE)
+            c.camera.status.online = True
             c._reset_mock_state()
             c._camera_alert("FACE_MODEL_LOAD_FAILED", {})
             self.assertIsNone(c._active_alert)

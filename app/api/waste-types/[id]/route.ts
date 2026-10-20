@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
 import { logAudit } from "@/lib/audit";
+import { AI_LABEL_PATTERN, normalizeAiLabels } from "@/lib/reward-policy";
 
 const updateSchema = z
   .object({
@@ -13,6 +14,15 @@ const updateSchema = z
     defaultRewardPerItem: z.number().int().min(0).max(10_000_000).nullable().optional(),
     description: z.string().max(500).nullable().optional(),
     active: z.boolean().optional(),
+  // M04: classifier labels that confirm this waste type (normalized, e.g. "bottle_pet").
+  aiAcceptedLabels: z
+    .array(z.string().max(64))
+    .max(50)
+    .transform(normalizeAiLabels)
+    .refine((labels) => labels.every((label) => AI_LABEL_PATTERN.test(label)), {
+      message: "Label AI hanya boleh berisi huruf, angka, titik dan garis bawah",
+    })
+    .optional(),
   })
   .refine(
     (d) =>

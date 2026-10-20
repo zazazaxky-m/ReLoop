@@ -6,6 +6,16 @@ import { handleApiError, jsonOk } from "@/lib/api";
 import { normalizeEmailDomains } from "@/lib/campaign";
 import { logAudit } from "@/lib/audit";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
+import { MAX_FUNDING_RUPIAH, assertMoneyProgramConfigured } from "@/lib/reward-funding";
+
+/** B01: integer rupiah caps of at least Rp1; null clears (no cap / not configured). Zero is never a cap (I3). */
+const rupiahCapSchema = z
+  .number({ invalid_type_error: "Nilai harus berupa angka" })
+  .int("Nilai harus bilangan bulat rupiah")
+  .min(1, "Nilai minimal Rp1; kosongkan untuk menghapus batas")
+  .max(MAX_FUNDING_RUPIAH, "Nilai melebihi batas yang diizinkan")
+  .nullable()
+  .optional();
 
 const createSchema = z
   .object({
@@ -15,12 +25,17 @@ const createSchema = z
       .enum(["MACHINE_DEPOSIT", "TRASH_BAG", "EVENT", "SCHOOL_PROGRAM", "TOURISM_PROGRAM"])
       .default("MACHINE_DEPOSIT"),
     rewardMode: z.enum(["MONEY_REWARD", "COMPLIANCE_ONLY"]).default("MONEY_REWARD"),
+    // M04: lets an EVENT / SCHOOL_PROGRAM campaign run at machines.
+    supportsMachine: z.boolean().optional(),
     visibility: z.enum(["PUBLIC", "PRIVATE"]).default("PUBLIC"),
     allowedEmailDomains: z.array(z.string()).optional(),
     startAt: z.string().datetime().nullable().optional(),
     endAt: z.string().datetime().nullable().optional(),
     rewardMultiplier: z.number().min(0).max(100).nullable().optional(),
     status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "ENDED"]).default("DRAFT"),
+    // B01: program budget and per-session reward ceiling (integer rupiah).
+    rewardBudgetRupiah: rupiahCapSchema,
+    maxRewardPerSessionRupiah: rupiahCapSchema,
     // Superadmin must specify; admin uses own org.
     organizationId: z.string().optional(),
   })
@@ -82,6 +97,15 @@ export async function POST(req: Request) {
     if (data.visibility === "PRIVATE" && (!domains || domains.length === 0)) {
       throw new HttpError(422, "Campaign private membutuhkan minimal satu domain email valid");
     }
+    // B01: under enforcement an ACTIVE money program needs its budget, and one at machines its ceiling.
+    assertMoneyProgramConfigured({
+      status: data.status,
+      rewardMode: data.rewardMode,
+      campaignType: data.campaignType,
+      supportsMachine: data.supportsMachine ?? false,
+      maxRewardPerSessionRupiah: data.maxRewardPerSessionRupiah ?? null,
+      rewardBudgetRupiah: data.rewardBudgetRupiah ?? null,
+    });
 
     const campaign = await prisma.campaign.create({
       data: {
@@ -90,12 +114,15 @@ export async function POST(req: Request) {
         description: data.description ?? null,
         campaignType: data.campaignType,
         rewardMode: data.rewardMode,
+        supportsMachine: data.supportsMachine ?? false,
         visibility: data.visibility,
         allowedEmailDomainsJson: domains ?? undefined,
         startAt: data.startAt ? new Date(data.startAt) : null,
         endAt: data.endAt ? new Date(data.endAt) : null,
         rewardMultiplier: data.rewardMultiplier ?? null,
         status: data.status,
+        rewardBudgetRupiah: data.rewardBudgetRupiah ?? null,
+        maxRewardPerSessionRupiah: data.maxRewardPerSessionRupiah ?? null,
       },
     });
 

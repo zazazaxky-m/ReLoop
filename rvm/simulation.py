@@ -5,74 +5,84 @@ the mock hardware driver."""
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import threading
 import time
 import uuid
 from typing import Any
 
 from .hardware import MockHardware
+from .lease import policy_version, sign_lease_v2
 from .states import (
     MachineState,
     SESSION_SIMULATION_SCENARIOS,
     SIMULATION_SCENARIOS,
+    describe_interlocks,
     iso_now,
 )
 
 
 class RvmSimulationMixin:
     def _reset_mock_state(self, deactivate_lease: bool = True) -> None:
-        self.db.set_json("safe_reason", None)
-        self._clear_alert()
-        if deactivate_lease:
-            self.db.deactivate_leases()
-        self.hardware.all_stop()
-        if isinstance(self.hardware, MockHardware):
-            self.hardware.patch(
-                chamber_open=False,
-                item_present=False,
-                acceptance_triggered=False,
-                reverse_motion=False,
-                weight_grams=0,
-                weight_stable=False,
-                fill_percent=20,
-                service_panel_open=False,
-                collection_door_open=False,
-                vibration_g=0.02,
-                camera_online=True,
-                camera_occluded=False,
-                camera_blurry=False,
-                temperature_c=28.0,
-            )
-            self._last = self.hardware.read()
-        self._processing_started_at = None
-        self._sensor_sequence = []
-        self._reset_waste_type_selection()
-        if self.db.active_lease():
-            self.set_state(MachineState.SESSION_ACTIVE, "simulation-reset")
-            self.hardware.set_input_gate(True)
-        else:
-            self.set_state(MachineState.IDLE, "maintenance-reset")
-        self.emit("STATUS_CHANGED", {"status": "ONLINE", "source": "maintenance"})
+        """Operator reset (maintenance reset-safe-state, remote RESET_ALERT,
+        simulator). Clears the safety latch only when every safety condition
+        is clear on a fresh sensor read; on MockHardware the simulated
+        sensors are first returned to their idle values."""
+        with self._lock:
+            self._safe_all_stop()
+            if isinstance(self.hardware, MockHardware):
+                self.hardware.patch(
+                    chamber_open=False,
+                    item_present=False,
+                    acceptance_triggered=False,
+                    reverse_motion=False,
+                    weight_grams=0,
+                    weight_stable=False,
+                    fill_percent=20,
+                    service_panel_open=False,
+                    collection_door_open=False,
+                    vibration_g=0.02,
+                    camera_online=True,
+                    camera_occluded=False,
+                    camera_blurry=False,
+                    temperature_c=28.0,
+                )
+                self._last = self.hardware.read()
+            unsafe = self._unsafe_conditions(self.hardware.read())
+            if unsafe:
+                raise ValueError("Reset ditolak: " + describe_interlocks(unsafe))
+            self.db.set_json("safe_reason", None)
+            self._clear_alert()
+            if deactivate_lease:
+                self.db.deactivate_leases()
+            self._processing_started_at = None
+            self._sensor_sequence = []
+            self._reset_waste_type_selection()
+            if self.db.active_lease():
+                self.set_state(MachineState.SESSION_ACTIVE, "simulation-reset")
+                self.try_open_input_gate("simulation-reset")
+            else:
+                self.set_state(MachineState.IDLE, "maintenance-reset")
+            self.emit("STATUS_CHANGED", {"status": "ONLINE", "source": "maintenance"})
 
     def _simulation_lease(self, seconds: int = 180) -> None:
-        now = time.time()
-        lease = {
+        # A local lease v2 without a money bound (the interactive simulator
+        # never represents a server session); signed with the machine secret
+        # exactly like the server's lease.
+        now = int(time.time())
+        policy = {"version": 1, "mode": "COMPLIANCE_ONLY", "multiplierBps": 10000, "wasteTypes": []}
+        lease = sign_lease_v2(self.config.machine_secret, {
             "id": str(uuid.uuid4()),
+            "machineCode": self.config.machine_code,
             "sessionId": f"interactive-{uuid.uuid4()}",
             "userRef": "interactive-simulator",
             "issuedAt": now,
             "expiresAt": now + seconds,
-        }
-        canonical = ".".join(
-            str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
-        )
-        lease["signature"] = hmac.new(
-            self.config.machine_secret.encode(),
-            canonical.encode(),
-            hashlib.sha256,
-        ).hexdigest()
+            "reservationId": None,
+            "policyVersion": policy_version(policy),
+            "ceilingRupiah": None,
+            "maxItems": None,
+        })
+        lease["policy"] = policy
         if not self.activate_lease(lease):
             raise RuntimeError("Gagal membuat sesi simulasi")
 

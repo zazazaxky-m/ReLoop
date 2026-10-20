@@ -36,6 +36,7 @@ export default async function AdminCampaignsPage({
     description: c.description,
     campaignType: c.campaignType,
     rewardMode: c.rewardMode,
+    supportsMachine: c.supportsMachine,
     visibility: c.visibility,
     allowedEmailDomains: (c.allowedEmailDomainsJson as string[] | null) ?? [],
     startAt: c.startAt,
@@ -44,6 +45,10 @@ export default async function AdminCampaignsPage({
     status: c.status,
     sessionCount: c._count.sessions,
     organizationName: null,
+    rewardBudgetRupiah: c.rewardBudgetRupiah,
+    maxRewardPerSessionRupiah: c.maxRewardPerSessionRupiah,
+    heldRupiah: c.heldRupiah,
+    spentRupiah: c.spentRupiah,
   }));
 
   const pageMeta = buildPaginationMeta(total, pagination);

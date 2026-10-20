@@ -5,6 +5,11 @@
 
 # testing
 /coverage
+# audit harness artifacts (redacted logs, screenshots) and Playwright output
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
 .coverage
 coverage*.txt
 cov-*.txt

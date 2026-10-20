@@ -1,6 +1,7 @@
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { getMinRedemption } from "@/lib/config";
+import { getLiabilitySummary } from "@/lib/reconciliation-report";
 import {
   Card,
   CardContent,
@@ -24,7 +25,7 @@ export default async function SuperadminDashboardPage() {
     machineCount,
     userCount,
     depositCount,
-    ledgerSum,
+    liability,
     pendingPartners,
     minRedemption,
     securitySummary,
@@ -34,10 +35,9 @@ export default async function SuperadminDashboardPage() {
     prisma.machine.count(),
     prisma.user.count({ where: { role: "USER" } }),
     prisma.depositItem.count({ where: { status: "ACCEPTED" } }),
-    prisma.rewardLedger.aggregate({
-      where: { entryType: "EARN", status: "AVAILABLE" },
-      _sum: { amount: true },
-    }),
+    // M05: net spendable liability, the figure the mobile overview shows as
+    // rewardAvailable (gross AVAILABLE earnings ignore payouts and reserves).
+    getLiabilitySummary(),
     prisma.organizationCollectorPartner.count({
       where: { status: "PENDING_SUPERADMIN_APPROVAL" },
     }),
@@ -59,7 +59,8 @@ export default async function SuperadminDashboardPage() {
         <MetricCard label="Pengguna" value={userCount} icon={Users} tone="blue" />
         <MetricCard
           label="Reward tersedia"
-          value={formatRupiah(ledgerSum._sum.amount ?? 0)}
+          value={formatRupiah(liability.availableLiability)}
+          hint="Saldo tersedia, setelah pencairan"
           icon={Wallet}
           tone="amber"
         />

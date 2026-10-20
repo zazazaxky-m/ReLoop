@@ -88,25 +88,39 @@ export function generateTotpCode(
   return hotp(base32Decode(secret), counter);
 }
 
-export function verifyTotpCode(
+/**
+ * Returns the time step (RFC 6238 counter) of the code in the ±`window` steps
+ * around now that equals `token`, or null. Callers that must not accept a
+ * second use of an OTP (RFC 6238 §5.2) compare it with the last accepted step.
+ * When several steps match, the latest one is returned.
+ */
+export function findTotpStep(
   secret: string,
   token: string,
   options?: { window?: number; timestampMs?: number },
-): boolean {
+): number | null {
   const normalized = token.replace(/\s+/g, "");
-  if (!/^\d{6}$/.test(normalized)) return false;
+  if (!/^\d{6}$/.test(normalized)) return null;
 
   const window = options?.window ?? 1;
   const timestampMs = options?.timestampMs ?? Date.now();
   const counter = Math.floor(timestampMs / 1000 / STEP_SECONDS);
   const secretBytes = base32Decode(secret);
 
-  for (let offset = -window; offset <= window; offset += 1) {
+  for (let offset = window; offset >= -window; offset -= 1) {
     const expected = hotp(secretBytes, counter + offset);
     const a = Buffer.from(expected);
     const b = Buffer.from(normalized);
-    if (a.length === b.length && timingSafeEqual(a, b)) return true;
+    if (a.length === b.length && timingSafeEqual(a, b)) return counter + offset;
   }
 
-  return false;
+  return null;
+}
+
+export function verifyTotpCode(
+  secret: string,
+  token: string,
+  options?: { window?: number; timestampMs?: number },
+): boolean {
+  return findTotpStep(secret, token, options) !== null;
 }

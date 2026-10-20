@@ -200,8 +200,8 @@ export function ConfigEditor({
 
       <SlideEditor
         kind="landing"
-        title="Carousel Landing Page"
-        description="Khusus halaman landing web. Rasio gambar yang disarankan 16:7."
+        title="Carousel landing lama (tersimpan)"
+        description="Disimpan sebagai arsip. Landing web memakai poster editorial, sehingga perubahan carousel ini tidak tampil di halaman utama."
         slides={landingSlides}
         uploading={uploading}
         onAdd={() => addSlide("landing")}

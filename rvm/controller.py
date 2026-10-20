@@ -1,28 +1,35 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
+import logging
 import secrets
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from .camera import CameraWorker
 from .config import RvmConfig
 from .database import EdgeDatabase
 from .fraud import RvmFraudMixin
 from .hardware import GpioHardware, HardwareAdapter, MockHardware, SensorSnapshot
+from .lease import bound_state, item_block_reason, item_cap, item_caps, verify_lease_v2
 from .remote import RvmRemoteMixin
 from .simulation import RvmSimulationMixin
 from .states import (
+    LOCKED_STATE_BLOCK_REASONS,
     MAINTENANCE_LOCKOUT_SECONDS,
     MAINTENANCE_LOCKOUT_THRESHOLD,
     MachineState,
     SIMULATION_SCENARIOS,
+    describe_interlocks,
+    iso_from_epoch,
     iso_now,
 )
-from .sync import SyncWorker
+from .sync import LAST_SUCCESS_KEY, SyncWorker
+
+logger = logging.getLogger(__name__)
+
+INVALID_DEAD_LETTER_IDS = "ID event tidak valid: kirim daftar ID event berupa angka positif"
 
 
 class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
@@ -55,6 +62,9 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         self._last = SensorSnapshot()
         self._last_heartbeat = 0.0
         self._last_lease_poll = 0.0
+        # (sessionId, reason) of the last refused renewal already audited: the
+        # server re-signs every 2 s poll, so one refusal is recorded once.
+        self._audited_renewal_refusal: tuple[str, str] | None = None
         self._last_display_poll = 0.0
         self._processing_started_at: float | None = None
         self._weight_reported = False
@@ -71,6 +81,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         self._server_session: dict[str, Any] | None = None
         self._idle_timeout_minutes: int | None = None
         self._active_alert: dict[str, Any] | None = self.db.get_json("active_alert")
+        self._output_fault: str | None = None
         self.camera = CameraWorker(
             config.camera_enabled,
             config.camera_index,
@@ -92,7 +103,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
 
     def start(self) -> None:
         self.running = True
-        self.hardware.all_stop()
+        self._safe_all_stop()
         self.sync.start()
         self.camera.start()
         self._recover_state_after_restart()
@@ -110,7 +121,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
 
     def stop(self) -> None:
         self.running = False
-        self.hardware.all_stop()
+        self._safe_all_stop()
         self.camera.stop()
         self.sync.stop()
         if self._loop:
@@ -138,79 +149,138 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         else:
             self.set_state(MachineState.IDLE, "startup")
 
+    @staticmethod
+    def _retry_delay(errors: int, base: float, cap: float) -> float:
+        """Normal loop cadence, or a capped exponential backoff while the
+        loop keeps failing."""
+        return min(cap, base * 2 ** min(errors, 16))
+
     def _run(self) -> None:
+        errors = 0
         while self.running:
             try:
-                snapshot = self.hardware.read()
-                self._process_sensors(snapshot)
-                self._last = snapshot
-                self._expire_lease()
-                if (
-                    self.state == MachineState.PROCESSING
-                    and self._processing_started_at
-                    and time.time() - self._processing_started_at
-                    > self.config.chamber_timeout_seconds
-                ):
-                    self.report_fraud("CHAMBER_PROCESS_TIMEOUT", {})
-                    self.emit("CHAMBER_TIMEOUT", {"timeoutSeconds": self.config.chamber_timeout_seconds}, self.session_id())
-                    self.emit("ITEM_REJECTED", {"reason": "CHAMBER_PROCESS_TIMEOUT"}, self.session_id())
-                    self._sensor_sequence = []
-                    self._reset_waste_type_selection()
-                    self.set_state(MachineState.SESSION_ACTIVE, "item-timeout")
-                    self.hardware.set_conveyor("STOPPED")
-                if time.time() - self._last_heartbeat >= self.config.heartbeat_seconds:
-                    self.emit("HEARTBEAT", self.heartbeat_payload(snapshot))
-                    self._last_heartbeat = time.time()
+                self._tick()
+                errors = 0
             except Exception as exc:
-                self.enter_safe_state(
-                    "CONTROL_LOOP_ERROR",
-                    {"error": str(exc)},
-                    category="SYSTEM",
-                    event_type="ERROR",
-                )
-            time.sleep(0.05)
+                errors += 1
+                if errors == 1:
+                    logger.error("control loop tick failed", exc_info=True)
+                try:
+                    if self._safety_latch_active():
+                        # Already latched (e.g. a failed output close in this
+                        # tick): keep the root-cause reason, stop everything.
+                        self._safe_all_stop()
+                    else:
+                        self.enter_safe_state(
+                            "CONTROL_LOOP_ERROR",
+                            {"error": str(exc)},
+                            category="SYSTEM",
+                            event_type="ERROR",
+                        )
+                except Exception:
+                    # The loop itself must keep running to retry the latch.
+                    logger.exception("control loop could not latch SAFE_STATE")
+            time.sleep(self._retry_delay(errors, base=0.05, cap=1.0))
+
+    def _tick(self) -> None:
+        """One control-loop pass. The whole pass holds the controller lock, so a
+        guarded output write (check + write under the same lock) is never
+        interleaved with sensor processing: the loop sees either the state
+        before the write or the state after it."""
+        with self._lock:
+            snapshot = self.hardware.read()
+            try:
+                self._process_sensors(snapshot)
+            finally:
+                # Each sensor edge is processed at most once, even when the
+                # pass aborts (e.g. a failed output close that latched).
+                self._last = snapshot
+            self._expire_lease()
+            if (
+                self.state == MachineState.PROCESSING
+                and self._processing_started_at
+                and time.time() - self._processing_started_at
+                > self.config.chamber_timeout_seconds
+            ):
+                self.report_fraud("CHAMBER_PROCESS_TIMEOUT", {})
+                self.emit("CHAMBER_TIMEOUT", {"timeoutSeconds": self.config.chamber_timeout_seconds}, self.session_id())
+                self.emit("ITEM_REJECTED", {"reason": "CHAMBER_PROCESS_TIMEOUT"}, self.session_id())
+                self._sensor_sequence = []
+                self._reset_waste_type_selection()
+                self.set_state(MachineState.SESSION_ACTIVE, "item-timeout")
+                self._close_output(lambda: self.hardware.set_conveyor("STOPPED"))
+            if time.time() - self._last_heartbeat >= self.config.heartbeat_seconds:
+                self.emit("HEARTBEAT", self.heartbeat_payload(snapshot))
+                self._last_heartbeat = time.time()
 
     def _lease_loop(self) -> None:
+        errors = 0
         while self.running:
-            self._last_lease_poll = time.time()
-            payload = self.sync.fetch_machine_session()
-            if payload is not None:
-                lease = payload.get("lease")
-                self._server_session = payload.get("session")
-                self._idle_timeout_minutes = payload.get("idleTimeoutMinutes")
-                waste_types = payload.get("wasteTypes")
-                if waste_types is not None:
-                    self.db.set_json("waste_types", waste_types)
-                local_lease = self.db.active_lease()
+            try:
+                self._poll_server_session()
+                errors = 0
+            except Exception:
+                errors += 1
+                logger.warning("server session poll failed (%d in a row)", errors, exc_info=True)
+            time.sleep(self._retry_delay(errors, base=2.0, cap=30.0))
 
+    def _poll_server_session(self) -> None:
+        """One session-bridge poll. Network calls run outside the controller
+        lock; only the local lease/state decision is taken under it."""
+        self._last_lease_poll = time.time()
+        payload = self.sync.fetch_machine_session()
+        if payload is not None:
+            lease = payload.get("lease")
+            self._server_session = payload.get("session")
+            self._idle_timeout_minutes = payload.get("idleTimeoutMinutes")
+            waste_types = payload.get("wasteTypes")
+            if waste_types is not None:
+                self.db.set_json("waste_types", waste_types)
+            with self._lock:
+                local_lease = self.db.active_lease()
                 if lease and not local_lease:
                     self.activate_lease(lease)
                 elif lease and local_lease and str(local_lease["session_id"]) != str(lease["sessionId"]):
                     self.db.deactivate_leases()
                     self.activate_lease(lease)
+                elif lease and local_lease:
+                    # Same session: only the expiry moves; a mid-item renewal
+                    # must not reopen the gate or reset the state.
+                    self.renew_lease(lease)
                 elif not lease and local_lease:
                     self.db.deactivate_leases()
-                    self.hardware.all_stop()
                     self._processing_started_at = None
                     self._reset_waste_type_selection()
                     if self._active_alert and self._active_alert.get("category") == "FRAUD":
                         self._clear_alert()
-                    self.set_state(MachineState.IDLE, "server-session-ended")
+                    # A safety latch, maintenance or full bin outlives the
+                    # server session; only a validated operator reset ends it.
+                    if self.state not in LOCKED_STATE_BLOCK_REASONS:
+                        self.set_state(MachineState.IDLE, "server-session-ended")
+                    # After the state change, so a failed stop's latch wins.
+                    self._safe_all_stop()
+                # B01b: every session the server no longer runs is closed
+                # locally; its close watermark follows once its outbox is
+                # synced (rvm/sync.py). A conflict (`sessionConflict`) is not
+                # an end: the session may resume once it is resolved.
+                if not payload.get("sessionConflict"):
+                    current = str(lease["sessionId"]) if isinstance(lease, dict) and lease.get("sessionId") else None
+                    for closed in self.db.close_sessions_except(current):
+                        self.db.audit("SESSION_CLOSED_BY_SERVER", {"sessionId": closed})
 
-            if self.state == MachineState.IDLE and time.time() - self._last_display_poll >= 5:
-                self._last_display_poll = time.time()
-                display = self.sync.fetch_display()
-                if display:
-                    self.db.set_json(
-                        "display",
-                        {
-                            "qrDataUrl": display.get("qrDataUrl"),
-                            "expiresAt": display.get("expiresAt"),
-                            "status": display.get("status"),
-                            "updatedAt": time.time(),
-                        },
-                    )
-            time.sleep(2)
+        if self.state == MachineState.IDLE and time.time() - self._last_display_poll >= 5:
+            self._last_display_poll = time.time()
+            display = self.sync.fetch_display()
+            if display:
+                self.db.set_json(
+                    "display",
+                    {
+                        "qrDataUrl": display.get("qrDataUrl"),
+                        "expiresAt": display.get("expiresAt"),
+                        "status": display.get("status"),
+                        "updatedAt": time.time(),
+                    },
+                )
 
     def _process_sensors(self, current: SensorSnapshot) -> None:
         if current.chamber_open and not self._last.chamber_open:
@@ -219,26 +289,43 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             else:
                 self._sensor_sequence = ["CHAMBER_OPEN"]
                 self.emit("CHAMBER_OPENED", {"doorSensor": "OPEN"}, self.session_id())
-        if current.service_panel_open and not self._last.service_panel_open:
-            self.enter_safe_state("SERVICE_PANEL_FORCED_OPEN", {})
-        if current.collection_door_open and not self._last.collection_door_open:
-            self.enter_safe_state("COLLECTION_DOOR_FORCED_OPEN", {})
-        if current.vibration_g >= self.config.vibration_threshold_g:
-            self.enter_safe_state("HIGH_IMPACT_DETECTED", {"vibrationG": current.vibration_g})
-        if current.camera_occluded and not self._last.camera_occluded:
-            self.enter_safe_state("CAMERA_OCCLUDED", {})
+        self._latch_hazard(
+            current.service_panel_open,
+            self._last.service_panel_open,
+            "SERVICE_PANEL_FORCED_OPEN",
+            {},
+        )
+        self._latch_hazard(
+            current.collection_door_open,
+            self._last.collection_door_open,
+            "COLLECTION_DOOR_FORCED_OPEN",
+            {},
+        )
+        self._latch_hazard(
+            current.vibration_g >= self.config.vibration_threshold_g,
+            self._last.vibration_g >= self.config.vibration_threshold_g,
+            "HIGH_IMPACT_DETECTED",
+            {"vibrationG": current.vibration_g},
+        )
+        self._latch_hazard(
+            current.camera_occluded,
+            self._last.camera_occluded,
+            "CAMERA_OCCLUDED",
+            {},
+        )
         if self._last.camera_online and not current.camera_online:
             self.enter_safe_state("CAMERA_OFFLINE", {})
         if current.camera_blurry and not self._last.camera_blurry:
             self._set_alert("SENSOR", "CAMERA_BLURRY", "WARNING", {})
             self.emit("ERROR", {"reason": "CAMERA_BLURRY"}, self.session_id())
-        if current.temperature_c >= self.config.max_temperature_c:
-            self.enter_safe_state(
-                "HIGH_TEMPERATURE",
-                {"temperatureC": current.temperature_c, "limitC": self.config.max_temperature_c},
-                category="SAFETY",
-                event_type="ERROR",
-            )
+        self._latch_hazard(
+            current.temperature_c >= self.config.max_temperature_c,
+            self._last.temperature_c >= self.config.max_temperature_c,
+            "HIGH_TEMPERATURE",
+            {"temperatureC": current.temperature_c, "limitC": self.config.max_temperature_c},
+            category="SAFETY",
+            event_type="ERROR",
+        )
         if current.reverse_motion and not self._last.reverse_motion:
             self.emit(
                 "SENSOR_SEQUENCE",
@@ -252,10 +339,13 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             self.report_fraud("REVERSE_MOTION", {"retrievalAttempt": True})
         if current.fill_percent != self._last.fill_percent:
             self.emit("FILL_LEVEL_UPDATED", {"fillLevelPercent": current.fill_percent})
-        if current.fill_percent >= self.config.max_fill_percent and self.state != MachineState.FULL:
+        if current.fill_percent >= self.config.max_fill_percent and self.state not in {
+            MachineState.FULL,
+            MachineState.SAFE_STATE,  # the safety latch outranks capacity state
+        }:
             self.set_state(MachineState.FULL, "capacity")
-            self.hardware.all_stop()
-            self.emit("STATUS_CHANGED", {"status": "FULL"})
+            if self._safe_all_stop():  # a failed stop latched SAFE_STATE instead
+                self.emit("STATUS_CHANGED", {"status": "FULL"})
         if current.item_present and not self._last.item_present:
             if self.state != MachineState.SESSION_ACTIVE:
                 self.report_fraud("ITEM_WITHOUT_ACTIVE_SESSION", {})
@@ -266,7 +356,7 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 self._sensor_sequence.append("ITEM_PRESENT")
                 self._processing_started_at = time.time()
                 self._weight_reported = False
-                self.hardware.set_input_gate(False)
+                self._close_output(lambda: self.hardware.set_input_gate(False))
                 item_payload: dict[str, Any] = {"inputBeam": True}
                 if self._selected_waste_type_id:
                     item_payload["wasteTypeId"] = self._selected_waste_type_id
@@ -318,32 +408,84 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 self._sensor_sequence = []
                 self._reset_waste_type_selection()
                 self.set_state(MachineState.SESSION_ACTIVE, "abnormal-weight-rejected")
-                self.hardware.set_input_gate(True)
+                self.try_open_input_gate("abnormal-weight-rejected")
             self._weight_reported = True
         if current.acceptance_triggered and not self._last.acceptance_triggered:
             if self.state != MachineState.PROCESSING:
                 self.report_fraud("IMPOSSIBLE_ACCEPTANCE_SEQUENCE", {})
             else:
-                self._sensor_sequence.extend(["CONVEYOR_FORWARD", "ACCEPTANCE_POINT"])
-                self.emit("SENSOR_SEQUENCE", {"steps": self._sensor_sequence}, self.session_id())
-                self.hardware.set_conveyor("FORWARD")
-                self.emit("CONVEYOR_STARTED", {"direction": "FORWARD"}, self.session_id())
-                self.emit("ITEM_ACCEPTED_POINT", {"acceptanceBeam": True}, self.session_id())
-                self.hardware.set_conveyor("STOPPED")
-                if self.config.compactor_enabled:
-                    self.emit("COMPACTION_STARTED", {}, self.session_id())
-                    self.hardware.set_compactor(True)
-                    time.sleep(0.15)
-                    self.hardware.set_compactor(False)
-                    self.emit("COMPACTION_COMPLETED", {}, self.session_id())
+                session_id = self.session_id()
+                waste_type_id = self._selected_waste_type_id
+                # B01b: the signed session bound (ceiling, item bound) is
+                # checked before any actuator moves. An item it cannot cover
+                # is rejected like an interlock refusal: every output off, no
+                # ITEM_ACCEPTED_POINT, the gate stays shut.
+                bound = self._item_bound_block(waste_type_id)
+                blocked: str | None = None
+                if bound:
+                    self._safe_all_stop()
+                    self.emit(
+                        "ITEM_REJECTED",
+                        {"reason": "SESSION_BOUND_REACHED", "bound": bound},
+                        session_id,
+                    )
+                    self.db.audit("SESSION_BOUND_REACHED", {"bound": bound, "wasteTypeId": waste_type_id})
+                elif (blocked := self._guarded_output(lambda: self.hardware.set_conveyor("FORWARD"))):
+                    # The server credits on ITEM_ACCEPTED_POINT: an item the
+                    # conveyor never moved is rejected, never accepted.
+                    self.emit(
+                        "ITEM_REJECTED",
+                        {"reason": "ACTUATION_BLOCKED", "blockedBy": blocked},
+                        session_id,
+                    )
+                else:
+                    self._sensor_sequence.extend(["CONVEYOR_FORWARD", "ACCEPTANCE_POINT"])
+                    self.emit("SENSOR_SEQUENCE", {"steps": self._sensor_sequence}, session_id)
+                    self.emit("CONVEYOR_STARTED", {"direction": "FORWARD"}, session_id)
+                    self._emit_accepted(session_id, waste_type_id)
+                    self._close_output(lambda: self.hardware.set_conveyor("STOPPED"))
+                    if (
+                        self.config.compactor_enabled
+                        and self._guarded_output(lambda: self.hardware.set_compactor(True)) is None
+                    ):
+                        self.emit("COMPACTION_STARTED", {}, session_id)
+                        time.sleep(0.15)
+                        self._close_output(lambda: self.hardware.set_compactor(False))
+                        self.emit("COMPACTION_COMPLETED", {}, session_id)
                 self._processing_started_at = None
                 self._sensor_sequence = []
                 self._reset_waste_type_selection()
-                self.set_state(MachineState.SESSION_ACTIVE, "item-accepted")
+                self.set_state(
+                    MachineState.SESSION_ACTIVE,
+                    "item-bound-reached" if bound else "item-actuation-blocked" if blocked else "item-accepted",
+                )
+        # Level-triggered enforcement: while latched, or while any physical
+        # hazard is present, every tick drives all outputs off again, whatever
+        # wrote them in between.
+        if self.state == MachineState.SAFE_STATE or self._physical_hazards(current):
+            self._safe_all_stop()
+
+    def _latch_hazard(
+        self,
+        active: bool,
+        was_active: bool,
+        reason: str,
+        payload: dict[str, Any],
+        **safe_state_options: str,
+    ) -> None:
+        """Latches SAFE_STATE whenever a hazard is present and the machine is
+        not latched yet (not only on the rising edge), so a door that is
+        already open when the latch is cleared re-latches on the next tick.
+        A new rising edge while latched still records its own alert."""
+        if active and (not was_active or self.state != MachineState.SAFE_STATE):
+            self.enter_safe_state(reason, payload, **safe_state_options)
 
     def heartbeat_payload(self, snapshot: SensorSnapshot | None = None) -> dict:
         sensor = snapshot or self.hardware.read()
-        server_status = "ERROR" if self.state in {MachineState.ERROR, MachineState.SAFE_STATE} else (
+        # A latched safety fault is reported as ERROR in every runtime state
+        # (e.g. MAINTENANCE entered while latched).
+        latched = self._safety_latch_active()
+        server_status = "ERROR" if latched or self.state == MachineState.ERROR else (
             "FULL" if self.state == MachineState.FULL else "ONLINE"
         )
         return {
@@ -353,6 +495,9 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             "temperatureC": sensor.temperature_c,
             "cameraOnline": self.camera.status.online if self.config.camera_enabled else sensor.camera_online,
             "queueDepth": self.db.queue_depth(),
+            # Outbox health for the dashboard (stored with the heartbeat event).
+            "deadLetterDepth": self.db.dead_letter_depth(),
+            "lastSyncSuccessAt": iso_from_epoch(self.db.get_json(LAST_SUCCESS_KEY)),
         }
 
     def emit(
@@ -369,6 +514,19 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
     def set_state(self, state: MachineState, reason: str) -> None:
         with self._lock:
             previous = self.state
+            if (
+                previous == MachineState.SAFE_STATE
+                and state not in {MachineState.SAFE_STATE, MachineState.MAINTENANCE}
+                and self.db.get_json("safe_reason")
+            ):
+                # A latched SAFE_STATE is left only through the validated
+                # operator reset, which clears safe_reason first; processing,
+                # session and capacity transitions never mask it.
+                self.db.audit(
+                    "STATE_CHANGE_SUPPRESSED",
+                    {"from": previous, "to": state, "reason": reason},
+                )
+                return
             self.state = state
             self.db.set_json("machine_state", state)
             self.db.audit("STATE_CHANGED", {"from": previous, "to": state, "reason": reason})
@@ -381,8 +539,14 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         category: str = "VANDALISM",
         event_type: str = "VANDALISM_DETECTED",
     ) -> None:
+        # Outputs off immediately, without waiting for the controller lock,
+        # and again under it so an in-flight guarded write cannot survive.
+        # An output fault never prevents the latch below; it escalates the
+        # latch to OUTPUT_STOP_FAILED and the control tick keeps retrying the
+        # stop while latched.
+        self._stop_outputs()
         with self._lock:
-            self.hardware.all_stop()
+            stopped = self._stop_outputs()
             if self.state == MachineState.SAFE_STATE and reason == self.db.get_json("safe_reason"):
                 return
             self._set_alert(category, reason, "CRITICAL", payload)
@@ -396,27 +560,75 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                 {
                     "reason": reason,
                     "category": category,
-                    "outputsDisabled": ["input_gate", "conveyor", "compactor"],
+                    "outputsDisabled": ["input_gate", "conveyor", "compactor"] if stopped else [],
+                    "stopFailed": not stopped,
                 },
                 self.session_id(),
             )
+            if not stopped and reason != "OUTPUT_STOP_FAILED":
+                # The unresolved output fault outranks the original reason.
+                self.enter_safe_state(
+                    "OUTPUT_STOP_FAILED",
+                    {"error": self._output_fault},
+                    category="SYSTEM",
+                    event_type="ERROR",
+                )
+
+    def lease_refusal(self, lease: Any) -> str | None:
+        """Why a lease is not a valid lease v2 for this machine (rvm/lease.py),
+        or None. A v1 lease (no `version`) is refused: a reward cap that is
+        not signed never gets a permissive fallback."""
+        return verify_lease_v2(self.config.machine_secret, lease, self.config.machine_code)
 
     def verify_lease(self, lease: dict[str, Any]) -> bool:
-        required = {"id", "sessionId", "issuedAt", "expiresAt", "signature"}
-        if not required.issubset(lease):
+        return self.lease_refusal(lease) is None
+
+    def renew_lease(self, lease: dict[str, Any]) -> bool:
+        """Extends the running session's lease from a fresh, verified server
+        lease for the same session; only the lease row changes. A changed
+        signed bound (e.g. a reservation that appeared after deploy) is adopted
+        and audited: refusing it would let the lease expire mid-item and the
+        next poll re-activate the session, reopening the gate. The consumed
+        counter is per session, so the budget is never reset. Never touches
+        the state, the latch or an output. Every later expiry is applied at
+        once: a local lease that trails the server's lets a reconnect after an
+        outage re-activate the session and reopen the gate mid-item, so the
+        row is rewritten on each poll that moves the expiry. One refused
+        renewal is audited once per session and reason. Caller holds
+        self._lock."""
+        current = self.db.active_lease()
+        if not current or not isinstance(lease, dict) or str(current["session_id"]) != str(lease.get("sessionId")):
             return False
-        canonical = ".".join(
-            str(lease[key]) for key in ("id", "sessionId", "issuedAt", "expiresAt")
+        refusal = self.lease_refusal(lease)
+        if refusal:
+            key = (str(current["session_id"]), refusal)
+            if self._audited_renewal_refusal != key:
+                self._audited_renewal_refusal = key
+                self.db.audit("LEASE_REFUSED", {"reason": refusal, "renewal": True})
+            return False
+        if float(lease["expiresAt"]) <= float(current["expires_at"]):
+            return False
+        bound_fields = (
+            ("reservation_id", "reservationId"),
+            ("policy_version", "policyVersion"),
+            ("ceiling_rupiah", "ceilingRupiah"),
+            ("max_items", "maxItems"),
         )
-        expected = hmac.new(
-            self.config.machine_secret.encode(), canonical.encode(), hashlib.sha256
-        ).hexdigest()
-        return hmac.compare_digest(expected, str(lease["signature"]))
+        changed = {
+            remote: {"from": current[local], "to": lease.get(remote)}
+            for local, remote in bound_fields
+            if current[local] != lease.get(remote)
+        }
+        self.db.renew_lease({**lease, "status": "ACTIVE"})
+        if changed:
+            self.db.audit("LEASE_BOUND_CHANGED", {"sessionId": str(current["session_id"]), "changes": changed})
+        return True
 
     def activate_lease(self, lease: dict[str, Any]) -> bool:
-        if not self.verify_lease(lease) or float(lease["expiresAt"]) <= time.time():
+        refusal = self.lease_refusal(lease)
+        if refusal or float(lease["expiresAt"]) <= time.time():
             # Pre-scan lease (QR display data), save as display
-            if lease.get("qrDataUrl"):
+            if isinstance(lease, dict) and lease.get("qrDataUrl"):
                 self.db.set_json(
                     "display",
                     {
@@ -426,22 +638,298 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
                         "updatedAt": time.time(),
                     }
                 )
+            elif refusal:
+                self.db.audit("LEASE_REFUSED", {"reason": refusal})
             return False
         lease = {**lease, "status": "ACTIVE"}
-        self.db.save_lease(lease)
-        self.set_state(MachineState.SESSION_ACTIVE, "lease-activated")
-        self.hardware.set_input_gate(True)
-        self.emit("CHAMBER_OPENED", {"leaseActivated": True}, lease["sessionId"])
-        if self.config.camera_capture_session_start:
-            self._capture_camera_evidence("SESSION_START", "SESSION_ACTIVATED", lease["sessionId"])
+        session_id = str(lease["sessionId"])
+        opened = False
+
+        def start_session() -> None:
+            nonlocal opened
+            # The durable consumed counter is keyed by session: a renewal (same
+            # session, fresh expiry) or a restart never resets it.
+            self.db.ensure_session(session_id)
+            self.db.save_lease(lease)
+            self.set_state(MachineState.SESSION_ACTIVE, "lease-activated")
+            # B01b: at an exhausted bound the session runs, but the gate stays
+            # shut: the machine accepts nothing more for it.
+            bound = self._gate_bound_block()
+            if bound:
+                self.db.audit(
+                    "ACTUATION_BLOCKED",
+                    {"output": "input_gate", "reason": "lease-activated", "blockedBy": bound},
+                )
+                return
+            self.hardware.set_input_gate(True)
+            opened = True
+
+        with self._lock:
+            # A session starts only from a stopped machine: every output is
+            # stopped in the same lock section as the interlock check and the
+            # gate opening, so nothing left running (a jog, a stuck relay) can
+            # move while the gate is open to a user. A failed stop latches
+            # OUTPUT_STOP_FAILED (_safe_all_stop) and the lease is refused.
+            if not self._safe_all_stop():
+                return False
+            # Local interlocks outrank a backend lease: on refusal nothing is
+            # saved and the state/latch stay exactly as they were.
+            if self._guarded_output(start_session) is not None:
+                return False
+        if opened:
+            self.emit("CHAMBER_OPENED", {"leaseActivated": True}, session_id)
+            if self.config.camera_capture_session_start:
+                self._capture_camera_evidence("SESSION_START", "SESSION_ACTIVATED", session_id)
         return True
+
+    # ------------------------------------------------------------------ #
+    # session bound (B01b): signed ceiling / item bound, durable counter
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _lease_bounds(lease: dict[str, Any]) -> tuple[int | None, int | None, dict[str, Any] | None]:
+        """(ceiling, max items, policy) of a stored lease row or a server lease."""
+        if "ceiling_rupiah" in lease:
+            raw = lease.get("policy_json")
+            policy = json.loads(raw) if raw else None
+            return lease.get("ceiling_rupiah"), lease.get("max_items"), policy
+        return lease.get("ceilingRupiah"), lease.get("maxItems"), lease.get("policy")
+
+    def session_bound(self) -> dict[str, Any] | None:
+        """The active session's bound as the kiosk shows it (None: no bound)."""
+        lease = self.db.active_lease()
+        if not lease:
+            return None
+        ceiling, max_items, policy = self._lease_bounds(lease)
+        consumption = self.db.session_consumption(str(lease["session_id"])) or {}
+        return bound_state(
+            ceiling=ceiling,
+            max_items=max_items,
+            policy=policy,
+            consumed_rupiah=int(consumption.get("consumed_rupiah") or 0),
+            consumed_items=int(consumption.get("consumed_items") or 0),
+            max_item_weight_grams=self.config.max_item_weight_grams,
+        )
+
+    def _gate_bound_block(self) -> str | None:
+        """Why the input gate must not open for another item (the bound is
+        exhausted), or None. Not an interlock: it never touches outputs."""
+        bound = self.session_bound()
+        return bound["reason"] if bound and bound["exhausted"] else None
+
+    def _item_bound_block(self, waste_type_id: str | None) -> str | None:
+        """Why the item now at the acceptance beam must not be accepted."""
+        lease = self.db.active_lease()
+        if not lease:
+            return None
+        ceiling, max_items, policy = self._lease_bounds(lease)
+        consumption = self.db.session_consumption(str(lease["session_id"])) or {}
+        return item_block_reason(
+            ceiling=ceiling,
+            max_items=max_items,
+            policy=policy,
+            consumed_rupiah=int(consumption.get("consumed_rupiah") or 0),
+            consumed_items=int(consumption.get("consumed_items") or 0),
+            waste_type_id=waste_type_id,
+            max_item_weight_grams=self.config.max_item_weight_grams,
+        )
+
+    def _emit_accepted(self, session_id: str | None, waste_type_id: str | None) -> str:
+        """ITEM_ACCEPTED_POINT plus the session's consumed counter (the most
+        the server can pay for this item under the signed snapshot), in one
+        SQLite transaction."""
+        payload: dict[str, Any] = {"acceptanceBeam": True}
+        lease = self.db.active_lease()
+        if session_id is None or not lease:
+            return self.emit("ITEM_ACCEPTED_POINT", payload, session_id)
+        ceiling, _max_items, policy = self._lease_bounds(lease)
+        cap = item_cap(item_caps(policy, self.config.max_item_weight_grams), waste_type_id, ceiling)
+        if ceiling is None:
+            cap = max(0, cap)
+        return self.db.enqueue_with_consumption("ITEM_ACCEPTED_POINT", payload, iso_now(), session_id, None, cap)
+
+    def _physical_hazards(self, snapshot: SensorSnapshot) -> list[str]:
+        """Conditions under which no actuator may move at all. An unresolved
+        output-stop fault counts: until a stop has succeeded again nothing may
+        be opened, every tick retries the stop and no reset is accepted."""
+        reasons = []
+        if self._output_fault is not None:
+            reasons.append("OUTPUT_STOP_FAILED")
+        if snapshot.service_panel_open:
+            reasons.append("SERVICE_PANEL_OPEN")
+        if snapshot.collection_door_open:
+            reasons.append("COLLECTION_DOOR_OPEN")
+        if snapshot.vibration_g >= self.config.vibration_threshold_g:
+            reasons.append("HIGH_VIBRATION")
+        if snapshot.temperature_c >= self.config.max_temperature_c:
+            reasons.append("HIGH_TEMPERATURE")
+        return reasons
+
+    def _unsafe_conditions(self, snapshot: SensorSnapshot) -> list[str]:
+        """Every safety condition that must be clear before outputs may be
+        opened or a safety latch may be reset: physical hazards plus the
+        camera requirement. The enabled camera worker must be online and
+        unobstructed; only MockHardware simulates camera signals (the GPIO
+        adapter has no camera inputs)."""
+        reasons = self._physical_hazards(snapshot)
+        camera_online = snapshot.camera_online if isinstance(self.hardware, MockHardware) else True
+        camera_occluded = snapshot.camera_occluded
+        if self.config.camera_enabled:
+            camera_online = camera_online and self.camera.status.online
+            camera_occluded = camera_occluded or self.camera.status.occluded
+        if not camera_online:
+            reasons.append("CAMERA_OFFLINE")
+        if camera_occluded:
+            reasons.append("CAMERA_OCCLUDED")
+        return reasons
+
+    def _safety_latch_active(self) -> bool:
+        alert = self._active_alert
+        return (
+            self.state == MachineState.SAFE_STATE
+            or bool(self.db.get_json("safe_reason"))
+            or bool(alert and alert.get("severity") == "CRITICAL")
+        )
+
+    def actuation_block_reason(self, snapshot: SensorSnapshot) -> str | None:
+        """Why the input gate, conveyor or compactor must not be opened or
+        started now, or None when every interlock is clear."""
+        unsafe = self._unsafe_conditions(snapshot)
+        if unsafe:
+            return unsafe[0]
+        if self._safety_latch_active():
+            return "SAFETY_LATCH_ACTIVE"
+        if self.state in LOCKED_STATE_BLOCK_REASONS:
+            return LOCKED_STATE_BLOCK_REASONS[self.state]
+        if snapshot.fill_percent >= self.config.max_fill_percent:
+            return "MACHINE_FULL"
+        return None
+
+    def _maintenance_block_reason(self, snapshot: SensorSnapshot) -> str | None:
+        """Interlock for a PIN-authorised technician jogging one output: any
+        physical hazard or an active safety latch blocks it, maintenance mode
+        does not (it is required; see _maintenance_output)."""
+        hazards = self._physical_hazards(snapshot)
+        if hazards:
+            return hazards[0]
+        if self._safety_latch_active():
+            return "SAFETY_LATCH_ACTIVE"
+        return None
+
+    def _guarded_output(
+        self,
+        write: Callable[[], None],
+        block_reason: Callable[[SensorSnapshot], str | None] | None = None,
+    ) -> str | None:
+        """Reads the latest sensors, evaluates the interlock and performs the
+        output write as one critical section under the controller lock.
+        Returns None when written, otherwise the blocking reason (with all
+        outputs forced off and `write` never called)."""
+        check = block_reason or self.actuation_block_reason
+        with self._lock:
+            try:
+                snapshot = self.hardware.read()
+            except Exception:
+                blocked: str | None = "SENSOR_READ_FAILED"
+            else:
+                blocked = check(snapshot)
+            if blocked:
+                self._safe_all_stop()
+                return blocked
+            write()
+            return None
+
+    def _stop_outputs(self) -> bool:
+        """One all_stop() attempt that never raises. Tracks the output fault:
+        set (and logged once per distinct error) while the stop fails, cleared
+        once a stop succeeds again. Does not latch; see _safe_all_stop."""
+        try:
+            self.hardware.all_stop()
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            if self._output_fault != error:
+                logger.error("all_stop failed: %s", error)
+            self._output_fault = error
+            return False
+        if self._output_fault is not None:
+            logger.info("all_stop recovered after: %s", self._output_fault)
+            self.db.audit("OUTPUT_STOP_RECOVERED", {"error": self._output_fault})
+            self._output_fault = None
+        return True
+
+    def _safe_all_stop(self) -> bool:
+        """Stop used by every path that turns all outputs off. It never
+        raises, and an unsuccessful stop always latches SAFE_STATE
+        (OUTPUT_STOP_FAILED, reported as an ERROR event). While latched every
+        tick retries the stop until it succeeds; the latch then stays until a
+        validated operator reset. Closing a single output goes through
+        _close_output, which latches the same way on a failed write."""
+        if self._stop_outputs():
+            return True
+        self.enter_safe_state(
+            "OUTPUT_STOP_FAILED",
+            {"error": self._output_fault},
+            category="SYSTEM",
+            event_type="ERROR",
+        )
+        return False
+
+    def _close_output(self, write: Callable[[], None]) -> None:
+        """Closes or stops a single output (always allowed, no interlock).
+        A failed write latches SAFE_STATE (OUTPUT_STOP_FAILED), which stops
+        every output and retries the stop each tick until it succeeds; the
+        error is then re-raised to the caller."""
+        with self._lock:
+            try:
+                write()
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                logger.error("output close failed: %s", error)
+                self.enter_safe_state(
+                    "OUTPUT_STOP_FAILED",
+                    {"error": error},
+                    category="SYSTEM",
+                    event_type="ERROR",
+                )
+                raise
+
+    def try_open_input_gate(self, reason: str) -> bool:
+        # B01b: at an exhausted session bound the gate stays shut; the bound
+        # is not a hazard, so nothing else changes.
+        bound = self._gate_bound_block()
+        if bound:
+            self.db.audit(
+                "ACTUATION_BLOCKED", {"output": "input_gate", "reason": reason, "blockedBy": bound}
+            )
+            return False
+        blocked = self._guarded_output(lambda: self.hardware.set_input_gate(True))
+        self.db.audit(
+            "INPUT_GATE_OPENED" if blocked is None else "ACTUATION_BLOCKED",
+            {"output": "input_gate", "reason": reason, "blockedBy": blocked},
+        )
+        return blocked is None
+
+    def _maintenance_output(self, write: Callable[[], None]) -> None:
+        """A technician jog (gate open, conveyor run, compactor on). Accepted
+        only in MAINTENANCE; the mode check and the guarded write share one
+        lock section, so leaving maintenance cannot interleave with the jog.
+        Outside MAINTENANCE the jog is refused without touching any output,
+        so a user's session is never disturbed by it."""
+        with self._lock:
+            if self.state != MachineState.MAINTENANCE:
+                raise ValueError(
+                    f"Aktuator ditolak: {describe_interlocks(['MAINTENANCE_REQUIRED'])}"
+                )
+            blocked = self._guarded_output(write, self._maintenance_block_reason)
+        if blocked:
+            raise ValueError(f"Aktuator ditolak: {describe_interlocks([blocked])}")
 
     def _expire_lease(self) -> None:
         if self.state not in {MachineState.SESSION_ACTIVE, MachineState.PROCESSING}:
             return
         if not self.db.active_lease():
-            self.hardware.all_stop()
             self.set_state(MachineState.SYNC_PENDING, "lease-expired")
+            # After the state change, so a failed stop's latch wins.
+            self._safe_all_stop()
 
     def session_id(self) -> str | None:
         lease = self.db.active_lease()
@@ -506,13 +994,28 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
         if command == "reset-safe-state":
             self._reset_mock_state()
         elif command == "gate":
-            hardware.set_input_gate(bool(data.get("open")))
+            if data.get("open"):
+                self._maintenance_output(lambda: hardware.set_input_gate(True))
+            else:
+                self._close_output(lambda: hardware.set_input_gate(False))
         elif command == "conveyor":
-            hardware.set_conveyor(str(data.get("direction", "STOPPED")))
+            direction = str(data.get("direction", "STOPPED"))
+            if direction in {"FORWARD", "REVERSE"}:
+                self._maintenance_output(lambda: hardware.set_conveyor(direction))
+            else:
+                self._close_output(lambda: hardware.set_conveyor("STOPPED"))
         elif command == "compactor":
-            hardware.set_compactor(bool(data.get("active")))
+            if data.get("active"):
+                self._maintenance_output(lambda: hardware.set_compactor(True))
+            else:
+                self._close_output(lambda: hardware.set_compactor(False))
         elif command == "flush":
             self.sync.flush_once()
+        elif command == "retry-dead-letter":
+            # Authorized by the maintenance token (rvm/api.py). Requeues with
+            # the same localEventId and payload; history is kept.
+            requeued = self.db.retry_dead_letters(self._dead_letter_ids(data))
+            self.db.audit("OUTBOX_DEAD_LETTER_RETRY", {"count": len(requeued), "ids": requeued})
         elif command == "mock-sensors" and isinstance(hardware, MockHardware):
             hardware.patch(**dict(data.get("values", {})))
         elif command == "simulate":
@@ -521,6 +1024,18 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             raise ValueError("Command maintenance tidak dikenal")
         self.db.audit("MAINTENANCE_COMMAND", {"command": command, "data": data})
         return self.public_state()
+
+    @staticmethod
+    def _dead_letter_ids(data: dict[str, Any]) -> list[int] | None:
+        """No `ids` key: every dead letter. Otherwise a list of positive
+        integer outbox ids; anything else is refused (HTTP 422 from the local
+        API) before any row changes."""
+        if "ids" not in data:
+            return None
+        ids = data["ids"]
+        if not isinstance(ids, list) or not all(type(value) is int and value > 0 for value in ids):
+            raise ValueError(INVALID_DEAD_LETTER_IDS)
+        return ids
 
     def public_state(self) -> dict[str, Any]:
         sensor = self.hardware.read()
@@ -545,6 +1060,8 @@ class RvmController(RvmFraudMixin, RvmRemoteMixin, RvmSimulationMixin):
             },
             "activeSession": bool(self.db.active_lease()),
             "session": self._server_session,
+            # B01b: the signed session bound and the durable consumed counter.
+            "sessionBound": self.session_bound(),
             "idleTimeoutMinutes": self._idle_timeout_minutes,
             "wasteTypes": self.db.get_json("waste_types", []),
             "selectedWasteTypeId": self._selected_waste_type_id,

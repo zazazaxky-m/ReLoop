@@ -1,5 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import * as auth from './auth';
+import { signMfaChallenge } from './mfa';
+import { SignJWT, decodeJwt, type JWTPayload } from 'jose';
 
 vi.mock('next/headers', () => ({
   cookies: vi.fn(),
@@ -41,6 +43,10 @@ describe('lib/auth', () => {
   });
 
   describe('JWT Sessions', () => {
+    it('rejects a valid MFA challenge as a session', async () => {
+      const token = await signMfaChallenge('audit-user', 0);
+      expect(await auth.verifySessionToken(token)).toBeNull();
+    });
     it('should sign and verify a session token', async () => {
       const token = await auth.signSession(mockPayload);
       expect(typeof token).toBe('string');
@@ -52,6 +58,8 @@ describe('lib/auth', () => {
       expect(verified?.email).toBe(mockPayload.email);
       expect(verified?.name).toBe(mockPayload.name);
       expect(verified?.role).toBe(mockPayload.role);
+      // R04: the realtime verifier needs the verified expiry (Unix seconds).
+      expect(verified?.expiresAt).toBe(decodeJwt(token).exp);
     });
 
     it('should return null for an invalid token', async () => {
@@ -59,24 +67,41 @@ describe('lib/auth', () => {
       expect(verified).toBeNull();
     });
 
-    it('defaults missing tokenVersion to 0 when verifying', async () => {
-      const { SignJWT } = await import('jose');
-      const secret = new TextEncoder().encode('dev-insecure-secret-change-me');
-      // Build a token without tokenVersion claim.
-      const token = await new SignJWT({
-        email: 't@x.com',
-        name: 'T',
-        role: 'USER',
-        organizationId: null,
-      })
-        .setProtectedHeader({ alg: 'HS256' })
-        .setSubject('user_x')
-        .setExpirationTime('1h')
-        .sign(secret);
-
-      const verified = await auth.verifySessionToken(token);
-      expect(verified?.tokenVersion).toBe(0);
+    it('includes the session purpose, issuer and audience', async () => {
+      expect(decodeJwt(await auth.signSession(mockPayload))).toMatchObject({
+        purpose: 'session', iss: 'reloop', aud: 'reloop-session', tokenVersion: 0,
+      });
     });
+
+    it.each([
+      ['legacy', { purpose: undefined, iss: undefined, aud: undefined }],
+      ['missing purpose', { purpose: undefined }], ['MFA purpose', { purpose: 'mfa' }],
+      ['wrong audience', { aud: 'reloop-mfa' }], ['wrong issuer', { iss: 'other' }],
+      ['missing version', { tokenVersion: undefined }], ['string version', { tokenVersion: '0' }],
+      ['negative version', { tokenVersion: -1 }], ['fractional version', { tokenVersion: 0.5 }],
+      ['empty subject', { sub: '' }], ['missing name', { name: undefined }],
+      ['invalid email type', { email: 42 }], ['invalid role', { role: 'ROOT' }],
+      ['missing organization', { organizationId: undefined }],
+      ['invalid organization', { organizationId: 4 }], ['missing issued time', { iat: undefined }],
+      ['invalid issued time', { iat: 'now' }], ['missing expiry', { exp: undefined }],
+      ['expired', { exp: 1 }],
+    ])('rejects %s claims', async (_label, overrides) => {
+      const now = Math.floor(Date.now() / 1000);
+      const token = await new SignJWT({ ...mockPayload, purpose: 'session', iss: 'reloop',
+        aud: 'reloop-session', iat: now, exp: now + 60, ...overrides } as unknown as JWTPayload)
+        .setProtectedHeader({ alg: 'HS256' })
+        .sign(new TextEncoder().encode(process.env.AUTH_JWT_SECRET || 'dev-insecure-secret-change-me'));
+      expect(await auth.verifySessionToken(token)).toBeNull();
+    });
+
+    it('rejects a correctly signed token using another algorithm', async () => {
+      const token = await new SignJWT({ ...mockPayload, purpose: 'session' })
+        .setIssuer('reloop').setAudience('reloop-session').setIssuedAt().setExpirationTime('1m')
+        .setProtectedHeader({ alg: 'HS384' })
+        .sign(new TextEncoder().encode(process.env.AUTH_JWT_SECRET || 'dev-insecure-secret-change-me'));
+      expect(await auth.verifySessionToken(token)).toBeNull();
+    });
+
   });
 
   describe('Cookie Management', () => {

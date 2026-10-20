@@ -1,0 +1,115 @@
+{
+  "contract": "reconciliation-report",
+  "version": 1,
+  "endpoint": "GET /api/reports/reconciliation",
+  "status": 200,
+  "description": "SUPERADMIN financial reconciliation (M05): net liabilities from the ledger, payout requests compared with their reserves per request, gross issuance per organization with the UNALLOCATED_LEGACY bucket until B01, and open M04 reward cases. Money is integer rupiah. totalOutstanding is the compatibility alias of availableLiability. Consumed by mobile ReconciliationLiability.fromJson. Breaking changes need a new versioned file.",
+  "response": {
+    "report": {
+      "availableLiability": 60000,
+      "pendingLiability": 5000,
+      "reservedLiability": 15000,
+      "paidTotal": 40000,
+      "totalObligation": 80000,
+      "overdrawn": { "users": 0, "availableShortfall": 0, "pendingShortfall": 0 },
+      "allocationStatus": "NOT_ALLOCATED_UNTIL_B01",
+      "unallocatedLegacyAmount": 60000,
+      "organizations": [
+        {
+          "organizationId": "cmauditorganization0000001",
+          "organizationName": "Organisasi Audit A",
+          "earnAvailable": 115000,
+          "earnPending": 5000,
+          "adjustments": 0,
+          "outstanding": 0,
+          "allocationStatus": "UNALLOCATED_LEGACY"
+        }
+      ],
+      "totalOutstanding": 60000,
+      "totalEarnAvailable": 115000,
+      "totalEarnPending": 5000,
+      "ledgerRedeemed": 40000,
+      "ledgerReserved": 15000,
+      "redemptionSuccessTotal": 40000,
+      "redemptionInFlightTotal": 15100,
+      "redeemedDiscrepancy": 0,
+      "reservedDiscrepancy": 100,
+      "hasDiscrepancy": true,
+      "payoutMismatches": [
+        {
+          "redemptionId": "cmauditredemption000000001",
+          "userId": "cmaudituser000000000000001",
+          "requestStatus": "APPROVED",
+          "requestAmount": 100,
+          "reserveStatuses": [],
+          "ledgerIds": [],
+          "paidDifference": 0,
+          "reservedDifference": -100,
+          "problem": "RESERVE_MISSING"
+        }
+      ],
+      "payoutMismatchCount": 1,
+      "flaggedTransfers": { "count": 1, "amount": 15000 },
+      "rewardCases": {
+        "open": 1,
+        "openAmount": 2500,
+        "recent": [
+          {
+            "id": "cmauditrewardcase000000001",
+            "businessKey": "review:cmaudititem000000000001:decision:v1",
+            "userId": "cmaudituser000000000000001",
+            "depositItemId": "cmaudititem000000000001",
+            "amount": 2500,
+            "entryType": "REVERSE",
+            "reasonCode": "ANOMALY_ALREADY_PAID_OUT",
+            "createdAt": "2026-10-13T08:00:00.000Z",
+            "ownerName": "Pengguna Audit",
+            "itemStatus": "REJECTED",
+            "withdrawableIfResolved": 2500
+          }
+        ]
+      },
+      "funding": {
+        "enforced": false,
+        "totalConfirmedRupiah": 250000,
+        "totalHeldRupiah": 60000,
+        "staleHoldCount": 1,
+        "organizations": [
+          {
+            "organizationId": "cmauditorganization0000001",
+            "organizationName": "Organisasi Audit A",
+            "accountId": "cmauditfunding00000000001",
+            "confirmedRupiah": 250000,
+            "heldRupiah": 60000,
+            "capacityRupiah": 190000,
+            "activeReservations": 2,
+            "reservedRemainingRupiah": 35000,
+            "uncoveredRupiah": 0,
+            "staleHolds": [
+              {
+                "reservationId": "cmauditreservation0000001",
+                "businessKey": "session:cmauditsession000000001:admission",
+                "organizationId": "cmauditorganization0000001",
+                "userId": "cmaudituser000000000000001",
+                "campaignId": null,
+                "sourceType": "SESSION",
+                "sourceId": "cmauditsession000000001",
+                "sourceStatus": "COMPLETED",
+                "ceilingRupiah": 20000,
+                "remainingRupiah": 15000,
+                "shortfallRupiah": 0,
+                "campaignShortfallRupiah": 0,
+                "ageMinutes": 95,
+                "reasons": ["SOURCE_CLOSED_AWAITING_WATERMARK"],
+                "reconciliation": "Sumber sudah berakhir tetapi sisa dana masih ditahan. Pastikan seluruh event mesin sudah tersinkron, lalu superadmin melepas sisa dana secara eksplisit (alasan wajib) atau tunggu konfirmasi penutupan dari mesin."
+              }
+            ],
+            "programsWithoutBudget": []
+          }
+        ]
+      },
+      "snapshot": { "readOnly": true, "isolation": "repeatable read" },
+      "generatedAt": "2026-10-13T08:05:00.000Z"
+    }
+  }
+}

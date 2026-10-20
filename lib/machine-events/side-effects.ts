@@ -1,12 +1,15 @@
 import type { MachineStatus, Prisma } from "@prisma/client";
 import {
+  canTransitionSession,
   transitionSession,
   validateSensorSequence,
   type SensorSequencePayload,
 } from "../machine-state";
 import { AUTO_PICKUP_FILL_THRESHOLD } from "../pickup";
 import {
+  SESSION_CLOSED_REASON,
   UNKNOWN_WASTE_TYPE_REASON,
+  machineReasonCode,
   payloadStr,
   type IngestEventInput,
   type MachineContext,
@@ -16,11 +19,22 @@ import {
   resolveFraudDepositItemId,
   resolveOrCreateUnknownWasteType,
 } from "./item";
-import { flagAnomaly, notifyOrgAdmins } from "./fraud";
+import { flagAnomaly, holdItemForFraud, notifyOrgAdmins, publishSecurityAlert } from "./fraud";
 import { maybeCreateAutoPickup } from "./pickup";
-import { handleAcceptance } from "./acceptance";
+import { handleAcceptance, handleItemRejected, recordItemEvidence } from "./acceptance";
+import { handleCloseWatermark } from "./watermark";
+import { isTerminalSession } from "../deposit-review-contract";
+import { sessionDeadline } from "../deposit-session-deadline";
 import type { DepositItemCache } from "./item-cache";
 
+/** Work that must run only after the event transaction commits (notifications, pushes). */
+export type PostCommitEffect = () => Promise<void>;
+
+/**
+ * Applies one event's effects inside `tx`. With `afterCommit`, notifications
+ * are handed to the caller to run after commit instead of being sent from
+ * inside the transaction (a rolled-back, retried event must not notify twice).
+ */
 export async function processEventSideEffects(
   tx: Prisma.TransactionClient,
   machine: MachineContext,
@@ -28,7 +42,13 @@ export async function processEventSideEffects(
   eventId: string,
   onItemCreated?: (id: string) => void,
   depositItemCache?: DepositItemCache,
+  afterCommit?: (effect: PostCommitEffect) => void,
 ) {
+  const autoPickup = () =>
+    afterCommit
+      ? maybeCreateAutoPickup(tx, machine, input.machineCode, afterCommit)
+      : maybeCreateAutoPickup(tx, machine, input.machineCode);
+
   const payload = payloadStr(input.payload);
 
   switch (input.eventType) {
@@ -49,7 +69,7 @@ export async function processEventSideEffects(
         (typeof fill === "number" && fill >= AUTO_PICKUP_FILL_THRESHOLD) ||
         payload.status === "FULL"
       ) {
-        await maybeCreateAutoPickup(tx, machine, input.machineCode);
+        await autoPickup();
       }
       break;
     }
@@ -61,7 +81,7 @@ export async function processEventSideEffects(
           data: { status: payload.status as MachineStatus },
         });
         if (payload.status === "FULL") {
-          await maybeCreateAutoPickup(tx, machine, input.machineCode);
+          await autoPickup();
         }
       }
       break;
@@ -78,7 +98,7 @@ export async function processEventSideEffects(
           },
         });
         if (fill >= AUTO_PICKUP_FILL_THRESHOLD) {
-          await maybeCreateAutoPickup(tx, machine, input.machineCode);
+          await autoPickup();
         }
       }
       break;
@@ -118,19 +138,37 @@ export async function processEventSideEffects(
 
     case "ITEM_DETECTED": {
       if (!input.sessionId) break;
+      // R03: lock the session row first (finish/cancel and the timeout policy
+      // hold it while they decide), then re-read it, so an item never slips
+      // into a session that is being released without being seen there.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "DepositSession" WHERE id = ${input.sessionId} FOR NO KEY UPDATE`;
+      if (locked.length === 0) break;
       const session = await tx.depositSession.findUnique({
         where: { id: input.sessionId },
       });
       if (!session) break;
+      // Reported after the session ended (a queued event, or a race with
+      // finish/timeout): the item stays in that session and goes to review;
+      // the session is not reopened or extended.
+      const sessionClosed = isTerminalSession(session.status);
+      // Past its deadline every lease has expired and the session is over even
+      // if no poll closed it yet (R03 I1): it is neither extended nor touched,
+      // and the item stays PENDING until the timeout policy moves it to REVIEW.
+      const now = Date.now();
+      const pastDeadline = sessionDeadline(session, machine.sessionIdleTimeoutMinutes).getTime() <= now;
 
-      await tx.depositSession.update({
-        where: { id: session.id },
-        data: {
-          timeoutAt: new Date(
-            Date.now() + machine.sessionIdleTimeoutMinutes * 60 * 1000,
-          ),
-        },
-      });
+      if (!sessionClosed && !pastDeadline) {
+        // The deadline only moves later: every lease issued for the session
+        // stays within it (lib/deposit-session-deadline.ts).
+        const extended = new Date(now + machine.sessionIdleTimeoutMinutes * 60 * 1000);
+        if (!session.timeoutAt || session.timeoutAt.getTime() < extended.getTime()) {
+          await tx.depositSession.update({
+            where: { id: session.id },
+            data: { timeoutAt: extended },
+          });
+        }
+      }
 
       // Preferred path: kiosk sends the real WasteType id the user picked
       // on-machine before inserting the item. Only trust it if it's still
@@ -189,10 +227,12 @@ export async function processEventSideEffects(
           wasteTypeId,
           quantity: (payload.quantity as number) ?? 1,
           source: kioskConfirmed ? "MACHINE" : "PYTHON_SIMULATOR",
-          status: isUnknownFallback ? "REVIEW" : "PENDING",
+          status: isUnknownFallback || sessionClosed ? "REVIEW" : "PENDING",
           validationReasonCode: isUnknownFallback
             ? UNKNOWN_WASTE_TYPE_REASON
-            : undefined,
+            : sessionClosed
+              ? SESSION_CLOSED_REASON
+              : undefined,
         },
       });
 
@@ -204,7 +244,7 @@ export async function processEventSideEffects(
         data: { depositItemId: item.id },
       });
 
-      if (session.status === "ACTIVE") {
+      if (session.status === "ACTIVE" && !pastDeadline) {
         await tx.depositSession.update({
           where: { id: session.id },
           data: { status: "PROCESSING_ITEM" },
@@ -216,11 +256,11 @@ export async function processEventSideEffects(
     case "WEIGHT_MEASURED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: {
-          measuredWeightGrams: payload.weightGrams as number,
-        },
+      // M04 (A3): evidence is written only while the item is undecided,
+      // under the acceptance lock order; a later reading never re-prices it.
+      await recordItemEvidence(tx, itemId, {
+        kind: "MEASUREMENT",
+        data: { measuredWeightGrams: payload.weightGrams as number },
       });
       break;
     }
@@ -228,12 +268,9 @@ export async function processEventSideEffects(
     case "IMAGE_CLASSIFIED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: {
-          aiDetectedType: payload.detectedType as string,
-          aiConfidence: payload.confidence as number,
-        },
+      await recordItemEvidence(tx, itemId, {
+        kind: "MEASUREMENT",
+        data: { aiDetectedType: payload.detectedType as string, aiConfidence: payload.confidence as number },
       });
       break;
     }
@@ -241,10 +278,7 @@ export async function processEventSideEffects(
     case "BARCODE_READ": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: { barcodeValue: payload.barcode as string },
-      });
+      await recordItemEvidence(tx, itemId, { kind: "MEASUREMENT", data: { barcodeValue: payload.barcode as string } });
       break;
     }
 
@@ -275,90 +309,76 @@ export async function processEventSideEffects(
     case "ITEM_REJECTED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: {
-          status: "REJECTED",
-          validationReasonCode: (payload.reason as string) ?? "REJECTED",
-        },
+      // M04: same gate and User -> DepositSession -> DepositItem locks as the
+      // acceptance point; never flips an accepted, priced or reviewed item.
+      await handleItemRejected(tx, {
+        sessionId: input.sessionId ?? null,
+        depositItemId: itemId,
+        reason: machineReasonCode(payload.reason, "REJECTED"),
       });
-      if (input.sessionId) {
-        const session = await tx.depositSession.findUnique({
-          where: { id: input.sessionId },
-        });
-        if (session?.status === "PROCESSING_ITEM") {
-          await tx.depositSession.update({
-            where: { id: session.id },
-            data: { status: transitionSession(session.status, "ITEM_DONE") },
-          });
-        }
-      }
       break;
     }
 
     case "FRAUD_DETECTED":
     case "VANDALISM_DETECTED": {
-      const reason = String(payload.reason ?? input.eventType);
+      // Machine-namespaced: a payload can never claim a reviewer's decision.
+      const reason = machineReasonCode(payload.reason, input.eventType);
       const affectedItemId =
         input.eventType === "FRAUD_DETECTED"
           ? await resolveFraudDepositItemId(tx, input)
           : input.depositItemId ?? null;
 
       if (affectedItemId) {
-        await tx.depositItem.update({
-          where: { id: affectedItemId },
-          data: {
-            status: "REVIEW",
-            externalFraudFlag: true,
-            validationReasonCode: reason,
-          },
-        });
-        await tx.rewardLedger.updateMany({
-          where: { depositItemId: affectedItemId, status: "AVAILABLE" },
-          data: { status: "PENDING", reasonCode: reason },
-        });
+        // M04: under User -> DepositSession -> DepositItem locks; holds the
+        // item's earning (or opens a reconciliation case if it was already
+        // paid out) and never reopens a reviewer's final decision.
+        await holdItemForFraud(tx, affectedItemId, reason);
         await tx.machineEvent.update({
           where: { id: eventId },
           data: { depositItemId: affectedItemId },
         });
       }
       if (input.sessionId) {
-        await flagAnomaly(
-          tx,
-          input.sessionId,
-          affectedItemId,
-          reason,
-        );
+        // The item itself was handled by the hold above.
+        await flagAnomaly(tx, input.sessionId, null, reason);
       }
-      await notifyOrgAdmins(machine.organizationId, {
-        type: "MACHINE_FRAUD",
-        title:
-          input.eventType === "VANDALISM_DETECTED"
-            ? "Indikasi vandalisme terdeteksi"
-            : "Indikasi fraud terdeteksi",
-        body: `Mesin ${input.machineCode ?? ""} melaporkan ${reason.replaceAll("_", " ").toLowerCase()}. Tinjau di log keamanan.`.trim(),
-        data: { machineCode: input.machineCode, reason },
-      });
+      const securityEventType = input.eventType;
+      const notify = () => {
+        // R04: realtime alert scoped to the machine row's organization.
+        publishSecurityAlert({
+          organizationId: machine.organizationId,
+          machineCode: input.machineCode,
+          eventType: securityEventType,
+          eventId,
+          occurredAt: input.occurredAt,
+        });
+        return notifyOrgAdmins(machine.organizationId, {
+          type: "MACHINE_FRAUD",
+          title:
+            input.eventType === "VANDALISM_DETECTED"
+              ? "Indikasi vandalisme terdeteksi"
+              : "Indikasi fraud terdeteksi",
+          body: `Mesin ${input.machineCode ?? ""} melaporkan ${reason.replaceAll("_", " ").toLowerCase()}. Tinjau di log keamanan.`.trim(),
+          data: { machineCode: input.machineCode, reason },
+        });
+      };
+      if (afterCommit) afterCommit(notify);
+      else await notify();
       break;
     }
 
     case "COMPACTION_STARTED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: { compactionStatus: "PENDING" },
-      });
+      // Post-acceptance lifecycle only; never touches priced evidence.
+      await recordItemEvidence(tx, itemId, { kind: "COMPACTION", data: { compactionStatus: "PENDING" } });
       break;
     }
 
     case "COMPACTION_COMPLETED": {
       const itemId = await resolveDepositItemId(tx, input, depositItemCache);
       if (!itemId) break;
-      await tx.depositItem.update({
-        where: { id: itemId },
-        data: { compactionStatus: "COMPACTED" },
-      });
+      await recordItemEvidence(tx, itemId, { kind: "COMPACTION", data: { compactionStatus: "COMPACTED" } });
       break;
     }
 
@@ -372,15 +392,25 @@ export async function processEventSideEffects(
           where: { id: input.sessionId },
         });
         if (session && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(session.status)) {
+          // The RVM emits VANDALISM_DETECTED first, which already moved the
+          // session to REVIEW; a latch never fails ingestion on the state
+          // machine (it would be dead-lettered and its ERROR status lost).
           await tx.depositSession.update({
             where: { id: session.id },
             data: {
-              status: transitionSession(session.status, "SAFE_STATE"),
+              status: canTransitionSession(session.status, "SAFE_STATE") ?? session.status,
               anomalyCount: { increment: 1 },
             },
           });
         }
       }
+      break;
+    }
+
+    case "SESSION_CLOSE_WATERMARK": {
+      // B01b: the machine confirmed every event of the session is synced;
+      // the residual reward hold is released now (keyed), never before.
+      await handleCloseWatermark(tx, machine, input, eventId, afterCommit);
       break;
     }
 

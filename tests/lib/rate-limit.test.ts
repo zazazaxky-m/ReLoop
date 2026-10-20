@@ -176,7 +176,7 @@ describe("rate-limit", () => {
     expect(result.allowed).toBe(true);
   });
 
-  it("Redis client on error sets unavailable", async () => {
+  it("Redis errors still deny while the backend is unavailable", async () => {
     vi.stubEnv("NODE_ENV", "production");
     process.env.REDIS_URL = "redis://localhost:6379";
 
@@ -201,8 +201,29 @@ describe("rate-limit", () => {
     
     await connectPromise.catch(() => {});
     
-    // next call should use fallback or fail closed because client is null
+    // A failed backend operation must deny the next request as well.
     const result = await mod.checkRateLimit("scan:u1", 1, 60_000);
     expect(result.allowed).toBe(false); // fail closed in prod
+  });
+});
+
+
+describe("authentication rate-limit availability", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("distinguishes unavailable storage from an exhausted quota and recovers after an error", async () => {
+    vi.resetModules(); vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("REDIS_URL", "redis://test");
+    let available = false;
+    let onError: (error: Error) => void = () => {};
+    vi.doMock("ioredis", () => ({ default: class Redis {
+      on(_event: string, handler: (error: Error) => void) { onError = handler; }
+      async incr() { if (!available) throw new Error("offline"); return 2; }
+      async pttl() { return 1000; }
+    } }));
+    const { checkRateLimit } = await import("@/lib/rate-limit");
+    expect(await checkRateLimit("test", 2, 1000)).toMatchObject({ allowed: false, unavailable: true });
+    onError(new Error("temporarily disconnected")); available = true;
+    expect(await checkRateLimit("test", 2, 1000)).toMatchObject({ allowed: true });
+    const limited = await checkRateLimit("test", 1, 1000);
+    expect(limited.allowed).toBe(false); expect(limited.unavailable).not.toBe(true);
   });
 });

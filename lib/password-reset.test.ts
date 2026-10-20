@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { createPasswordResetToken, consumePasswordResetToken } from "./password-reset";
+import { createPasswordResetToken, consumePasswordResetToken, findPasswordResetTokenOwner } from "./password-reset";
 import { prisma } from "./prisma";
 
 vi.mock("./prisma", () => ({
@@ -100,5 +100,46 @@ describe("consumePasswordResetToken", () => {
 
     const userId = await consumePasswordResetToken("raced-token");
     expect(userId).toBeNull();
+  });
+});
+
+describe("findPasswordResetTokenOwner", () => {
+  const record = (overrides: Record<string, unknown> = {}) => ({
+    id: "tok_1", userId: "user_1", tokenHash: "hash", usedAt: null,
+    expiresAt: new Date(Date.now() + 60_000), createdAt: new Date(), ...overrides,
+  });
+
+  it("returns the owner of a valid token without claiming it", async () => {
+    vi.mocked(prisma.passwordResetToken.findUnique).mockResolvedValue(record() as any);
+    await expect(findPasswordResetTokenOwner("raw")).resolves.toBe("user_1");
+    expect(prisma.passwordResetToken.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns null for unknown, used or expired tokens", async () => {
+    vi.mocked(prisma.passwordResetToken.findUnique).mockResolvedValueOnce(null);
+    await expect(findPasswordResetTokenOwner("raw")).resolves.toBeNull();
+    vi.mocked(prisma.passwordResetToken.findUnique).mockResolvedValueOnce(record({ usedAt: new Date() }) as any);
+    await expect(findPasswordResetTokenOwner("raw")).resolves.toBeNull();
+    vi.mocked(prisma.passwordResetToken.findUnique).mockResolvedValueOnce(record({ expiresAt: new Date(Date.now() - 1) }) as any);
+    await expect(findPasswordResetTokenOwner("raw")).resolves.toBeNull();
+  });
+});
+
+describe("consumePasswordResetToken with a transaction client", () => {
+  it("reads and claims through the given client, so the claim rolls back with its transaction", async () => {
+    const client = { passwordResetToken: { findUnique: vi.fn(), updateMany: vi.fn() } };
+    client.passwordResetToken.findUnique.mockResolvedValue({
+      id: "tok_1", userId: "user_1", tokenHash: "hash", usedAt: null,
+      expiresAt: new Date(Date.now() + 60_000), createdAt: new Date(),
+    });
+    client.passwordResetToken.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(consumePasswordResetToken("raw", client as any)).resolves.toBe("user_1");
+    expect(client.passwordResetToken.updateMany).toHaveBeenCalledWith({
+      where: { id: "tok_1", usedAt: null },
+      data: { usedAt: expect.any(Date) },
+    });
+    expect(prisma.passwordResetToken.findUnique).not.toHaveBeenCalled();
+    expect(prisma.passwordResetToken.updateMany).not.toHaveBeenCalled();
   });
 });

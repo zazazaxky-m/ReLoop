@@ -2,6 +2,8 @@ import { requirePageUser } from "@/lib/rbac";
 import { getWalletBalance, getLedgerHistory } from "@/lib/ledger";
 import { CONFIG_KEYS, getConfigInt, getMinRedemption } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
+import { VERIFIED_MEMBERSHIP } from "@/lib/travel-agent-access";
+import { heldByOpenDebitCases } from "@/lib/reward-credit";
 import { formatRewardPoints } from "@/lib/reward-points";
 import {
   Card,
@@ -31,6 +33,7 @@ export default async function UserWalletPage() {
     minRedemption,
     travelAgentLinkCount,
     pointsToRupiah,
+    heldByCases,
   ] = await Promise.all([
     getWalletBalance(user.id),
     getLedgerHistory(user.id, { take: 30 }),
@@ -45,8 +48,9 @@ export default async function UserWalletPage() {
       take: 20,
     }),
     getMinRedemption(),
-    prisma.travelAgentUser.count({ where: { userId: user.id } }),
+    prisma.travelAgentUser.count({ where: { userId: user.id, ...VERIFIED_MEMBERSHIP } }),
     getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
+    heldByOpenDebitCases(prisma, user.id),
   ]);
 
   const isTravelAgentUser = travelAgentLinkCount > 0;
@@ -116,6 +120,7 @@ export default async function UserWalletPage() {
         accounts={accountRows}
         redemptions={redemptionRows}
         available={balance.available}
+        heldForReview={Math.min(Math.max(0, balance.available), heldByCases)}
         minRedemption={minRedemption}
       />
 

@@ -22,11 +22,22 @@ interface MachineInitial {
   hasConveyor: boolean;
   hasCompactor: boolean;
   hasExternalCamera: boolean;
+  materialVerification?: string;
+  /** B01: reward ceiling and item bound of one deposit session (null = not configured). */
+  maxRewardPerSessionRupiah?: number | null;
+  maxItemsPerSession?: number | null;
   regionId: string | null;
   wasteTypeIds: string[];
 }
 
 const STATUSES = ["ONLINE", "OFFLINE", "FULL", "MAINTENANCE", "ERROR"];
+
+/** Machine.materialVerification (M04, lib/reward-policy.ts verifyMaterial). */
+const MATERIAL_VERIFICATION: Array<[string, string]> = [
+  ["WEIGHT_ONLY", "Berat saja (tanpa AI wajib)"],
+  ["BARCODE_WEIGHT", "Barcode + berat (tanpa AI)"],
+  ["AI_REQUIRED", "AI wajib mengonfirmasi jenis"],
+];
 
 export function MachineForm({
   mode,
@@ -61,6 +72,9 @@ export function MachineForm({
     hasConveyor: machine?.hasConveyor ?? true,
     hasCompactor: machine?.hasCompactor ?? false,
     hasExternalCamera: machine?.hasExternalCamera ?? false,
+    materialVerification: machine?.materialVerification ?? "WEIGHT_ONLY",
+    maxRewardPerSessionRupiah: machine?.maxRewardPerSessionRupiah?.toString() ?? "",
+    maxItemsPerSession: machine?.maxItemsPerSession?.toString() ?? "",
     wasteTypeIds: new Set<string>(machine?.wasteTypeIds ?? []),
   });
 
@@ -91,6 +105,9 @@ export function MachineForm({
         hasConveyor: form.hasConveyor,
         hasCompactor: form.hasCompactor,
         hasExternalCamera: form.hasExternalCamera,
+        materialVerification: form.materialVerification,
+        maxRewardPerSessionRupiah: form.maxRewardPerSessionRupiah.trim() ? Number(form.maxRewardPerSessionRupiah) : null,
+        maxItemsPerSession: form.maxItemsPerSession.trim() ? Number(form.maxItemsPerSession) : null,
         wasteTypeIds: Array.from(form.wasteTypeIds),
       };
       if (mode === "create") {
@@ -230,6 +247,32 @@ export function MachineForm({
             onChange={(e) => setForm((f) => ({ ...f, sessionIdleTimeoutMinutes: e.target.value }))}
           />
         </FormField>
+        <FormField
+          label="Batas reward per sesi (Rp)"
+          htmlFor="maxRewardPerSession"
+          hint="Minimal Rp1; dana sebesar ini direservasi saat sesi berhadiah dimulai bila program tidak menetapkan batasnya sendiri."
+        >
+          <Input
+            id="maxRewardPerSession"
+            type="number"
+            min="1"
+            step="1"
+            value={form.maxRewardPerSessionRupiah}
+            onChange={(e) => setForm((f) => ({ ...f, maxRewardPerSessionRupiah: e.target.value }))}
+            placeholder="misal 20000"
+          />
+        </FormField>
+        <FormField label="Maksimal item per sesi" htmlFor="maxItemsPerSession" hint="Batas item satu sesi setoran.">
+          <Input
+            id="maxItemsPerSession"
+            type="number"
+            min="1"
+            step="1"
+            value={form.maxItemsPerSession}
+            onChange={(e) => setForm((f) => ({ ...f, maxItemsPerSession: e.target.value }))}
+            placeholder="misal 50"
+          />
+        </FormField>
       </div>
 
       <FormField label="Deskripsi" htmlFor="desc">
@@ -239,6 +282,24 @@ export function MachineForm({
           onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
           placeholder="Lokasi & catatan mesin"
         />
+      </FormField>
+
+      <FormField
+        label="Verifikasi material"
+        htmlFor="material-verification"
+        hint="Label yang dilaporkan kamera AI selalu dicocokkan dengan label jenis sampah; item yang tidak cocok ditahan untuk ditinjau."
+      >
+        <Select
+          id="material-verification"
+          value={form.materialVerification}
+          onChange={(e) => setForm((f) => ({ ...f, materialVerification: e.target.value }))}
+        >
+          {MATERIAL_VERIFICATION.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </Select>
       </FormField>
 
       <div>

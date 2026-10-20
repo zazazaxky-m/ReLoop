@@ -23,7 +23,7 @@ Silakan merujuk ke dokumen berikut untuk detail pada masing-masing komponen:
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22.12+ (the CI and the Docker images run Node 22 LTS)
 - Docker (for the local PostgreSQL instance) — or your own PostgreSQL
 
 ## Getting started
@@ -79,3 +79,54 @@ All demo accounts use the password **`password1234`** (minimum 12 characters).
 - `npm run lint` / `typecheck` / `test` - quality checks
 - `npm run db:migrate` / `db:push` / `db:seed` / `db:reset` - database
 - `npm run prisma:generate` - regenerate the Prisma client
+
+## Production deployment (Docker Compose)
+
+`docker-compose.yml` runs the standalone Next.js server (`HOSTNAME=0.0.0.0`, port 3000) behind
+nginx (`127.0.0.1:8111`). The deploy workflow copies `.env.production` to `.env`; besides the
+secrets it must set `NEXT_PUBLIC_BASE_URL` to the public URL browsers use, e.g.
+`https://reloop.example`:
+
+- The request proxy accepts signed-in browser writes (POST/PUT/PATCH/DELETE carrying an `Origin`
+  header) only when `Origin` equals that URL's origin. The server's bind address
+  (`http://0.0.0.0:3000`) and the `Host` / `X-Forwarded-Host` headers are never trusted.
+  Requests without `Origin` (the mobile app) are unaffected.
+- Emailed links (password reset, account deletion, invitations, email verification) are built
+  only from it.
+- Without a valid http(s) value the app fails closed: browser writes answer 403, those email
+  endpoints answer 503, and the web log shows `NEXT_PUBLIC_BASE_URL is not configured or invalid`.
+  The compose file has no localhost default for it.
+- Exactly one origin is accepted. Serve other host names (e.g. `www.` vs the apex) as redirects
+  to it in nginx.
+- Set it in the runtime environment. A `NEXT_PUBLIC_` value present during `next build` is
+  inlined into the bundle and wins over the runtime one (the Docker build leaves it unset).
+
+To run the whole stack locally through its nginx, set `NEXT_PUBLIC_BASE_URL=http://localhost:8111`.
+
+## Regression harness (real services)
+
+`npm test` stays fast and Docker-free (unit tests only). The suites below run through
+`scripts/run-audit-tests.mjs`, which needs Docker Engine + Compose v2 for the database suites:
+
+| Command | What runs |
+| --- | --- |
+| `npm run test:integration [-- <file> ...]` | Vitest `tests/integration/**` against real PostgreSQL 16 + Redis 7 and a real `next dev` server |
+| `npm run test:realtime [-- <file> ...]` | Vitest `tests/realtime/**`: gateway child process (virtual clock/timers over IPC) + live verifier running the production DB guard on the disposable DB |
+| `npm run test:browser [-- <playwright args>]` | Playwright `tests/browser/**/*.spec.ts` at 360/768/1280 px, light and dark (`npx playwright install chromium` once) |
+| `npm run test:rvm [-- <unittest args>]` | RVM `tests/test_rvm*.py` in a fresh temporary venv with `rvm/requirements.txt` |
+| `npm run test:flutter [-- <flutter test args>]` | `flutter test` from `mobile/` (needs Flutter 3.41.7; fails as "NOT RUN" when absent) |
+
+For each run the runner starts a uniquely named Compose project from `docker-compose.audit.yml`
+(no fixed names/ports, no persistent volumes), refuses any database that is not a loopback
+`reloop_audit_test` owned by the run, generates fresh secrets, migrates, runs the tests and removes
+the containers. It never reads `DATABASE_URL`/`REDIS_URL` from your shell or `.env`. Redacted logs
+and screenshots land in `test-results/audit/<suite>-<run-id>/` (gitignored).
+
+Writing a test: import `f` from `tests/support/audit-fixture.ts` (fresh seeded graph per test:
+orgs A/B, users, admins with MFA on admin A, superadmin, collectors, payout account, online machine,
+active money campaigns). Use `f.json(actor, method, path, body)` for real HTTP with production
+session cookies, `f.connection()` for extra connections in race tests (see
+`tests/support/race-probe.ts`), and `f.capturedTransport()` for mail/push sent through the fake
+transport. Browser specs import `test`/`expect` from `tests/support/browser-fixture.ts`.
+Cross-client DTO fixtures live in `tests/fixtures/contracts/` and are asserted by both
+`tests/support/contracts.ts` and `mobile/test/contracts/`.

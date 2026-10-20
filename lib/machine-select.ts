@@ -18,6 +18,7 @@ export const machineSafeSelect = {
   hasConveyor: true,
   hasCompactor: true,
   hasExternalCamera: true,
+  materialVerification: true,
   chamberTimeoutSeconds: true,
   sessionIdleTimeoutMinutes: true,
   lastHeartbeatAt: true,

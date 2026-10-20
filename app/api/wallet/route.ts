@@ -3,7 +3,10 @@ import { handleApiError, jsonOk } from "@/lib/api";
 import { getWalletBalance, getLedgerHistory, countLedgerHistory } from "@/lib/ledger";
 import { CONFIG_KEYS, getConfigInt, getMinRedemption } from "@/lib/config";
 import { prisma } from "@/lib/prisma";
+import { VERIFIED_MEMBERSHIP } from "@/lib/travel-agent-access";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
+import { REDEMPTION_PRIVATE_COLUMNS } from "@/lib/payout-destination";
+import { heldByOpenDebitCases } from "@/lib/reward-credit";
 
 export async function GET(req: Request) {
   try {
@@ -19,6 +22,7 @@ export async function GET(req: Request) {
       minRedemption,
       travelAgentLinkCount,
       pointsToRupiah,
+      heldByCases,
     ] = await Promise.all([
       getWalletBalance(user.id),
       countLedgerHistory(user.id),
@@ -31,11 +35,16 @@ export async function GET(req: Request) {
         where: { userId: user.id },
         orderBy: { createdAt: "desc" },
         take: 20,
+        omit: REDEMPTION_PRIVATE_COLUMNS,
       }),
       getMinRedemption(),
-      prisma.travelAgentUser.count({ where: { userId: user.id } }),
+      prisma.travelAgentUser.count({ where: { userId: user.id, ...VERIFIED_MEMBERSHIP } }),
       getConfigInt(CONFIG_KEYS.POINTS_TO_RUPIAH),
+      heldByOpenDebitCases(prisma, user.id),
     ]);
+    // Part of the available balance an open reconciliation case still owes:
+    // shown apart and refused by requestRedemption (lib/wallet-service.ts).
+    const heldForReview = Math.min(Math.max(0, balance.available), heldByCases);
 
     return jsonOk({
       balance,
@@ -46,6 +55,8 @@ export async function GET(req: Request) {
       minRedemption,
       isTravelAgent: travelAgentLinkCount > 0,
       pointsToRupiah,
+      heldForReview,
+      withdrawable: Math.max(0, balance.available - heldForReview),
     });
   } catch (error) {
     return handleApiError(error);

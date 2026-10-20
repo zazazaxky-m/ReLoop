@@ -81,7 +81,15 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       AUDIT_CHECKSUM_SECRET: ${AUDIT_CHECKSUM_SECRET:-audit-secret-change-me}
       NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-ReLoop}
-      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
+      # Required: the public URL browsers use (e.g. https://reloop.example; for
+      # this stack's own nginx locally, http://localhost:8111). It is the only
+      # Origin the proxy accepts for signed-in browser writes and the only base
+      # for emailed links. Deliberately no localhost default: when unset the
+      # app fails closed (browser writes 403, email endpoints 503) and logs
+      # "NEXT_PUBLIC_BASE_URL is not configured or invalid". Not `:?`, which
+      # would abort every compose command (incl. the README's local
+      # `docker compose up -d` for the database) before a .env exists.
+      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-}
       REALTIME_INTERNAL_SECRET: ${REALTIME_INTERNAL_SECRET:-reloop-dev-realtime-secret}
       REALTIME_PUBLISH_URL: http://realtime:3001/publish
       NEXT_PUBLIC_REALTIME_WS_URL: ${NEXT_PUBLIC_REALTIME_WS_URL:-ws://localhost:3001/ws}

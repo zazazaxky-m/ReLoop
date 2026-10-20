@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import { Button, FormField, Input } from "@/components/ui";
 import { Eye, EyeOff } from "@/components/ui/icons";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
+import { POST_AUTH_PATHS } from "@/lib/link-token";
+
+type PostAuthPath = (typeof POST_AUTH_PATHS)[number];
 
 type Mode = "login" | "register";
 
@@ -13,7 +16,11 @@ interface MfaChallenge {
   challengeToken: string;
 }
 
-export function AuthForm({ mode }: { mode: Mode }) {
+/**
+ * `next`: an allowlisted page to return to after signing in (lib/link-token.ts
+ * safeNextPath), e.g. the invitation page a signed-out visitor came from.
+ */
+export function AuthForm({ mode, next = null }: { mode: Mode; next?: PostAuthPath | null }) {
   const router = useRouter();
   const isRegister = mode === "register";
   const [loading, setLoading] = useState(false);
@@ -33,6 +40,19 @@ export function AuthForm({ mode }: { mode: Mode }) {
   useEffect(() => {
     if (error) errorRef.current?.focus();
   }, [error]);
+
+  /**
+   * A token page (`next`) is opened as a full document load: its inline
+   * capture script (lib/link-token.ts) runs only while HTML is parsed.
+   */
+  function goAfterAuth(redirectTo: string | undefined) {
+    if (next) {
+      window.location.assign(next);
+      return;
+    }
+    router.push(redirectTo ?? "/dashboard");
+    router.refresh();
+  }
 
   function update(key: keyof typeof form) {
     return (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -70,8 +90,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         return;
       }
 
-      router.push(data.redirectTo ?? "/dashboard");
-      router.refresh();
+      goAfterAuth(data.redirectTo);
     } catch {
       setError("Tidak dapat terhubung ke server");
     } finally {
@@ -102,8 +121,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         return;
       }
 
-      router.push(data.redirectTo ?? "/dashboard");
-      router.refresh();
+      goAfterAuth(data.redirectTo);
     } catch {
       setError("Tidak dapat terhubung ke server");
     } finally {
@@ -324,7 +342,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
       >
         {isRegister ? "Sudah punya akun? " : "Belum punya akun? "}
         <Link
-          href={isRegister ? "/login" : "/register"}
+          href={`${isRegister ? "/login" : "/register"}${next ? `?next=${encodeURIComponent(next)}` : ""}`}
           className="relative font-bold text-brand-700 before:absolute before:-inset-x-1 before:-inset-y-2 hover:underline dark:text-brand-400"
         >
           {isRegister ? "Masuk" : "Daftar"}

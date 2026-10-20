@@ -1,20 +1,12 @@
-import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiUser, HttpError } from "@/lib/rbac";
-import { handleApiError, jsonError, jsonOk } from "@/lib/api";
-import { getWalletBalance, createRedeemReserve } from "@/lib/ledger";
-import { getMinRedemption } from "@/lib/config";
-import { logAudit } from "@/lib/audit";
+import { requireApiUser } from "@/lib/rbac";
+import { handleApiError, jsonOk } from "@/lib/api";
+import { redemptionRequestSchema, requestRedemption } from "@/lib/wallet-service";
+import { describePayoutDestination, publicRedemption } from "@/lib/payout-destination";
 import { displayUsers } from "@/lib/display-user";
 import { buildPaginationMeta, parsePagination } from "@/lib/pagination";
-
-const createSchema = z.object({
-  amount: z.number().int().positive(),
-  payoutAccountId: z.string().min(1),
-  idempotencyKey: z.string().min(8).max(80).optional(),
-});
 
 const ACTIVE_QUEUE = ["REQUESTED", "APPROVED", "PROCESSING"] as const;
 
@@ -45,18 +37,27 @@ export async function GET(req: Request) {
       }),
     ]);
 
-    // Attach the payout account snapshot (no FK relation in schema).
+    // Current account (no FK relation in schema), kept for older clients.
     const accountIds = redemptions.map((r) => r.payoutAccountId).filter(Boolean) as string[];
     const accounts = accountIds.length
       ? await prisma.payoutAccount.findMany({ where: { id: { in: accountIds } } })
       : [];
     const accById = new Map(accounts.map((a) => [a.id, a]));
 
-    const enriched = redemptions.map((r) => ({
-      ...r,
-      user: r.user ? displayUsers([r.user])[0] : r.user,
-      payoutAccount: r.payoutAccountId ? (accById.get(r.payoutAccountId) ?? null) : null,
-    }));
+    const enriched = redemptions.map((r) => {
+      const account = r.payoutAccountId ? (accById.get(r.payoutAccountId) ?? null) : null;
+      return {
+        ...publicRedemption(r),
+        user: r.user ? displayUsers([r.user])[0] : r.user,
+        payoutAccount: account,
+        // Where this request is paid to: the request-time snapshot, never the
+        // mutable account (legacy rows: current account, flagged as such).
+        payoutDestination: describePayoutDestination(
+          r,
+          account && account.userId === r.userId ? account : null,
+        ),
+      };
+    });
 
     return jsonOk({
       redemptions: enriched,
@@ -67,68 +68,30 @@ export async function GET(req: Request) {
   }
 }
 
+/**
+ * Requests a payout. The balance check, reserve and idempotency decision run in
+ * one transaction under the user's row lock (lib/wallet-service.ts).
+ *
+ * Clients should send one `idempotencyKey` per logical request and reuse it on
+ * retry. Legacy clients may omit it: the server generates one and returns it as
+ * `idempotencyKey` so the client can retry safely.
+ */
 export async function POST(req: Request) {
   try {
     const user = await requireApiUser(["USER"]);
-    const data = createSchema.parse(await req.json());
-
-    if (data.idempotencyKey) {
-      const existing = await prisma.redemption.findUnique({
-        where: { idempotencyKey: data.idempotencyKey },
-      });
-      if (existing) return jsonOk({ redemption: existing, idempotent: true });
-    }
-
-    const account = await prisma.payoutAccount.findUnique({
-      where: { id: data.payoutAccountId },
-    });
-    if (!account || account.userId !== user.id) {
-      throw new HttpError(404, "Akun pencairan tidak ditemukan");
-    }
-    if (account.status === "DISABLED") {
-      throw new HttpError(409, "Akun pencairan dinonaktifkan");
-    }
-
-    const minRedemption = await getMinRedemption();
-    if (data.amount < minRedemption) {
-      return jsonError(422, `Minimum pencairan Rp${minRedemption.toLocaleString("id-ID")}`);
-    }
-
-    const balance = await getWalletBalance(user.id);
-    if (balance.available < data.amount) {
-      return jsonError(422, "Saldo tersedia tidak mencukupi");
-    }
-
+    const data = redemptionRequestSchema.parse(await req.json());
     const idempotencyKey = data.idempotencyKey ?? randomUUID();
 
-    const redemption = await prisma.$transaction(async (tx) => {
-      const created = await tx.redemption.create({
-        data: {
-          userId: user.id,
-          provider: account.provider,
-          payoutAccountId: account.id,
-          amount: data.amount,
-          method: "MANUAL_TRANSFER",
-          status: "REQUESTED",
-          idempotencyKey,
-        },
-      });
-      await createRedeemReserve(
-        { userId: user.id, amount: data.amount, redemptionId: created.id, provider: account.provider },
-        tx,
-      );
-      return created;
+    const { redemption, idempotent } = await requestRedemption(user, {
+      amount: data.amount,
+      payoutAccountId: data.payoutAccountId,
+      idempotencyKey,
     });
 
-    await logAudit({
-      actorId: user.id,
-      action: "REDEMPTION_REQUEST",
-      entityType: "Redemption",
-      entityId: redemption.id,
-      metadata: { amount: data.amount, provider: account.provider },
-    });
-
-    return jsonOk({ redemption }, 201);
+    return jsonOk(
+      { redemption: publicRedemption(redemption), idempotent, idempotencyKey: redemption.idempotencyKey },
+      idempotent ? 200 : 201,
+    );
   } catch (error) {
     return handleApiError(error);
   }

@@ -55,17 +55,31 @@ describe("mailer", () => {
     await expect(sendPasswordResetEmail({ to: "user@example.com", resetUrl: "http://example.com" })).rejects.toThrow("Gagal mengirim email reset (500)");
   });
 
-  it("logs in dev when no api key", async () => {
+  it("logs a redacted notice in dev when no api key", async () => {
     delete process.env.RESEND_API_KEY;
+    delete process.env.AUDIT_TEST_RUN;
     (process.env as any).NODE_ENV = "development";
     
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     
-    const result = await sendPasswordResetEmail({ to: "user@example.com", resetUrl: "http://example.com" });
+    const result = await sendPasswordResetEmail({ to: "user@example.com", resetUrl: "http://example.com/reset-password?token=raw-token-value" });
     expect(result.provider).toBe("log");
     expect(consoleInfo).toHaveBeenCalled();
+    expect(consoleInfo.mock.calls.flat().join(" ")).not.toContain("raw-token-value");
     
     consoleInfo.mockRestore();
+  });
+
+  it("ignores the audit capture switch in production", async () => {
+    delete process.env.RESEND_API_KEY;
+    process.env.AUDIT_TEST_RUN = "1";
+    process.env.AUDIT_TRANSPORT_SINK = "/nonexistent/should-not-be-written.jsonl";
+    (process.env as any).NODE_ENV = "production";
+
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await sendPasswordResetEmail({ to: "user@example.com", resetUrl: "http://example.com" });
+    expect(result.provider).toBe("none");
+    consoleWarn.mockRestore();
   });
 
   it("warns in prod when no api key", async () => {

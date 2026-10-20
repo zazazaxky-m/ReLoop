@@ -105,6 +105,42 @@ enum CampaignRewardMode {
   COMPLIANCE_ONLY
 }
 
+/// How a machine verifies that an inserted item is the selected waste type
+/// (lib/reward-policy.ts verifyMaterial). A label the classifier did report is
+/// always checked against WasteType.aiAcceptedLabels, whatever the policy.
+enum MaterialVerification {
+  /// The classifier must confirm the item; missing/unavailable AI holds it for review.
+  AI_REQUIRED
+  /// No AI dependency: a barcode must be read and the weight must be in range.
+  BARCODE_WEIGHT
+  /// Weight window only (behaviour before M04; default).
+  WEIGHT_ONLY
+}
+
+/// RewardReconciliationCase lifecycle: OPEN until an operator settles it outside the ledger flow.
+enum RewardReconciliationStatus {
+  OPEN
+  RESOLVED
+}
+
+/// B01: cash-side movements of a RewardFundingAccount (immutable rows).
+enum FundingEntryKind {
+  CONFIRMED_TOPUP
+  PAYOUT
+  CORRECTION
+}
+
+/// B01: what a reward budget reservation was taken for.
+enum RewardReservationSource {
+  SESSION
+  TRIP
+}
+
+enum RewardReservationStatus {
+  ACTIVE
+  RELEASED
+}
+
 enum SessionStatus {
   RESERVED
   ACTIVE
@@ -176,6 +212,8 @@ enum MachineEventType {
   STATUS_CHANGED
   FILL_LEVEL_UPDATED
   ERROR
+  /// B01b: "every event of session S up to localEventId N is synced" (rvm/sync.py); releases the residual hold.
+  SESSION_CLOSE_WATERMARK
 }
 
 enum LedgerEntryType {
@@ -208,6 +246,18 @@ enum PayoutAccountStatus {
   UNVERIFIED
   VERIFIED
   DISABLED
+}
+
+/// Where Redemption.payoutDestination* came from. NULL on a row means a legacy
+/// request whose destination has not been captured yet.
+enum PayoutDestinationSource {
+  /// Copied from the chosen PayoutAccount inside the request transaction.
+  REQUEST_SNAPSHOT
+  /// Legacy request: copied from the account as it was when an operator first
+  /// acted on it (process / success / proof), not at request time.
+  LEGACY_ACCOUNT_FALLBACK
+  /// Legacy request whose account no longer exists: nothing is guessed.
+  LEGACY_UNAVAILABLE
 }
 
 enum RedemptionStatus {
@@ -312,6 +362,8 @@ enum NotificationType {
   MACHINE_FRAUD
   TRIP_STATUS
   TRASH_BAG_REWARD
+  PICKUP_STATUS
+  PICKUP_OVERDUE
 }
 
 // ============================================================
@@ -319,60 +371,83 @@ enum NotificationType {
 // ============================================================
 
 model User {
-  id             String        @id @default(cuid())
-  name           String
+  id                      String        @id @default(cuid())
+  name                    String
   /// AES-GCM ciphertext (random IV). Equality lookups use emailLookup, not this field.
-  email          String
+  email                   String
   /// HMAC blind index for login/register (middleware fills on write; cuid default only for create typing).
-  emailLookup    String        @unique @default(cuid())
-  phone          String?
-  passwordHash   String?
-  authProvider   String        @default("CREDENTIALS")
-  role           Role          @default(USER)
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  status         UserStatus    @default(ACTIVE)
-  payoutEligible Boolean       @default(true)
+  emailLookup             String        @unique @default(cuid())
+  phone                   String?
+  passwordHash            String?
+  authProvider            String        @default("CREDENTIALS")
+  role                    Role          @default(USER)
+  organizationId          String?
+  organization            Organization? @relation(fields: [organizationId], references: [id])
+  status                  UserStatus    @default(ACTIVE)
+  payoutEligible          Boolean       @default(true)
   // Bumped on password reset/change, role demotion, or suspension — stale JWTs are rejected.
-  tokenVersion   Int           @default(0)
-  mfaEnabled     Boolean       @default(false)
-  totpSecret     String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  tokenVersion            Int           @default(0)
+  mfaEnabled              Boolean       @default(false)
+  totpSecret              String?
+  /// A02 fix 1: RFC 6238 time step of the last code accepted for the active
+  /// factor (login, setup/disable proof, or the confirm code of a new factor).
+  /// A code at this step or earlier is a replay and is refused. Null: none yet.
+  totpLastUsedStep        Int?
+  /// A02: a setup or replacement factor awaiting its first code (AES-GCM
+  /// ciphertext, like totpSecret). Never used for login; the active factor
+  /// stays in totpSecret until lib/mfa.ts promotes this one under the User
+  /// lock. The three pending fields are all set or all null (CHECK
+  /// "User_pendingTotp_all_or_none" in migration 20261014023251_mfa_pending_setup).
+  pendingTotpSecret       String?
+  pendingTotpExpiresAt    DateTime?
+  /// tokenVersion when the setup started; any later bump voids the setup.
+  pendingTotpTokenVersion Int?
+  /// A03: when the current email was proven (an emailed verification or
+  /// invitation token was used by this account). Null for every account
+  /// before A03 and after each email change, until the new address is proven.
+  emailVerifiedAt         DateTime?
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
 
-  depositSessions       DepositSession[]
-  ledgerEntries         RewardLedger[]
-  payoutAccounts        PayoutAccount[]
-  redemptions           Redemption[]
-  collectorPartnerships OrganizationCollectorPartner[] @relation("CollectorPartnerships")
-  assignedPickups       PickupRequest[]                @relation("AssignedCollector")
-  travelAgentLinks      TravelAgentUser[]
-  trips                 Trip[]
-  notifications         Notification[]
-  deviceTokens          DeviceToken[]
-  passwordResetTokens   PasswordResetToken[]
+  depositSessions         DepositSession[]
+  ledgerEntries           RewardLedger[]
+  rewardCases             RewardReconciliationCase[]
+  payoutAccounts          PayoutAccount[]
+  redemptions             Redemption[]
+  collectorPartnerships   OrganizationCollectorPartner[] @relation("CollectorPartnerships")
+  assignedPickups         PickupRequest[]                @relation("AssignedCollector")
+  travelAgentLinks        TravelAgentUser[]
+  trips                   Trip[]
+  notifications           Notification[]
+  deviceTokens            DeviceToken[]
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  emailOutbox             EmailOutbox[]
 
   @@index([organizationId])
   @@index([role])
 }
 
 model Organization {
-  id           String    @id @default(cuid())
-  name         String
-  type         OrgType   @default(OTHER)
+  id                String             @id @default(cuid())
+  name              String
+  type              OrgType            @default(OTHER)
   // Region levels stored as soft references (Region.id) for aggregation/reporting.
-  provinceId   String?
-  regencyId    String?
-  districtId   String?
-  villageId    String?
-  regionId     String?
-  region       Region?   @relation(fields: [regionId], references: [id])
-  address      String?
-  contactName  String?
-  contactPhone String?
-  status       OrgStatus @default(ACTIVE)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  provinceId        String?
+  regencyId         String?
+  districtId        String?
+  villageId         String?
+  regionId          String?
+  region            Region?            @relation(fields: [regionId], references: [id])
+  address           String?
+  contactName       String?
+  contactPhone      String?
+  status            OrgStatus          @default(ACTIVE)
+  /// Reward mode of machine deposits made without a campaign (M04). Explicit
+  /// per organization; MONEY_REWARD keeps the behaviour before M04.
+  machineRewardMode CampaignRewardMode @default(MONEY_REWARD)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   users              User[]
   machines           Machine[]
@@ -383,6 +458,7 @@ model Organization {
   ledgerEntries      RewardLedger[]
   travelAgentLinks   TravelAgentOrganization[]
   travelAgentInvites TravelAgentInvite[]
+  rewardFunding      RewardFundingAccount?
 
   @@index([regionId])
   @@index([type])
@@ -432,33 +508,41 @@ model OrganizationCollectorPartner {
 // ============================================================
 
 model Machine {
-  id                        String        @id @default(cuid())
+  id                        String               @id @default(cuid())
   organizationId            String
-  organization              Organization  @relation(fields: [organizationId], references: [id])
+  organization              Organization         @relation(fields: [organizationId], references: [id])
   regionId                  String?
-  region                    Region?       @relation(fields: [regionId], references: [id])
-  machineCode               String        @unique
+  region                    Region?              @relation(fields: [regionId], references: [id])
+  machineCode               String               @unique
   qrToken                   String?
   qrTokenExpiresAt          DateTime?
-  qrRotationSeconds         Int           @default(30)
+  qrRotationSeconds         Int                  @default(30)
   // Per-machine secret for HMAC-signed event ingestion (provisioned by superadmin).
   ingestSecret              String?
   name                      String
   description               String?
-  status                    MachineStatus @default(OFFLINE)
-  fillLevelPercent          Int           @default(0)
+  status                    MachineStatus        @default(OFFLINE)
+  fillLevelPercent          Int                  @default(0)
   capacityKg                Float?
-  hasInputChamber           Boolean       @default(true)
-  hasConveyor               Boolean       @default(true)
-  hasCompactor              Boolean       @default(false)
-  hasExternalCamera         Boolean       @default(false)
-  chamberTimeoutSeconds     Int           @default(20)
-  sessionIdleTimeoutMinutes Int           @default(3)
+  hasInputChamber           Boolean              @default(true)
+  hasConveyor               Boolean              @default(true)
+  hasCompactor              Boolean              @default(false)
+  hasExternalCamera         Boolean              @default(false)
+  /// Material verification policy (M04); WEIGHT_ONLY keeps the behaviour before M04.
+  materialVerification      MaterialVerification @default(WEIGHT_ONLY)
+  chamberTimeoutSeconds     Int                  @default(20)
+  sessionIdleTimeoutMinutes Int                  @default(3)
+  /// B01: reward ceiling reserved for one deposit session on this machine
+  /// (integer rupiah) when the session's campaign sets none. Null = not
+  /// configured: with REWARD_FUNDING_ENFORCED a money session is refused.
+  maxRewardPerSessionRupiah Int?
+  /// B01: item bound of one session, bound into the signed lease by B01b.
+  maxItemsPerSession        Int?
   lastHeartbeatAt           DateTime?
   latitude                  Float?
   longitude                 Float?
-  createdAt                 DateTime      @default(now())
-  updatedAt                 DateTime      @updatedAt
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
 
   wasteTypes     MachineWasteType[]
   sessions       DepositSession[]
@@ -481,6 +565,9 @@ model WasteType {
   defaultRewardPerItem Int?
   description          String?
   active               Boolean   @default(true)
+  /// Classifier labels (normalized, e.g. `bottle_pet`) that confirm this waste
+  /// type (M04). Empty = the type cannot be verified by AI.
+  aiAcceptedLabels     String[]  @default([])
   // null = global (managed by superadmin); set = organization-specific (admin-added)
   organizationId       String?
   createdAt            DateTime  @default(now())
@@ -543,6 +630,9 @@ model Campaign {
   description             String?
   campaignType            CampaignType       @default(MACHINE_DEPOSIT)
   rewardMode              CampaignRewardMode @default(MONEY_REWARD)
+  /// EVENT / SCHOOL_PROGRAM only: the program may run at machines (M04).
+  /// MACHINE_DEPOSIT always may; TRASH_BAG / TOURISM_PROGRAM never do.
+  supportsMachine         Boolean            @default(false)
   visibility              CampaignVisibility @default(PUBLIC)
   allowedEmailDomainsJson Json?
   startAt                 DateTime?
@@ -550,6 +640,15 @@ model Campaign {
   status                  CampaignStatus     @default(DRAFT)
   rewardMultiplier        Float?
   rulesJson               Json?
+  /// B01: total reward budget of the program (integer rupiah); null = no
+  /// program cap (the organization's funded capacity still applies).
+  rewardBudgetRupiah        Int?
+  /// B01: admission ceilings reserved and not yet committed (lib/reward-funding.ts).
+  heldRupiah                Int                @default(0)
+  /// B01: committed reward obligations (earned, pending review or paid); not refilled by a payout.
+  spentRupiah               Int                @default(0)
+  /// B01: reward ceiling reserved per deposit session under this program; falls back to Machine.maxRewardPerSessionRupiah.
+  maxRewardPerSessionRupiah Int?
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
 
@@ -557,6 +656,8 @@ model Campaign {
   rewardRates   RewardRate[]
   ledgerEntries RewardLedger[]
   trips         Trip[]
+  rewardReservations RewardBudgetReservation[]
+  rewardCommits      RewardBudgetCommit[]
 
   @@index([organizationId, status])
 }
@@ -565,6 +666,14 @@ model Campaign {
 // Deposit flow
 // ============================================================
 
+// One active session per machine (R03, EX-04): the hand-written partial unique
+// index "DepositSession_one_active_per_machine" on ("machineId") WHERE status IN
+// (RESERVED, ACTIVE, PROCESSING_ITEM, REVIEW). Staged in
+// prisma/migrations-enforce/one_active_machine_session_enforce and moved into
+// prisma/migrations in a later release, after `npm run reconcile:sessions`
+// exits 0. Prisma 6 cannot express partial indexes; remove any generated DROP
+// INDEX for it. Writers go through lib/deposit-session-service.ts (User ->
+// Machine row locks), which keep exclusivity without the index.
 model DepositSession {
   id           String        @id @default(cuid())
   userId       String
@@ -578,6 +687,14 @@ model DepositSession {
   completedAt  DateTime?
   timeoutAt    DateTime?
   anomalyCount Int           @default(0)
+  /// B01b: sha256 of the admission snapshot (lib/session-policy.ts), bound into the signed lease v2.
+  policyVersion           String?
+  /// B01b: the admission snapshot (rates, multiplier, mode and bounds) every acceptance of this session is priced from.
+  policySnapshotJson      Json?
+  /// B01b: when the RVM confirmed that every event of this session was synced (SESSION_CLOSE_WATERMARK);
+  /// the residual reward hold is released only then. Null = still awaiting the machine.
+  closeWatermarkAt        DateTime?
+  closeWatermarkEventCount Int?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -737,12 +854,187 @@ model RewardLedger {
   referenceType  String?
   referenceId    String?
   actorId        String?
+  /// Unique key of the financial effect this row records (e.g. `redemption:<id>:reserve`,
+  /// `deposit-item:<id>:earn`, `trip:<id>:return`). Required for every new write; null only on legacy rows.
+  businessKey    String?         @unique
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
+  // Partial unique indexes Prisma 6 cannot express (migrations 20261013122400_wallet_keys_enforce,
+  // 20261013151919_trip_reward_keys_enforce); remove any DROP INDEX for them that
+  // `prisma migrate diff/dev` generates:
+  //   RewardLedger_one_earn_per_deposit_item   ("depositItemId") WHERE EARN AND status <> 'REVERSED'
+  //   RewardLedger_one_reserve_per_redemption  ("referenceId") WHERE REDEEM/Redemption AND status <> 'REJECTED'
+  //   RewardLedger_one_earn_per_trip           ("referenceId") WHERE EARN/TRASH_BAG_RETURN/Trip AND status <> 'REVERSED'
   @@index([userId, status])
   @@index([sessionId])
   @@index([depositItemId])
+  @@index([referenceType, referenceId])
+}
+
+/// A money effect the system refused to apply automatically (M04,
+/// lib/reward-credit.ts): a correction that would push a balance that was
+/// already paid out or reserved below zero, or a credit to an account the A04
+/// erasure anonymized. The ledger is never forced; an operator resolves the
+/// case outside the automatic flow. Listed in the reconciliation report.
+model RewardReconciliationCase {
+  id            String                     @id @default(cuid())
+  /// Business key of the refused effect (e.g. `review:<itemId>:decision:v1`, `fraud:<itemId>:hold:v1`).
+  businessKey   String                     @unique
+  userId        String
+  user          User                       @relation(fields: [userId], references: [id])
+  depositItemId String?
+  /// Positive rupiah at stake; reasonCode says whether a debit or a credit was refused.
+  amount        Int
+  /// Ledger entry type of the effect that was not written.
+  entryType     LedgerEntryType
+  /// ANOMALY_ALREADY_PAID_OUT | RECIPIENT_ERASED
+  reasonCode    String
+  referenceType String?
+  referenceId   String?
+  status        RewardReconciliationStatus @default(OPEN)
+  note          String?
+  resolvedAt    DateTime?
+  resolvedById  String?
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+
+  @@index([status, createdAt])
+  @@index([userId])
+}
+
+/// B01 (BIZ-02): confirmed reward cash and held reward obligations of one
+/// organization. Counters are maintained only under the row lock
+/// (lib/db-locks.ts lockFundingAccount) by lib/reward-funding.ts; every change
+/// is backed by an immutable FundingEntry (cash) or a reservation/commit row
+/// (obligation). `confirmedRupiah - heldRupiah` is the capacity an admission
+/// may still reserve.
+model RewardFundingAccount {
+  id              String       @id @default(cuid())
+  organizationId  String       @unique
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  /// Cash confirmed by an operator with evidence (sum of entries).
+  confirmedRupiah Int          @default(0)
+  /// Reward obligations not yet paid: admission ceilings still reserved plus committed earnings.
+  heldRupiah      Int          @default(0)
+  /// Bumped on every counter change (diagnostics; the row lock serializes writers).
+  version         Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  entries      FundingEntry[]
+  reservations RewardBudgetReservation[]
+  commits      RewardBudgetCommit[]
+}
+
+/// Immutable cash movement of a funding account. Never moves real money:
+/// CONFIRMED_TOPUP records a verified deposit (unique `reference`), PAYOUT the
+/// gross of a successful user payout attributed to this source, CORRECTION a
+/// signed operator correction with evidence.
+model FundingEntry {
+  id           String               @id @default(cuid())
+  accountId    String
+  account      RewardFundingAccount @relation(fields: [accountId], references: [id])
+  /// `topup:<organizationId>:<reference>`, `correction:<organizationId>:<reference>`, `redemption:<id>:payout:<accountId>`.
+  businessKey  String               @unique
+  kind         FundingEntryKind
+  /// Signed integer rupiah: topups positive, payouts negative, corrections either sign.
+  amount       Int
+  /// Operator evidence reference (bank/transfer reference) or the redemption id for a payout.
+  reference    String
+  note         String?
+  verifiedById String?
+  createdAt    DateTime             @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([kind, reference])
+}
+
+/// Reward capacity reserved before material is admitted: a deposit session's
+/// ceiling (`session:<id>:admission`) or a trip's issued bags
+/// (`trip:<id>:issuance`). `remainingRupiah` is what commits may still draw;
+/// a session's residue is released only by an explicit operator action (B01a)
+/// or the RVM close watermark (B01b), never by a timeout.
+model RewardBudgetReservation {
+  id                      String                  @id @default(cuid())
+  businessKey             String                  @unique
+  accountId               String
+  account                 RewardFundingAccount    @relation(fields: [accountId], references: [id])
+  campaignId              String?
+  campaign                Campaign?               @relation(fields: [campaignId], references: [id])
+  userId                  String
+  sourceType              RewardReservationSource
+  sourceId                String
+  ceilingRupiah           Int
+  remainingRupiah         Int
+  /// Shadow mode only: capacity the account lacked when this was reserved (0 when covered).
+  shortfallRupiah         Int                     @default(0)
+  /// Shadow mode only: budget the campaign lacked when this was reserved (0 when covered).
+  campaignShortfallRupiah Int                     @default(0)
+  /// B01a fix 1: created at the first earning of a source that was admitted
+  /// without a reservation after the funding cutover (its program turned to
+  /// money later). Ceiling 0: every commit is uncovered and reported.
+  lateReservation         Boolean                 @default(false)
+  status                  RewardReservationStatus @default(ACTIVE)
+  releasedAt              DateTime?
+  releasedById            String?
+  releaseReason           String?
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+
+  commits  RewardBudgetCommit[]
+  releases RewardBudgetRelease[]
+
+  @@index([accountId, status])
+  @@index([sourceType, sourceId])
+  @@index([userId])
+}
+
+/// B01b: one keyed release of a reservation's remaining ceiling (the close
+/// watermark, a trip close, an operator release). The unique business key makes
+/// a retried release a no-op: the same key never gives money back twice.
+model RewardBudgetRelease {
+  id            String                  @id @default(cuid())
+  reservationId String
+  reservation   RewardBudgetReservation @relation(fields: [reservationId], references: [id])
+  accountId     String
+  campaignId    String?
+  businessKey   String                  @unique
+  amount        Int
+  reason        String?
+  releasedById  String?
+  createdAt     DateTime                @default(now())
+
+  @@index([reservationId])
+}
+
+/// One reward obligation drawn from a reservation, keyed by the earning's
+/// business key (`deposit-item:<id>:earn`, `trip:<id>:return`) so a retried
+/// event never consumes budget twice. `heldRupiah` is the obligation (the
+/// approvable ceiling while `reviewPending`), `paidRupiah` the part already
+/// attributed to successful payouts, `uncoveredRupiah` the part that exceeded
+/// the reservation when committed (material already accepted never loses its
+/// reward; the excess is reported).
+model RewardBudgetCommit {
+  id              String                  @id @default(cuid())
+  reservationId   String
+  reservation     RewardBudgetReservation @relation(fields: [reservationId], references: [id])
+  accountId       String
+  account         RewardFundingAccount    @relation(fields: [accountId], references: [id])
+  campaignId      String?
+  campaign        Campaign?               @relation(fields: [campaignId], references: [id])
+  userId          String
+  businessKey     String                  @unique
+  heldRupiah      Int
+  paidRupiah      Int                     @default(0)
+  uncoveredRupiah Int                     @default(0)
+  reviewPending   Boolean                 @default(false)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@index([reservationId])
+  @@index([accountId])
+  @@index([userId, reviewPending])
 }
 
 // ============================================================
@@ -766,22 +1058,39 @@ model PayoutAccount {
 }
 
 model Redemption {
-  id                      String             @id @default(cuid())
-  userId                  String
-  user                    User               @relation(fields: [userId], references: [id])
-  provider                PayoutProviderType @default(OTHER)
-  payoutAccountId         String?
-  amount                  Int
-  method                  RedemptionMethod   @default(MANUAL_TRANSFER)
-  status                  RedemptionStatus   @default(REQUESTED)
-  providerReference       String?
-  manualTransferProofUrl  String?
-  note                    String?
-  processedBySuperadminId String?
-  idempotencyKey          String             @unique
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
+  id                          String                   @id @default(cuid())
+  userId                      String
+  user                        User                     @relation(fields: [userId], references: [id])
+  provider                    PayoutProviderType       @default(OTHER)
+  payoutAccountId             String?
+  amount                      Int
+  method                      RedemptionMethod         @default(MANUAL_TRANSFER)
+  status                      RedemptionStatus         @default(REQUESTED)
+  providerReference           String?
+  manualTransferProofUrl      String?
+  note                        String?
+  processedBySuperadminId     String?
+  /// Client key for one logical request, unique per user (not globally).
+  idempotencyKey              String
+  /// sha256 of the canonical request (amount + payoutAccountId); null on legacy rows.
+  requestHash                 String?
+  /// Immutable payout destination used by the queue, process, success and proof
+  /// (never the mutable PayoutAccount). Identifier/name are AES-GCM ciphertext
+  /// from lib/encryption; never return them to clients (lib/payout-destination.ts).
+  payoutDestinationSource     PayoutDestinationSource?
+  payoutDestinationProvider   PayoutProviderType?
+  payoutDestinationIdentifier String?
+  payoutDestinationName       String?
+  payoutDestinationCapturedAt DateTime?
+  /// Operator could not confirm the external transfer: the request stays
+  /// PROCESSING with its reserve held until the outcome is reconciled.
+  reconciliationRequired      Boolean                  @default(false)
+  reconciliationNote          String?
+  reconciliationFlaggedAt     DateTime?
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
 
+  @@unique([userId, idempotencyKey])
   @@index([userId, status])
   @@index([status])
 }
@@ -805,6 +1114,20 @@ model PickupRequest {
   priority            Int                           @default(0)
   reason              PickupReason                  @default(FULL)
   notes               String?
+  /// B05: compare-and-set version; every dispatch/field transition increments it.
+  version             Int                           @default(0)
+  /// B05: when the current collector was dispatched (null while REQUESTED).
+  assignedAt          DateTime?
+  /// B05: start deadline the operator chose at dispatch (no default SLA).
+  expectedStartAt     DateTime?
+  /// B05: last overdue escalation; reset by every dispatch, so it fires once per version.
+  lastEscalatedAt     DateTime?
+  /// B05: required reason of a cancel/fail, shown to operators.
+  closedReason        String?
+  /// B05: the FAILED/CANCELLED task this one replaces (one replacement per task).
+  replacesPickupId    String?                       @unique
+  replacesPickup      PickupRequest?                @relation("PickupReplacement", fields: [replacesPickupId], references: [id])
+  replacedBy          PickupRequest?                @relation("PickupReplacement")
   createdAt           DateTime                      @default(now())
   updatedAt           DateTime                      @updatedAt
 
@@ -812,6 +1135,7 @@ model PickupRequest {
 
   @@index([organizationId, status])
   @@index([assignedCollectorId])
+  @@index([status, expectedStartAt])
 }
 
 model PickupItem {
@@ -879,11 +1203,24 @@ model TravelAgentInvite {
   email          String
   status         TravelAgentInviteStatus @default(PENDING)
   invitedById    String?
+  /// A03: SHA-256 of the single-use token in the emailed link (lib/invitations.ts).
+  /// The raw token is never stored: it is minted when the mail is sent
+  /// (lib/email-outbox.ts), so each delivery replaces the previous token.
+  /// Null until the first delivery.
+  tokenHash      String?                 @unique
+  /// 24 hours after the latest delivery; null until the first delivery.
+  expiresAt      DateTime?
+  /// Set once, by the accepting account (compare-and-set in acceptTravelAgentInvite).
+  acceptedAt     DateTime?
+  acceptedById   String?
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
+  outbox EmailOutbox[]
+
   @@index([email, status])
   @@index([organizationId, status])
+  @@index([acceptedById])
 }
 
 model TravelAgentUser {
@@ -893,6 +1230,10 @@ model TravelAgentUser {
   userId        String
   user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   roleInAgent   TravelAgentUserRole @default(OWNER)
+  /// A03: set when this account accepted an emailed invitation for the agent.
+  /// Trip access needs it (and a verified account email); null for every
+  /// membership created before A03 and after the account's email changes.
+  verifiedAt    DateTime?
   createdAt     DateTime            @default(now())
 
   @@unique([travelAgentId, userId])
@@ -930,17 +1271,17 @@ model Trip {
 }
 
 model TrashBagAssignment {
-  id           String     @id @default(cuid())
+  id           String           @id @default(cuid())
   tripId       String
-  trip         Trip       @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip         Trip             @relation(fields: [tripId], references: [id], onDelete: Cascade)
   assignedById String?
   wasteTypeId  String?
-  wasteType    WasteType? @relation(fields: [wasteTypeId], references: [id])
-  bagQrCode    String     @unique
-  bagCount     Int        @default(1)
+  wasteType    WasteType?       @relation(fields: [wasteTypeId], references: [id])
+  bagQrCode    String           @unique
+  bagCount     Int              @default(1)
   status       ConditionStatus?
   returnedAt   DateTime?
-  assignedAt   DateTime   @default(now())
+  assignedAt   DateTime         @default(now())
 
   @@index([tripId])
   @@index([wasteTypeId])
@@ -974,16 +1315,26 @@ model ManualValidation {
 // ============================================================
 
 model AuditLog {
-  id           String   @id @default(cuid())
-  actorId      String?
-  action       String
-  entityType   String
-  entityId     String?
-  metadataJson Json?
-  // Tamper-evident chain: SHA-256 of (previousHash + canonical payload)
-  previousHash String?
-  checksum     String?
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  actorId       String?
+  action        String
+  entityType    String
+  entityId      String?
+  metadataJson  Json?
+  // Tamper-evident chain (lib/audit.ts). Version 2 (A05): HMAC-SHA256 over
+  // (chainSequence, previousHash, canonicalAuditPayload of the stored row),
+  // with createdAt stored exactly as hashed. Version 1 rows (before A05) are
+  // an archived legacy chain: never re-signed, see docs/security/audit-chain.md.
+  previousHash  String?
+  checksum      String?
+  createdAt     DateTime @default(now())
+  // 1 = legacy archive (no sequence), 2 = canonical chain. The migration sets
+  // existing rows to 1 before this default; a CHECK (by hand) pairs version
+  // and sequence.
+  chainVersion  Int      @default(2)
+  // Gapless position in the v2 chain, allocated under the chain advisory lock
+  // inside the inserting transaction. Verification orders by it.
+  chainSequence BigInt?  @unique
 
   @@index([entityType, entityId])
   @@index([actorId])
@@ -1005,21 +1356,36 @@ model ConsentRecord {
 }
 
 model DeletionRequest {
-  id          String           @id @default(cuid())
-  email       String
+  id          String                @id @default(cuid())
+  /// Email typed into the public form (null for requests made from a signed-in
+  /// session). Erased together with the account (lib/erasure-jobs.ts).
+  email       String?
   userId      String?
-  // PARTIAL = some data categories; FULL = account + all data
-  scope       DeletionRequestScope @default(PARTIAL)
-  dataTypes   String[]         // For PARTIAL: which categories were requested
+  // PARTIAL = some data categories; FULL = account erasure (lib/erasure-jobs.ts)
+  scope       DeletionRequestScope  @default(PARTIAL)
+  dataTypes   String[] // For PARTIAL: which categories were requested
   reason      String?
   status      DeletionRequestStatus @default(PENDING)
   ipAddress   String?
   userAgent   String?
   processedAt DateTime?
-  createdAt   DateTime         @default(now())
+  createdAt   DateTime              @default(now())
+
+  /// How the account owner confirmed a FULL request; null = not verified, never executed.
+  verificationMethod    DeletionVerificationMethod?
+  /// SHA-256 of the one-time token mailed to the account (raw token never stored).
+  verificationTokenHash String?                     @unique
+  verificationExpiresAt DateTime?
+  verifiedAt            DateTime?
+  /// PENDING_RECONCILIATION only: the open balances/obligations that hold the
+  /// erasure (numbers and counts, never personal data).
+  reconciliationJson    Json?
+
+  steps ErasureJobStep[]
 
   @@index([email])
   @@index([status, createdAt])
+  @@index([userId, status])
 }
 
 enum DeletionRequestScope {
@@ -1027,12 +1393,58 @@ enum DeletionRequestScope {
   FULL
 }
 
+/// PENDING: received, not verified by the account owner (nothing runs).
+/// VERIFIED/PROCESSING: verified, erasure steps queued or running.
+/// PENDING_RECONCILIATION: verified, held until open balances/payouts settle; nothing erased yet.
+/// RETRYABLE_FAILED: a required step failed and will be retried; not complete.
+/// COMPLETED: every required step finished.
 enum DeletionRequestStatus {
   PENDING
   VERIFIED
   PROCESSING
+  PENDING_RECONCILIATION
+  RETRYABLE_FAILED
   COMPLETED
   REJECTED
+}
+
+enum DeletionVerificationMethod {
+  /// The owner asked from an authenticated session (DELETE /api/user/data).
+  SESSION
+  /// The owner opened the one-time link mailed to the account address.
+  EMAIL_TOKEN
+  /// An operator verified the owner out of band (scripts/process-erasure-jobs.ts).
+  OPERATOR
+}
+
+enum ErasureStepName {
+  /// One DB transaction under the User lock: redact profile, clear secrets and
+  /// tokens, disable payout accounts, erase destination copies and free text.
+  ANONYMIZE_ACCOUNT
+  /// After commit: delete the owner's transfer-proof files from private storage.
+  DELETE_PROOF_FILES
+}
+
+/// Durable, idempotent step of a FULL deletion request. A request is COMPLETED
+/// only when every one of its steps has completedAt.
+model ErasureJobStep {
+  id            String          @id @default(cuid())
+  requestId     String
+  request       DeletionRequest @relation(fields: [requestId], references: [id])
+  step          ErasureStepName
+  attempts      Int             @default(0)
+  /// Earliest time the periodic runner retries/re-checks this step.
+  nextAttemptAt DateTime        @default(now())
+  completedAt   DateTime?
+  /// Error class/code of the last failed attempt (never a message with data).
+  lastError     String?
+  /// Non-personal inputs of a post-commit step (e.g. redemption ids whose proof folders are removed).
+  payloadJson   Json?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([requestId, step])
+  @@index([completedAt, nextAttemptAt])
 }
 
 model SystemConfig {
@@ -1093,4 +1505,71 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+/// A03: purpose of an EmailVerificationToken (the hash is separated per purpose).
+enum EmailTokenPurpose {
+  VERIFY_EMAIL
+}
+
+/// A03: single-use proof that the account holder reads `emailLookup`'s mailbox.
+/// Only the SHA-256 of the raw token is stored. The token is valid only while
+/// the account's current emailLookup still equals the snapshot.
+model EmailVerificationToken {
+  id          String            @id @default(cuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose     EmailTokenPurpose @default(VERIFY_EMAIL)
+  /// HMAC blind index of the address the link was sent to (User.emailLookup at send time).
+  emailLookup String
+  tokenHash   String            @unique
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime          @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+enum EmailOutboxKind {
+  TRAVEL_AGENT_INVITE
+  EMAIL_VERIFICATION
+}
+
+enum EmailOutboxStatus {
+  PENDING
+  SENDING
+  SENT
+  CANCELLED
+  FAILED
+}
+
+/// A03: durable delivery of invitation and verification mail
+/// (lib/email-outbox.ts, scripts/process-email-outbox.ts). A row holds no
+/// address and no token: the recipient is read from the invite or user when
+/// the mail is sent, and the token is minted at that moment and only its hash
+/// is written (to the invite or an EmailVerificationToken).
+model EmailOutbox {
+  id            String             @id @default(cuid())
+  kind          EmailOutboxKind
+  inviteId      String?
+  invite        TravelAgentInvite? @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  userId        String?
+  user          User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// EMAIL_VERIFICATION: User.emailLookup when queued; a later email change cancels the row.
+  emailLookup   String?
+  status        EmailOutboxStatus  @default(PENDING)
+  attempts      Int                @default(0)
+  nextAttemptAt DateTime           @default(now())
+  /// SENDING rows whose lease passed are retried (a crashed sender).
+  leaseUntil    DateTime?
+  /// Error class or code only (never a message, address or link).
+  lastError     String?
+  sentAt        DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([inviteId])
+  @@index([userId])
 }

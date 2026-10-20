@@ -70,8 +70,7 @@ describe('POST /api/machine-events', () => {
     
     vi.mocked(me.ingestMachineEvent)
       .mockResolvedValueOnce({ duplicate: false, eventId: 'evt_1' } as any)
-      .mockResolvedValueOnce({ duplicate: true, eventId: 'evt_2' } as any)
-      .mockRejectedValueOnce(new Error('Processing error'));
+      .mockResolvedValueOnce({ duplicate: true, eventId: 'evt_2' } as any);
 
     const res = await POST(makeReq({ 
       machineCode: 'm1', 
@@ -85,12 +84,15 @@ describe('POST /api/machine-events', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     
+    expect(data.protocolVersion).toBe(2);
     expect(data.received).toBe(3);
     expect(data.results[0]).toEqual({ localEventId: '1', status: 'accepted', eventId: 'evt_1' });
     expect(data.results[1]).toEqual({ localEventId: '2', status: 'duplicate', eventId: 'evt_2' });
-    expect(data.results[2]).toEqual({ localEventId: '3', status: 'error', error: 'EVENT_REJECTED' });
-    
-    expect(me.ingestMachineEvent).toHaveBeenCalledTimes(3);
+    // Protocol v2 (R02): an unknown event type is rejected per event, permanently,
+    // without reaching the ingest path.
+    expect(data.results[2]).toEqual({ localEventId: '3', status: 'error', error: 'INVALID_EVENT', retryable: false });
+
+    expect(me.ingestMachineEvent).toHaveBeenCalledTimes(2);
   });
 
   it('short-circuits known duplicates from DB before ingest', async () => {

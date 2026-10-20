@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
-import { SignJWT, jwtVerify } from "jose";
+import { SignJWT } from "jose";
+import { getJwtSecret } from "./auth-tokens";
+export { verifySessionToken } from "./auth-tokens";
 import bcrypt from "bcryptjs";
 import type { AppRole } from "./roles";
 
@@ -12,17 +14,6 @@ export function sessionMaxAgeSeconds(role: AppRole): number {
   return role === "ADMIN" || role === "SUPERADMIN"
     ? PRIVILEGED_MAX_AGE_SECONDS
     : USER_MAX_AGE_SECONDS;
-}
-
-function getJwtSecret(): Uint8Array {
-  const s = process.env.AUTH_JWT_SECRET;
-  if (!s || s === "dev-insecure-secret-change-me") {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("AUTH_JWT_SECRET must be set in production");
-    }
-    return new TextEncoder().encode("dev-insecure-secret-change-me");
-  }
-  return new TextEncoder().encode(s);
 }
 
 export interface SessionPayload {
@@ -68,29 +59,13 @@ export async function verifyPassword(
 
 export async function signSession(payload: SessionPayload): Promise<string> {
   const maxAge = sessionMaxAgeSeconds(payload.role);
-  return new SignJWT({ ...payload })
+  return new SignJWT({ ...payload, purpose: "session" })
+    .setIssuer("reloop")
+    .setAudience("reloop-session")
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${maxAge}s`)
     .sign(getJwtSecret());
-}
-
-export async function verifySessionToken(
-  token: string,
-): Promise<SessionPayload | null> {
-  try {
-    const { payload } = await jwtVerify(token, getJwtSecret());
-    return {
-      sub: String(payload.sub),
-      email: String(payload.email),
-      name: String(payload.name),
-      role: payload.role as AppRole,
-      organizationId: (payload.organizationId as string | null) ?? null,
-      tokenVersion: Number(payload.tokenVersion ?? 0),
-    };
-  } catch {
-    return null;
-  }
 }
 
 /** Writes the session cookie. Only valid in Route Handlers / Server Actions. */

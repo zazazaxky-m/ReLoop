@@ -6,6 +6,7 @@ import { MachineDetailView } from "@/components/machine/MachineDetailView";
 import { requirePageUser } from "@/lib/rbac";
 import { prisma } from "@/lib/prisma";
 import { wasteTypeOptions, regionOptions } from "@/lib/queries";
+import { getMachineSyncStatus } from "@/lib/machine-sync-status";
 
 export const metadata: Metadata = { title: "Detail Mesin" };
 
@@ -28,9 +29,10 @@ export default async function AdminMachineDetailPage({
   });
   if (!machine || machine.organizationId !== user.organizationId) notFound();
 
-  const [wasteTypes, regions] = await Promise.all([
+  const [wasteTypes, regions, syncStatus] = await Promise.all([
     wasteTypeOptions(user.organizationId),
     regionOptions(),
+    getMachineSyncStatus(machine.id),
   ]);
 
   return (
@@ -52,6 +54,7 @@ export default async function AdminMachineDetailPage({
         wasteTypes={wasteTypes}
         regions={regions}
         listHref="/dashboard/admin/machines"
+        syncStatus={syncStatus}
       />
     </div>
   );

@@ -23,10 +23,35 @@ export interface RedemptionAdminRow {
   provider: string;
   accountIdentifier: string | null;
   accountName: string | null;
+  /** REQUEST_SNAPSHOT, LEGACY_ACCOUNT_FALLBACK or LEGACY_UNAVAILABLE (lib/payout-destination.ts). */
+  destinationSource?: string;
+  /** False for a legacy request whose destination is shown from the current account. */
+  destinationRecorded?: boolean;
+  /** The number and name were removed by the owner's data-erasure request. */
+  destinationErased?: boolean;
   status: string;
   note: string | null;
   manualTransferProofUrl?: string | null;
+  reconciliationRequired?: boolean;
+  reconciliationNote?: string | null;
   createdAt: string | Date;
+}
+
+type ActionKind = "success" | "fail" | "flag_reconciliation";
+
+const ACTION_TITLES: Record<ActionKind, string> = {
+  success: "Konfirmasi Pembayaran",
+  fail: "Tandai Gagal",
+  flag_reconciliation: "Transfer Belum Pasti",
+};
+
+function destinationLabel(r: RedemptionAdminRow): string | null {
+  if (r.destinationErased) return "Tujuan dihapus atas permintaan hapus data pengguna";
+  if (r.destinationSource === "LEGACY_UNAVAILABLE") return "Tujuan lama tidak tersedia";
+  if (r.destinationSource === "LEGACY_ACCOUNT_FALLBACK") {
+    return r.destinationRecorded ? "Data lama: akun saat diproses" : "Data lama: akun saat ini";
+  }
+  return null;
 }
 
 export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminRow[] }) {
@@ -34,7 +59,7 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
-  const [actionKind, setActionKind] = useState<"success" | "fail" | null>(null);
+  const [actionKind, setActionKind] = useState<ActionKind | null>(null);
   const [note, setNote] = useState("Sudah ditransfer");
   const [ref, setRef] = useState("");
   const [proofFile, setProofFile] = useState<File | null>(null);
@@ -90,7 +115,7 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
     }
   }
 
-  function openAction(id: string, kind: "success" | "fail") {
+  function openAction(id: string, kind: ActionKind) {
     setActionId(id);
     setActionKind(kind);
     setNote(kind === "success" ? "Sudah ditransfer" : "");
@@ -120,11 +145,30 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
       render: (r) => (
         <div className="text-sm">
           <p>{r.provider}</p>
-          <p className="text-xs text-muted">{r.accountIdentifier ?? "-"}</p>
+          <p className="text-xs text-muted">
+            {r.accountIdentifier ?? "-"}
+            {r.accountName ? ` · ${r.accountName}` : ""}
+          </p>
+          {destinationLabel(r) ? (
+            <p className="text-xs text-amber-700 dark:text-amber-400">{destinationLabel(r)}</p>
+          ) : null}
         </div>
       ),
     },
-    { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => (
+        <div className="flex flex-col items-start gap-1">
+          <StatusBadge status={r.status} />
+          {r.reconciliationRequired ? (
+            <span className="text-xs font-semibold text-amber-700 dark:text-amber-400" title={r.reconciliationNote ?? undefined}>
+              Perlu rekonsiliasi
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
     {
       key: "created",
       header: "Diajukan",
@@ -171,6 +215,11 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
                   Tandai Transfer
                 </Button>
               ) : null}
+              {r.status === "PROCESSING" && !r.reconciliationRequired ? (
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => openAction(r.id, "flag_reconciliation")}>
+                  Belum Pasti
+                </Button>
+              ) : null}
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => openAction(r.id, "fail")}>
                 Gagal
               </Button>
@@ -202,9 +251,7 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
       {actionId && actionKind ? (
         <Card>
           <CardHeader>
-            <CardTitle>
-              {actionKind === "success" ? "Konfirmasi Pembayaran" : "Tandai Gagal"}
-            </CardTitle>
+            <CardTitle>{ACTION_TITLES[actionKind]}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -213,7 +260,13 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
                 <Input
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder={actionKind === "success" ? "Sudah ditransfer" : "Alasan gagal"}
+                  placeholder={
+                    actionKind === "success"
+                      ? "Sudah ditransfer"
+                      : actionKind === "fail"
+                        ? "Alasan gagal"
+                        : "Contoh: mutasi bank belum muncul"
+                  }
                   className="mt-1.5"
                 />
               </div>
@@ -257,7 +310,11 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
                       })
                 }
               >
-                {actionKind === "success" ? "Konfirmasi Sudah Transfer" : "Tandai Gagal"}
+                {actionKind === "success"
+                  ? "Konfirmasi Sudah Transfer"
+                  : actionKind === "fail"
+                    ? "Tandai Gagal"
+                    : "Tahan untuk Rekonsiliasi"}
               </Button>
               <Button
                 variant="ghost"
@@ -271,7 +328,9 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
               </Button>
             </div>
             <p className="text-xs text-muted">
-              Tambahkan catatan atau referensi transaksi untuk memudahkan pelacakan.
+              {actionKind === "flag_reconciliation"
+                ? "Pengajuan tetap diproses dan saldo pengguna tetap ditahan sampai hasil transfer dipastikan."
+                : "Tambahkan catatan atau referensi transaksi untuk memudahkan pelacakan."}
             </p>
           </CardContent>
         </Card>

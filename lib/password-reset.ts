@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 
 /**
@@ -40,26 +41,47 @@ export async function createPasswordResetToken(
   return rawToken;
 }
 
+type ResetTokenClient = Pick<Prisma.TransactionClient, "passwordResetToken">;
+
+function isUsable(record: { usedAt: Date | null; expiresAt: Date } | null): boolean {
+  return Boolean(record && !record.usedAt && record.expiresAt.getTime() >= Date.now());
+}
+
+/**
+ * Owner of a currently usable token (null when unknown, used or expired),
+ * without claiming it. The owner is immutable, so a caller can learn which
+ * User row to lock and then claim the token inside that locked transaction.
+ */
+export async function findPasswordResetTokenOwner(rawToken: string): Promise<string | null> {
+  const record = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash: hashToken(rawToken) },
+    select: { userId: true, usedAt: true, expiresAt: true },
+  });
+  return record && isUsable(record) ? record.userId : null;
+}
+
 /**
  * Validates a raw reset token and, if valid, atomically marks it used and
  * returns the owning userId. Returns null when the token is unknown, already
- * used, or expired.
+ * used, or expired. Pass the caller's TransactionClient so the claim commits
+ * or rolls back with the password change.
  */
 export async function consumePasswordResetToken(
   rawToken: string,
+  client: ResetTokenClient = prisma,
 ): Promise<string | null> {
   const tokenHash = hashToken(rawToken);
-  const record = await prisma.passwordResetToken.findUnique({
+  const record = await client.passwordResetToken.findUnique({
     where: { tokenHash },
   });
 
-  if (!record || record.usedAt || record.expiresAt.getTime() < Date.now()) {
+  if (!record || !isUsable(record)) {
     return null;
   }
 
   // Guard against a race where two requests submit the same token: only the
   // update that flips usedAt from null wins.
-  const claimed = await prisma.passwordResetToken.updateMany({
+  const claimed = await client.passwordResetToken.updateMany({
     where: { id: record.id, usedAt: null },
     data: { usedAt: new Date() },
   });

@@ -1,5 +1,11 @@
 import { randomBytes } from "node:crypto";
+import type { ConditionStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { calculateCompliance, type ComplianceResult } from "@/lib/tourism";
+import { VERIFIED_MEMBERSHIP } from "@/lib/travel-agent-access";
+
+/** A trip changed between the caller's read and its write (compare-and-set lost). */
+export const TRIP_CHANGED = "Status trip sudah berubah. Muat ulang halaman lalu coba lagi.";
 
 /** Default reward per returned & sorted trash bag (Rp). Overridden by campaign.rewardMultiplier. */
 export const TRASH_BAG_REWARD_PER_BAG = 2000;
@@ -31,6 +37,22 @@ export function isRewardableCondition(condition: string | null | undefined): boo
 }
 
 /**
+ * Trip-level condition from the bags that already have a status (null = not
+ * reviewed yet, ignored): all NOT_RETURNED -> NOT_RETURNED, all GOOD -> GOOD,
+ * any POOR -> POOR, otherwise PARTIAL. Null when no bag was reviewed.
+ */
+export function aggregateBagCondition(
+  statuses: ReadonlyArray<ConditionStatus | null | undefined>,
+): ConditionStatus | null {
+  const known = statuses.filter((status): status is ConditionStatus => Boolean(status));
+  if (known.length === 0) return null;
+  if (known.every((status) => status === "NOT_RETURNED")) return "NOT_RETURNED";
+  if (known.every((status) => status === "GOOD")) return "GOOD";
+  if (known.some((status) => status === "POOR")) return "POOR";
+  return "PARTIAL";
+}
+
+/**
  * Trash-bag payout:
  * base = rewardableBags × TRASH_BAG_REWARD_PER_BAG × campaignMultiplier
  * final = floor(base × complianceScore/100)
@@ -50,6 +72,60 @@ export function computeTrashBagRewardAmount(input: {
   const base = input.rewardableBagCount * perBag * campaignMult;
   const complianceMult = Math.max(0, Math.min(100, input.complianceScore)) / 100;
   return Math.floor(base * complianceMult);
+}
+
+export interface TripBagEvaluation {
+  assignedCount: number;
+  reviewedCount: number;
+  returnedCount: number;
+  rewardableCount: number;
+  conditionStatus: ConditionStatus | null;
+  compliance: ComplianceResult;
+  rewardAmount: number;
+}
+
+/**
+ * Check-out score and reward of a trip from its bag rows only (one row = one
+ * unit; null = not reviewed). Pure: used by refreshTripOutcome
+ * (lib/trip-validation.ts) and by the read-only inventory, so both price a
+ * trip the same way. A reward needs a MONEY_REWARD campaign and a recipient.
+ */
+export function evaluateTripBags(input: {
+  statuses: ReadonlyArray<ConditionStatus | null>;
+  appCompleted: boolean;
+  rewardMode: string;
+  hasRecipient: boolean;
+  rewardMultiplier?: number | null;
+}): TripBagEvaluation {
+  const known = input.statuses.filter((status): status is ConditionStatus => status !== null);
+  const returnedCount = known.filter((status) => status !== "NOT_RETURNED").length;
+  const rewardableCount = known.filter((status) => isRewardableCondition(status)).length;
+  const conditionStatus = aggregateBagCondition(known);
+  const compliance = calculateCompliance({
+    stage: "CHECK_OUT",
+    appCompleted: input.appCompleted,
+    assignedBagCount: input.statuses.length,
+    returnedBagCount: returnedCount,
+    conditionStatus,
+  });
+  const rewardAmount =
+    input.rewardMode === "MONEY_REWARD" && input.hasRecipient
+      ? computeTrashBagRewardAmount({
+          rewardableBagCount: rewardableCount,
+          complianceScore: compliance.score,
+          rewardMultiplier: input.rewardMultiplier,
+          rewardPerBag: TRASH_BAG_REWARD_PER_BAG,
+        })
+      : 0;
+  return {
+    assignedCount: input.statuses.length,
+    reviewedCount: known.length,
+    returnedCount,
+    rewardableCount,
+    conditionStatus,
+    compliance,
+    rewardAmount,
+  };
 }
 
 /** Manual PATCH may only cancel (or reopen a cancelled trip). Lifecycle otherwise follows gate validations. */
@@ -103,14 +179,18 @@ export function canValidateTripStage(
 /**
  * Gate ops (issue bags / check-in / check-out / progressive scan) require the trip's
  * travel agent to still be INVITED for the campaign org. Pickup after COMPLETED is
- * allowed even if the agent was later suspended.
+ * allowed even if the agent was later suspended. Pass the transaction client
+ * to re-check the link after the trip locks are held.
  */
-export async function getTripTravelAgentGateBlockReason(input: {
-  travelAgentId: string | null | undefined;
-  organizationId: string;
-}): Promise<string | null> {
+export async function getTripTravelAgentGateBlockReason(
+  input: {
+    travelAgentId: string | null | undefined;
+    organizationId: string;
+  },
+  db: Pick<Prisma.TransactionClient, "travelAgentOrganization"> = prisma,
+): Promise<string | null> {
   if (!input.travelAgentId) return null;
-  const link = await prisma.travelAgentOrganization.findUnique({
+  const link = await db.travelAgentOrganization.findUnique({
     where: {
       travelAgentId_organizationId: {
         travelAgentId: input.travelAgentId,
@@ -125,12 +205,16 @@ export async function getTripTravelAgentGateBlockReason(input: {
   return null;
 }
 
-/** Travel-agent-linked USER may only see trips for orgs where the agent is still INVITED. */
+/**
+ * Travel-agent-linked USER may only see trips for orgs where the agent is
+ * still INVITED, and only through a verified membership (A03: accepted from
+ * the invited mailbox, account email still verified).
+ */
 export async function getInvitedTravelAgentTripFilters(userId: string): Promise<
   Array<{ travelAgentId: string; organizationId: string }>
 > {
   const agentLinks = await prisma.travelAgentUser.findMany({
-    where: { userId },
+    where: { userId, ...VERIFIED_MEMBERSHIP },
     select: { travelAgentId: true },
   });
   const travelAgentIds = agentLinks.map((link) => link.travelAgentId);

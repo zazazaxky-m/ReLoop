@@ -34,7 +34,7 @@ export async function resolveFraudDepositItemId(
   input: IngestEventInput,
 ): Promise<string | null> {
   if (input.depositItemId) return input.depositItemId;
-  if (!input.sessionId) return null;
+  if (!input.sessionId || input.itemReferenceRejected) return null;
   const item = await tx.depositItem.findFirst({
     where: { sessionId: input.sessionId },
     orderBy: { createdAt: "desc" },
@@ -54,7 +54,8 @@ export async function resolveDepositItemId(
     if (input.sessionId) cache?.set(input.sessionId, input.depositItemId);
     return input.depositItemId;
   }
-  if (!input.sessionId) return null;
+  // The event named an item outside its session (R03): never substitute one.
+  if (!input.sessionId || input.itemReferenceRejected) return null;
 
   if (cache?.has(input.sessionId)) {
     // has() guarantees the key exists; value may be null.

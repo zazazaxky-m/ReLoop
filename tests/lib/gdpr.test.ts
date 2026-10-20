@@ -2,7 +2,6 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   recordConsent,
   verifyConsent,
-  processErasureRequest,
   exportUserData,
   createUserDataExportStream,
 } from '@/lib/gdpr';
@@ -14,9 +13,12 @@ vi.mock('@/lib/prisma', () => ({
     consentRecord: { create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
     user: { findUnique: vi.fn(), update: vi.fn() },
     depositSession: { updateMany: vi.fn(), findMany: vi.fn() },
-    payoutAccount: { deleteMany: vi.fn() },
-    rewardLedger: { updateMany: vi.fn(), findMany: vi.fn() },
+    payoutAccount: { findMany: vi.fn(async () => []) },
+    rewardLedger: { findMany: vi.fn() },
     redemption: { findMany: vi.fn() },
+    trip: { findMany: vi.fn(async () => []) },
+    notification: { findMany: vi.fn(async () => []) },
+    deletionRequest: { findMany: vi.fn(async () => []) },
   },
 }));
 
@@ -58,29 +60,7 @@ describe('gdpr', () => {
     });
   });
 
-  describe('processErasureRequest', () => {
-    it('throws if user not found', async () => {
-      vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
-      await expect(processErasureRequest('u1')).rejects.toThrow('User not found');
-    });
-
-    it('anonymizes user data and logs audit', async () => {
-      vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'u1' } as any);
-      
-      const log = await processErasureRequest('u1');
-      
-      expect(prisma.user.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ name: '[REDACTED]', email: 'redacted-u1@reloop.id' }) })
-      );
-      expect(prisma.depositSession.updateMany).toHaveBeenCalled();
-      expect(prisma.payoutAccount.deleteMany).toHaveBeenCalled();
-      expect(prisma.rewardLedger.updateMany).toHaveBeenCalled();
-      expect(audit.logAudit).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'DATA_ERASURE', entityId: 'u1' })
-      );
-      expect(log.steps).toHaveLength(4);
-    });
-  });
+  // Account erasure moved to lib/erasure-jobs.ts (covered by tests/integration/erasure.test.ts).
 
   describe('exportUserData', () => {
     it('gathers paginated data', async () => {
@@ -105,6 +85,42 @@ describe('gdpr', () => {
 
       const exp = await exportUserData('u1');
       expect(exp.profile).toBeNull();
+    });
+  });
+
+  describe('export completeness', () => {
+    it('exposes the same sections in memory and in the stream, with the owner destination but no ciphertext', async () => {
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'u1', name: 'Test' } as any);
+      vi.mocked(prisma.depositSession.findMany).mockResolvedValue([]);
+      vi.mocked(prisma.rewardLedger.findMany).mockResolvedValue([]);
+      vi.mocked(prisma.consentRecord.findMany).mockResolvedValue([]);
+      vi.mocked(prisma.redemption.findMany).mockResolvedValue([{
+        id: 'r1', userId: 'u1', payoutAccountId: null, requestHash: 'hash', payoutDestinationSource: 'REQUEST_SNAPSHOT',
+        payoutDestinationProvider: 'DANA', payoutDestinationIdentifier: 'not-ciphertext', payoutDestinationName: null,
+        payoutDestinationCapturedAt: new Date(0),
+      }] as any);
+
+      const memory = await exportUserData('u1');
+      const stream = createUserDataExportStream('u1');
+      let text = '';
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+      }
+      const streamed = JSON.parse(text);
+
+      const sections = ['exportDate', 'profile', 'depositSessions', 'ledger', 'consents', 'redemptions',
+        'payoutAccounts', 'trips', 'notifications', 'deletionRequests'];
+      expect(Object.keys(memory).sort()).toEqual([...sections].sort());
+      expect(Object.keys(streamed).sort()).toEqual([...sections].sort());
+      for (const redemption of [memory.redemptions[0], streamed.redemptions[0]] as any[]) {
+        expect(redemption).not.toHaveProperty('payoutDestinationIdentifier');
+        expect(redemption).not.toHaveProperty('requestHash');
+        expect(redemption.payoutDestination).toMatchObject({ source: 'REQUEST_SNAPSHOT', provider: 'DANA' });
+      }
     });
   });
 

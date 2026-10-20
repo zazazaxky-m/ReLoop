@@ -28,7 +28,19 @@ export interface TravelAgentRow {
   tripCount: number;
   compliantCount: number;
   nonCompliantCount: number;
+  /** A03: members linked to the agent, and those verified from the invited mailbox. */
+  memberCount: number;
+  verifiedMemberCount: number;
+  /** Latest invitation for this organization (null: none issued). */
+  inviteState: "NOT_SENT" | "SENT" | "EXPIRED" | "ACCEPTED" | null;
 }
+
+const INVITE_STATE_LABEL: Record<NonNullable<TravelAgentRow["inviteState"]>, string> = {
+  NOT_SENT: "Undangan belum terkirim",
+  SENT: "Undangan terkirim, menunggu diterima",
+  EXPIRED: "Undangan kedaluwarsa",
+  ACCEPTED: "Undangan diterima",
+};
 
 const EMPTY = {
   name: "",
@@ -69,9 +81,9 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
         return;
       }
       setSuccess(
-        data.invite?.status === "INVITED"
-          ? "Travel agent sudah punya akun. Status otomatis menjadi INVITED."
-          : "Travel agent tersimpan sebagai PENDING sampai email tersebut membuat akun.",
+        data.organizationStatus === "INVITED"
+          ? "Undangan baru dikirim ke email travel agent. Anggota yang sudah terverifikasi tetap punya akses."
+          : "Undangan dikirim ke email travel agent. Status PENDING sampai undangan diterima dari email tersebut.",
       );
       setForm({ ...EMPTY });
       router.refresh();
@@ -104,6 +116,20 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
       ),
     },
     {
+      key: "verification",
+      header: "Verifikasi",
+      render: (r) => (
+        <div>
+          <p className="font-semibold text-foreground">
+            {r.verifiedMemberCount}/{r.memberCount} anggota terverifikasi
+          </p>
+          <p className="text-xs text-muted">
+            {r.inviteState ? INVITE_STATE_LABEL[r.inviteState] : "Belum ada undangan"}
+          </p>
+        </div>
+      ),
+    },
+    {
       key: "compliance",
       header: "Compliance",
       render: (r) => {
@@ -125,6 +151,16 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
       align: "right",
       render: (r) => (
         <div className="flex flex-wrap justify-end gap-2">
+          {r.organizationStatus === "PENDING" || r.organizationStatus === "INVITED" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => resendInvite(r.id)}
+            >
+              Kirim ulang undangan
+            </Button>
+          ) : null}
           {r.organizationStatus === "INVITED" ? (
             <Button
               size="sm"
@@ -159,6 +195,28 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
       ),
     },
   ];
+
+  async function resendInvite(travelAgentId: string) {
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch(`/api/travel-agents/${travelAgentId}/invitations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? "Gagal mengirim ulang undangan");
+        return;
+      }
+      setSuccess("Undangan dikirim ulang. Tautan lama tidak berlaku lagi.");
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function updateStatus(
     travelAgentId: string,
@@ -200,6 +258,19 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
         </Button>
       </div>
 
+      {!open && (error || success) ? (
+        <div
+          role={error ? "alert" : "status"}
+          className={
+            error
+              ? "rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-status-error"
+              : "rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-800"
+          }
+        >
+          {error ?? success}
+        </div>
+      ) : null}
+
       {open ? (
         <Card>
           <CardHeader>
@@ -230,7 +301,7 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
                   label="Email travel agent"
                   htmlFor="ta-email"
                   required
-                  hint="Jika email belum punya akun, status menjadi pending."
+                  hint="Undangan dikirim ke email ini. Akses trip baru aktif setelah undangan diterima dari email tersebut."
                 >
                   <Input
                     id="ta-email"

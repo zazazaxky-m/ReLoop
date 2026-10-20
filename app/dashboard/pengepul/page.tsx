@@ -124,7 +124,7 @@ export default async function PengepulDashboardPage() {
           <CardContent>
             {tasks.length === 0 ? (
               <p className="py-6 text-center text-sm text-muted">
-                Tidak ada tugas pickup saat ini.
+                Belum ada tugas. Menunggu penugasan admin.
               </p>
             ) : (
               <ul className="space-y-2">

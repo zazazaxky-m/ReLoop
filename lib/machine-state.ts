@@ -46,13 +46,21 @@ export function canTransitionSession(
   return SESSION_TRANSITIONS[from]?.[action] ?? null;
 }
 
+/** A deterministic business rejection: retrying the same event cannot succeed. */
+export class InvalidSessionTransitionError extends Error {
+  constructor(current: SessionStatus, action: string) {
+    super(`Transisi sesi tidak valid: ${current} + ${action}`);
+    this.name = "InvalidSessionTransitionError";
+  }
+}
+
 export function transitionSession(
   current: SessionStatus,
   action: string,
 ): SessionStatus {
   const next = canTransitionSession(current, action);
   if (!next) {
-    throw new Error(`Transisi sesi tidak valid: ${current} + ${action}`);
+    throw new InvalidSessionTransitionError(current, action);
   }
   return next;
 }

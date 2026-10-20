@@ -7,8 +7,9 @@ import {
   settleRedeemLedger,
   assertAppendOnlyPolicy,
   ledgerReasonLabel,
-  getReconciliationReport,
   getLedgerHistory,
+  depositItemEarnKey,
+  redemptionReserveKey,
   type LedgerGroup 
 } from './ledger';
 import { prisma } from './prisma';
@@ -22,8 +23,6 @@ vi.mock('./prisma', () => ({
       update: vi.fn(),
       findMany: vi.fn(),
     },
-    redemption: { groupBy: vi.fn() },
-    organization: { findMany: vi.fn() },
   }
 }));
 
@@ -144,6 +143,30 @@ describe('lib/ledger', () => {
       const bal = await getWalletBalance('user1');
       expect(bal.available).toBe(0);
     });
+
+    it('reads through the given transaction client instead of the global client', async () => {
+      const tx = {
+        rewardLedger: {
+          groupBy: vi.fn().mockResolvedValue([
+            { entryType: 'EARN', status: 'AVAILABLE', _sum: { amount: 500 } },
+            { entryType: 'REDEEM', status: 'PENDING', _sum: { amount: -200 } },
+          ]),
+        },
+      };
+      const bal = await getWalletBalance('user1', tx as any);
+      expect(bal).toMatchObject({ available: 300, reserved: 200 });
+      expect(tx.rewardLedger.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: 'user1' } }),
+      );
+      expect(prisma.rewardLedger.groupBy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('business keys', () => {
+    it('formats one key per financial effect', () => {
+      expect(redemptionReserveKey('r1')).toBe('redemption:r1:reserve');
+      expect(depositItemEarnKey('di1')).toBe('deposit-item:di1:earn');
+    });
   });
 
   describe('getLedgerHistory', () => {
@@ -190,6 +213,7 @@ describe('lib/ledger', () => {
           entryType: 'EARN',
           referenceType: 'DepositItem',
           referenceId: 'di1',
+          businessKey: 'deposit-item:di1:earn',
         })
       });
     });
@@ -214,43 +238,39 @@ describe('lib/ledger', () => {
           status: 'PENDING',
           referenceType: 'Redemption',
           referenceId: 'r1',
+          businessKey: 'redemption:r1:reserve',
         })
       });
     });
   });
 
   describe('settleRedeemLedger', () => {
-    it('returns null if entry not found (or already settled)', async () => {
-      vi.mocked(prisma.rewardLedger.findFirst).mockResolvedValue(null);
-      const res = await settleRedeemLedger('r1', 'success');
-      expect(res).toBeNull();
+    // Full contract: tests/lib/ledger.test.ts. Here: it only ever uses the given tx.
+    it('reads and writes through the caller transaction only', async () => {
+      const tx = {
+        redemption: { findUnique: vi.fn().mockResolvedValue({ id: 'r1', userId: 'u1', amount: 50 }) },
+        rewardLedger: {
+          findMany: vi.fn().mockResolvedValue([{ id: 'res_1', userId: 'u1', amount: -50, status: 'PENDING' }]),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      const res = await settleRedeemLedger('r1', 'failed', tx as any);
+      expect(res).toMatchObject({ changed: true, entry: { id: 'res_1', status: 'REVERSED' } });
+      expect(tx.rewardLedger.updateMany).toHaveBeenCalledWith({ where: { id: 'res_1', status: 'PENDING' }, data: { status: 'REVERSED' } });
       expect(prisma.rewardLedger.update).not.toHaveBeenCalled();
+      expect(prisma.rewardLedger.findFirst).not.toHaveBeenCalled();
     });
 
-    it('updates status to REDEEMED on success', async () => {
-      vi.mocked(prisma.rewardLedger.findFirst).mockResolvedValue({ id: 'res_1' } as any);
-      vi.mocked(prisma.rewardLedger.update).mockResolvedValue({ id: 'res_1', status: 'REDEEMED' } as any);
-      
-      const res = await settleRedeemLedger('r1', 'success');
-      
-      expect(res).toEqual({ id: 'res_1', status: 'REDEEMED' });
-      expect(prisma.rewardLedger.update).toHaveBeenCalledWith({
-        where: { id: 'res_1' },
-        data: { status: 'REDEEMED' }
-      });
-    });
-
-    it('updates status to REVERSED on failure', async () => {
-      vi.mocked(prisma.rewardLedger.findFirst).mockResolvedValue({ id: 'res_1' } as any);
-      vi.mocked(prisma.rewardLedger.update).mockResolvedValue({ id: 'res_1', status: 'REVERSED' } as any);
-      
-      const res = await settleRedeemLedger('r1', 'failed');
-      
-      expect(res).toEqual({ id: 'res_1', status: 'REVERSED' });
-      expect(prisma.rewardLedger.update).toHaveBeenCalledWith({
-        where: { id: 'res_1' },
-        data: { status: 'REVERSED' }
-      });
+    it('answers 409 instead of a no-op when the reserve was settled the other way', async () => {
+      const tx = {
+        redemption: { findUnique: vi.fn().mockResolvedValue({ id: 'r1', userId: 'u1', amount: 50 }) },
+        rewardLedger: {
+          findMany: vi.fn().mockResolvedValue([{ id: 'res_1', userId: 'u1', amount: -50, status: 'REDEEMED' }]),
+          updateMany: vi.fn(),
+        },
+      };
+      await expect(settleRedeemLedger('r1', 'failed', tx as any)).rejects.toMatchObject({ status: 409 });
+      expect(tx.rewardLedger.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -260,44 +280,4 @@ describe('lib/ledger', () => {
     });
   });
 
-  describe('getReconciliationReport', () => {
-    it('aggregates org liability and payout reconciliation with null sums', async () => {
-      vi.mocked(prisma.rewardLedger.groupBy)
-        .mockResolvedValueOnce([
-          { organizationId: 'org1', status: 'AVAILABLE', _sum: { amount: 100 } },
-          { organizationId: 'org1', status: 'PENDING', _sum: { amount: 20 } },
-          { organizationId: null, status: 'AVAILABLE', _sum: { amount: null } },
-          { organizationId: 'gone', status: 'AVAILABLE', _sum: { amount: 5 } },
-        ] as any)
-        .mockResolvedValueOnce([
-          { organizationId: 'org1', status: 'AVAILABLE', _sum: { amount: -10 } },
-          { organizationId: 'org1', status: 'PENDING', _sum: { amount: null } },
-          { organizationId: 'org1', status: 'REDEEMED', _sum: { amount: 1 } },
-        ] as any)
-        .mockResolvedValueOnce([
-          { status: 'REDEEMED', _sum: { amount: -50 } },
-          { status: 'PENDING', _sum: { amount: null } },
-          { status: 'AVAILABLE', _sum: { amount: -1 } },
-        ] as any);
-      vi.mocked(prisma.redemption.groupBy).mockResolvedValue([
-        { status: 'SUCCESS', _sum: { amount: 40 } },
-        { status: 'REQUESTED', _sum: { amount: 5 } },
-        { status: 'APPROVED', _sum: { amount: null } },
-        { status: 'FAILED', _sum: { amount: 9 } },
-      ] as any);
-      vi.mocked(prisma.organization.findMany).mockResolvedValue([
-        { id: 'org1', name: 'Org One' },
-      ] as any);
-
-      const report = await getReconciliationReport();
-      expect(report.organizations.some((o) => o.organizationName === 'Org One')).toBe(true);
-      expect(report.organizations.some((o) => o.organizationName === 'Tanpa organisasi')).toBe(true);
-      expect(report.organizations.some((o) => o.organizationName === '(organisasi dihapus)')).toBe(true);
-      expect(report.ledgerRedeemed).toBe(50);
-      expect(report.ledgerReserved).toBe(0);
-      expect(report.redemptionSuccessTotal).toBe(40);
-      expect(report.redemptionInFlightTotal).toBe(5);
-      expect(report.hasDiscrepancy).toBe(true);
-    });
-  });
 });

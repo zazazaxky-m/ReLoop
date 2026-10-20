@@ -1,8 +1,13 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { MACHINE_SIG_MAX_SKEW_SECONDS } from "./machine-auth-constants";
 import { consumeMachineNonce } from "./machine-nonce";
 
-/** Max allowed clock skew (seconds) between machine and server for a signed request. */
-export const MACHINE_SIG_MAX_SKEW_SECONDS = 300;
+/**
+ * Max allowed clock skew (seconds) between machine and server for a signed
+ * request. Single source: lib/machine-auth-constants.ts (the nonce TTL is
+ * derived from it there).
+ */
+export { MACHINE_SIG_MAX_SKEW_SECONDS };
 
 /** Generates a high-entropy per-machine ingest secret. */
 export function generateIngestSecret(): string {
@@ -12,6 +17,11 @@ export function generateIngestSecret(): string {
 /**
  * Canonical signing string = `${timestamp}.${nonce}.${rawBody}`, HMAC-SHA256 with
  * the machine's secret. The secret never travels on the wire — only the signature.
+ *
+ * The method and path are not signed (a body signed for one machine endpoint
+ * verifies on another). Binding them is a separate, versioned protocol upgrade
+ * (rvm/README.md, "Lease sesi dan jendela replay"); changing this string silently would reject
+ * every deployed machine.
  */
 export function signMachinePayload(
   secret: string,
@@ -56,7 +66,11 @@ export function verifyMachineSignature(params: {
   return timingSafeEqual(a, b) ? { ok: true } : { ok: false, reason: "BAD_SIGNATURE" };
 }
 
-/** Verifies HMAC signature and rejects replayed nonces within the skew window. */
+/**
+ * Verifies the HMAC signature, then consumes the nonce. The nonce is kept for
+ * MACHINE_NONCE_TTL_MS (2 * skew + 60 s), longer than the signature can be
+ * valid, so a replay is refused for as long as the signature would pass.
+ */
 export async function verifyMachineRequest(params: {
   machineId: string;
   secret: string | null | undefined;

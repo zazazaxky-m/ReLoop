@@ -5,7 +5,17 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["**/*.test.ts"],
-    exclude: ["node_modules", ".next", ".pytest_cache"],
+    // Real-service suites run through scripts/run-audit-tests.mjs; browser
+    // specs (*.spec.ts) belong to Playwright. Keep `npm test` Docker-free.
+    exclude: [
+      "node_modules",
+      ".next",
+      ".pytest_cache",
+      "tests/integration/**",
+      "tests/realtime/**",
+      "tests/browser/**",
+      "**/*.spec.ts",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],

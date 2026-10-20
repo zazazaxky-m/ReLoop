@@ -70,10 +70,10 @@ export function DataDeletionForm() {
             Permintaan diterima
           </h2>
           <p className="text-sm leading-6 text-muted">
-            Kami telah menerima permintaan penghapusan sebagian data Anda.
-            Tim kami akan memprosesnya dalam waktu 7 (tujuh) hari kerja dan
-            mengirim konfirmasi ke{" "}
-            <span className="font-semibold text-foreground">{email}</span>.
+            Permintaan penghapusan sebagian data dicatat. Belum ada data yang
+            dihapus: tim privasi kami akan menghubungi{" "}
+            <span className="font-semibold text-foreground">{email}</span> untuk
+            memverifikasi pemilik akun sebelum memproses permintaan.
           </p>
         </div>
       </div>

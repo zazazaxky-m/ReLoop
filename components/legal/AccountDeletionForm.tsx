@@ -2,20 +2,10 @@
 
 import { useState } from "react";
 import { Button, FormField, Input, Textarea } from "@/components/ui";
-import { CheckCircle, Trash } from "@/components/ui/icons";
+import { Info, Trash } from "@/components/ui/icons";
 
 const inputClass =
   "h-11 rounded-xl border-border bg-surface px-4 text-[15px] shadow-none hover:border-muted sm:h-12";
-
-const dataTypeOptions = [
-  "Profil (nama, email, nomor telepon, foto)",
-  "Akun pencairan (DANA/OVO/GoPay/Bank)",
-  "Riwayat setoran & reward",
-  "Riwayat pencairan poin",
-  "Riwayat travel program",
-  "Notifikasi & preferensi",
-  "Foto dokumentasi laporan",
-] as const;
 
 export function AccountDeletionForm() {
   const [email, setEmail] = useState("");
@@ -23,14 +13,12 @@ export function AccountDeletionForm() {
   const [confirm, setConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!confirm) {
-      setError(
-        "Anda harus menyetujui bahwa semua data pribadi akan dihapus permanen.",
-      );
+      setError("Centang pernyataan di bawah untuk melanjutkan.");
       return;
     }
     setLoading(true);
@@ -41,12 +29,16 @@ export function AccountDeletionForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, reason }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
         setError(data?.error ?? "Terjadi kesalahan");
         return;
       }
-      setSubmitted(true);
+      setSubmitted(
+        typeof data?.message === "string"
+          ? data.message
+          : "Permintaan diterima. Tidak ada data yang dihapus sebelum pemilik akun mengonfirmasi.",
+      );
     } catch {
       setError("Tidak dapat terhubung ke server");
     } finally {
@@ -57,29 +49,30 @@ export function AccountDeletionForm() {
   if (submitted) {
     return (
       <div className="space-y-5 text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-400">
-          <CheckCircle className="text-2xl" />
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+          <Info className="text-2xl" />
         </span>
         <div className="space-y-1.5">
           <h2 className="text-xl font-black tracking-[-0.03em] text-foreground">
-            Permintaan diterima
+            Menunggu konfirmasi
           </h2>
+          <p className="text-sm leading-6 text-muted">{submitted}</p>
           <p className="text-sm leading-6 text-muted">
-            Kami telah menerima permintaan penghapusan akun untuk{" "}
-            <span className="font-semibold text-foreground">{email}</span>. Tim
-            kami akan memverifikasi identitas Anda dan menghapus akun dalam
-            waktu paling lambat 7 (tujuh) hari kerja. Anda akan menerima
-            konfirmasi melalui email setelah proses selesai.
+            Periksa kotak masuk{" "}
+            <span className="font-semibold text-foreground">{email}</span> dan
+            buka tautan konfirmasi (berlaku 24 jam, sekali pakai). Status
+            penghapusan ditampilkan setelah Anda mengonfirmasi.
           </p>
         </div>
         <p className="text-xs text-muted">
-          Pertanyaan? Hubungi{" "}
+          Tidak bisa membuka email itu atau masuk ke aplikasi? Hubungi{" "}
           <a
             href="mailto:privacy@reloop.id"
             className="font-semibold text-brand-700 hover:underline dark:text-brand-400"
           >
             privacy@reloop.id
-          </a>
+          </a>{" "}
+          untuk verifikasi identitas oleh tim kami.
         </p>
       </div>
     );
@@ -100,7 +93,7 @@ export function AccountDeletionForm() {
         label="Email akun yang akan dihapus"
         htmlFor="deletion-email"
         required
-        hint="Gunakan email yang terdaftar di aplikasi ReLoop."
+        hint="Gunakan email yang terdaftar di aplikasi ReLoop. Tautan konfirmasi dikirim ke alamat ini."
       >
         <Input
           id="deletion-email"
@@ -117,7 +110,7 @@ export function AccountDeletionForm() {
       <FormField
         label="Alasan (opsional)"
         htmlFor="deletion-reason"
-        hint="Bantu kami memahami mengapa Anda ingin menghapus akun. Tidak wajib diisi."
+        hint="Bantu kami memahami mengapa Anda ingin menghapus akun. Tidak wajib diisi dan ikut dihapus bersama akun."
       >
         <Textarea
           id="deletion-reason"
@@ -137,12 +130,14 @@ export function AccountDeletionForm() {
           required
         />
         <span>
-          Saya memahami bahwa setelah dihapus,{" "}
+          Saya memahami bahwa setelah dikonfirmasi,{" "}
           <span className="font-bold text-foreground">
-            akun dan semua data pribadi saya tidak dapat dipulihkan
+            data pribadi akun saya dihapus dan akun dinonaktifkan secara
+            permanen
           </span>
-          . Sisa saldo reward yang belum dicairkan akan hangus. Saya tetap
-          bisa membuat akun baru di kemudian hari dengan email yang berbeda.
+          , sedangkan catatan transaksi tetap disimpan tanpa identitas saya.
+          Jika masih ada saldo atau pencairan yang berjalan, penghapusan
+          ditunda sampai selesai dan saldo saya tidak dihanguskan.
         </span>
       </label>
 

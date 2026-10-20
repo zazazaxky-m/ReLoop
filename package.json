@@ -4,7 +4,7 @@
   "private": true,
   "description": "ReLoop - digital waste management platform",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "next dev",
@@ -16,6 +16,11 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
+    "test:integration": "node scripts/run-audit-tests.mjs integration",
+    "test:browser": "node scripts/run-audit-tests.mjs browser",
+    "test:realtime": "node scripts/run-audit-tests.mjs realtime",
+    "test:rvm": "node scripts/run-audit-tests.mjs python",
+    "test:flutter": "node scripts/run-audit-tests.mjs flutter",
     "prisma:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
@@ -23,19 +28,27 @@
     "db:seed": "tsx prisma/seed.ts",
     "backfill:payout-encryption": "tsx scripts/backfill-payout-encryption.ts",
     "backfill:email-lookup": "tsx scripts/backfill-email-lookup.ts",
+    "reconcile:wallet": "tsx scripts/reconcile-wallet-history.ts",
+    "reconcile:sessions": "tsx scripts/reconcile-active-sessions.ts",
+    "erasure:process": "tsx scripts/process-erasure-jobs.ts",
+    "audit:checkpoint": "tsx scripts/checkpoint-audit-chain.ts",
+    "email:outbox": "tsx scripts/process-email-outbox.ts",
+    "pickups:escalate": "tsx scripts/process-pickup-escalations.ts",
+    "report:travel-agent-access": "tsx scripts/report-travel-agent-access.ts",
     "db:reset": "prisma migrate reset --force"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "@prisma/client": "^6.0.0",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
     "html5-qrcode": "^2.3.8",
     "jose": "^5.9.0",
     "leaflet": "^1.9.4",
-    "next": "^16.0.0",
+    "next": "16.4.0",
     "next-themes": "^0.4.6",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
@@ -48,11 +61,14 @@
     "ioredis": "^5.4.1"
   },
   "overrides": {
-    "postcss": "^8.5.10",
-    "uuid": "^11.1.1"
+    "postcss": "^8.5.23",
+    "uuid": "^11.1.1",
+    "deepmerge-ts": "^8.0.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/eslintrc": "^3.2.0",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/leaflet": "^1.9.21",
@@ -60,16 +76,16 @@
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "4.1.11",
     "eslint": "^9.17.0",
-    "eslint-config-next": "^16.0.0",
+    "eslint-config-next": "16.4.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8",
-    "postcss": "^8.5.10",
+    "postcss": "^8.5.23",
     "prisma": "^6.0.0",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.8"
+    "vitest": "4.1.11"
   }
 }

@@ -25,6 +25,7 @@ import urllib.request
 import rvm.main as rvm_main
 from rvm.api import LocalApiServer
 from rvm.config import RvmConfig
+from rvm.lease import policy_version, sign_lease_v2
 from rvm.controller import MachineState, RvmController
 from rvm.database import EdgeDatabase
 from rvm.hardware import GpioHardware, MockHardware
@@ -45,16 +46,16 @@ def controller_in(tmp, **overrides):
     return RvmController(RvmConfig(**base))
 
 
-def signed_lease(secret, session_id="session-1", expires=None):
+def signed_lease(secret, session_id="session-1", expires=None, machine_code="TEST-001"):
+    """A signed lease v2 without a money bound (B01b; the v1 form is refused by the worker)."""
     now = int(time.time())
-    lease = {
-        "id": f"lease-{session_id}",
-        "sessionId": session_id,
-        "issuedAt": now,
-        "expiresAt": expires if expires is not None else now + 60,
-    }
-    canonical = ".".join(str(lease[k]) for k in ("id", "sessionId", "issuedAt", "expiresAt"))
-    lease["signature"] = hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+    policy = {"version": 1, "mode": "COMPLIANCE_ONLY", "multiplierBps": 10000, "wasteTypes": []}
+    lease = sign_lease_v2(secret, {
+        "id": f"lease-{session_id}", "machineCode": machine_code, "sessionId": session_id, "userRef": None,
+        "issuedAt": now, "expiresAt": int(expires) if expires is not None else now + 60, "reservationId": None,
+        "policyVersion": policy_version(policy), "ceilingRupiah": None, "maxItems": None,
+    })
+    lease["policy"] = policy
     return lease
 
 
@@ -351,7 +352,8 @@ class ControllerExtraTest(unittest.TestCase):
                 raise RuntimeError("boom")
             c.hardware.read = boom
             c.running = True
-            with mock.patch("rvm.controller.time.sleep", lambda *a: None):
+            with self.assertLogs("rvm.controller", level="ERROR"), \
+                    mock.patch("rvm.controller.time.sleep", lambda *a: None):
                 t = threading.Thread(target=c._run)
                 t.start()
                 deadline = time.time() + 3
@@ -409,6 +411,7 @@ class ControllerExtraTest(unittest.TestCase):
     def test_activate_valid_camera_capture(self):
         with tempfile.TemporaryDirectory() as tmp:
             c = controller_in(tmp, camera_enabled=True, camera_capture_session_start=True)
+            c.camera.status.online = True  # enabled camera must be healthy to open the gate
             captured = []
             c._capture_camera_evidence = lambda *a, **k: captured.append(a)
             self.assertTrue(c.activate_lease(signed_lease(c.config.machine_secret, "cap-sess")))
@@ -419,6 +422,8 @@ class ControllerExtraTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             c = controller_in(tmp)
             c.maintenance_command("reset-safe-state", {})
+            # Jogs are only accepted in MAINTENANCE.
+            c.execute_remote_command("ENTER_MAINTENANCE", {})
             c.maintenance_command("gate", {"open": True})
             self.assertTrue(c.hardware.input_gate_open)
             c.maintenance_command("conveyor", {"direction": "FORWARD"})
@@ -491,13 +496,11 @@ class ControllerExtraTest(unittest.TestCase):
             "issuedAt": time.time(), "expiresAt": time.time() + 100,
             "status": "ACTIVE", "signature": "x",
         })
-        seen = {"n": 0}
         def fetch():
-            seen["n"] += 1
-            if seen["n"] == 1:
-                return {"lease": None}
-            raise StopIteration
+            self.c.running = False  # one poll, then the loop exits cleanly
+            return {"lease": None}
         self.c.sync.fetch_machine_session = fetch
+        self.c.sync.fetch_display = lambda: None
         self.c.running = True
         t = threading.Thread(target=self.c._lease_loop)
         t.start()
@@ -656,8 +659,11 @@ class SyncTest(unittest.TestCase):
     def test_flush_once_success(self):
         with tempfile.TemporaryDirectory() as tmp:
             w, db = make_sync(tmp)
-            db.enqueue("E", {"a": 1}, "now")
-            with mock.patch("rvm.sync.urllib.request.urlopen", UrlFake({"/machine-events": b"{}"})):
+            event_id = db.enqueue("E", {"a": 1}, "now")
+            # Protocol v2 (R02): only a matched accepted/duplicate result ACKs.
+            answer = json.dumps({"protocolVersion": 2, "received": 1, "results": [
+                {"localEventId": event_id, "status": "accepted", "eventId": "srv-1"}]}).encode()
+            with mock.patch("rvm.sync.urllib.request.urlopen", UrlFake({"/machine-events": answer})):
                 self.assertTrue(w.flush_once())
             self.assertTrue(w.online)
             self.assertEqual(db.queue_depth(), 0)
@@ -671,6 +677,15 @@ class SyncTest(unittest.TestCase):
             with mock.patch("rvm.sync.urllib.request.urlopen", UrlFake({"/machine-events": err})):
                 self.assertFalse(w.flush_once())
             self.assertFalse(w.online)
+            self.assertEqual(db.queue_depth(), 1)
+            db.close()
+
+    def test_flush_once_legacy_empty_body_keeps_queue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w, db = make_sync(tmp)
+            db.enqueue("E", {"a": 1}, "now")
+            with mock.patch("rvm.sync.urllib.request.urlopen", UrlFake({"/machine-events": b"{}"})):
+                self.assertFalse(w.flush_once())
             self.assertEqual(db.queue_depth(), 1)
             db.close()
 
@@ -1011,9 +1026,21 @@ class ApiTest(unittest.TestCase):
         status, body = self.post("/api/maintenance/login", {"pin": "2468"})
         self.assertEqual(status, 200)
         token = json.loads(body)["token"]
+        # A jog is refused outside MAINTENANCE and accepted inside it; closing
+        # is always allowed.
+        status, body = self.post("/api/maintenance/command", {"command": "gate", "open": True},
+                                  {"Authorization": f"Bearer {token}"})
+        self.assertEqual(status, 422)
+        self.assertIn("mode maintenance", json.loads(body)["error"])
+        self.c.execute_remote_command("ENTER_MAINTENANCE", {})
         status, _ = self.post("/api/maintenance/command", {"command": "gate", "open": True},
                                {"Authorization": f"Bearer {token}"})
         self.assertEqual(status, 200)
+        self.assertTrue(self.c.hardware.input_gate_open)
+        status, _ = self.post("/api/maintenance/command", {"command": "gate", "open": False},
+                               {"Authorization": f"Bearer {token}"})
+        self.assertEqual(status, 200)
+        self.c.execute_remote_command("RESUME_OPERATION", {})
         status, _ = self.post("/api/maintenance/command", {"command": "bogus"},
                                {"Authorization": f"Bearer {token}"})
         self.assertEqual(status, 422)

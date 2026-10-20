@@ -559,6 +559,19 @@ class ScanScreenState extends State<ScanScreen>
     );
   }
 
+  /// B01b: the session bound the user sees before the first item.
+  String _describeLimits(SessionLimits limits) {
+    final parts = <String>[];
+    if (limits.maxRewardRupiah != null) {
+      parts.add('reward maksimal ${formatRupiah(limits.maxRewardRupiah!)}');
+    }
+    if (limits.maxItems != null) {
+      parts.add('maksimal ${limits.maxItems} item');
+    }
+    return 'Batas sesi ini: ${parts.join(' dan ')}. '
+        'Mesin berhenti menerima item setelah batas tercapai.';
+  }
+
   Widget _buildResult() {
     final result = _scanResult!;
     final machine = result.machine;
@@ -597,6 +610,14 @@ class ScanScreenState extends State<ScanScreen>
                   style: TextStyle(color: context.reloopMuted, fontSize: 13),
                   textAlign: TextAlign.center,
                 ),
+                if (result.limits?.hasAny ?? false) ...[
+                  const SizedBox(height: ReLoopSpacing.xs),
+                  Text(
+                    _describeLimits(result.limits!),
+                    style: TextStyle(color: context.reloopMuted, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
                 const SizedBox(height: ReLoopSpacing.md),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,

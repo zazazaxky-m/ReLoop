@@ -7,6 +7,8 @@ import * as ledger from '@/lib/ledger';
 import * as config from '@/lib/config';
 import * as campaign from '@/lib/campaign';
 import * as gdpr from '@/lib/gdpr';
+import * as erasure from '@/lib/erasure-jobs';
+import * as auth from '@/lib/auth';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -39,8 +41,16 @@ vi.mock('@/lib/campaign', () => ({
 
 vi.mock('@/lib/gdpr', () => ({
   createUserDataExportStream: vi.fn(),
-  processErasureRequest: vi.fn(),
 }));
+
+vi.mock('@/lib/erasure-jobs', () => ({
+  ERASURE_ONLY_USERS: 'Hanya pengguna biasa yang dapat menghapus data',
+  requestErasure: vi.fn(),
+  runErasureJob: vi.fn(),
+  getErasureStatus: vi.fn(),
+}));
+
+vi.mock('@/lib/auth', () => ({ clearSessionCookie: vi.fn() }));
 
 describe('/api/user endpoints', () => {
   beforeEach(() => {
@@ -110,12 +120,29 @@ describe('/api/user endpoints', () => {
       expect(data.error).toBe('Hanya pengguna biasa yang dapat menghapus data');
     });
 
-    it('processes erasure request for USER role (200)', async () => {
+    it('accepts the erasure (202) and runs it once when nothing is owed', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'USER' } as any);
-      
+      vi.mocked(erasure.requestErasure).mockResolvedValue({ requestId: 'r1', status: 'PROCESSING' });
+      vi.mocked(erasure.getErasureStatus).mockResolvedValue({ requestId: 'r1', status: 'COMPLETED', completed: true, accountErased: true } as any);
+
       const res = await deleteData();
-      expect(res.status).toBe(200);
-      expect(gdpr.processErasureRequest).toHaveBeenCalledWith('u1');
+      expect(res.status).toBe(202);
+      expect(erasure.requestErasure).toHaveBeenCalledWith('u1');
+      expect(erasure.runErasureJob).toHaveBeenCalledWith('r1');
+      expect(auth.clearSessionCookie).toHaveBeenCalled();
+      expect(await res.json()).toMatchObject({ requestId: 'r1', status: 'COMPLETED', completed: true });
+    });
+
+    it('holds the erasure without running it while balances are open (202, session kept)', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'USER' } as any);
+      vi.mocked(erasure.requestErasure).mockResolvedValue({ requestId: 'r1', status: 'PENDING_RECONCILIATION' });
+      vi.mocked(erasure.getErasureStatus).mockResolvedValue({ requestId: 'r1', status: 'PENDING_RECONCILIATION', completed: false, accountErased: false } as any);
+
+      const res = await deleteData();
+      expect(res.status).toBe(202);
+      expect(erasure.runErasureJob).not.toHaveBeenCalled();
+      expect(auth.clearSessionCookie).not.toHaveBeenCalled();
+      expect(await res.json()).toMatchObject({ status: 'PENDING_RECONCILIATION', completed: false });
     });
   });
 });

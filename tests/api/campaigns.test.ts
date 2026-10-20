@@ -3,13 +3,27 @@ import { GET, POST } from '@/app/api/campaigns/route';
 import { PATCH, DELETE } from '@/app/api/campaigns/[id]/route';
 import { prisma } from '@/lib/prisma';
 import * as rbac from '@/lib/rbac';
+import * as locks from '@/lib/db-locks';
+import * as funding from '@/lib/reward-funding';
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    campaign: { findMany: vi.fn(), create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), delete: vi.fn(), count: vi.fn() },
+    campaign: {
+      findMany: vi.fn(), create: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), delete: vi.fn(), count: vi.fn(),
+    },
     depositSession: { count: vi.fn() },
     rewardRate: { deleteMany: vi.fn() },
   },
+}));
+// B01: a PATCH re-reads and updates the program under its Campaign lock; the
+// transaction client is the mocked prisma. The enforcement guard is unit-tested in reward-funding.
+vi.mock('@/lib/wallet-service', () => ({
+  runWalletTransaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),
+}));
+vi.mock('@/lib/db-locks', () => ({ lockCampaign: vi.fn() }));
+vi.mock('@/lib/reward-funding', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/reward-funding')>()),
+  guardProgramRewardChange: vi.fn(),
 }));
 
 vi.mock('@/lib/rbac', () => ({
@@ -136,6 +150,15 @@ describe('/api/campaigns endpoints', () => {
   });
 
   describe('PATCH', () => {
+    beforeEach(() => {
+      // The row re-read under the Campaign lock is the row loadEditable saw.
+      vi.mocked(prisma.campaign.findUniqueOrThrow).mockImplementation((async () => ({
+        rewardMode: 'MONEY_REWARD', campaignType: 'MACHINE_DEPOSIT', supportsMachine: false, status: 'DRAFT',
+        rewardMultiplier: null, maxRewardPerSessionRupiah: null, rewardBudgetRupiah: null,
+        ...(await vi.mocked(prisma.campaign.findUnique).mock.results[0]?.value),
+      })) as any);
+    });
+
     it('updates campaign (200)', async () => {
       vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'SUPERADMIN' } as any);
       vi.mocked(prisma.campaign.findUnique).mockResolvedValue({ id: 'c1', visibility: 'PUBLIC', organizationId: 'org1' } as any);
@@ -144,12 +167,66 @@ describe('/api/campaigns endpoints', () => {
       const res = await PATCH(makeReq('http://localhost/api/campaigns/c1', 'PATCH', {
         name: 'Updated',
       }), { params: Promise.resolve({ id: 'c1' }) });
-      
+
       expect(res.status).toBe(200);
       expect(prisma.campaign.update).toHaveBeenCalledWith(expect.objectContaining({
         where: { id: 'c1' },
         data: expect.objectContaining({ name: 'Updated' })
       }));
+      // B01 fix 1 (I2): re-read and guarded under the Campaign lock before the update.
+      expect(locks.lockCampaign).toHaveBeenCalledWith(prisma, 'c1');
+      expect(vi.mocked(locks.lockCampaign).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(prisma.campaign.update).mock.invocationCallOrder[0]);
+      expect(funding.guardProgramRewardChange).toHaveBeenCalledWith(prisma, expect.objectContaining({
+        campaignId: 'c1', next: expect.objectContaining({ rewardMode: 'MONEY_REWARD', rewardMultiplier: null }) }));
+    });
+
+    it('passes the mode and multiplier change to the enforcement guard and refuses when it throws (B01 fix 1, I2)', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'ADMIN', organizationId: 'org1' } as any);
+      vi.mocked(prisma.campaign.findUnique).mockResolvedValue({
+        id: 'c1', visibility: 'PUBLIC', organizationId: 'org1', rewardMode: 'COMPLIANCE_ONLY', rewardMultiplier: 1 } as any);
+      vi.mocked(funding.guardProgramRewardChange).mockRejectedValueOnce(
+        new (rbac as any).HttpError(409, 'Program masih memiliki sesi setoran atau trip yang berjalan.'));
+      const res = await PATCH(makeReq('http://localhost/api/campaigns/c1', 'PATCH', {
+        rewardMode: 'MONEY_REWARD', rewardMultiplier: 2,
+      }), { params: Promise.resolve({ id: 'c1' }) });
+      expect(res.status).toBe(409);
+      expect(funding.guardProgramRewardChange).toHaveBeenCalledWith(prisma, {
+        campaignId: 'c1',
+        current: expect.objectContaining({ rewardMode: 'COMPLIANCE_ONLY', rewardMultiplier: 1 }),
+        next: expect.objectContaining({ rewardMode: 'MONEY_REWARD', rewardMultiplier: 2 }),
+      });
+      expect(prisma.campaign.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects zero caps (I3) and, under enforcement, activating a money program without a budget or ceiling (C1)', async () => {
+      vi.mocked(rbac.requireApiUser).mockResolvedValue({ id: 'u1', role: 'ADMIN', organizationId: 'org1' } as any);
+      vi.mocked(prisma.campaign.findUnique).mockResolvedValue({ id: 'c1', visibility: 'PUBLIC', organizationId: 'org1' } as any);
+      for (const body of [{ maxRewardPerSessionRupiah: 0 }, { rewardBudgetRupiah: 0 }, { rewardBudgetRupiah: -1 }, { maxRewardPerSessionRupiah: 1.5 }]) {
+        const res = await PATCH(makeReq('http://localhost/api/campaigns/c1', 'PATCH', body), { params: Promise.resolve({ id: 'c1' }) });
+        expect(res.status).toBe(422);
+      }
+      expect(prisma.campaign.update).not.toHaveBeenCalled();
+
+      const previous = process.env.REWARD_FUNDING_ENFORCED;
+      try {
+        process.env.REWARD_FUNDING_ENFORCED = 'true';
+        const noBudget = await PATCH(makeReq('http://localhost/api/campaigns/c1', 'PATCH', {
+          status: 'ACTIVE', maxRewardPerSessionRupiah: 5_000 }), { params: Promise.resolve({ id: 'c1' }) });
+        expect(noBudget.status).toBe(422);
+        expect((await noBudget.json()).error).toBe('Kuota reward program wajib diisi sebelum program berhadiah diaktifkan');
+        const noCeiling = await PATCH(makeReq('http://localhost/api/campaigns/c1', 'PATCH', {
+          status: 'ACTIVE', rewardBudgetRupiah: 50_000 }), { params: Promise.resolve({ id: 'c1' }) });
+        expect(noCeiling.status).toBe(422);
+        expect((await noCeiling.json()).error).toBe('Batas reward per sesi wajib diisi sebelum program berhadiah diaktifkan');
+        expect(prisma.campaign.update).not.toHaveBeenCalled();
+        vi.mocked(prisma.campaign.update).mockResolvedValue({ id: 'c1' } as any);
+        const ok = await PATCH(makeReq('http://localhost/api/campaigns/c1', 'PATCH', {
+          status: 'ACTIVE', rewardBudgetRupiah: 50_000, maxRewardPerSessionRupiah: 5_000 }), { params: Promise.resolve({ id: 'c1' }) });
+        expect(ok.status).toBe(200);
+      } finally {
+        if (previous === undefined) delete process.env.REWARD_FUNDING_ENFORCED;
+        else process.env.REWARD_FUNDING_ENFORCED = previous;
+      }
     });
 
     it('returns 404 when campaign is missing', async () => {
