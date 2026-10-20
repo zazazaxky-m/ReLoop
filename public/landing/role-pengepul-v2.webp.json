@@ -1,0 +1,4 @@
+{
+  "prompt": "Use case: background-extraction. Edit target: the provided generated single hand holding recycled plastic flakes. Keep the hand, wrist and every plastic flake exactly unchanged, including grayscale tones, pose, framing, scale and all detail. REMOVE the soft gray glowing halo / smoky drop-shadow backdrop all around the hand and flakes, replacing ALL pixels beyond the crisp real silhouette with pure alpha zero transparency. The image must be a tight photographic sticker cutout with hard clean photographic edges, no shadow whatsoever, no glow, no smoky gray gradient, no backdrop. Do not add, rearrange, recolor or redraw any anatomy or material. Preserve all actual subject pixels. Transparent background.",
+  "createdAt": "2026-10-18T07:05:22.189Z"
+}

@@ -26,7 +26,7 @@ export default async function SuperadminConfigPage() {
     <div className="space-y-6">
       <PageHeader
         title="Konfigurasi Global"
-        description="Atur kebijakan sistem serta konten carousel landing page secara terpusat."
+        description="Atur kebijakan sistem serta konten carousel aplikasi secara terpusat."
       />
       <ConfigEditor initial={initial} />
     </div>

@@ -1,0 +1,4 @@
+{
+  "prompt": "Use case: background-extraction\nEdit target: the attached transparent dusty concrete ground plate. Preserve exactly the floor grain, tiny gray pebbles, natural shadows, low horizontal composition, and far right pale wall. Correct ONLY the alpha-transition edge: remove all yellow, lime, orange, red, and white colored fringes along every cutout edge. There must be no colored halo at all. Replace the rough cutout border with a subtle natural soft transparency transition, smoothly fading pale warm-gray photographic ground into fully transparent empty space over about 15-30 pixels at this resolution. Keep the lower concrete crisply photographic. Preserve the fully transparent upper-left area. Preserve wide aspect ratio, RGBA alpha transparency. No added objects, no bottle, can, ribbon, typography, logos, smoke, fog or graphics.",
+  "createdAt": "2026-10-18T15:21:38.697Z"
+}
