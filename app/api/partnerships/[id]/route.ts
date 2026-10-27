@@ -21,7 +21,7 @@ const patchSchema = z.object({
   ]),
   serviceArea: z
     .object({
-      regions: z.array(z.string()).optional(),
+      regions: z.array(z.string()).max(100, "Maksimal 100 wilayah").optional(),
       note: z.string().max(500).optional(),
     })
     .optional(),

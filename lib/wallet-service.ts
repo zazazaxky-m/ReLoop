@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma, type Redemption, type RedemptionStatus } from "@prisma/client";
 import { z } from "zod";
+import { typeErrors } from "./zod-errors";
 import { logAudit } from "./audit";
 import { getMinRedemption } from "./config";
 import { lockFundingAccount, lockRedemption, lockUser } from "./db-locks";
@@ -37,21 +38,21 @@ import { fundingAccountsForPayout, settlePayoutFunding } from "./reward-funding"
 export const MAX_RUPIAH = 2_147_483_647;
 
 export const rupiahAmountSchema = z
-  .number({ required_error: "Jumlah wajib diisi", invalid_type_error: "Jumlah harus berupa angka" })
+  .number({ error: typeErrors({ required: "Jumlah wajib diisi", invalidType: "Jumlah harus berupa angka" }) })
   .int("Jumlah harus bilangan bulat rupiah")
   .positive("Jumlah harus lebih dari 0")
   .max(MAX_RUPIAH, "Jumlah melebihi batas yang diizinkan");
 
 /** One logical request per key, scoped to the user; visible ASCII, 1-80 chars. */
 export const idempotencyKeySchema = z
-  .string({ invalid_type_error: "Kunci permintaan tidak valid" })
+  .string({ error: typeErrors({ invalidType: "Kunci permintaan tidak valid" }) })
   .regex(/^[\x21-\x7e]{1,80}$/, "Kunci permintaan tidak valid");
 
 /** HTTP body of POST /api/redemptions. Legacy clients may still omit the key. */
 export const redemptionRequestSchema = z.object({
   amount: rupiahAmountSchema,
   payoutAccountId: z
-    .string({ required_error: "Akun pencairan wajib dipilih", invalid_type_error: "Akun pencairan tidak valid" })
+    .string({ error: typeErrors({ required: "Akun pencairan wajib dipilih", invalidType: "Akun pencairan tidak valid" }) })
     .min(1, "Akun pencairan wajib dipilih")
     .max(191, "Akun pencairan tidak valid"),
   idempotencyKey: idempotencyKeySchema.optional(),
@@ -275,7 +276,7 @@ export interface TransitionRedemptionInput {
 
 const optionalText = (max: number, message: string) =>
   z
-    .string({ invalid_type_error: message })
+    .string({ error: typeErrors({ invalidType: message }) })
     .max(max, message)
     .optional()
     .transform((value) => value?.trim() || undefined);
@@ -284,24 +285,20 @@ const noteSchema = optionalText(500, "Catatan maksimal 500 karakter");
 const providerReferenceSchema = optionalText(120, "Nomor referensi maksimal 120 karakter");
 
 const transitionInputSchema = z.object({
-  action: z.enum(["approve", "process", "success", "fail", "cancel"], {
-    errorMap: () => ({ message: "Aksi pencairan tidak dikenal" }),
-  }),
+  action: z.enum(["approve", "process", "success", "fail", "cancel"], { error: "Aksi pencairan tidak dikenal" }),
   note: noteSchema,
   providerReference: providerReferenceSchema,
 });
 
 /** HTTP body of PATCH /api/redemptions/[id]. */
 export const redemptionPatchSchema = z.object({
-  action: z.enum(["approve", "process", "success", "fail", "cancel", "flag_reconciliation"], {
-    errorMap: () => ({ message: "Aksi pencairan tidak dikenal" }),
-  }),
+  action: z.enum(["approve", "process", "success", "fail", "cancel", "flag_reconciliation"], { error: "Aksi pencairan tidak dikenal" }),
   note: noteSchema,
   providerReference: providerReferenceSchema,
 });
 
 const reconciliationNoteSchema = z
-  .string({ required_error: "Catatan rekonsiliasi wajib diisi", invalid_type_error: "Catatan rekonsiliasi wajib diisi" })
+  .string({ error: "Catatan rekonsiliasi wajib diisi" })
   .trim()
   .min(1, "Catatan rekonsiliasi wajib diisi")
   .max(500, "Catatan maksimal 500 karakter");

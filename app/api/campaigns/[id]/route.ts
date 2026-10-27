@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { typeErrors } from "@/lib/zod-errors";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireApiUser, HttpError } from "@/lib/rbac";
@@ -11,7 +12,7 @@ import { runWalletTransaction } from "@/lib/wallet-service";
 
 /** B01: integer rupiah caps of at least Rp1; null clears (no cap / not configured). Zero is never a cap (I3). */
 const rupiahCapSchema = z
-  .number({ invalid_type_error: "Nilai harus berupa angka" })
+  .number({ error: typeErrors({ invalidType: "Nilai harus berupa angka" }) })
   .int("Nilai harus bilangan bulat rupiah")
   .min(1, "Nilai minimal Rp1; kosongkan untuk menghapus batas")
   .max(MAX_FUNDING_RUPIAH, "Nilai melebihi batas yang diizinkan")
@@ -29,7 +30,7 @@ const updateSchema = z
     // M04: lets an EVENT / SCHOOL_PROGRAM campaign run at machines.
     supportsMachine: z.boolean().optional(),
     visibility: z.enum(["PUBLIC", "PRIVATE"]).optional(),
-    allowedEmailDomains: z.array(z.string()).optional(),
+    allowedEmailDomains: z.array(z.string()).max(100, "Maksimal 100 domain email").optional(),
     startAt: z.string().datetime().nullable().optional(),
     endAt: z.string().datetime().nullable().optional(),
     rewardMultiplier: z.number().min(0).max(100).nullable().optional(),

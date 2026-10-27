@@ -19,15 +19,18 @@ A fresh audit of `main` at cf6d667 reported advisories published after the initi
 
 | | Before | After |
 |---|---|---|
-| `npm audit` (whole tree) | 5 entries: 1 critical (`next`), 1 high (`zod`), 3 moderate (`vitest`, `@vitest/mocker`, `@vitest/coverage-v8`) | 1 entry: `zod` (high) |
-| `npm audit --omit=dev` (production tree) | 2 entries: `next` (critical), `zod` (high) | 1 entry: `zod` (high) |
-| Gate | exit 1, 4 untriaged | exit 1, 1 untriaged (`zod`, open below) |
+| `npm audit` (whole tree) | 5 entries: 1 critical (`next`), 1 high (`zod`), 3 moderate (`vitest`, `@vitest/mocker`, `@vitest/coverage-v8`) | 0 |
+| `npm audit --omit=dev` (production tree) | 2 entries: `next` (critical), `zod` (high) | 0 |
+| Gate | exit 1, 4 untriaged | exit 0, no exceptions |
+
+The upgrades landed in two steps: `next` and `vitest` first, then `zod` 3 to 4 with request array bounds.
 
 | Change | From | To | Why |
 |---|---|---|---|
 | `next` (exact pin) | 16.4.0 | 16.4.3 | GHSA-2464-fhr4-w9xw, GHSA-673q-mjm6-r5xr and GHSA-p3m5-59mp-jv5r are fixed in 16.4.1. 16.4.2 and 16.4.3 are LTS backports only (Turbopack fixes, Google font URLs, `proxy.ts` no longer loading the app-page runtime, OpenTelemetry traces); 16.4.3 is the current 16.4 patch. |
 | `eslint-config-next` (exact pin) | 16.4.0 | 16.4.3 | Moves with `next`. |
 | `vitest` and `@vitest/coverage-v8` (exact pins, lockstep) | 4.1.11 | 4.1.12 | Moderate GHSA-qxg6-89mg-rqv8 and GHSA-xp26-3454-mjgp in `@vitest/mocker` (dev server mock registration; fixed in 4.1.12). Moderate, so no gate row. Brings `vite` 8.3.5 and `rolldown` 1.2.15 inside the ranges their parents declare. |
+| `zod` | ^3.24.0 (3.25.76) | ^4.6.7 (4.6.7) | GHSA-mrhx-c7xc-m3w5, fixed in 4.6.6 only (no 3.x release). 4.6.7 is the current 4.6 patch. `eslint-plugin-react-hooks` and `zod-validation-error` already accept `^4`, so one copy is installed. See the zod section below for the code changes. |
 
 The lockfile was re-resolved with npm 11.21.0 as the lockfile note below requires; `npm ci` was re-verified with npm 10.9.9. No other package version changed.
 
@@ -36,6 +39,7 @@ The lockfile was re-resolved with npm 11.21.0 as the lockfile note below require
 | `next` | 16.4.3 (16.4.0) | GHSA-2464-fhr4-w9xw | critical | production / runtime | no | 16.4.1 | patched | farhanlhsn | n/a (fixed) |
 | `next` | 16.4.3 (16.4.0) | GHSA-673q-mjm6-r5xr | critical | production / runtime | no | 16.4.1 | patched | farhanlhsn | n/a (fixed) |
 | `next` | 16.4.3 (16.4.0) | GHSA-p3m5-59mp-jv5r | high | production / runtime | no | 16.4.1 | patched | farhanlhsn | n/a (fixed) |
+| `zod` | 4.6.7 (3.25.76) | GHSA-mrhx-c7xc-m3w5 | high | production / runtime | yes (before the fix) | 4.6.6 | patched | farhanlhsn | n/a (fixed) |
 
 - GHSA-2464-fhr4-w9xw: Memory bug in the sharp/libvips build the image optimizer uses on glibc Linux; the vendor workaround is sharp >= 0.35.5. The lockfile already resolved sharp 0.35.5 before the upgrade, production runs node:22-alpine (musl), next.config.ts has no images config (no remotePatterns, SVG not rasterised), and no code imports next/image. Patched by upgrade.
 - GHSA-673q-mjm6-r5xr: Needs a `use cache` function (Cache Components) that returns typed arrays. No `use cache` directive exists and next.config.ts does not enable cacheComponents. Patched by upgrade.
@@ -43,9 +47,33 @@ The lockfile was re-resolved with npm 11.21.0 as the lockfile note below require
 
 `braces` GHSA-vfj7-8cjw-p6xm was withdrawn by GitHub on 2026-10-23 and is no longer reported, so its exception row was removed from the JSON as its exit criteria require. There are no open exceptions.
 
-**Open, untriaged on purpose: `zod` 3.25.76, GHSA-mrhx-c7xc-m3w5 (high, production / runtime).** Array validation collects an issue for every failing element with no cap, so a large array can exhaust memory. The only fix is zod 4.6.6, a major upgrade from 3 (68 files import `zod`). Request schemas reach it: 9 of the 11 `z.array()` schemas under `app/` and `lib/` have no length bound, and nginx accepts bodies up to 20M. Whether `.max()` alone bounds zod 3's per-element issue collection was not verified. The owner has to choose between migrating to zod 4 and a dated exception with a mitigation such as per-route body size limits; until then the gate fails.
+Verified after the `next`/`vitest` step: `npm run typecheck`, `npm run lint` (0 errors), `npm test` (168 files, 1859 tests), `npm run build`, `npm run test:browser -- tests/browser/render-qr-map.spec.ts tests/browser/smoke.spec.ts` (30 passed across 360/768/1280 px, light and dark) and `node --test tests/dependency-gate.test.mjs` (46 passed).
 
-Verified on the upgraded tree: `npm run typecheck`, `npm run lint` (0 errors), `npm test` (168 files, 1859 tests), `npm run build`, `npm run test:browser -- tests/browser/render-qr-map.spec.ts tests/browser/smoke.spec.ts` (30 passed across 360/768/1280 px, light and dark) and `node --test tests/dependency-gate.test.mjs` (46 passed).
+### zod 3 to 4 (GHSA-mrhx-c7xc-m3w5)
+
+**Exposure before the fix.** zod 3 (and 4 before 4.6.6) walked every element of an array and built one issue per bad element, even when the array was over its `.max()`. 9 of the 11 `z.array()` request schemas had no bound at all, and nginx accepts bodies up to 20M. `POST /api/machine-events` parses its envelope before the HMAC check (it needs `machineCode` to find the secret), so an unauthenticated request reached it: 100,000 malformed events produced 100,001 issues.
+
+**What the fix covers.** zod 4.6.6 checks `.max()`, `.length()` and `.size()` before parsing elements ([colinhacks/zod#6652](https://github.com/colinhacks/zod/pull/6652)). An array without a bound is still walked in full, so the upgrade alone was not enough. Every request array now has an upper bound:
+
+| Schema | Bound | Basis |
+|---|---|---|
+| `POST /api/machine-events` `events` (no session, HMAC checked after parsing) | 50 (`MAX_EVENTS_PER_BATCH` in `lib/machine-events/protocol.ts`) | `rvm/config.py` and `simulator/simulator.py` clamp the batch to 1..50; on a whole-batch 422 the worker already falls back to one event per batch |
+| `PATCH /api/notifications` `ids` (any signed-in user) | 100 | the bell lists and marks at most 30 |
+| `campaigns` `allowedEmailDomains`, `partnerships` `serviceArea.regions`, `machines` `wasteTypeIds` (create and update; admin roles, checked before parsing) | 100, with an Indonesian message | well above any configured list |
+
+`lib/session-policy.ts` keeps an unbounded array: it parses the snapshot the server itself stored, never request input. `tests/lib/request-array-bounds.test.ts` fails on any new `z.array()` in `app/` or `lib/` without `.max()`/`.length()` on the same line, except listed non-request schemas. `tests/api/machine-events.test.ts` checks that 50 events pass the envelope, that 51 are refused with 422 before the machine lookup, and that 100,000 malformed events yield one issue; on zod 4.6.5 the last test fails with 100,001 issues.
+
+**API migration.** Only APIs that zod 4 removed were changed. Deprecated ones that still work (`.passthrough()`, `.strict()`, `z.nativeEnum`, `z.ZodIssueCode`, `.email()`, `.uuid()`, `.datetime()`, `message:` params) were left alone.
+
+- `required_error` / `invalid_type_error` (12 schemas): replaced by `error: typeErrors({ required, invalidType })` (`lib/zod-errors.ts`), which keeps both messages and zod's default for the one not given. Where both messages were the same it is a plain `error: "..."`.
+- `errorMap` on the two redemption action enums: `error: "Aksi pencairan tidak dikenal"`.
+- `z.record(z.unknown())` (6): `z.record(z.string(), z.unknown())`.
+
+Behaviour checked against `zod/v3`: `.email()` accepted and refused the same 35 addresses (login uses it). `.uuid()` now refuses an invalid version or variant nibble and `.datetime()` refuses a time without seconds; every sender produces RFC 4122 v4 UUIDs (`randomUUID()`, Python `uuid.uuid4()`) and timestamps with seconds (`toISOString()`, Python `isoformat()`, Dart `toUtc().toIso8601String()`). Messages for issues without a custom message changed wording (English either way); the only UI that displays `issues[0].message` (`RewardCaseResolveForm`) shows custom messages.
+
+Not changed and already broken before this upgrade: the mobile admin campaign screen sends `startAt`/`endAt` as a bare date (`2026-10-27`), which `.datetime()` refuses in zod 3 and 4 alike.
+
+Verified after the `zod` step: `npm run typecheck`, `npm run lint` (0 errors), `npm test` (170 files, 1868 tests), `npm run build`, `npm run test:integration` (20 files, 301 tests), `npm run test:realtime` (2 files, 16 tests), `npm run test:browser` (48 passed), `npm ci` with npm 10.9.9, `node --test tests/dependency-gate.test.mjs` (46 passed) and the gate on `artifacts/npm-audit-*.json` (exit 0).
 
 ## How exposure was classified
 

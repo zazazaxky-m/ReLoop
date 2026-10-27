@@ -8,6 +8,7 @@ import { createDepositItemCache } from "@/lib/machine-events/item-cache";
 import {
   INVALID_EVENT,
   MACHINE_EVENTS_PROTOCOL_VERSION,
+  MAX_EVENTS_PER_BATCH,
   classifyIngestFailure,
   eventFailure,
   failureTag,
@@ -18,10 +19,11 @@ import {
 
 // Envelope only: one malformed event must not reject the whole batch (it is
 // answered per event as INVALID_EVENT), or a poison event would stall the
-// machine's outbox.
+// machine's outbox. An oversized batch is rejected whole (HTTP 422); the
+// worker then falls back to one event per batch.
 const batchSchema = z.object({
   machineCode: z.string(),
-  events: z.array(z.object({ localEventId: z.string() }).passthrough()),
+  events: z.array(z.object({ localEventId: z.string() }).passthrough()).max(MAX_EVENTS_PER_BATCH),
 });
 
 /** Protocol v2: see lib/machine-events/protocol.ts and rvm/README.md. */

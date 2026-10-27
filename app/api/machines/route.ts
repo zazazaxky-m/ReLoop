@@ -34,7 +34,7 @@ const createSchema = z.object({
   status: z.enum(["ONLINE", "OFFLINE", "FULL", "MAINTENANCE", "ERROR"]).optional(),
   latitude: z.number().optional(),
   longitude: z.number().optional(),
-  wasteTypeIds: z.array(z.string()).optional(),
+  wasteTypeIds: z.array(z.string()).max(100, "Maksimal 100 jenis sampah").optional(),
 });
 
 export async function GET(req: NextRequest) {

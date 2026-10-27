@@ -8,7 +8,7 @@ import { publishRealtime } from "@/lib/realtime";
 
 const resultSchema = z.object({
   success: z.boolean(),
-  result: z.record(z.unknown()).optional(),
+  result: z.record(z.string(), z.unknown()).optional(),
   error: z.string().max(1000).optional(),
 });
 

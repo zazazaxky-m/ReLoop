@@ -17,6 +17,14 @@ import { HttpError } from "../rbac";
  */
 export const MACHINE_EVENTS_PROTOCOL_VERSION = 2 as const;
 
+/**
+ * Largest batch the server parses. The worker and the simulator both clamp
+ * their batch size to 1..50 (rvm/config.py, simulator/simulator.py). The
+ * envelope is parsed before the HMAC check, so the bound must be enforced by
+ * the schema, where zod rejects an oversized array before walking it.
+ */
+export const MAX_EVENTS_PER_BATCH = 50;
+
 /** Stable, non-sensitive codes; never a message, stack or SQL detail. */
 export type MachineEventErrorCode =
   /** The event itself is malformed (unknown type, bad field). Permanent. */
@@ -48,7 +56,7 @@ const parsableDate = (value: string) => !Number.isNaN(Date.parse(value));
 export const machineEventSchema = z.object({
   localEventId: z.string().min(1),
   eventType: z.nativeEnum(MachineEventType),
-  payload: z.record(z.unknown()).optional().nullable(),
+  payload: z.record(z.string(), z.unknown()).optional().nullable(),
   sessionId: z.string().optional().nullable(),
   depositItemId: z.string().optional().nullable(),
   occurredAt: z.string().refine(parsableDate).optional().nullable(),

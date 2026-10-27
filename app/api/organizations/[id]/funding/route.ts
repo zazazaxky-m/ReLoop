@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { typeErrors } from "@/lib/zod-errors";
 import { prisma } from "@/lib/prisma";
 import { requireApiUser, assertOrgScope, HttpError } from "@/lib/rbac";
 import { handleApiError, jsonOk } from "@/lib/api";
@@ -41,17 +42,17 @@ const entrySchema = z.object({
   action: z.literal("record_entry").optional(),
   kind: z.enum(["CONFIRMED_TOPUP", "CORRECTION"]).default("CONFIRMED_TOPUP"),
   amount: z
-    .number({ required_error: "Nominal wajib diisi", invalid_type_error: "Nominal harus berupa angka" })
+    .number({ error: typeErrors({ required: "Nominal wajib diisi", invalidType: "Nominal harus berupa angka" }) })
     .int("Nominal harus bilangan bulat rupiah")
     .min(-MAX_FUNDING_RUPIAH, "Nominal melebihi batas yang diizinkan")
     .max(MAX_FUNDING_RUPIAH, "Nominal melebihi batas yang diizinkan"),
   reference: z
-    .string({ required_error: FUNDING_REFERENCE_REQUIRED, invalid_type_error: FUNDING_REFERENCE_REQUIRED })
+    .string({ error: FUNDING_REFERENCE_REQUIRED })
     .trim()
     .min(FUNDING_REFERENCE_MIN, FUNDING_REFERENCE_REQUIRED)
     .max(120, "Referensi maksimal 120 karakter"),
   note: z
-    .string({ required_error: FUNDING_NOTE_REQUIRED, invalid_type_error: FUNDING_NOTE_REQUIRED })
+    .string({ error: FUNDING_NOTE_REQUIRED })
     .trim()
     .min(FUNDING_NOTE_MIN, FUNDING_NOTE_REQUIRED)
     .max(500, "Catatan maksimal 500 karakter"),
@@ -68,7 +69,7 @@ const releaseSchema = z.object({
   action: z.literal("release_reservation"),
   reservationId: z.string().min(1, "reservationId wajib diisi").max(191),
   reason: z
-    .string({ required_error: "Alasan pelepasan sisa dana wajib diisi" })
+    .string({ error: typeErrors({ required: "Alasan pelepasan sisa dana wajib diisi" }) })
     .trim()
     .min(3, "Alasan pelepasan sisa dana wajib diisi")
     .max(500, "Alasan maksimal 500 karakter"),
