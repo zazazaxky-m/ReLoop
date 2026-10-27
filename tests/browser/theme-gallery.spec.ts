@@ -103,6 +103,9 @@ test("superadmin pages", async ({ page, fixture, artifacts }) => {
 });
 
 test("landing hero is unchanged", async ({ page }) => {
+  // The baseline is recorded locally from main before the theme work and is
+  // gitignored, so CI has nothing to compare against.
+  test.skip(!!process.env.CI, "landing baseline is local-only");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
