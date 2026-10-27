@@ -57,7 +57,7 @@ describe("StatusBadge", () => {
   it.each(STATUS_KEYS)("renders %s with an icon and a text label", (status) => {
     const html = render(createElement(StatusBadge, { status }));
     expect(html).toContain("<svg");
-    expect(html.replace(/<[^>]+>/g, "").trim()).not.toBe("");
+    expect(html).toMatch(/>\s*[^<\s][^<]*</);
     expect(html).toContain("rounded-full");
   });
 
