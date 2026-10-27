@@ -38,7 +38,7 @@ export function BrandLogo({
   // The wordmark's dark-green "Re" disappears on dark surfaces, so swap in a
   // light-lettered copy with the class-based dark variant.
   if (surface === "dark") {
-    return <img src="/reloop-logo-name-dark.svg" className={className} {...shared} />;
+    return <img src="/reloop-logo-name-dark.svg" className={className} {...shared} alt={alt} />;
   }
 
   return (
