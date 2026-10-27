@@ -30,7 +30,7 @@ export function PagePagination({
         {page > 1 ? (
           <Link
             href={hrefFor(page - 1)}
-            className="rounded-lg border border-border px-3 py-1.5 font-medium text-foreground hover:bg-surface-soft"
+            className="rounded-full border border-input-border px-3.5 py-1.5 font-bold text-foreground hover:bg-surface-soft"
           >
             Sebelumnya
           </Link>
@@ -38,7 +38,7 @@ export function PagePagination({
         {page < totalPages ? (
           <Link
             href={hrefFor(page + 1)}
-            className="rounded-lg border border-border px-3 py-1.5 font-medium text-foreground hover:bg-surface-soft"
+            className="rounded-full border border-input-border px-3.5 py-1.5 font-bold text-foreground hover:bg-surface-soft"
           >
             Berikutnya
           </Link>

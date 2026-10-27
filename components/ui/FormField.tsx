@@ -9,10 +9,10 @@ import { cn } from "@/lib/cn";
 import { ChevronDown } from "./icons";
 
 const controlBase =
-  "w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-foreground shadow-sm transition-colors placeholder:text-muted-soft hover:border-muted focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15 disabled:cursor-not-allowed disabled:bg-surface-soft disabled:opacity-60";
+  "w-full rounded-[14px] border border-input-border bg-surface px-3.5 py-2.5 text-sm text-foreground transition-colors placeholder:text-muted-soft hover:border-foreground/60 focus:border-foreground focus:outline-none focus:ring-4 focus:ring-lime dark:focus:border-lime dark:focus:ring-lime/25 disabled:cursor-not-allowed disabled:bg-surface-soft disabled:opacity-60";
 
 const selectBase =
-  "peer w-full appearance-none rounded-lg border border-border bg-surface text-foreground shadow-sm outline-none transition-[background-color,border-color,box-shadow] hover:border-muted focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15 disabled:cursor-not-allowed disabled:bg-surface-soft disabled:text-muted disabled:opacity-70";
+  "peer w-full appearance-none rounded-[14px] border border-input-border bg-surface text-foreground outline-none transition-[background-color,border-color,box-shadow] hover:border-foreground/60 focus:border-foreground focus:ring-4 focus:ring-lime dark:focus:border-lime dark:focus:ring-lime/25 disabled:cursor-not-allowed disabled:bg-surface-soft disabled:text-muted disabled:opacity-70";
 
 type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & {
   compact?: boolean;
@@ -24,7 +24,7 @@ export function Label({
 }: LabelHTMLAttributes<HTMLLabelElement>) {
   return (
     <label
-      className={cn("text-sm font-medium text-foreground", className)}
+      className={cn("text-sm font-bold text-foreground", className)}
       {...props}
     />
   );
@@ -64,7 +64,7 @@ export function Select({ className, children, compact, ...props }: SelectProps) 
       >
         {children}
       </select>
-      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted transition-colors peer-focus:text-brand-600 peer-disabled:text-muted-soft">
+      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted transition-colors peer-focus:text-foreground peer-disabled:text-muted-soft">
         <ChevronDown className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
       </span>
     </div>

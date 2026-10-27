@@ -64,11 +64,11 @@ export function TableSkeleton({
     <div
       aria-hidden="true"
       className={cn(
-        "-mx-4 overflow-hidden border-y border-border bg-surface shadow-sm sm:mx-0 sm:rounded-lg sm:border",
+        "-mx-4 overflow-hidden border-y border-border bg-surface sm:mx-0 sm:rounded-2xl sm:border",
         className,
       )}
     >
-      <div className="flex items-center gap-4 border-b border-border bg-surface-soft/80 px-4 py-3.5">
+      <div className="flex items-center gap-4 border-b border-rule-strong px-4 py-3.5">
         {Array.from({ length: columns }).map((_, i) => (
           <Skeleton key={i} className="h-3 flex-1" />
         ))}

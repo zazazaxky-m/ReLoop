@@ -104,6 +104,8 @@ const REGISTRY: Record<string, StatusMeta> = {
   NOT_RETURNED: { label: "Tidak Dikembalikan", tone: "neutral", Icon: XCircle },
 };
 
+export const STATUS_KEYS: readonly string[] = Object.keys(REGISTRY);
+
 function humanize(status: string) {
   return status
     .toLowerCase()
@@ -133,7 +135,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold",
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold",
         toneClasses[tone],
         className,
       )}
