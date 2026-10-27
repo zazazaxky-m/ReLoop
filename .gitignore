@@ -64,3 +64,5 @@ simulator/.reloop-MSN-001-state.json
 
 # artifacts
 *.apk
+# Local Playwright visual baselines (platform-specific; see tests/browser/theme-gallery.spec.ts)
+/tests/browser/*-snapshots/
