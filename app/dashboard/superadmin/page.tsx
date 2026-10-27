@@ -13,7 +13,7 @@ import {
   buttonVariants,
 } from "@/components/ui";
 import { AlertTriangle, Building, FileText, Recycle, Users, Wallet } from "@/components/ui/icons";
-import { formatRupiah } from "@/lib/format";
+import { formatDayHeading, formatRupiah } from "@/lib/format";
 import { SecurityEventList } from "@/components/security/SecurityEventList";
 import { getSecurityEvents, getSecuritySummary } from "@/lib/security-events";
 
@@ -49,6 +49,7 @@ export default async function SuperadminDashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow={formatDayHeading(new Date())}
         title="Dashboard Superadmin"
         description="Pantau operasional, pengguna, organisasi, dan reward dalam satu ringkasan."
       />
@@ -122,7 +123,7 @@ export default async function SuperadminDashboardPage() {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
         <MetricCard label="Item diterima" value={depositCount} tone="teal" />
-        <MetricCard label="Kemitraan pending" value={pendingPartners} tone="amber" />
+        <MetricCard label="Kemitraan pending" value={pendingPartners} tone="amber" emphasis={pendingPartners > 0} />
         <MetricCard
           label="Min. pencairan"
           value={formatRupiah(minRedemption)}

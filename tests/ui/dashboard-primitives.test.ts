@@ -48,6 +48,19 @@ describe("MetricCard", () => {
     const off = render(createElement(MetricCard, { label: "Perlu perhatian", value: 2, emphasis: false }));
     for (const c of ['data-emphasis="true"', "bg-ink", "text-lime"]) expect(off).not.toContain(c);
   });
+
+  // "Rp 12.345.678" is one unbreakable word (Intl puts a no-break space after "Rp").
+  it("fits a long amount in a narrow card instead of breaking the number", () => {
+    const icon = () => createElement("svg");
+    const long = render(createElement(MetricCard, { label: "Total diperoleh", value: "Rp\u00a012.345.678", icon }));
+    expect(long).toMatch(/^<div class="[^"]*@container/);
+    expect(long).toMatch(/class="[^"]*text-xl @\[13rem\]:text-4xl[^"]*">Rp/);
+    expect(long).toMatch(/<span class="[^"]*\bhidden @\[13rem\]:flex\b[^"]*"><svg/);
+
+    const short = render(createElement(MetricCard, { label: "Mesin", value: 24, icon }));
+    expect(short).toMatch(/class="[^"]*text-4xl[^"]*">24</);
+    expect(short).not.toMatch(/<span class="[^"]*\bhidden\b/);
+  });
 });
 
 describe("QuickAction", () => {

@@ -78,7 +78,7 @@ export function NotificationBell() {
         aria-label={unreadCount > 0 ? `Notifikasi, ${unreadCount} belum dibaca` : "Notifikasi"}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-sm transition-colors hover:bg-surface-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+        className="relative flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface text-muted transition-colors hover:bg-surface-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         <Bell className="text-lg" />
         {unreadCount > 0 ? (
@@ -89,13 +89,13 @@ export function NotificationBell() {
       </button>
 
       {open ? (
-        <div className="absolute right-0 z-[950] mt-2 w-80 overflow-hidden rounded-xl border border-border bg-surface shadow-lg">
+        <div className="absolute right-0 z-[950] mt-2 w-80 overflow-hidden rounded-2xl border border-border bg-surface shadow-lg">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <p className="text-sm font-semibold text-foreground">Notifikasi</p>
             {unreadCount > 0 ? (
               <button
                 onClick={() => markRead()}
-                className="text-xs font-semibold text-brand-700 hover:underline dark:text-brand-400"
+                className="text-xs font-semibold text-foreground underline decoration-1 underline-offset-2 hover:decoration-2"
               >
                 Tandai semua dibaca
               </button>
@@ -115,7 +115,7 @@ export function NotificationBell() {
                 >
                   <span className="flex items-center gap-2">
                     {!n.readAt ? (
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-600" />
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ink dark:bg-lime" />
                     ) : null}
                     <span className="text-sm font-semibold text-foreground">{n.title}</span>
                   </span>

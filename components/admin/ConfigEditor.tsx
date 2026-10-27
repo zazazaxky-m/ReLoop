@@ -304,7 +304,7 @@ function SlideEditor({
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <div
-                    className={`relative overflow-hidden rounded-xl border border-border bg-emerald-950 ${
+                    className={`relative overflow-hidden rounded-xl border border-border bg-ink ${
                       kind === "mobile" ? "aspect-[12/5]" : "aspect-[16/7]"
                     }`}
                   >

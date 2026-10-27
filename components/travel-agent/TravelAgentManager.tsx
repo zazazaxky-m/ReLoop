@@ -264,7 +264,7 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
           className={
             error
               ? "rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-status-error"
-              : "rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-800"
+              : "rounded-xl border border-brand-200 bg-brand-50 px-3.5 py-2.5 text-sm text-foreground"
           }
         >
           {error ?? success}
@@ -284,7 +284,7 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
                 </div>
               ) : null}
               {success ? (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-800">
+                <div className="rounded-xl border border-brand-200 bg-brand-50 px-3.5 py-2.5 text-sm text-foreground">
                   {success}
                 </div>
               ) : null}

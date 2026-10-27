@@ -143,7 +143,7 @@ export default async function UserTrashBagPage({
                   </span>
                   {pickedUp ? <StatusBadge status="BANK_SAMPAH_PICKUP" /> : null}
                   {t.campaign.rewardMode === "MONEY_REWARD" ? (
-                    <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                    <span className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-bold text-foreground">
                       Reward {formatRupiah(rewardAmount)}
                     </span>
                   ) : null}

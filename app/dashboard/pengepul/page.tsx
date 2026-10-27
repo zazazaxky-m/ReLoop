@@ -12,6 +12,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { MapPin, Recycle, Truck } from "@/components/ui/icons";
+import { formatDayHeading } from "@/lib/format";
 
 export default async function PengepulDashboardPage() {
   const user = await requirePageUser(["PENGEPUL"]);
@@ -60,6 +61,7 @@ export default async function PengepulDashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow={formatDayHeading(new Date())}
         title="Dashboard Pengepul"
         description="Pantau tugas pengambilan dan mesin yang membutuhkan penanganan."
       />
@@ -70,6 +72,7 @@ export default async function PengepulDashboardPage() {
           value={taskCount}
           icon={Truck}
           tone="amber"
+          emphasis={taskCount > 0}
           className="col-span-2 lg:col-span-1"
         />
         <MetricCard

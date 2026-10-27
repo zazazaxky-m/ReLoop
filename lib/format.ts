@@ -20,6 +20,16 @@ export function formatDateTime(value: Date | string | null | undefined): string 
   }).format(d);
 }
 
+/** "Selasa, 27 Oktober": the day in Jakarta, for dashboard headers. */
+export function formatDayHeading(value: Date): string {
+  return new Intl.DateTimeFormat("id-ID", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "Asia/Jakarta",
+  }).format(value);
+}
+
 export function formatDate(value: Date | string | null | undefined): string {
   if (!value) return "-";
   const d = typeof value === "string" ? new Date(value) : value;

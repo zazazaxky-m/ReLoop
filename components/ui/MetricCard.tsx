@@ -22,11 +22,14 @@ export function MetricCard({
   emphasis?: boolean;
   className?: string;
 }) {
+  // A formatted amount such as "Rp 12.345.678" cannot wrap (Intl joins "Rp" with
+  // a no-break space): in a narrow card it drops a size and the icon makes room.
+  const long = typeof value === "string" && value.length > 8;
   return (
     <Card
       data-emphasis={emphasis ? "true" : undefined}
       className={cn(
-        "min-h-32 p-4 sm:p-5",
+        "@container min-h-32 p-4 sm:p-5",
         emphasis && "border-ink bg-ink text-on-ink dark:border-lime/50",
         className,
       )}
@@ -43,7 +46,8 @@ export function MetricCard({
           </p>
           <p
             className={cn(
-              "font-display text-4xl leading-none tracking-[-0.01em] break-words sm:text-[2.75rem]",
+              "font-display leading-none tracking-[-0.01em] break-words",
+              long ? "text-xl @[13rem]:text-4xl @[17rem]:text-[2.75rem]" : "text-4xl sm:text-[2.75rem]",
               emphasis ? "text-lime" : "text-foreground",
             )}
           >
@@ -58,7 +62,8 @@ export function MetricCard({
         {Icon ? (
           <span
             className={cn(
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg",
+              "h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg",
+              long ? "hidden @[13rem]:flex" : "flex",
               emphasis ? "bg-lime text-ink" : "bg-surface-soft text-foreground",
             )}
           >
