@@ -88,4 +88,16 @@ describe("editorial palette", () => {
       }
     }
   });
+
+  it("map markers use status tokens", () => {
+    const markers = readRepoFile("components/map/map-markers.css");
+    for (const status of ["online", "full", "maintenance", "error", "offline"]) {
+      expect(markers).toMatch(new RegExp(`\\.rl-status--${status}\\s*\\{\\s*color:\\s*var\\(--color-status-${status}\\)`));
+    }
+    expect(markers).not.toContain("#0d9488");
+    expect(markers).toMatch(/\.rl-campaign-pin\s*\{[^}]*background:\s*var\(--color-ink\)[^}]*color:\s*var\(--color-lime\)/);
+    // Leaflet paints popups white; they follow the theme so popup text stays readable in dark mode.
+    expect(markers).toMatch(/\.leaflet-popup-content-wrapper[^{]*\{[^}]*background:\s*var\(--color-surface\)/);
+    expect(readRepoFile("components/map/MapLegend.tsx")).not.toContain("bg-[#");
+  });
 });

@@ -1,11 +1,11 @@
 // Static color classes (not inline styles, which our CSP blocks); keep in sync
 // with the .rl-status--* colors in map-markers.css.
 const ITEMS: { label: string; dotClass: string }[] = [
-  { label: "Online", dotClass: "bg-[#16a34a]" },
-  { label: "Penuh", dotClass: "bg-[#d97706]" },
-  { label: "Maintenance", dotClass: "bg-[#2563eb]" },
-  { label: "Error", dotClass: "bg-[#dc2626]" },
-  { label: "Offline", dotClass: "bg-[#64748b]" },
+  { label: "Online", dotClass: "bg-status-online" },
+  { label: "Penuh", dotClass: "bg-status-full" },
+  { label: "Maintenance", dotClass: "bg-status-maintenance" },
+  { label: "Error", dotClass: "bg-status-error" },
+  { label: "Offline", dotClass: "bg-status-offline" },
 ];
 
 export function MapLegend({ showCampaign = true }: { showCampaign?: boolean }) {
@@ -23,7 +23,7 @@ export function MapLegend({ showCampaign = true }: { showCampaign?: boolean }) {
       {showCampaign ? (
         <span className="flex items-center gap-1.5">
           <span
-            className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#0d9488] text-[8px] text-white"
+            className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-ink text-[8px] text-lime ring-1 ring-on-ink"
             aria-hidden
           >
             ★

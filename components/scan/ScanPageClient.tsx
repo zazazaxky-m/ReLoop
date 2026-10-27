@@ -217,7 +217,7 @@ export function ScanPageClient() {
               <QrScanner onResult={handleScanned} onCancel={() => setCameraOn(false)} />
             ) : (
               <div className="text-center">
-                <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-brand-50 text-2xl text-brand-600 dark:bg-brand-950/20 dark:text-brand-400">
+                <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-lime text-2xl text-ink">
                   <QrCode />
                 </span>
                 {code && token ? (
@@ -244,7 +244,7 @@ export function ScanPageClient() {
                       Mulai Sesi Setor
                     </Button>
                   ) : (
-                    <Link href="/dashboard/user" className="text-sm text-brand-600">
+                    <Link href="/dashboard/user" className="text-sm font-bold text-foreground underline decoration-1 underline-offset-4 hover:decoration-2">
                       Kembali ke Dashboard
                     </Link>
                   )}
@@ -283,7 +283,7 @@ export function ScanPageClient() {
               </p>
               {limitText ? (
                 <p
-                  className="rounded-lg bg-mint px-3 py-2 text-sm text-brand-700 dark:text-brand-400"
+                  className="rounded-[14px] bg-mint px-3 py-2 text-sm text-foreground"
                   data-testid="session-limits"
                 >
                   {limitReached ? "Batas sesi tercapai. Tekan Selesai Setor untuk menutup sesi." : limitText}
@@ -294,7 +294,7 @@ export function ScanPageClient() {
                   {machine.supportedWasteTypes.map((w) => (
                     <span
                       key={w.id}
-                      className="rounded-lg bg-mint px-2.5 py-1 text-xs font-medium text-brand-700 dark:text-brand-400"
+                      className="rounded-full bg-mint px-2.5 py-1 text-xs font-bold text-foreground"
                     >
                       {w.name}
                     </span>
@@ -321,13 +321,13 @@ export function ScanPageClient() {
                       className="flex items-center justify-between py-3 text-sm"
                     >
                       <span className="flex items-center gap-2">
-                        <Recycle className="text-brand-500" />
+                        <Recycle className="text-muted" />
                         {item.wasteType.name}
                       </span>
                       <span className="flex items-center gap-2">
                         <StatusBadge status={item.status} />
                         {item.rewardAmount > 0 ? (
-                          <span className="font-medium text-brand-700">
+                          <span className="font-bold text-foreground">
                             {formatRupiah(item.rewardAmount)}
                           </span>
                         ) : null}
@@ -337,7 +337,7 @@ export function ScanPageClient() {
                 </ul>
               )}
               {totalReward > 0 ? (
-                <p className="mt-4 text-right text-sm font-semibold text-brand-700">
+                <p className="mt-4 text-right text-sm font-bold text-foreground">
                   Total sesi: {formatRupiah(totalReward)}
                 </p>
               ) : null}
