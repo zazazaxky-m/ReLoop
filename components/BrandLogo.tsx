@@ -9,6 +9,8 @@ type BrandLogoProps = {
   className?: string;
   priority?: boolean;
   alt?: string;
+  /** "dark" always uses the light-lettered wordmark, e.g. on the ink sidebar. */
+  surface?: "auto" | "dark";
 };
 
 export function BrandLogo({
@@ -18,6 +20,7 @@ export function BrandLogo({
   className,
   priority = false,
   alt = "ReLoop",
+  surface = "auto",
 }: BrandLogoProps) {
   const shared = {
     alt,
@@ -34,6 +37,10 @@ export function BrandLogo({
 
   // The wordmark's dark-green "Re" disappears on dark surfaces, so swap in a
   // light-lettered copy with the class-based dark variant.
+  if (surface === "dark") {
+    return <img src="/reloop-logo-name-dark.svg" className={className} {...shared} alt={alt} />;
+  }
+
   return (
     <>
       <img

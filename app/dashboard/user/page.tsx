@@ -21,7 +21,6 @@ import {
 import {
   ArrowUpRight,
   Coins,
-  Map,
   Megaphone,
   QrCode,
   Recycle,
@@ -122,28 +121,25 @@ export default async function UserDashboardPage() {
           href="/scan"
           title="Scan mesin"
           description="Mulai sesi setor dengan QR."
-          icon={QrCode}
+          index={1}
         />
         <QuickAction
           href="/map"
           title="Cari mesin"
           description="Lihat lokasi dan kapasitas."
-          icon={Map}
-          tone="teal"
+          index={2}
         />
         <QuickAction
           href="/dashboard/user/wallet"
           title="Dompet"
           description="Kelola saldo dan pencairan."
-          icon={Wallet}
-          tone="amber"
+          index={3}
         />
         <QuickAction
           href="/dashboard/user/campaigns"
           title="Program"
           description="Lihat program yang tersedia."
-          icon={Megaphone}
-          tone="blue"
+          index={4}
         />
       </div>
 

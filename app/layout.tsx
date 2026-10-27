@@ -6,10 +6,28 @@ import { NONCE_HEADER } from "@/lib/security-headers";
 import { SITE_DESCRIPTION, SITE_NAME, siteUrl } from "@/lib/site";
 import "./globals.css";
 
+// Editorial faces shared with the landing page (self-hosted, OFL).
+const dmSans = localFont({
+  src: [
+    { path: "../public/landing/fonts/dm-sans-400.ttf", weight: "400" },
+    { path: "../public/landing/fonts/dm-sans-700.ttf", weight: "700" },
+  ],
+  variable: "--font-dm-sans",
+  display: "swap",
+});
+
+const anton = localFont({
+  src: "../public/landing/fonts/anton.ttf",
+  variable: "--font-anton",
+  display: "swap",
+});
+
+// Only the legacy surfaces (kiosk, machine display, print) still use it.
 const jakarta = localFont({
   src: "../public/fonts/plus-jakarta-sans-latin.woff2",
   variable: "--font-jakarta",
   display: "swap",
+  preload: false,
 });
 
 export function generateMetadata(): Metadata {
@@ -50,7 +68,7 @@ export function generateMetadata(): Metadata {
 }
 
 export const viewport: Viewport = {
-  themeColor: "#16a34a",
+  themeColor: "#082f22",
   width: "device-width",
   initialScale: 1,
 };
@@ -63,7 +81,7 @@ export default async function RootLayout({
   return (
     <html
       lang="id"
-      className={jakarta.variable}
+      className={`${dmSans.variable} ${anton.variable} ${jakarta.variable}`}
       suppressHydrationWarning
       nonce={nonce}
     >

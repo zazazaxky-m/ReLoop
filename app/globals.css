@@ -1,44 +1,113 @@
 @import "tailwindcss";
+@import "./legacy-theme.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Editorial palette shared with the landing page
+   (docs/superpowers/specs/2026-10-27-app-editorial-theme-design.md).
+   Values are #rrggbb so tests/theme/palette.test.ts can check contrast. */
 @theme {
   /* Surfaces */
-  --color-background: #f3f7f5;
-  --color-surface: #ffffff;
-  --color-surface-soft: #f8faf9;
-  --color-foreground: #14211a;
-  --color-muted: #5f6f66;
-  --color-muted-soft: #667468;
-  --color-border: #dce6df;
+  --color-background: #f0eee5;
+  --color-surface: #f7f6ef;
+  --color-surface-soft: #e9e7dc;
+  --color-foreground: #082f22;
+  --color-muted: #454c40;
+  --color-muted-soft: #596053;
+  --color-border: #d6d7ca;
+  --color-rule-strong: #a4ac9a;
+  --color-input-border: #7c8372;
 
-  /* Brand green scale */
-  --color-brand-50: #ecfdf5;
-  --color-brand-100: #dcfce7;
-  --color-brand-200: #bbf7d0;
-  --color-brand-300: #86efac;
-  --color-brand-400: #4ade80;
-  --color-brand-500: #16a34a;
-  --color-brand-600: #15803d;
-  --color-brand-700: #14532d;
-  --color-brand-800: #134e2a;
-  --color-brand-900: #0f3d21;
-  --color-brand-950: #082818;
+  /* Editorial ink and lime */
+  --color-ink: #082f22;
+  --color-ink-hover: #225c3f;
+  --color-on-ink: #f7f6ef;
+  --color-lime: #d2f437;
+
+  /* Ink sidebar */
+  --color-sidebar: #082f22;
+  --color-sidebar-fg: #f0eee5;
+  --color-sidebar-muted: #bfc6b8;
+  --color-sidebar-label: #b5cf3f;
+
+  /* Forest scale */
+  --color-brand-50: #eef0e2;
+  --color-brand-100: #e1e7cf;
+  --color-brand-200: #c9d4ae;
+  --color-brand-300: #a7b98a;
+  --color-brand-400: #55803f;
+  --color-brand-500: #3d6b3a;
+  --color-brand-600: #225c3f;
+  --color-brand-700: #174a32;
+  --color-brand-800: #0f3b28;
+  --color-brand-900: #082f22;
+  --color-brand-950: #05200f;
 
   /* Semantic helpers */
-  --color-mint: #dcfce7;
-  --color-mint-soft: #ecfdf5;
-  --color-accent: #65a30d;
+  --color-mint: #e1e7cf;
+  --color-mint-soft: #eef0e2;
+  --color-accent: #d2f437;
+
+  /* Tailwind red/amber/blue/slate, warmed to sit on paper */
+  --color-red-50: #f7e6de;
+  --color-red-100: #f1d4cb;
+  --color-red-200: #e6b9ab;
+  --color-red-300: #d7957f;
+  --color-red-400: #c66a50;
+  --color-red-500: #b5462b;
+  --color-red-600: #9e3420;
+  --color-red-700: #8b2314;
+  --color-red-800: #6f1c11;
+  --color-red-900: #561a10;
+  --color-red-950: #2e0c07;
+
+  --color-amber-50: #f7edd4;
+  --color-amber-100: #f2e1b8;
+  --color-amber-200: #e8cf96;
+  --color-amber-300: #dcb66a;
+  --color-amber-400: #cf9a3c;
+  --color-amber-500: #b7791f;
+  --color-amber-600: #8f5c0e;
+  --color-amber-700: #6e4500;
+  --color-amber-800: #5a3906;
+  --color-amber-900: #472d07;
+  --color-amber-950: #2a1a03;
+
+  --color-blue-50: #e9ecf1;
+  --color-blue-100: #dde3ee;
+  --color-blue-200: #c5cfe2;
+  --color-blue-300: #9fb0d0;
+  --color-blue-400: #7489b8;
+  --color-blue-500: #4f68a0;
+  --color-blue-600: #3a5290;
+  --color-blue-700: #253f78;
+  --color-blue-800: #1f3461;
+  --color-blue-900: #1b2b4d;
+  --color-blue-950: #0f182c;
+
+  --color-slate-50: #f5f4ee;
+  --color-slate-100: #e9e8de;
+  --color-slate-200: #dcdbcf;
+  --color-slate-300: #c3c4b5;
+  --color-slate-400: #9a9e8e;
+  --color-slate-500: #62685a;
+  --color-slate-600: #51574a;
+  --color-slate-700: #40463a;
+  --color-slate-800: #2f352b;
+  --color-slate-900: #1e231c;
+  --color-slate-950: #11140f;
 
   /* Status hues (used with text labels + icons, never color alone) */
-  --color-status-online: #16a34a;
-  --color-status-full: #d97706;
-  --color-status-maintenance: #2563eb;
-  --color-status-error: #dc2626;
-  --color-status-offline: #64748b;
+  --color-status-online: #3d7a2a;
+  --color-status-full: #b7791f;
+  --color-status-maintenance: #3a5290;
+  --color-status-error: #b5462b;
+  --color-status-offline: #62685a;
 
-  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system,
+  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  /* Anton: metric values, quick-action numbers, auth poster band only. */
+  --font-display: var(--font-anton), Impact, "Arial Narrow", sans-serif;
 }
 
 html {
@@ -53,6 +122,24 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* The landing's paper grain behind light pages. Cards and .legacy-theme
+   paint opaque backgrounds over it; dark mode drops it. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: url("/landing/paper-v2.webp") repeat;
+  background-size: 900px;
+  mix-blend-mode: multiply;
+  opacity: 0.42;
+}
+
+.dark body::before {
+  display: none;
+}
+
 /* Layered so Tailwind border-color utilities can override the default. */
 @layer base {
   * {
@@ -61,8 +148,8 @@ body {
 }
 
 ::selection {
-  background: var(--color-brand-200);
-  color: var(--color-brand-900);
+  background: var(--color-lime);
+  color: var(--color-ink);
 }
 
 button,
@@ -83,27 +170,49 @@ button:not(:disabled),
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: #bdcbc2;
+    background: var(--color-rule-strong);
     border-radius: 9999px;
   }
 }
 
 .dark {
-  --color-background: #0b0f0d;
-  --color-surface: #101613;
-  --color-surface-soft: #161e1a;
-  --color-foreground: #e4e9e6;
-  --color-muted: #9aa9a0;
-  --color-muted-soft: #7e8e85;
-  --color-border: #1d2722;
-  --color-brand-950: #061d10;
-  --color-mint: #0f3d21;
-  --color-mint-soft: #082818;
-  --color-brand-50: #0a2e18;
-  --color-brand-100: #0f3d21;
-  --color-brand-200: #14532d;
+  --color-background: #08150f;
+  --color-surface: #0e1f17;
+  --color-surface-soft: #14291f;
+  --color-foreground: #ecebe2;
+  --color-muted: #aab3a3;
+  --color-muted-soft: #939c8d;
+  --color-border: #1f3529;
+  --color-rule-strong: #3a5244;
+  --color-input-border: #5f7666;
+  --color-sidebar: #0c2219;
+  --color-sidebar-fg: #ecebe2;
+  --color-sidebar-muted: #a9b3a5;
+  --color-brand-50: #11281b;
+  --color-brand-100: #163322;
+  --color-brand-200: #1e4430;
+  --color-brand-300: #e2f79a;
+  --color-brand-400: #d2f437;
+  --color-brand-500: #b8d92a;
+  --color-brand-950: #071a11;
+  --color-mint: #163322;
+  --color-mint-soft: #11281b;
+  --color-red-400: #e58b70;
+  --color-amber-400: #e0b052;
+  --color-blue-400: #97a9d6;
+  --color-slate-400: #a3a99a;
+  --color-status-online: #8fc46a;
+  --color-status-full: #e0b052;
+  --color-status-maintenance: #97a9d6;
+  --color-status-error: #e58b70;
+  --color-status-offline: #a3a99a;
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #2b3a32;
+  background: #2b4436;
+}
+.reloop-landing h1,
+.reloop-landing h2,
+.reloop-landing h3 {
+  font-weight: 700;
 }

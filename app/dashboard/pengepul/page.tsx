@@ -11,7 +11,7 @@ import {
   QuickAction,
   StatusBadge,
 } from "@/components/ui";
-import { Map, MapPin, Recycle, Truck, User } from "@/components/ui/icons";
+import { MapPin, Recycle, Truck } from "@/components/ui/icons";
 
 export default async function PengepulDashboardPage() {
   const user = await requirePageUser(["PENGEPUL"]);
@@ -91,28 +91,25 @@ export default async function PengepulDashboardPage() {
           href="/dashboard/pengepul/tasks"
           title="Tugas pickup"
           description="Lihat dan perbarui tugas."
-          icon={Truck}
-          tone="amber"
+          index={1}
         />
         <QuickAction
           href="/dashboard/pengepul/map"
           title="Peta mesin"
           description="Cari mesin organisasi mitra."
-          icon={Map}
-          tone="blue"
+          index={2}
         />
         <QuickAction
           href="/dashboard/pengepul/area"
           title="Area layanan"
           description="Kelola wilayah dan mitra."
-          icon={MapPin}
-          tone="teal"
+          index={3}
         />
         <QuickAction
           href="/dashboard/pengepul/profile"
           title="Profil"
           description="Periksa informasi kontak."
-          icon={User}
+          index={4}
         />
       </div>
 

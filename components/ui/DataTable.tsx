@@ -38,19 +38,19 @@ export function DataTable<T>({
   return (
     <div
       className={cn(
-        "-mx-4 overflow-hidden border-y border-border bg-surface shadow-sm sm:mx-0 sm:rounded-lg sm:border",
+        "-mx-4 overflow-hidden border-y border-border bg-surface sm:mx-0 sm:rounded-2xl sm:border",
         className,
       )}
     >
       <div className="overflow-x-auto">
         <table className="w-full min-w-[700px] border-collapse text-sm">
-          <thead className="bg-surface-soft/80">
-            <tr className="border-b border-border bg-surface-soft/80">
+          <thead>
+            <tr className="border-b border-rule-strong">
               {columns.map((col) => (
                 <th
                   key={col.key}
                   className={cn(
-                    "whitespace-nowrap px-4 py-3.5 text-[11px] font-bold uppercase tracking-[0.08em] text-muted",
+                    "whitespace-nowrap px-4 py-3.5 text-[11px] font-bold uppercase tracking-[0.1em] text-foreground",
                     alignClass[col.align ?? "left"],
                     col.className,
                   )}
