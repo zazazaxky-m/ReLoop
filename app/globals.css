@@ -194,6 +194,10 @@ button:not(:disabled),
   --color-brand-300: #e2f79a;
   --color-brand-400: #d2f437;
   --color-brand-500: #b8d92a;
+  /* Pages use brand-600..800 as light-mode text; in dark they take the lime shades. */
+  --color-brand-600: #b8d92a;
+  --color-brand-700: #d2f437;
+  --color-brand-800: #e2f79a;
   --color-brand-950: #071a11;
   --color-mint: #163322;
   --color-mint-soft: #11281b;

@@ -14,6 +14,8 @@ import AccountDeletionPage from "@/app/(legal)/account-deletion/page";
 import DataDeletionPage from "@/app/(legal)/data-deletion/page";
 import PrivacyPage from "@/app/(legal)/privacy/page";
 import TermsPage from "@/app/(legal)/terms/page";
+import DashboardError from "@/app/dashboard/error";
+import ScanError from "@/app/scan/error";
 import { AppShell, type AppShellUser } from "@/components/AppShell";
 import { AuthForm } from "@/components/auth/AuthForm";
 
@@ -242,5 +244,18 @@ describe("app shell", () => {
   it("uses no inline styles or old green accents", () => {
     expect(html).not.toContain("style=");
     expect(html).not.toMatch(/bg-brand-600|text-brand-[78]00|bg-brand-50\b/);
+  });
+});
+
+describe("error pages", () => {
+  it.each([
+    ["dashboard", DashboardError],
+    ["scan", ScanError],
+  ] as const)("%s retries with the shared primary pill", (_name, Page) => {
+    const html = renderToStaticMarkup(createElement(Page, { error: new Error("x"), reset: () => {} }));
+    const button = html.match(/<button\b[^>]*>/)?.[0] ?? "";
+    expect(button).toContain("bg-ink");
+    expect(button).toContain("rounded-full");
+    expect(button).not.toMatch(/bg-brand-600|text-white/);
   });
 });
