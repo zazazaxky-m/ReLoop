@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui";
-import { CheckCircle, Info } from "@/components/ui/icons";
+import { Button, buttonVariants } from "@/components/ui";
+import { ArrowRight, CheckCircle, Info } from "@/components/ui/icons";
 import { forgetLinkToken, takeLinkToken, type LinkTokenKind } from "@/lib/link-token";
 
 interface Copy {
@@ -140,12 +140,12 @@ export function EmailTokenAction({ kind }: { kind: LinkTokenKind }) {
   if (state.phase === "done") {
     return (
       <div className="space-y-4 text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-400">
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-lime text-ink">
           <CheckCircle className="text-2xl" />
         </span>
-        <h2 className="text-xl font-black tracking-[-0.03em] text-foreground">{copy.doneTitle}</h2>
+        <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">{copy.doneTitle}</h2>
         <p className="text-sm leading-6 text-muted">{copy.doneBody}</p>
-        <Link href={copy.doneHref} className="inline-flex text-sm font-semibold text-brand-700 hover:underline dark:text-brand-400">
+        <Link href={copy.doneHref} className="inline-flex text-sm font-bold text-foreground underline decoration-1 underline-offset-4 hover:decoration-2">
           {copy.doneLink}
         </Link>
       </div>
@@ -163,14 +163,14 @@ export function EmailTokenAction({ kind }: { kind: LinkTokenKind }) {
         <div className="flex flex-col gap-2 sm:flex-row">
           <Link
             href={`/login?next=${next}`}
-            className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-brand-600 px-4 text-sm font-semibold text-white hover:bg-brand-700"
+            className={buttonVariants({ size: "lg", className: "flex-1" })}
           >
             Masuk
           </Link>
           {kind === "accept-invitation" ? (
             <Link
               href={`/register?next=${next}`}
-              className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-border px-4 text-sm font-semibold text-foreground hover:bg-surface/60"
+              className={buttonVariants({ variant: "outline", size: "lg", className: "flex-1 border-foreground" })}
             >
               Daftar
             </Link>
@@ -196,8 +196,9 @@ export function EmailTokenAction({ kind }: { kind: LinkTokenKind }) {
           ? " Undangan hanya dapat diterima oleh akun yang memakai alamat email undangan."
           : null}
       </p>
-      <Button type="button" size="lg" className="h-12 w-full rounded-xl" disabled={busy} onClick={submit}>
+      <Button type="button" size="lg" className="h-13 w-full justify-between" disabled={busy} onClick={submit}>
         {busy ? copy.busy : copy.action}
+        {busy ? null : <ArrowRight className="text-lg" />}
       </Button>
     </div>
   );

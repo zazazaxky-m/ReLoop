@@ -3,10 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Button, FormField, Input } from "@/components/ui";
-import { CheckCircle } from "@/components/ui/icons";
+import { ArrowRight, CheckCircle } from "@/components/ui/icons";
 
-const inputClass =
-  "h-11 rounded-xl border-border bg-surface px-4 text-[15px] shadow-none hover:border-muted sm:h-12";
+const inputClass = "h-12 px-4 text-[15px]";
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
@@ -42,11 +41,11 @@ export function ForgotPasswordForm() {
   if (sent) {
     return (
       <div className="space-y-5 text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-400">
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-lime text-ink">
           <CheckCircle className="text-2xl" />
         </span>
         <div className="space-y-1.5">
-          <h2 className="text-xl font-black tracking-[-0.03em] text-foreground">
+          <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
             Cek emailmu
           </h2>
           <p className="text-sm leading-6 text-muted">
@@ -66,7 +65,7 @@ export function ForgotPasswordForm() {
             </p>
             <Link
               href={devUrl.replace(/^.*\/reset-password/, "/reset-password")}
-              className="mt-1.5 block break-all font-semibold text-brand-700 hover:underline dark:text-brand-400"
+              className="mt-1.5 block break-all font-semibold text-foreground underline decoration-1 underline-offset-2 hover:decoration-2"
             >
               {devUrl}
             </Link>
@@ -75,7 +74,7 @@ export function ForgotPasswordForm() {
 
         <Link
           href="/login"
-          className="inline-block text-sm font-bold text-brand-700 hover:underline dark:text-brand-400"
+          className="inline-block text-sm font-bold text-foreground underline decoration-1 underline-offset-4 hover:decoration-2"
         >
           Kembali ke halaman masuk
         </Link>
@@ -110,17 +109,18 @@ export function ForgotPasswordForm() {
       <Button
         type="submit"
         size="lg"
-        className="mt-2 h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 sm:h-13"
+        className="mt-2 h-13 w-full justify-between"
         disabled={loading}
       >
         {loading ? "Mengirim..." : "Kirim tautan reset"}
+        {loading ? null : <ArrowRight className="text-lg" />}
       </Button>
 
       <p className="pt-1 text-center text-sm text-muted">
         Ingat kata sandimu?{" "}
         <Link
           href="/login"
-          className="font-bold text-brand-700 hover:underline dark:text-brand-400"
+          className="font-bold text-foreground underline decoration-1 underline-offset-4 hover:decoration-2"
         >
           Masuk
         </Link>

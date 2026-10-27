@@ -15,6 +15,14 @@ const color = (theme: Record<string, string>, name: string) => {
 };
 
 describe("editorial palette", () => {
+  it("keeps a light island light in dark mode", () => {
+    expect(readBlock(css, ".dark .light-island")).toEqual({
+      "color-background": light["color-background"],
+      "color-foreground": light["color-foreground"],
+      "color-muted": light["color-muted"],
+    });
+  });
+
   it("pins the editorial anchors", () => {
     expect(light["color-background"]).toBe("#f0eee5");
     expect(light["color-foreground"]).toBe("#082f22");
