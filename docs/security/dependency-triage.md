@@ -1,6 +1,6 @@
 # Dependency advisory triage (SEC-07)
 
-Audit date: 2026-10-13. Source of truth for the gate: [`dependency-triage.json`](dependency-triage.json) (this document is the readable form; `tests/dependency-gate.test.mjs` fails if a row in the JSON is missing here).
+Audit dates: 2026-10-13 (initial triage) and 2026-10-27 ([re-audit](#re-audit-2026-10-27)). Source of truth for the gate: [`dependency-triage.json`](dependency-triage.json) (this document is the readable form; `tests/dependency-gate.test.mjs` fails if a row in the JSON is missing here).
 
 ## Result
 
@@ -11,7 +11,41 @@ Audit date: 2026-10-13. Source of truth for the gate: [`dependency-triage.json`]
 | Moderate/low advisories | 19 | 0 (the same upgrades cleared them) |
 | Gate (`scripts/check-dependency-advisories.mjs`) | exit 1, 35 untriaged | exit 0, one dated exception |
 
-The baseline `artifacts/reloop-dependency-audit-2026-10-13.json` was not reused as inventory. Fresh audits were run on this checkout, and the committed evidence is `artifacts/npm-audit-current.json` and `artifacts/npm-audit-runtime.json` (post-upgrade; they contain only advisory metadata, no tokens or paths outside `node_modules/`).
+The baseline `artifacts/reloop-dependency-audit-2026-10-13.json` was not reused as inventory. Fresh audits were run on this checkout, and the committed evidence is `artifacts/npm-audit-current.json` and `artifacts/npm-audit-runtime.json` (post-upgrade; they contain only advisory metadata, no tokens or paths outside `node_modules/`). Since the re-audit they hold the 2026-10-27 post-upgrade audits.
+
+## Re-audit 2026-10-27
+
+A fresh audit of `main` at cf6d667 reported advisories published after the initial triage: three in `next` 16.4.0 (2026-10-22), one in `zod` (2026-10-01) and two moderate ones in `@vitest/mocker` (2026-10-21). The gate failed with 4 untriaged high/critical advisories.
+
+| | Before | After |
+|---|---|---|
+| `npm audit` (whole tree) | 5 entries: 1 critical (`next`), 1 high (`zod`), 3 moderate (`vitest`, `@vitest/mocker`, `@vitest/coverage-v8`) | 1 entry: `zod` (high) |
+| `npm audit --omit=dev` (production tree) | 2 entries: `next` (critical), `zod` (high) | 1 entry: `zod` (high) |
+| Gate | exit 1, 4 untriaged | exit 1, 1 untriaged (`zod`, open below) |
+
+| Change | From | To | Why |
+|---|---|---|---|
+| `next` (exact pin) | 16.4.0 | 16.4.3 | GHSA-2464-fhr4-w9xw, GHSA-673q-mjm6-r5xr and GHSA-p3m5-59mp-jv5r are fixed in 16.4.1. 16.4.2 and 16.4.3 are LTS backports only (Turbopack fixes, Google font URLs, `proxy.ts` no longer loading the app-page runtime, OpenTelemetry traces); 16.4.3 is the current 16.4 patch. |
+| `eslint-config-next` (exact pin) | 16.4.0 | 16.4.3 | Moves with `next`. |
+| `vitest` and `@vitest/coverage-v8` (exact pins, lockstep) | 4.1.11 | 4.1.12 | Moderate GHSA-qxg6-89mg-rqv8 and GHSA-xp26-3454-mjgp in `@vitest/mocker` (dev server mock registration; fixed in 4.1.12). Moderate, so no gate row. Brings `vite` 8.3.5 and `rolldown` 1.2.15 inside the ranges their parents declare. |
+
+The lockfile was re-resolved with npm 11.21.0 as the lockfile note below requires; `npm ci` was re-verified with npm 10.9.9. No other package version changed.
+
+| Package | Installed (was) | Advisory | Sev | Scope / chain | Reachable at runtime | Fixed in | Decision | Owner | Expires |
+|---|---|---|---|---|---|---|---|---|---|
+| `next` | 16.4.3 (16.4.0) | GHSA-2464-fhr4-w9xw | critical | production / runtime | no | 16.4.1 | patched | farhanlhsn | n/a (fixed) |
+| `next` | 16.4.3 (16.4.0) | GHSA-673q-mjm6-r5xr | critical | production / runtime | no | 16.4.1 | patched | farhanlhsn | n/a (fixed) |
+| `next` | 16.4.3 (16.4.0) | GHSA-p3m5-59mp-jv5r | high | production / runtime | no | 16.4.1 | patched | farhanlhsn | n/a (fixed) |
+
+- GHSA-2464-fhr4-w9xw: Memory bug in the sharp/libvips build the image optimizer uses on glibc Linux; the vendor workaround is sharp >= 0.35.5. The lockfile already resolved sharp 0.35.5 before the upgrade, production runs node:22-alpine (musl), next.config.ts has no images config (no remotePatterns, SVG not rasterised), and no code imports next/image. Patched by upgrade.
+- GHSA-673q-mjm6-r5xr: Needs a `use cache` function (Cache Components) that returns typed arrays. No `use cache` directive exists and next.config.ts does not enable cacheComponents. Patched by upgrade.
+- GHSA-p3m5-59mp-jv5r: Vendor states apps without Server Actions are not vulnerable. The app defines none (no `'use server'` directive). Patched by upgrade.
+
+`braces` GHSA-vfj7-8cjw-p6xm was withdrawn by GitHub on 2026-10-23 and is no longer reported, so its exception row was removed from the JSON as its exit criteria require. There are no open exceptions.
+
+**Open, untriaged on purpose: `zod` 3.25.76, GHSA-mrhx-c7xc-m3w5 (high, production / runtime).** Array validation collects an issue for every failing element with no cap, so a large array can exhaust memory. The only fix is zod 4.6.6, a major upgrade from 3 (68 files import `zod`). Request schemas reach it: 9 of the 11 `z.array()` schemas under `app/` and `lib/` have no length bound, and nginx accepts bodies up to 20M. Whether `.max()` alone bounds zod 3's per-element issue collection was not verified. The owner has to choose between migrating to zod 4 and a dated exception with a mitigation such as per-route body size limits; until then the gate fails.
+
+Verified on the upgraded tree: `npm run typecheck`, `npm run lint` (0 errors), `npm test` (168 files, 1859 tests), `npm run build`, `npm run test:browser -- tests/browser/render-qr-map.spec.ts tests/browser/smoke.spec.ts` (30 passed across 360/768/1280 px, light and dark) and `node --test tests/dependency-gate.test.mjs` (46 passed).
 
 ## How exposure was classified
 
@@ -71,7 +105,7 @@ CI, `security-scan.yml`, `deploy.yml` and `compliance-check.yml` now run Node 22
 | `brace-expansion` | 1.1.21, 5.0.12 (1.1.15, 2.1.1, 5.0.6, 5.0.7) | GHSA-mh99-v99m-4gvg | high | dev / lint/test | no | 1.1.17 (1.x), 5.0.8 (5.x) | patched | farhanlhsn | n/a (fixed) |
 | `brace-expansion` | 1.1.21, 5.0.12 (1.1.15, 2.1.1, 5.0.6, 5.0.7) | GHSA-qhr7-859c-m2p7 | high | dev / lint/test | no | 1.1.20 (1.x), 5.0.11 (5.x) | patched | farhanlhsn | n/a (fixed) |
 | `brace-expansion` | 1.1.21, 5.0.12 (1.1.15, 2.1.1, 5.0.6, 5.0.7) | GHSA-rgw5-rvv9-x895 | high | dev / lint/test | no | 1.1.18 (1.x), 5.0.9 (5.x) | patched | farhanlhsn | n/a (fixed) |
-| `braces` | 3.0.3 (3.0.3) | GHSA-vfj7-8cjw-p6xm | high | dev / lint | no | none released | exception | farhanlhsn | 2026-12-31 |
+| `braces` | 3.0.3 (3.0.3) | GHSA-vfj7-8cjw-p6xm | high | dev / lint | no | none released | exception, closed 2026-10-27 (advisory withdrawn, row removed) | farhanlhsn | n/a (closed) |
 | `browserslist` | 4.29.3 (4.28.2) | GHSA-73wf-gq98-2v4g | high | dev / lint | no | 4.28.7 | patched | farhanlhsn | n/a (fixed) |
 | `browserslist` | 4.29.3 (4.28.2) | GHSA-c83g-rgw3-j3cx | high | dev / lint | no | 4.28.7 | patched | farhanlhsn | n/a (fixed) |
 | `js-yaml` | 4.3.2 (4.2.0) | GHSA-2883-xcg3-v3hh | high | dev / lint | no | 4.3.2 | patched | farhanlhsn | n/a (fixed) |
@@ -122,7 +156,7 @@ CI, `security-scan.yml`, `deploy.yml` and `compliance-check.yml` now run Node 22
 - GHSA-3jxr-9vmj-r5cp, GHSA-6j4f-fj2g-mc7p, GHSA-mh99-v99m-4gvg, GHSA-qhr7-859c-m2p7, GHSA-rgw5-rvv9-x895: Reached only through minimatch inside ESLint, typescript-estree and vitest coverage tooling over repository glob patterns; not present in the production dependency audit. Patched by lockfile refresh (installed 1.1.21 and 5.0.12).
 
 **`braces`**
-- GHSA-vfj7-8cjw-p6xm: No patched release exists (advisory range is every version through 3.0.3, which is the latest). Reached only via eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch while ESLint resolves its own fixed glob patterns. Not in npm audit --omit=dev.
+- GHSA-vfj7-8cjw-p6xm: No patched release exists (advisory range is every version through 3.0.3, which is the latest). Reached only via eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch while ESLint resolves its own fixed glob patterns. Not in npm audit --omit=dev. Withdrawn by GitHub on 2026-10-23; the exception was closed in the re-audit.
 
 **`browserslist`**
 - GHSA-73wf-gq98-2v4g, GHSA-c83g-rgw3-j3cx: Reached only through @babel/helper-compilation-targets under eslint-plugin-react-hooks (lint). Not in the production dependency audit and not used by next build (SWC). Patched by lockfile refresh.
@@ -141,11 +175,7 @@ CI, `security-scan.yml`, `deploy.yml` and `compliance-check.yml` now run Node 22
 
 ## Open exceptions
 
-| Package | Advisory | Scope | Owner | Expires | Mitigation |
-|---|---|---|---|---|---|
-| `braces` 3.0.3 | GHSA-vfj7-8cjw-p6xm | dev / lint | farhanlhsn | 2026-12-31 | ESLint runs only on developer machines and in two CI jobs, `quality` (ci.yml) and `compliance-scan` (compliance-check.yml), never in a production image or the db-migrate container command; glob patterns come from the repository ESLint config, not from requests or uploads; neither lint step has deployment secrets (compliance-check.yml passes ENCRYPTION_KEY only to its test step). Re-triage is forced by the gate: the exception is valid through 2026-12-31 and the gate fails from 2027-01-01, and it fails as soon as npm audit reports an available fix for braces (fixAvailable true, a non-breaking upgrade, or an upgrade of braces itself) until the fix is applied or recorded in reviewedFix. |
-
-Exit criteria for `braces`: remove the row when `npm audit` stops reporting it (a fixed `braces`, or `fast-glob`/`micromatch` dropping it through a newer `eslint-config-next`). The exception is valid through 2026-12-31 and the gate fails from 2027-01-01. The gate also fails as soon as `npm audit` reports a fix for it (`fixAvailable: true`, a non-breaking upgrade, or an upgrade of `braces` itself), and the weekly `security-scan.yml` run re-checks it, so it cannot be forgotten. Today npm only suggests downgrading `eslint-config-next` to 14.2.35, a breaking change to a different package, which is deliberately not treated as a fix of `braces`.
+None. The only exception, `braces` 3.0.3 GHSA-vfj7-8cjw-p6xm (dev / lint, owner farhanlhsn, valid through 2026-12-31, mitigated by ESLint running only on developer machines and in CI over repository glob patterns), was closed on 2026-10-27: GitHub withdrew the advisory on 2026-10-23 and `npm audit` stopped reporting it, which was its exit criterion, so the row was removed from the JSON.
 
 ## Prisma (stays on 6)
 
