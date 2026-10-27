@@ -1,5 +1,5 @@
 {
-  "generatedFor": "npm audit of 2026-10-13 after the F00 upgrade; rows cover every high/critical advisory reported before it",
+  "generatedFor": "npm audit of 2026-10-13 after the F00 upgrade and the re-audit of 2026-10-27 (next 16.4.3); rows cover every high/critical advisory reported before each upgrade",
   "rows": [
     {
       "package": "next",
@@ -120,6 +120,51 @@
       "chain": "runtime",
       "previousVersion": "16.2.10",
       "evidence": "Requires attacker-controlled values in ImageResponse SVG content. The only use is app/opengraph-image.tsx, which renders static fonts and the app icon, no request input. Patched by upgrade."
+    },
+    {
+      "package": "next",
+      "installed": "16.4.3",
+      "advisory": "GHSA-2464-fhr4-w9xw",
+      "scope": "production",
+      "runtimeReachable": false,
+      "fixedVersion": "16.4.1",
+      "decision": "patched",
+      "owner": "farhanlhsn",
+      "expiresAt": null,
+      "severity": "critical",
+      "chain": "runtime",
+      "previousVersion": "16.4.0",
+      "evidence": "Memory bug in the sharp/libvips build the image optimizer uses on glibc Linux; the vendor workaround is sharp >= 0.35.5. The lockfile already resolved sharp 0.35.5 before the upgrade, production runs node:22-alpine (musl), next.config.ts has no images config (no remotePatterns, SVG not rasterised), and no code imports next/image. Patched by upgrade."
+    },
+    {
+      "package": "next",
+      "installed": "16.4.3",
+      "advisory": "GHSA-673q-mjm6-r5xr",
+      "scope": "production",
+      "runtimeReachable": false,
+      "fixedVersion": "16.4.1",
+      "decision": "patched",
+      "owner": "farhanlhsn",
+      "expiresAt": null,
+      "severity": "critical",
+      "chain": "runtime",
+      "previousVersion": "16.4.0",
+      "evidence": "Needs a `use cache` function (Cache Components) that returns typed arrays. No `use cache` directive exists and next.config.ts does not enable cacheComponents. Patched by upgrade."
+    },
+    {
+      "package": "next",
+      "installed": "16.4.3",
+      "advisory": "GHSA-p3m5-59mp-jv5r",
+      "scope": "production",
+      "runtimeReachable": false,
+      "fixedVersion": "16.4.1",
+      "decision": "patched",
+      "owner": "farhanlhsn",
+      "expiresAt": null,
+      "severity": "high",
+      "chain": "runtime",
+      "previousVersion": "16.4.0",
+      "evidence": "Vendor states apps without Server Actions are not vulnerable. The app defines none (no 'use server' directive). Patched by upgrade."
     },
     {
       "package": "sharp",
@@ -375,22 +420,6 @@
       "chain": "lint/test",
       "previousVersion": "1.1.15, 2.1.1, 5.0.6, 5.0.7",
       "evidence": "Reached only through minimatch inside ESLint, typescript-estree and vitest coverage tooling over repository glob patterns; not present in the production dependency audit. Patched by lockfile refresh (installed 1.1.21 and 5.0.12)."
-    },
-    {
-      "package": "braces",
-      "installed": "3.0.3",
-      "advisory": "GHSA-vfj7-8cjw-p6xm",
-      "scope": "dev",
-      "runtimeReachable": false,
-      "fixedVersion": null,
-      "decision": "exception",
-      "owner": "farhanlhsn",
-      "expiresAt": "2026-12-31",
-      "severity": "high",
-      "chain": "lint",
-      "previousVersion": "3.0.3",
-      "evidence": "No patched release exists (advisory range is every version through 3.0.3, which is the latest). Reached only via eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch while ESLint resolves its own fixed glob patterns. Not in npm audit --omit=dev.",
-      "mitigation": "ESLint runs only on developer machines and in two CI jobs, `quality` (ci.yml) and `compliance-scan` (compliance-check.yml), never in a production image or the db-migrate container command; glob patterns come from the repository ESLint config, not from requests or uploads; neither lint step has deployment secrets (compliance-check.yml passes ENCRYPTION_KEY only to its test step). Re-triage is forced by the gate: the exception is valid through 2026-12-31 and the gate fails from 2027-01-01, and it fails as soon as npm audit reports an available fix for braces (fixAvailable true, a non-breaking upgrade, or an upgrade of braces itself) until the fix is applied or recorded in reviewedFix."
     },
     {
       "package": "browserslist",
