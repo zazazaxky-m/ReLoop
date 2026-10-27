@@ -108,3 +108,17 @@
   --color-status-error: #dc2626;
   --color-status-offline: #64748b;
 }
+
+/* Whatever the legacy surface does not cover (e.g. below the print sheet)
+   shows the body: keep it the old background, without the paper grain. */
+body:has(.legacy-theme) {
+  background-color: #f3f7f5;
+}
+
+.dark body:has(.legacy-theme) {
+  background-color: #0b0f0d;
+}
+
+body:has(.legacy-theme)::before {
+  display: none;
+}

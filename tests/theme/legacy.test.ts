@@ -85,6 +85,13 @@ describe("legacy theme scope", () => {
     }
   });
 
+  it("gives the page body behind a legacy surface the old background, without paper grain", () => {
+    expect(readBlock(legacyCss, "body:has(.legacy-theme)")).toEqual({});
+    expect(legacyCss).toMatch(/\nbody:has\(\.legacy-theme\)\s*\{\s*background-color:\s*#f3f7f5;\s*\}/);
+    expect(legacyCss).toMatch(/\n\.dark body:has\(\.legacy-theme\)\s*\{\s*background-color:\s*#0b0f0d;\s*\}/);
+    expect(legacyCss).toMatch(/\nbody:has\(\.legacy-theme\)::before\s*\{\s*display:\s*none;\s*\}/);
+  });
+
   it.each([
     ["kiosk", KioskLayout],
     ["machine display", MachineDisplayLayout],
