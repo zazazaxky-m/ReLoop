@@ -11,7 +11,7 @@ import { publishRealtime } from "@/lib/realtime";
 
 const createSchema = z.object({
   command: z.nativeEnum(RemoteCommandType),
-  payload: z.record(z.unknown()).optional(),
+  payload: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function GET(

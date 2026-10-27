@@ -27,7 +27,7 @@ const updateSchema = z.object({
   maxItemsPerSession: z.number().int().min(1).max(10_000).nullable().optional(),
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),
-  wasteTypeIds: z.array(z.string()).optional(),
+  wasteTypeIds: z.array(z.string()).max(100, "Maksimal 100 jenis sampah").optional(),
 });
 
 async function loadScoped(id: string, userRole: string, userOrg: string | null) {

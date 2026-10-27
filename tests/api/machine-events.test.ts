@@ -3,6 +3,7 @@ import { POST } from '@/app/api/machine-events/route';
 import { prisma } from '@/lib/prisma';
 import * as mAuth from '@/lib/machine-auth';
 import * as me from '@/lib/machine-events';
+import { MAX_EVENTS_PER_BATCH } from '@/lib/machine-events/protocol';
 import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/prisma', () => ({
@@ -176,5 +177,29 @@ describe('POST /api/machine-events', () => {
   it('returns handled error on unexpected failure', async () => {
     vi.mocked(prisma.machine.findUnique).mockRejectedValue(new Error('events boom'));
     expect((await POST(makeReq({ machineCode: 'm1', events: [] }))).status).toBe(500);
+  });
+
+  // The envelope is parsed before the HMAC check, so anyone can send it.
+  describe('batch size bound (GHSA-mrhx-c7xc-m3w5)', () => {
+    const events = (n: number) => Array.from({ length: n }, (_, i) => ({ localEventId: `e${i}` }));
+
+    it('accepts a full batch of MAX_EVENTS_PER_BATCH events past the envelope', async () => {
+      vi.mocked(prisma.machine.findUnique).mockResolvedValue(null);
+      const res = await POST(makeReq({ machineCode: 'm1', events: events(MAX_EVENTS_PER_BATCH) }));
+      expect(res.status).toBe(404);
+    });
+
+    it('rejects one event over the bound with 422 before looking up the machine', async () => {
+      const res = await POST(makeReq({ machineCode: 'm1', events: events(MAX_EVENTS_PER_BATCH + 1) }));
+      expect(res.status).toBe(422);
+      expect((await res.json()).issues).toEqual([{ path: 'events', message: expect.any(String) }]);
+      expect(prisma.machine.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('reports one issue for a huge batch of malformed events instead of one per event', async () => {
+      const res = await POST(makeReq({ machineCode: 'm1', events: Array.from({ length: 100_000 }, () => 0) }));
+      expect(res.status).toBe(422);
+      expect((await res.json()).issues).toHaveLength(1);
+    });
   });
 });

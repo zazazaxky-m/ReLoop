@@ -1,5 +1,5 @@
 {
-  "generatedFor": "npm audit of 2026-10-13 after the F00 upgrade and the re-audit of 2026-10-27 (next 16.4.3); rows cover every high/critical advisory reported before each upgrade",
+  "generatedFor": "npm audit of 2026-10-13 after the F00 upgrade and the re-audit of 2026-10-27 (next 16.4.3, zod 4.6.7); rows cover every high/critical advisory reported before each upgrade",
   "rows": [
     {
       "package": "next",
@@ -555,6 +555,21 @@
       "chain": "test",
       "previousVersion": "2.1.9",
       "evidence": "Needs the Vitest UI server listening; @vitest/ui is not installed and npm test runs vitest run. Patched by upgrade to 4.1.11."
+    },
+    {
+      "package": "zod",
+      "installed": "4.6.7",
+      "advisory": "GHSA-mrhx-c7xc-m3w5",
+      "scope": "production",
+      "runtimeReachable": true,
+      "fixedVersion": "4.6.6",
+      "decision": "patched",
+      "owner": "farhanlhsn",
+      "expiresAt": null,
+      "severity": "high",
+      "chain": "runtime",
+      "previousVersion": "3.25.76",
+      "evidence": "Reachable before the fix: zod 3 walked every element of an array, one issue per bad element, even past .max(), and 9 of 11 request arrays had no bound. POST /api/machine-events parses its envelope before the HMAC check, so an unauthenticated batch reached it. zod 4.6.6 checks .max()/.length() before walking elements, so the upgrade alone protects only bounded arrays: every request array now has .max() (events 50, matching the worker's 1..50 batch size; notification ids, campaign email domains, partnership regions and machine waste types 100), and tests/lib/request-array-bounds.test.ts fails on a new unbounded z.array() in app/ or lib/. Patched by upgrade plus bounds."
     }
   ]
 }

@@ -56,7 +56,7 @@ export const scanSessionContractV1 = z.object({
 const machineEventRequestItemV2 = z.object({
   localEventId: z.string().min(1),
   eventType: z.string().min(1),
-  payload: z.record(z.unknown()).nullable(),
+  payload: z.record(z.string(), z.unknown()).nullable(),
   sessionId: z.string().nullable(),
   depositItemId: z.string().nullable(),
   occurredAt: z.string().min(1),
@@ -109,7 +109,7 @@ export const machineEventsContractV2 = z.object({
     }).strict(),
     legacyV1: z.object({
       description: z.string().min(1),
-      response: z.record(z.unknown()),
+      response: z.record(z.string(), z.unknown()),
       workerOutcome: workerOutcomeV2,
     }).strict(),
   }).strict(),

@@ -1,5 +1,6 @@
 import type { RewardReconciliationCase } from "@prisma/client";
 import { z } from "zod";
+import { typeErrors } from "./zod-errors";
 import { logAudit } from "./audit";
 import { lockUser } from "./db-locks";
 import { HttpError, type CurrentUser } from "./rbac";
@@ -19,7 +20,7 @@ const REWARD_CASE_CHANGED = "Kasus rekonsiliasi sudah berubah. Muat ulang halama
 
 export const rewardCaseResolveSchema = z.object({
   note: z
-    .string({ required_error: "Catatan penyelesaian wajib diisi" })
+    .string({ error: typeErrors({ required: "Catatan penyelesaian wajib diisi" }) })
     .trim()
     .min(10, "Catatan penyelesaian minimal 10 karakter")
     .max(500, "Catatan penyelesaian maksimal 500 karakter"),

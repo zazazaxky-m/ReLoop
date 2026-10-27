@@ -22,7 +22,7 @@ const schema = z.object({
   reason: z.string().min(1).max(100),
   sessionId: z.string().optional().nullable(),
   occurredAt: z.string().datetime(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   sceneBase64: z.string().min(4),
   facesBase64: z.array(z.string().min(4)).max(5).default([]),
 });

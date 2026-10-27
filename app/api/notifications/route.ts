@@ -22,7 +22,8 @@ export async function GET() {
 
 const patchSchema = z.object({
   // Marks specific notifications read, or every unread one when omitted.
-  ids: z.array(z.string()).optional(),
+  // The bell sends at most the 30 it lists.
+  ids: z.array(z.string()).max(100).optional(),
 });
 
 export async function PATCH(req: Request) {
