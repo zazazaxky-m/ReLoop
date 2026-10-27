@@ -12,7 +12,6 @@ const RESTYLED = new Set<string>([]);
 // Defects already present on main (7b0361f) before the theme work; they are
 // tolerated here so the gallery still catches anything new.
 const KNOWN_DEFECTS: Record<string, { overflow?: number; critical?: string[] }> = {
-  "/dashboard/superadmin": { overflow: 3 },
   "/dashboard/superadmin/users": { critical: ["select-name"] },
   "/dashboard/superadmin/config": { critical: ["label"] },
 };

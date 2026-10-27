@@ -134,7 +134,7 @@ export default async function UserWalletPage() {
               Belum ada riwayat transaksi.
             </p>
           ) : (
-            <ul className="grid gap-2 lg:grid-cols-2">
+            <ul className="grid grid-cols-1 gap-2 lg:grid-cols-2">
               {history.map((entry) => (
                 <li
                   key={entry.id}
