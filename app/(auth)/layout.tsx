@@ -1,6 +1,18 @@
+/* eslint-disable @next/next/no-img-element -- Decorative landing artwork:
+   next/image adds an inline style that our CSP blocks. */
 import { BrandLogo } from "@/components/BrandLogo";
 import Link from "next/link";
-import { CheckCircle } from "@/components/ui/icons";
+
+const BAND = "SETOR. PUTAR. ULANG.";
+
+function BandItems({ markClassName }: { markClassName: string }) {
+  return [0, 1, 2].map((i) => (
+    <span key={i} className="inline-flex items-center gap-3.5">
+      <img src="/landing/mark.svg" alt="" className={`${markClassName} brightness-[.18] saturate-50`} />
+      {BAND}
+    </span>
+  ));
+}
 
 export default function AuthLayout({
   children,
@@ -8,50 +20,33 @@ export default function AuthLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-dvh bg-background lg:grid lg:grid-cols-[minmax(420px,44%)_1fr]">
-      <aside className="relative hidden h-dvh overflow-hidden bg-brand-950 p-10 text-white lg:flex lg:flex-col lg:justify-between xl:p-14">
-        <div className="absolute -bottom-44 -left-32 h-96 w-96 rounded-full border-[64px] border-lime-300/10" />
-        <div className="absolute -right-28 -top-28 h-96 w-96 rounded-full bg-emerald-700/20 blur-3xl" />
-
-        <Link href="/" className="relative inline-flex self-start rounded-2xl bg-surface px-4 py-2.5">
-          <BrandLogo
-            width={145}
-            height={43}
-            priority
-            className="h-10 w-auto"
-          />
-        </Link>
-
-        <div className="relative z-10 max-w-lg">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-lime-300">
-            Sampah selesai. Dampak dimulai.
-          </p>
-          {/* Decorative tagline: keep the page's <h1> (in the form) as the first heading. */}
-          <p className="mt-5 text-balance text-4xl font-black leading-[1.05] tracking-[-0.05em] [word-spacing:0.05em] xl:text-5xl">
-            Satu akun untuk setiap aksi baikmu.
-          </p>
-          <div className="mt-8 space-y-4 text-sm font-medium text-white/80">
-            <p className="flex items-center gap-3">
-              <CheckCircle className="text-lg text-lime-300" />
-              Setoran dan reward tercatat otomatis.
-            </p>
-            <p className="flex items-center gap-3">
-              <CheckCircle className="text-lg text-lime-300" />
-              Pantau dampakmu dari satu dashboard.
-            </p>
-          </div>
+    <div className="min-h-dvh lg:grid lg:grid-cols-[minmax(420px,44%)_1fr]">
+      {/* Decorative poster from the landing artwork: keep the page's <h1> (in the form) as the first heading. */}
+      <aside
+        aria-hidden="true"
+        className="light-island relative hidden h-dvh overflow-hidden border-r border-rule-strong bg-background text-foreground lg:block"
+      >
+        <img src="/landing/logo.svg" alt="" className="absolute left-9 top-8 z-[3] h-9 w-auto" />
+        <img src="/landing/heading-v2.webp" alt="" className="absolute left-[30px] top-[104px] z-[1] w-[78%]" />
+        <img
+          src="/landing/bottle-v2.webp"
+          alt=""
+          className="absolute -right-10 top-[210px] z-[2] w-[52%] rotate-6 drop-shadow-[0_26px_22px_#00190c38]"
+        />
+        <img src="/landing/slogan-v2.webp" alt="" className="absolute left-[22px] top-[318px] z-[3] w-[60%]" />
+        <div className="absolute -inset-x-[30px] bottom-[74px] z-[4] flex h-[50px] -rotate-[4.5deg] items-center gap-[26px] overflow-hidden whitespace-nowrap bg-lime pl-10 font-display text-[23px] tracking-[-0.01em]">
+          <BandItems markClassName="w-[26px]" />
         </div>
-
-        <p className="relative text-xs text-white/50">
+        <p className="absolute bottom-[22px] left-9 z-[4] text-xs text-muted">
           &copy; {new Date().getFullYear()} ReLoop
         </p>
+        {/* Paper grain over the artwork, as on the landing poster. */}
+        <div className="pointer-events-none absolute inset-0 z-[6] bg-[url('/landing/paper-v2.webp')] bg-[length:900px] opacity-[0.42] mix-blend-multiply" />
       </aside>
 
       <main className="relative flex min-h-dvh flex-col overflow-y-auto">
-        <div className="absolute inset-x-0 top-0 h-48 bg-gradient-to-b from-brand-100/65 to-transparent dark:from-brand-950/40 lg:hidden" />
-
-        <header className="relative flex h-18 items-center px-5 sm:px-8 lg:hidden">
-          <Link href="/" className="flex items-center">
+        <header className="flex h-18 items-center justify-between gap-4 px-5 sm:px-8 lg:justify-end lg:px-10">
+          <Link href="/" className="flex items-center lg:hidden">
             <BrandLogo
               width={125}
               height={37}
@@ -59,18 +54,23 @@ export default function AuthLayout({
               className="h-9 w-auto"
             />
           </Link>
-        </header>
-
-        <div className="relative mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-4 py-6 sm:px-10 sm:py-8 lg:px-12">
-          <div className="w-full rounded-[1.5rem] border border-border bg-surface p-5 shadow-[0_24px_70px_rgba(6,78,59,0.1)] dark:shadow-none sm:rounded-[2rem] sm:p-7 lg:p-8">
-            {children}
-          </div>
           <Link
             href="/"
-            className="relative mx-auto mt-3 text-xs font-semibold text-muted transition-colors before:absolute before:inset-x-0 before:-inset-y-2 hover:text-brand-700 dark:hover:text-brand-400 sm:mt-4"
+            className="relative inline-flex items-center gap-2 text-[13px] font-bold text-foreground underline decoration-1 underline-offset-4 before:absolute before:inset-x-0 before:-inset-y-2 hover:decoration-2"
           >
-            ← Kembali ke halaman utama
+            <span aria-hidden="true">←</span>
+            Kembali ke beranda
           </Link>
+        </header>
+
+        <div aria-hidden="true" className="overflow-hidden py-2 lg:hidden">
+          <div className="-mx-4 flex h-7 -rotate-[1.5deg] items-center gap-5 whitespace-nowrap bg-lime px-4 font-display text-sm tracking-[-0.01em] text-ink">
+            <BandItems markClassName="w-4" />
+          </div>
+        </div>
+
+        <div className="mx-auto flex w-full max-w-[30rem] flex-1 flex-col justify-center px-5 py-8 sm:px-8 lg:py-12">
+          {children}
         </div>
       </main>
     </div>

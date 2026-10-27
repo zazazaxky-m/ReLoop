@@ -208,6 +208,13 @@ button:not(:disabled),
   --color-status-offline: #a3a99a;
 }
 
+/* Poster artwork (the auth panel) stays on light paper in dark mode. */
+.dark .light-island {
+  --color-background: #f0eee5;
+  --color-foreground: #082f22;
+  --color-muted: #454c40;
+}
+
 .dark ::-webkit-scrollbar-thumb {
   background: #2b4436;
 }

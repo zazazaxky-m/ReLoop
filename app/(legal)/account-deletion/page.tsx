@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Info, Trash } from "@/components/ui/icons";
+import { Info } from "@/components/ui/icons";
 import { AccountDeletionForm } from "@/components/legal/AccountDeletionForm";
 import { ERASED_DATA, RETAINED_DATA } from "@/lib/erasure-copy";
 
@@ -14,23 +14,21 @@ export const metadata: Metadata = {
 export default function AccountDeletionPage() {
   return (
     <article className="grid gap-8 lg:grid-cols-[1.1fr_1fr]">
-      <div className="space-y-6">
-        <header className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
-          <div className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-status-error dark:border-red-900/40 dark:bg-red-950/30">
-            <Trash className="text-sm" /> Hapus Akun
-          </div>
-          <h1 className="mt-4 text-3xl font-black tracking-[-0.04em] text-foreground sm:text-4xl">
+      <div className="space-y-10">
+        <header>
+          <p className="inline-block -rotate-[1.5deg] rounded-[3px] bg-lime px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.13em] text-ink">Hapus Akun</p>
+          <h1 className="mt-5 text-4xl font-bold leading-[1.02] tracking-[-0.06em] text-foreground sm:text-5xl">
             Penghapusan Akun ReLoop
           </h1>
-          <p className="mt-3 text-sm leading-6 text-muted sm:text-[15px]">
+          <p className="mt-5 text-[15px] leading-7 text-muted">
             Kami menghormati keputusan Anda untuk berhenti menggunakan ReLoop.
             Halaman ini menjelaskan proses, data yang dihapus, dan data yang
             tetap disimpan beserta alasannya.
           </p>
         </header>
 
-        <section className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
-          <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground">
+        <section className="border-t border-rule-strong pt-8">
+          <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
             Langkah-langkah
           </h2>
           <ol className="mt-4 list-decimal space-y-2 pl-5 text-[15px] leading-7 text-muted">
@@ -65,8 +63,8 @@ export default function AccountDeletionPage() {
           </ol>
         </section>
 
-        <section className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
-          <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground">
+        <section className="border-t border-rule-strong pt-8">
+          <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
             Data yang dihapus
           </h2>
           <ul className="mt-4 list-disc space-y-1.5 pl-5 text-[15px] leading-7 text-muted">
@@ -76,8 +74,8 @@ export default function AccountDeletionPage() {
           </ul>
         </section>
 
-        <section className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
-          <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground">
+        <section className="border-t border-rule-strong pt-8">
+          <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
             Data yang tetap disimpan dan alasannya
           </h2>
           <ul className="mt-4 list-disc space-y-1.5 pl-5 text-[15px] leading-7 text-muted">
@@ -100,7 +98,7 @@ export default function AccountDeletionPage() {
               gunakan halaman{" "}
               <a
                 href="/data-deletion"
-                className="font-semibold underline-offset-2 hover:underline"
+                className="font-semibold underline decoration-1 underline-offset-2 hover:decoration-2"
               >
                 Hapus Data
               </a>
@@ -111,8 +109,8 @@ export default function AccountDeletionPage() {
       </div>
 
       <aside className="lg:sticky lg:top-6 lg:self-start">
-        <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
-          <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground">
+        <div className="rounded-2xl border border-border bg-surface p-6">
+          <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
             Formulir Penghapusan Akun
           </h2>
           <p className="mt-1 text-sm text-muted">

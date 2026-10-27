@@ -7,7 +7,7 @@ import { expect, test } from "../support/browser-fixture";
 // Every page is screenshotted per viewport and scheme; pages listed in
 // RESTYLED must also be free of axe color-contrast violations.
 
-const RESTYLED = new Set<string>([]);
+const RESTYLED = new Set<string>(["/login", "/register", "/forgot-password", "/privacy", "/terms"]);
 
 // Defects already present on main (7b0361f) before the theme work; they are
 // tolerated here so the gallery still catches anything new.

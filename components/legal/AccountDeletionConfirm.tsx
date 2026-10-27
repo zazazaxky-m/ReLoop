@@ -38,10 +38,10 @@ function ResultView({ result }: { result: ErasureResult }) {
   return (
     <div className="space-y-5">
       <div className="space-y-3 text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-400">
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-lime text-ink">
           <Icon className="text-2xl" />
         </span>
-        <h2 className="text-xl font-black tracking-[-0.03em] text-foreground">{title}</h2>
+        <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">{title}</h2>
         <p className="text-sm leading-6 text-muted">{result.message}</p>
       </div>
       {result.resolutionSteps.length > 0 ? (
@@ -114,7 +114,7 @@ export function AccountDeletionConfirm({ token }: { token: string | null }) {
         type="button"
         size="lg"
         variant="danger"
-        className="h-12 w-full rounded-xl sm:h-13"
+        className="h-13 w-full"
         disabled={loading}
         onClick={onConfirm}
       >

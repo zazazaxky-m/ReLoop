@@ -10,13 +10,13 @@ export default function ForgotPasswordPage() {
   return (
     <div className="space-y-7">
       <div>
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-brand-600 dark:text-brand-400">
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted">
           Pemulihan akun
         </p>
-        <h1 className="mt-2 text-3xl font-black tracking-[-0.045em] [word-spacing:0.05em] text-foreground">
+        <h1 className="mt-2.5 text-4xl font-bold leading-none tracking-[-0.06em] text-foreground sm:text-5xl">
           Lupa kata sandi?
         </h1>
-        <p className="mt-2 text-sm leading-6 text-muted">
+        <p className="mt-2.5 text-[15px] leading-6 text-muted">
           Masukkan email akunmu. Kami akan mengirimkan tautan untuk mengatur
           ulang kata sandi.
         </p>

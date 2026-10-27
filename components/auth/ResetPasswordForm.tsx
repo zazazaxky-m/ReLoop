@@ -4,11 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button, FormField, Input } from "@/components/ui";
-import { Eye, EyeOff } from "@/components/ui/icons";
+import { ArrowRight, Eye, EyeOff } from "@/components/ui/icons";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 
-const inputClass =
-  "h-11 rounded-xl border-border bg-surface px-4 text-[15px] shadow-none hover:border-muted sm:h-12";
+const inputClass = "h-12 px-4 text-[15px]";
 
 export function ResetPasswordForm({ token }: { token: string }) {
   const router = useRouter();
@@ -21,7 +20,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
   if (!token) {
     return (
       <div className="space-y-4 text-center">
-        <h2 className="text-xl font-black tracking-[-0.03em] text-foreground">
+        <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
           Tautan tidak valid
         </h2>
         <p className="text-sm leading-6 text-muted">
@@ -29,7 +28,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
         </p>
         <Link
           href="/forgot-password"
-          className="inline-block text-sm font-bold text-brand-700 hover:underline dark:text-brand-400"
+          className="inline-block text-sm font-bold text-foreground underline decoration-1 underline-offset-4 hover:decoration-2"
         >
           Minta tautan baru
         </Link>
@@ -96,7 +95,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
             onClick={() => setShowPassword((v) => !v)}
             aria-label={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
             aria-pressed={showPassword}
-            className="absolute inset-y-0 right-2 my-auto flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:hover:text-brand-400"
+            className="absolute inset-y-0 right-2 my-auto flex h-9 w-9 items-center justify-center rounded-full text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
           >
             {showPassword ? <EyeOff className="text-lg" /> : <Eye className="text-lg" />}
           </button>
@@ -120,16 +119,17 @@ export function ResetPasswordForm({ token }: { token: string }) {
       <Button
         type="submit"
         size="lg"
-        className="mt-2 h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 sm:h-13"
+        className="mt-2 h-13 w-full justify-between"
         disabled={loading}
       >
         {loading ? "Menyimpan..." : "Simpan kata sandi baru"}
+        {loading ? null : <ArrowRight className="text-lg" />}
       </Button>
 
       <p className="pt-1 text-center text-sm text-muted">
         <Link
           href="/login"
-          className="font-bold text-brand-700 hover:underline dark:text-brand-400"
+          className="font-bold text-foreground underline decoration-1 underline-offset-4 hover:decoration-2"
         >
           Kembali ke halaman masuk
         </Link>

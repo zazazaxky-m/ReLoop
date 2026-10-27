@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Leaf, ShieldCheck } from "@/components/ui/icons";
+import { ShieldCheck } from "@/components/ui/icons";
 
 export const metadata: Metadata = {
   title: "Kebijakan Privasi",
@@ -52,19 +52,17 @@ const sections = [
 
 export default function PrivacyPage() {
   return (
-    <article className="prose prose-slate max-w-none">
-      <header className="mb-10 border-b border-border pb-8">
-        <div className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-brand-700 dark:border-brand-900/40 dark:bg-brand-950/30 dark:text-brand-400">
-          <Leaf className="text-sm" /> Privasi
-        </div>
-        <h1 className="mt-4 text-3xl font-black tracking-[-0.04em] text-foreground sm:text-4xl">
+    <article>
+      <header className="mb-12">
+        <p className="inline-block -rotate-[1.5deg] rounded-[3px] bg-lime px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.13em] text-ink">Privasi</p>
+        <h1 className="mt-5 text-4xl font-bold leading-[1.02] tracking-[-0.06em] text-foreground sm:text-5xl">
           Kebijakan Privasi ReLoop
         </h1>
         <p className="mt-3 text-sm text-muted">
           Terakhir diperbarui:{" "}
           <time dateTime={LAST_UPDATED}>{LAST_UPDATED}</time>
         </p>
-        <p className="mt-4 max-w-2xl text-sm leading-6 text-muted sm:text-[15px]">
+        <p className="mt-5 max-w-2xl text-[15px] leading-7 text-muted sm:text-base">
           Privasi Anda adalah prioritas kami. Dokumen ini menjelaskan bagaimana
           ReLoop mengumpulkan, menggunakan, menyimpan, dan melindungi data
           pribadi Anda saat menggunakan aplikasi mobile, situs web, dan mesin
@@ -72,24 +70,26 @@ export default function PrivacyPage() {
         </p>
       </header>
 
-      <div className="space-y-8">
+      <div className="space-y-10">
         {sections.map((section) => (
           <section
             key={section.title}
-            className="rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6"
+            className="border-t border-rule-strong pt-8"
           >
-            <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground sm:text-xl">
+            <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground sm:text-2xl">
               {section.title}
             </h2>
-            <p className="mt-3 text-[15px] leading-7 text-muted">{section.body}</p>
+            <p className="mt-3 max-w-[68ch] text-[15px] leading-7 text-muted sm:text-base">{section.body}</p>
           </section>
         ))}
       </div>
 
-      <aside className="mt-10 flex items-start gap-3 rounded-2xl border border-brand-200 bg-brand-50/60 p-5 text-sm leading-6 text-brand-900 dark:border-brand-900/30 dark:bg-brand-950/20 dark:text-brand-200 sm:p-6">
-        <ShieldCheck className="mt-0.5 shrink-0 text-lg text-brand-700 dark:text-brand-400" />
+      <aside className="mt-12 flex items-start gap-4 rounded-2xl border border-border bg-surface p-5 text-sm leading-6 text-muted sm:p-6">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-lime text-lg text-ink">
+          <ShieldCheck />
+        </span>
         <div>
-          <p className="font-bold text-brand-900 dark:text-brand-100">
+          <p className="font-bold text-foreground">
             Komitmen kami
           </p>
           <p className="mt-1">
