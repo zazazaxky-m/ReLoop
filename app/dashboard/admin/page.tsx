@@ -12,7 +12,7 @@ import {
   StatusBadge,
   buttonVariants,
 } from "@/components/ui";
-import { FileText, Megaphone, Recycle, Truck, Users } from "@/components/ui/icons";
+import { Megaphone, Recycle, Truck } from "@/components/ui/icons";
 import { FillLevelBar } from "@/components/machine/FillLevelBar";
 
 export default async function AdminDashboardPage() {
@@ -69,28 +69,25 @@ export default async function AdminDashboardPage() {
           href="/dashboard/admin/machines"
           title="Kelola mesin"
           description="Pantau status dan kapasitas."
-          icon={Recycle}
+          index={1}
         />
         <QuickAction
           href="/dashboard/admin/pickups"
           title="Atur pickup"
           description="Buat dan tetapkan tugas."
-          icon={Truck}
-          tone="amber"
+          index={2}
         />
         <QuickAction
           href="/dashboard/admin/partners"
           title="Mitra pengepul"
           description="Kelola hubungan kemitraan."
-          icon={Users}
-          tone="teal"
+          index={3}
         />
         <QuickAction
           href="/dashboard/admin/reports"
           title="Laporan"
           description="Lihat dan unduh data."
-          icon={FileText}
-          tone="blue"
+          index={4}
         />
       </div>
 

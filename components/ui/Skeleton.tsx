@@ -16,7 +16,7 @@ export function MetricCardSkeleton({ className }: { className?: string }) {
     <div
       aria-hidden="true"
       className={cn(
-        "min-h-32 rounded-lg border border-t-4 border-border border-t-border bg-surface p-4 shadow-sm sm:p-5",
+        "min-h-32 rounded-2xl border border-border bg-surface p-4 sm:p-5",
         className,
       )}
     >
@@ -26,7 +26,7 @@ export function MetricCardSkeleton({ className }: { className?: string }) {
           <Skeleton className="h-7 w-28" />
           <Skeleton className="h-3 w-16" />
         </div>
-        <Skeleton className="h-10 w-10 shrink-0 rounded-lg" />
+        <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
       </div>
     </div>
   );
@@ -38,15 +38,14 @@ export function PageHeaderSkeleton({
   withAction?: boolean;
 }) {
   return (
-    <div className="-mx-4 flex flex-col gap-4 border-y border-border bg-surface/75 px-4 py-5 sm:-mx-6 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:-mx-8 lg:px-8">
+    <div className="flex flex-col gap-4 pb-1 pt-2 sm:flex-row sm:items-end sm:justify-between">
       <div className="flex min-w-0 items-start gap-3">
-        <span className="mt-1 h-10 w-1 shrink-0 rounded-full bg-border" />
         <div className="min-w-0 space-y-2">
-          <Skeleton className="h-6 w-52 max-w-[60vw]" />
+          <Skeleton className="h-9 w-64 max-w-[70vw]" />
           <Skeleton className="h-4 w-72 max-w-[80vw]" />
         </div>
       </div>
-      {withAction ? <Skeleton className="h-10 w-full rounded-lg sm:w-32" /> : null}
+      {withAction ? <Skeleton className="h-10 w-full rounded-full sm:w-32" /> : null}
     </div>
   );
 }
