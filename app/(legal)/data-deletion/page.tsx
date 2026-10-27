@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Info, ShieldCheck } from "@/components/ui/icons";
+import { Info } from "@/components/ui/icons";
 import { DataDeletionForm } from "@/components/legal/DataDeletionForm";
 
 export const metadata: Metadata = {
@@ -14,24 +14,22 @@ export const metadata: Metadata = {
 export default function DataDeletionPage() {
   return (
     <article className="grid gap-8 lg:grid-cols-[1.1fr_1fr]">
-      <div className="space-y-6">
-        <header className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
-          <div className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-brand-700 dark:border-brand-900/40 dark:bg-brand-950/30 dark:text-brand-400">
-            <ShieldCheck className="text-sm" /> Hapus Data
-          </div>
-          <h1 className="mt-4 text-3xl font-black tracking-[-0.04em] text-foreground sm:text-4xl">
+      <div className="space-y-10">
+        <header>
+          <p className="inline-block -rotate-[1.5deg] rounded-[3px] bg-lime px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.13em] text-ink">Hapus Data</p>
+          <h1 className="mt-5 text-4xl font-bold leading-[1.02] tracking-[-0.06em] text-foreground sm:text-5xl">
             Penghapusan Sebagian Data
           </h1>
-          <p className="mt-3 text-sm leading-6 text-muted sm:text-[15px]">
+          <p className="mt-5 text-[15px] leading-7 text-muted">
             Ingin menghapus beberapa kategori data tanpa menutup akun? Halaman
             ini memungkinkan Anda memilih data apa saja yang ingin dihapus.
             Akun Anda tetap aktif dan sisa saldo reward tidak terpengaruh.
           </p>
-          <p className="mt-3 text-sm leading-6 text-muted sm:text-[15px]">
+          <p className="mt-5 text-[15px] leading-7 text-muted">
             Untuk menghapus akun sepenuhnya, gunakan halaman{" "}
             <Link
               href="/account-deletion"
-              className="font-semibold text-brand-700 underline-offset-2 hover:underline dark:text-brand-400"
+              className="font-semibold text-foreground underline decoration-1 underline-offset-2 hover:decoration-2"
             >
               Hapus Akun
             </Link>
@@ -39,8 +37,8 @@ export default function DataDeletionPage() {
           </p>
         </header>
 
-        <section className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
-          <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground">
+        <section className="border-t border-rule-strong pt-8">
+          <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
             Bagaimana prosesnya?
           </h2>
           <ol className="mt-4 list-decimal space-y-2 pl-5 text-[15px] leading-7 text-muted">
@@ -60,8 +58,8 @@ export default function DataDeletionPage() {
           </ol>
         </section>
 
-        <section className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
-          <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground">
+        <section className="border-t border-rule-strong pt-8">
+          <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
             Apa yang terjadi setelah data dihapus?
           </h2>
           <ul className="mt-4 list-disc space-y-1.5 pl-5 text-[15px] leading-7 text-muted">
@@ -107,8 +105,8 @@ export default function DataDeletionPage() {
       </div>
 
       <aside className="lg:sticky lg:top-6 lg:self-start">
-        <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
-          <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground">
+        <div className="rounded-2xl border border-border bg-surface p-6">
+          <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
             Formulir Penghapusan Data
           </h2>
           <p className="mt-1 text-sm text-muted">

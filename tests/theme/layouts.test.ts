@@ -8,6 +8,12 @@ import LoginPage from "@/app/(auth)/login/page";
 import RegisterPage from "@/app/(auth)/register/page";
 import ResetPasswordPage from "@/app/(auth)/reset-password/page";
 import VerifyEmailPage from "@/app/(auth)/verify-email/page";
+import LegalLayout from "@/app/(legal)/layout";
+import AccountDeletionConfirmPage from "@/app/(legal)/account-deletion/confirm/page";
+import AccountDeletionPage from "@/app/(legal)/account-deletion/page";
+import DataDeletionPage from "@/app/(legal)/data-deletion/page";
+import PrivacyPage from "@/app/(legal)/privacy/page";
+import TermsPage from "@/app/(legal)/terms/page";
 import { AuthForm } from "@/components/auth/AuthForm";
 
 vi.mock("next/navigation", () => ({
@@ -18,7 +24,8 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/auth/LinkTokenCapture", () => ({ LinkTokenCapture: () => null }));
 
 // Public pages from docs/superpowers/specs/2026-10-27-app-editorial-theme-design.md
-// ("Public pages"): the auth poster built from landing artwork.
+// ("Public pages"): the auth poster built from landing artwork, and the legal
+// pages as an editorial reading page.
 
 /** The first element `<tag ...>...</tag>` in `html`; auth markup never nests the tag. */
 function element(html: string, tag: string): string {
@@ -136,4 +143,46 @@ describe("auth pages", () => {
       expect(html).not.toMatch(/text-brand-[67]00|bg-brand-600|font-black|shadow-\[/);
     },
   );
+});
+
+describe("legal layout", () => {
+  const html = renderToStaticMarkup(LegalLayout({ children: createElement("h1", null, "Kebijakan Privasi") }));
+
+  it("keeps the home link and the legal footer links", () => {
+    expect(links(html, "/").some((a) => a.includes("← Beranda"))).toBe(true);
+    for (const href of ["/privacy", "/terms", "/account-deletion"]) expect(links(html, href)).toHaveLength(1);
+  });
+
+  it("sits on paper without a blurred bar or inline styles", () => {
+    expect(html).not.toContain("backdrop-blur");
+    expect(html).not.toContain("style=");
+  });
+});
+
+describe("legal pages", () => {
+  const pages: [string, () => React.ReactElement | Promise<React.ReactElement>][] = [
+    ["privacy", PrivacyPage],
+    ["terms", TermsPage],
+    ["data-deletion", DataDeletionPage],
+    ["account-deletion", AccountDeletionPage],
+    ["account-deletion/confirm", () => AccountDeletionConfirmPage({ searchParams: Promise.resolve({}) })],
+  ];
+
+  it.each(pages)("%s has the editorial title and no old green accents", async (_name, page) => {
+    const html = renderToStaticMarkup(await page());
+    expect(html.match(/<h1\b[^>]*>/)?.[0]).toContain("tracking-[-0.06em]");
+    expect(html).not.toMatch(/text-brand-[67]00|bg-brand-600|font-black|shadow-sm|shadow-\[/);
+    expect(html).not.toMatch(/class="[^"]*\bprose\b/);
+  });
+
+  it.each(pages.slice(0, 2))("%s puts a rule above every section", async (_name, page) => {
+    const html = renderToStaticMarkup(await page());
+    const sections = html.match(/<section\b[^>]*>/g) ?? [];
+    expect(sections.length).toBeGreaterThan(5);
+    for (const tag of sections) {
+      expect(tag).toContain("border-t");
+      expect(tag).toContain("border-rule-strong");
+      expect(tag).toContain("pt-8");
+    }
+  });
 });
