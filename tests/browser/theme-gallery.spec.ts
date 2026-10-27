@@ -23,6 +23,8 @@ async function capture(page: Page, path: string, slug: string, screenshot: (page
   const known = KNOWN_DEFECTS[path] ?? {};
   await page.goto(path);
   await expect(page.locator("h1").first()).toBeVisible();
+  // Measure the settled layout, not the fallback font before DM Sans swaps in.
+  await page.evaluate(() => document.fonts.ready);
   expect(await page.evaluate(horizontalOverflow)).toBeLessThanOrEqual(known.overflow ?? 0);
 
   const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
