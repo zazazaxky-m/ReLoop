@@ -2,7 +2,9 @@
  * Leaflet marker/popup HTML is injected as strings, so these styles live in a
  * stylesheet: inline style="" attributes are blocked by the production CSP.
  * Colors come from the theme tokens in app/globals.css, the same ones the
- * MapLegend dots use, so markers and popups follow light and dark mode.
+ * MapLegend dots use. Popups follow light and dark mode; pins keep the light
+ * status colors in dark mode because the map tiles stay light (globals.css,
+ * ".dark .leaflet-marker-pane").
  */
 .rl-status--online { color: var(--color-status-online); }
 .rl-status--full { color: var(--color-status-full); }

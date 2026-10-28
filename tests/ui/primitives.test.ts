@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { BrandLogo } from "@/components/BrandLogo";
+import { MapLegend } from "@/components/map/MapLegend";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { buttonVariants } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -81,5 +82,16 @@ describe("NotificationBell", () => {
     expect(button).toContain("rounded-full");
     expect(button).toContain("focus-visible:ring-offset-background");
     expect(button).not.toContain("shadow-sm");
+  });
+});
+
+// Map pins sit on light OSM tiles in dark mode too.
+describe("status colors in dark mode", () => {
+  it("keys the legend in the pins' light status colors, ringed for the dark page", () => {
+    const html = render(createElement(MapLegend));
+    expect(html).toMatch(/^<div class="[^"]*\bmap-status-light\b/);
+    const dots = html.match(/<span class="[^"]*\bbg-status-[a-z]+\b[^"]*"/g) ?? [];
+    expect(dots).toHaveLength(5);
+    for (const dot of dots) expect(dot).toContain("dark:ring-on-ink");
   });
 });
