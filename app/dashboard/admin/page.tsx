@@ -12,8 +12,9 @@ import {
   StatusBadge,
   buttonVariants,
 } from "@/components/ui";
-import { FileText, Megaphone, Recycle, Truck, Users } from "@/components/ui/icons";
+import { Megaphone, Recycle, Truck } from "@/components/ui/icons";
 import { FillLevelBar } from "@/components/machine/FillLevelBar";
+import { formatDayHeading } from "@/lib/format";
 
 export default async function AdminDashboardPage() {
   const user = await requirePageUser(["ADMIN"]);
@@ -48,6 +49,7 @@ export default async function AdminDashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow={formatDayHeading(new Date())}
         title="Dashboard Admin"
         description="Pantau mesin, pickup, dan aktivitas operasional organisasi."
         actions={
@@ -60,7 +62,13 @@ export default async function AdminDashboardPage() {
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <MetricCard label="Mesin" value={machineCount} icon={Recycle} tone="green" />
         <MetricCard label="Mesin penuh" value={fullMachines} icon={Truck} hint="Perlu pickup" tone="amber" />
-        <MetricCard label="Perlu perhatian" value={offlineMachines} icon={Recycle} tone="slate" />
+        <MetricCard
+          label="Perlu perhatian"
+          value={offlineMachines}
+          icon={Recycle}
+          tone="slate"
+          emphasis={offlineMachines > 0}
+        />
         <MetricCard label="Campaign aktif" value={campaigns} icon={Megaphone} tone="blue" />
       </div>
 
@@ -69,28 +77,25 @@ export default async function AdminDashboardPage() {
           href="/dashboard/admin/machines"
           title="Kelola mesin"
           description="Pantau status dan kapasitas."
-          icon={Recycle}
+          index={1}
         />
         <QuickAction
           href="/dashboard/admin/pickups"
           title="Atur pickup"
           description="Buat dan tetapkan tugas."
-          icon={Truck}
-          tone="amber"
+          index={2}
         />
         <QuickAction
           href="/dashboard/admin/partners"
           title="Mitra pengepul"
           description="Kelola hubungan kemitraan."
-          icon={Users}
-          tone="teal"
+          index={3}
         />
         <QuickAction
           href="/dashboard/admin/reports"
           title="Laporan"
           description="Lihat dan unduh data."
-          icon={FileText}
-          tone="blue"
+          index={4}
         />
       </div>
 

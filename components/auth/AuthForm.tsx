@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Button, FormField, Input } from "@/components/ui";
-import { Eye, EyeOff } from "@/components/ui/icons";
+import { Button, FormField, Input, buttonVariants } from "@/components/ui";
+import { ArrowRight, Eye, EyeOff } from "@/components/ui/icons";
+import { cn } from "@/lib/cn";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { POST_AUTH_PATHS } from "@/lib/link-token";
 
@@ -129,8 +130,7 @@ export function AuthForm({ mode, next = null }: { mode: Mode; next?: PostAuthPat
     }
   }
 
-  const inputClass =
-    "h-11 rounded-xl border-border bg-surface px-4 text-[15px] shadow-none hover:border-muted sm:h-12";
+  const inputClass = "h-12 px-4 text-[15px]";
 
   if (mfaChallenge) {
     return (
@@ -165,13 +165,9 @@ export function AuthForm({ mode, next = null }: { mode: Mode; next?: PostAuthPat
           />
         </FormField>
 
-        <Button
-          type="submit"
-          size="lg"
-          className="mt-2 h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 sm:h-13"
-          disabled={loading}
-        >
+        <Button type="submit" size="lg" className="mt-2 h-13 w-full justify-between" disabled={loading}>
           {loading ? "Memverifikasi..." : "Verifikasi MFA"}
+          {loading ? null : <ArrowRight className="text-lg" />}
         </Button>
 
         <button
@@ -273,7 +269,7 @@ export function AuthForm({ mode, next = null }: { mode: Mode; next?: PostAuthPat
             onClick={() => setShowPassword((v) => !v)}
             aria-label={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
             aria-pressed={showPassword}
-            className="absolute inset-y-0 right-2 my-auto flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:hover:text-brand-400"
+            className="absolute inset-y-0 right-2 my-auto flex h-9 w-9 items-center justify-center rounded-full text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
           >
             {showPassword ? <EyeOff className="text-lg" /> : <Eye className="text-lg" />}
           </button>
@@ -284,7 +280,7 @@ export function AuthForm({ mode, next = null }: { mode: Mode; next?: PostAuthPat
         <div className="-mt-1 text-right">
           <Link
             href="/forgot-password"
-            className="relative text-sm font-semibold text-brand-700 before:absolute before:inset-x-0 before:-inset-y-2 hover:underline dark:text-brand-400"
+            className="relative text-sm text-foreground underline decoration-1 underline-offset-4 before:absolute before:inset-x-0 before:-inset-y-2 hover:decoration-2"
           >
             Lupa kata sandi?
           </Link>
@@ -297,7 +293,7 @@ export function AuthForm({ mode, next = null }: { mode: Mode; next?: PostAuthPat
             type="checkbox"
             checked={agreedToTerms}
             onChange={(e) => setAgreedToTerms(e.target.checked)}
-            className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-brand-600 focus:ring-brand-500"
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-input-border accent-ink focus:ring-brand-400 dark:accent-lime"
             data-testid="agree-terms"
           />
           <span>
@@ -306,7 +302,7 @@ export function AuthForm({ mode, next = null }: { mode: Mode; next?: PostAuthPat
               href="/terms"
               target="_blank"
               rel="noopener"
-              className="font-semibold text-brand-700 underline-offset-2 hover:underline dark:text-brand-400"
+              className="font-semibold text-foreground underline decoration-1 underline-offset-2 hover:decoration-2"
             >
               Syarat &amp; Ketentuan
             </Link>{" "}
@@ -315,7 +311,7 @@ export function AuthForm({ mode, next = null }: { mode: Mode; next?: PostAuthPat
               href="/privacy"
               target="_blank"
               rel="noopener"
-              className="font-semibold text-brand-700 underline-offset-2 hover:underline dark:text-brand-400"
+              className="font-semibold text-foreground underline decoration-1 underline-offset-2 hover:decoration-2"
             >
               Kebijakan Privasi
             </Link>{" "}
@@ -327,27 +323,24 @@ export function AuthForm({ mode, next = null }: { mode: Mode; next?: PostAuthPat
       <Button
         type="submit"
         size="lg"
-        className={`h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 sm:h-13 ${
-          isRegister ? "sm:col-span-2" : "mt-2"
-        }`}
+        className={cn("h-13 w-full justify-between", isRegister ? "sm:col-span-2" : "mt-2")}
         disabled={loading}
       >
         {loading ? "Memproses..." : isRegister ? "Buat akun" : "Masuk"}
+        {loading ? null : <ArrowRight className="text-lg" />}
       </Button>
 
-      <p
-        className={`text-center text-sm text-muted ${
-          isRegister ? "sm:col-span-2" : "pt-1"
-        }`}
-      >
-        {isRegister ? "Sudah punya akun? " : "Belum punya akun? "}
+      <div className={cn("space-y-4", isRegister ? "sm:col-span-2" : "pt-1")}>
+        <p className="flex items-center gap-3.5 text-xs text-muted before:h-px before:flex-1 before:bg-rule-strong after:h-px after:flex-1 after:bg-rule-strong">
+          {isRegister ? "Sudah punya akun?" : "Belum punya akun?"}
+        </p>
         <Link
           href={`${isRegister ? "/login" : "/register"}${next ? `?next=${encodeURIComponent(next)}` : ""}`}
-          className="relative font-bold text-brand-700 before:absolute before:-inset-x-1 before:-inset-y-2 hover:underline dark:text-brand-400"
+          className={buttonVariants({ variant: "outline", size: "lg", className: "w-full border-foreground" })}
         >
           {isRegister ? "Masuk" : "Daftar"}
         </Link>
-      </p>
+      </div>
     </form>
   );
 }

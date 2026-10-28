@@ -5,6 +5,7 @@ import {
   formatDateTime,
   formatDate,
   timeAgo,
+  formatDayHeading,
 } from "@/lib/format";
 
 describe("format", () => {
@@ -36,5 +37,9 @@ describe("format", () => {
     expect(timeAgo(new Date(now - 5 * 60_000).toISOString())).toContain("menit");
     expect(timeAgo(new Date(now - 3 * 3_600_000))).toContain("jam");
     expect(timeAgo(new Date(now - 2 * 86_400_000))).toContain("hari");
+  });
+
+  it("formatDayHeading names the Jakarta day, whatever the server's zone", () => {
+    expect(formatDayHeading(new Date("2026-10-26T18:30:00Z"))).toBe("Selasa, 27 Oktober");
   });
 });

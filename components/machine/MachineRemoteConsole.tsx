@@ -129,14 +129,14 @@ export function MachineRemoteConsole({
       : null;
 
   return (
-    <Card className="overflow-hidden border-emerald-200">
-      <div className="border-b border-emerald-100 bg-emerald-950 px-4 py-3 text-white sm:px-5">
+    <Card className="overflow-hidden">
+      <div className="border-b border-white/10 bg-sidebar px-4 py-3 text-sidebar-fg sm:px-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-emerald-300">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-sidebar-label">
               Remote Console
             </p>
-            <p className="mt-1 text-sm text-emerald-50/70">
+            <p className="mt-1 text-sm text-sidebar-muted">
               Kontrol aman melalui command queue HMAC.
             </p>
           </div>
@@ -144,7 +144,7 @@ export function MachineRemoteConsole({
             className={`rounded-full px-2 py-1 text-[10px] font-bold ${
               active
                 ? "bg-amber-300 text-amber-950"
-                : "bg-emerald-400/20 text-emerald-200"
+                : "bg-white/10 text-sidebar-fg"
             }`}
           >
             {active ? active.status : "SIAP"}
@@ -154,7 +154,7 @@ export function MachineRemoteConsole({
 
       <div className="space-y-4 p-4 sm:p-5">
         {error ? (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/20 dark:text-red-400">
             {error}
           </p>
         ) : null}

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { FileText, Info } from "@/components/ui/icons";
+import { Info } from "@/components/ui/icons";
 
 export const metadata: Metadata = {
   title: "Syarat & Ketentuan",
@@ -64,40 +64,38 @@ const sections = [
 
 export default function TermsPage() {
   return (
-    <article className="prose prose-slate max-w-none">
-      <header className="mb-10 border-b border-border pb-8">
-        <div className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-brand-700 dark:border-brand-900/40 dark:bg-brand-950/30 dark:text-brand-400">
-          <FileText className="text-sm" /> Ketentuan
-        </div>
-        <h1 className="mt-4 text-3xl font-black tracking-[-0.04em] text-foreground sm:text-4xl">
+    <article>
+      <header className="mb-12">
+        <p className="inline-block -rotate-[1.5deg] rounded-[3px] bg-lime px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.13em] text-ink">Ketentuan</p>
+        <h1 className="mt-5 text-4xl font-bold leading-[1.02] tracking-[-0.06em] text-foreground sm:text-5xl">
           Syarat &amp; Ketentuan ReLoop
         </h1>
         <p className="mt-3 text-sm text-muted">
           Terakhir diperbarui:{" "}
           <time dateTime={LAST_UPDATED}>{LAST_UPDATED}</time>
         </p>
-        <p className="mt-4 max-w-2xl text-sm leading-6 text-muted sm:text-[15px]">
+        <p className="mt-5 max-w-2xl text-[15px] leading-7 text-muted sm:text-base">
           Harap baca Syarat &amp; Ketentuan ini dengan saksama sebelum
           menggunakan Layanan ReLoop. Dokumen ini merupakan perjanjian yang
           mengikat antara Anda dan ReLoop.
         </p>
       </header>
 
-      <div className="space-y-6">
+      <div className="space-y-10">
         {sections.map((section) => (
           <section
             key={section.title}
-            className="rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6"
+            className="border-t border-rule-strong pt-8"
           >
-            <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground sm:text-xl">
+            <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground sm:text-2xl">
               {section.title}
             </h2>
-            <p className="mt-3 text-[15px] leading-7 text-muted">{section.body}</p>
+            <p className="mt-3 max-w-[68ch] text-[15px] leading-7 text-muted sm:text-base">{section.body}</p>
           </section>
         ))}
       </div>
 
-      <aside className="mt-10 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-5 text-sm leading-6 text-amber-900 dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-200 sm:p-6">
+      <aside className="mt-12 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/60 p-5 text-sm leading-6 text-amber-900 dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-200 sm:p-6">
         <Info className="mt-0.5 shrink-0 text-lg text-amber-700 dark:text-amber-400" />
         <div>
           <p className="font-bold text-amber-900 dark:text-amber-100">

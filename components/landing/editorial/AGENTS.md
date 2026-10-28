@@ -6,7 +6,7 @@ Preserve the cream paper, forest headline, lime brush slogan/ticker, photographe
 
 The ribbon silhouette MUST stay fixed. Material highlights flow lower-left → upper-right on the shared route. Do not restore the rejected orbit/morph or disconnected vertical strips. Both masks share phase; keep the four-second seamless dash period.
 
-All styles must remain scoped under `.reloop-landing`. Production CSP forbids inline style attributes: use stylesheet rules, including SVG mask type. Do not weaken CSP or change the rest of the app's theme to support this landing page.
+All styles must remain scoped under `.reloop-landing`. Production CSP forbids inline style attributes: use stylesheet rules, including SVG mask type. The whole app shares this visual language (see `docs/superpowers/specs/2026-10-27-app-editorial-theme-design.md`); the landing composition itself stays fixed, and CSP must not be weakened.
 
 Primary CTAs lead to `/register`; login and legal links use local app routes. The separate deposit/redemption demo is explicitly simulated and must never call real wallet/payment APIs. Keep keyboard focus containment, Escape, inert background, timer cleanup, motion pause and reduced-motion support.
 

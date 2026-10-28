@@ -263,8 +263,8 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
           role={error ? "alert" : "status"}
           className={
             error
-              ? "rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-status-error"
-              : "rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-800"
+              ? "rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-status-error dark:border-red-900/30 dark:bg-red-950/20"
+              : "rounded-xl border border-brand-200 bg-brand-50 px-3.5 py-2.5 text-sm text-foreground"
           }
         >
           {error ?? success}
@@ -279,12 +279,12 @@ export function TravelAgentManager({ agents }: { agents: TravelAgentRow[] }) {
           <CardContent>
             <form onSubmit={submit} className="space-y-4">
               {error ? (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-status-error">
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-status-error dark:border-red-900/30 dark:bg-red-950/20">
                   {error}
                 </div>
               ) : null}
               {success ? (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-800">
+                <div className="rounded-xl border border-brand-200 bg-brand-50 px-3.5 py-2.5 text-sm text-foreground">
                   {success}
                 </div>
               ) : null}

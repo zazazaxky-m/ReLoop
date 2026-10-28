@@ -13,7 +13,7 @@ The approved ReLoop poster prototype replaces the public `/` page. Base branch: 
 
 The approved transparent WebP cutouts, paper and generated floor plate are under `public/landing`, with their original embedded provenance. Fonts are self-hosted with licenses. Raster images keep the poster's deliberately measured layered coordinates; below-the-fold imagery is lazy-loaded. Icons use Phosphor, matching the prototype.
 
-`components/landing/editorial/landing.css` scopes resets, typography, palette, controls and responsive rules to `.reloop-landing`; auth/dashboard/legal surfaces retain their existing theme. A single global modal scroll-lock rule is temporary and removed on close/unmount. No CSP rules are relaxed and no inline style attributes are rendered.
+`components/landing/editorial/landing.css` scopes resets, typography, palette, controls and responsive rules to `.reloop-landing`; auth, dashboard and legal surfaces share the landing palette through `app/globals.css` tokens. A single global modal scroll-lock rule is temporary and removed on close/unmount. No CSP rules are relaxed and no inline style attributes are rendered.
 
 ## Motion
 

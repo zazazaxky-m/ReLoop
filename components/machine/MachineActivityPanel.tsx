@@ -62,7 +62,7 @@ export function MachineActivityPanel({
               onClick={() => setTab(item.id)}
               className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                 tab === item.id
-                  ? "bg-emerald-700 text-white shadow-sm"
+                  ? "bg-ink text-on-ink dark:bg-lime dark:text-ink"
                   : "text-muted hover:bg-surface hover:text-foreground"
               }`}
             >

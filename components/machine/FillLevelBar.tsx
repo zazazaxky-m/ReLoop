@@ -23,7 +23,7 @@ export function FillLevelBar({
         <rect
           width={width}
           height={1}
-          className={percent >= 80 ? "fill-amber-500" : "fill-brand-500"}
+          className={percent >= 80 ? "fill-amber-500" : "fill-ink dark:fill-lime"}
         />
       </svg>
     </div>

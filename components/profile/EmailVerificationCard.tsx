@@ -71,7 +71,7 @@ export function EmailVerificationCard({
             </Button>
           </div>
         )}
-        {message ? <p role="status" className="text-emerald-700 dark:text-emerald-400">{message}</p> : null}
+        {message ? <p role="status" className="text-status-online">{message}</p> : null}
         {error ? <p role="alert" className="text-status-error">{error}</p> : null}
         {unverified.length > 0 ? (
           <div className="space-y-1 rounded-xl border border-border bg-surface/50 p-3">

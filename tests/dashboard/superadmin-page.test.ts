@@ -1,7 +1,8 @@
 import { isValidElement, type ReactNode } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import SuperadminDashboardPage from '@/app/dashboard/superadmin/page';
-import { formatRupiah } from '@/lib/format';
+import { formatDayHeading, formatRupiah } from '@/lib/format';
 import { prisma } from '@/lib/prisma';
 import { getLiabilitySummary } from '@/lib/reconciliation-report';
 
@@ -44,5 +45,27 @@ describe('superadmin dashboard page (M05 fix round 1)', () => {
     expect(reward?.value).toBe(formatRupiah(60_000));
     expect(getLiabilitySummary).toHaveBeenCalledTimes(1);
     expect(prisma.rewardLedger.aggregate).not.toHaveBeenCalled();
+  });
+});
+
+describe('superadmin dashboard page (editorial theme)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('emphasizes pending partnerships only when there are some', async () => {
+    vi.mocked(prisma.organizationCollectorPartner.count).mockResolvedValueOnce(0);
+    expect(renderToStaticMarkup(await SuperadminDashboardPage())).not.toContain('data-emphasis');
+
+    vi.mocked(prisma.organizationCollectorPartner.count).mockResolvedValueOnce(3);
+    expect(renderToStaticMarkup(await SuperadminDashboardPage()).match(/data-emphasis="true"/g)).toHaveLength(1);
+  });
+
+  it("dates the header with today's Jakarta day", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-26T18:30:00Z'));
+    const html = renderToStaticMarkup(await SuperadminDashboardPage());
+    expect(html).toContain(formatDayHeading(new Date('2026-10-26T18:30:00Z')));
+    expect(html).toContain('Selasa, 27 Oktober');
   });
 });

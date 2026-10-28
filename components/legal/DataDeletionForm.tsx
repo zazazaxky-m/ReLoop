@@ -4,8 +4,7 @@ import { useState } from "react";
 import { Button, FormField, Input, Textarea } from "@/components/ui";
 import { CheckCircle, ShieldCheck } from "@/components/ui/icons";
 
-const inputClass =
-  "h-11 rounded-xl border-border bg-surface px-4 text-[15px] shadow-none hover:border-muted sm:h-12";
+const inputClass = "h-12 px-4 text-[15px]";
 
 const dataTypeOptions = [
   { id: "profile", label: "Profil (nama, email, nomor telepon, foto)" },
@@ -62,11 +61,11 @@ export function DataDeletionForm() {
   if (submitted) {
     return (
       <div className="space-y-5 text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-400">
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-lime text-ink">
           <CheckCircle className="text-2xl" />
         </span>
         <div className="space-y-1.5">
-          <h2 className="text-xl font-black tracking-[-0.03em] text-foreground">
+          <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
             Permintaan diterima
           </h2>
           <p className="text-sm leading-6 text-muted">
@@ -123,7 +122,7 @@ export function DataDeletionForm() {
                 type="checkbox"
                 checked={selected.has(opt.id)}
                 onChange={() => toggle(opt.id)}
-                className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-brand-600 focus:ring-brand-500"
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-input-border accent-ink focus:ring-brand-400 dark:accent-lime"
               />
               <span className="text-sm text-foreground">{opt.label}</span>
             </label>
@@ -151,7 +150,7 @@ export function DataDeletionForm() {
       <Button
         type="submit"
         size="lg"
-        className="h-12 w-full rounded-xl bg-brand-600 shadow-[0_10px_24px_rgba(4,120,87,0.2)] hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 sm:h-13"
+        className="h-13 w-full"
         disabled={loading}
       >
         <ShieldCheck className="mr-2 text-lg" />

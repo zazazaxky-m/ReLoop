@@ -4,8 +4,7 @@ import { useState } from "react";
 import { Button, FormField, Input, Textarea } from "@/components/ui";
 import { Info, Trash } from "@/components/ui/icons";
 
-const inputClass =
-  "h-11 rounded-xl border-border bg-surface px-4 text-[15px] shadow-none hover:border-muted sm:h-12";
+const inputClass = "h-12 px-4 text-[15px]";
 
 export function AccountDeletionForm() {
   const [email, setEmail] = useState("");
@@ -49,11 +48,11 @@ export function AccountDeletionForm() {
   if (submitted) {
     return (
       <div className="space-y-5 text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
           <Info className="text-2xl" />
         </span>
         <div className="space-y-1.5">
-          <h2 className="text-xl font-black tracking-[-0.03em] text-foreground">
+          <h2 className="text-xl font-bold tracking-[-0.03em] text-foreground">
             Menunggu konfirmasi
           </h2>
           <p className="text-sm leading-6 text-muted">{submitted}</p>
@@ -68,7 +67,7 @@ export function AccountDeletionForm() {
           Tidak bisa membuka email itu atau masuk ke aplikasi? Hubungi{" "}
           <a
             href="mailto:privacy@reloop.id"
-            className="font-semibold text-brand-700 hover:underline dark:text-brand-400"
+            className="font-semibold text-foreground underline decoration-1 underline-offset-2 hover:decoration-2"
           >
             privacy@reloop.id
           </a>{" "}
@@ -126,7 +125,7 @@ export function AccountDeletionForm() {
           type="checkbox"
           checked={confirm}
           onChange={(e) => setConfirm(e.target.checked)}
-          className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-brand-600 focus:ring-brand-500"
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-input-border accent-ink focus:ring-brand-400 dark:accent-lime"
           required
         />
         <span>
@@ -145,7 +144,7 @@ export function AccountDeletionForm() {
         type="submit"
         size="lg"
         variant="danger"
-        className="h-12 w-full rounded-xl sm:h-13"
+        className="h-13 w-full"
         disabled={loading}
       >
         <Trash className="mr-2 text-lg" />

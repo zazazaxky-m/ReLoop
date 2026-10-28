@@ -138,12 +138,12 @@ export default async function UserTrashBagPage({
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <StatusBadge status={t.status} />
-                  <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  <span className="rounded-full border border-border bg-surface-soft px-2.5 py-1 text-xs font-semibold text-muted">
                     Skor {t.complianceScore}/100
                   </span>
                   {pickedUp ? <StatusBadge status="BANK_SAMPAH_PICKUP" /> : null}
                   {t.campaign.rewardMode === "MONEY_REWARD" ? (
-                    <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                    <span className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-bold text-foreground">
                       Reward {formatRupiah(rewardAmount)}
                     </span>
                   ) : null}
@@ -163,7 +163,7 @@ export default async function UserTrashBagPage({
                             {b.status ? (
                               <StatusBadge status={b.status} />
                             ) : (
-                              <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                              <span className="rounded-full border border-border bg-surface-soft px-2 py-0.5 text-[10px] font-semibold text-muted">
                                 Belum divalidasi
                               </span>
                             )}
