@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- Decorative landing artwork:
    next/image adds an inline style that our CSP blocks. */
 import { BrandLogo } from "@/components/BrandLogo";
+import { preloadEditorialFonts } from "@/lib/fonts";
 import Link from "next/link";
 
 const BAND = "SETOR. PUTAR. ULANG.";
@@ -19,6 +20,7 @@ export default function AuthLayout({
 }: {
   children: React.ReactNode;
 }) {
+  preloadEditorialFonts();
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[minmax(420px,44%)_1fr]">
       {/* Decorative poster from the landing artwork: keep the page's <h1> (in the form) as the first heading. */}

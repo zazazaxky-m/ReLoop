@@ -259,3 +259,33 @@ describe("error pages", () => {
     expect(button).not.toMatch(/bg-brand-600|text-white/);
   });
 });
+
+// The body face is the landing's own DM Sans file (see fonts.test.ts); pages
+// outside the landing ask for it early, the landing loads it from its own CSS.
+describe("editorial font preload", () => {
+  const preloads = (html: string) =>
+    (html.match(/<link\b[^>]*rel="preload"[^>]*>/g) ?? []).filter((tag) => tag.includes('as="font"'));
+
+  // Rendered as components: preload() only works while React is rendering.
+  const asLayout = (Layout: unknown) => Layout as ComponentType<{ children?: ReactNode }>;
+
+  it.each([
+    ["auth layout", () => renderToStaticMarkup(createElement(asLayout(AuthLayout), null, createElement("h1", null, "Masuk")))],
+    ["legal layout", () => renderToStaticMarkup(createElement(asLayout(LegalLayout), null, createElement("h1", null, "Privasi")))],
+    [
+      "app shell",
+      () =>
+        renderToStaticMarkup(
+          createElement(AppShell as ComponentType<{ user: AppShellUser; children?: ReactNode }>, {
+            user: { name: "A", email: "a@reloop.test", role: "USER" },
+          }),
+        ),
+    ],
+  ] as const)("%s preloads DM Sans 400 and 700", (_name, render) => {
+    const tags = preloads(render());
+    for (const weight of ["400", "700"]) {
+      expect(tags.some((tag) => tag.includes(`href="/landing/fonts/dm-sans-${weight}.ttf"`))).toBe(true);
+    }
+    expect(tags.some((tag) => tag.includes("anton"))).toBe(false);
+  });
+});

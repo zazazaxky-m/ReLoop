@@ -1,4 +1,5 @@
 import { BrandLogo } from "@/components/BrandLogo";
+import { preloadEditorialFonts } from "@/lib/fonts";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -9,6 +10,7 @@ import type { ReactNode } from "react";
  * GitHub, support emails, etc.).
  */
 export default function LegalLayout({ children }: { children: ReactNode }) {
+  preloadEditorialFonts();
   return (
     <div className="min-h-dvh text-foreground">
       <header className="border-b border-rule-strong">
