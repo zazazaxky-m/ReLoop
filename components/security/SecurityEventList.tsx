@@ -67,7 +67,7 @@ export function SecurityEventList({
             {!compact ? (
               <Link
                 href={`/dashboard/superadmin/machines/${event.machine.id}`}
-                className="mt-2 inline-block text-xs font-semibold text-brand-700 dark:text-brand-400 hover:underline"
+                className="mt-2 inline-block text-xs font-semibold text-brand-700 dark:text-brand-400 underline decoration-1 underline-offset-2 hover:decoration-2"
               >
                 Buka detail mesin
               </Link>

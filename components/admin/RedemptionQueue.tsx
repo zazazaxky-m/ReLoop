@@ -189,7 +189,7 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
                   href={`/api/redemptions/${r.id}/proof`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs font-semibold text-brand-700 dark:text-brand-400 hover:underline"
+                  className="text-xs font-semibold text-brand-700 dark:text-brand-400 underline decoration-1 underline-offset-2 hover:decoration-2"
                 >
                   Lihat bukti
                 </a>
@@ -229,7 +229,7 @@ export function RedemptionQueue({ redemptions }: { redemptions: RedemptionAdminR
                 href={`/api/redemptions/${r.id}/proof`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs font-semibold text-brand-700 dark:text-brand-400 hover:underline"
+                className="text-xs font-semibold text-brand-700 dark:text-brand-400 underline decoration-1 underline-offset-2 hover:decoration-2"
               >
                 Lihat bukti
               </a>

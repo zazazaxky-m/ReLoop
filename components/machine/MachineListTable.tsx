@@ -31,7 +31,7 @@ export function MachineListTable({
       render: (m) => (
         <Link
           href={`${detailBase}/${m.id}`}
-          className="font-mono text-sm font-semibold text-brand-700 hover:underline"
+          className="font-mono text-sm font-semibold text-brand-700 underline decoration-1 underline-offset-2 hover:decoration-2"
         >
           {m.machineCode}
         </Link>
