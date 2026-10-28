@@ -28,7 +28,7 @@ export function MachineCaptureGallery({
       {captures.map((capture) => (
         <article
           key={capture.id}
-          className="overflow-hidden rounded-xl border border-border bg-slate-50"
+          className="overflow-hidden rounded-xl border border-border bg-surface-soft"
         >
           <a
             href={`/api/machine-captures/${capture.id}/image/scene`}
@@ -58,12 +58,12 @@ export function MachineCaptureGallery({
             </div>
 
             <div className="flex flex-wrap gap-2 text-xs">
-              <span className="rounded-full bg-white px-2 py-1 text-slate-600">
+              <span className="rounded-full bg-white px-2 py-1 text-ink">
                 {capture.personDetected
                   ? "Orang terdeteksi"
                   : "Orang tidak terdeteksi"}
               </span>
-              <span className="rounded-full bg-white px-2 py-1 text-slate-600">
+              <span className="rounded-full bg-white px-2 py-1 text-ink">
                 {capture.faceCount} wajah
               </span>
             </div>

@@ -112,7 +112,7 @@ export async function MachineDetailView({
                     className={
                       on
                         ? "rounded-full border border-brand-200 bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700"
-                        : "rounded-full border border-border bg-slate-50 px-2.5 py-0.5 text-xs text-muted line-through"
+                        : "rounded-full border border-border bg-surface-soft px-2.5 py-0.5 text-xs text-muted line-through"
                     }
                   >
                     {label}

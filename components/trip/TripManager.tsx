@@ -621,12 +621,12 @@ export function TripManager({
                 </FormField>
               </div>
               {campaigns.length === 0 ? (
-                <p className="text-sm text-amber-700">
+                <p className="text-sm text-amber-700 dark:text-amber-400">
                   Belum ada campaign ACTIVE tipe Trash Bag / Program Wisata. Aktifkan campaign dulu.
                 </p>
               ) : null}
               {agentRequired && travelAgents.length === 0 ? (
-                <p className="text-sm text-amber-700">
+                <p className="text-sm text-amber-700 dark:text-amber-400">
                   Program Wisata membutuhkan travel agent berstatus INVITED.
                 </p>
               ) : null}
