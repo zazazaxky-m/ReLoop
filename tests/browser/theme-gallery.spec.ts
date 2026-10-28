@@ -66,6 +66,12 @@ async function capture(
   await screenshot(page, `theme-${slug}`);
 }
 
+// A legacy layout's viewport overrides the root theme color and keeps the rest.
+async function expectLegacyChrome(page: Page) {
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#16a34a");
+  await expect(page.locator('meta[name="viewport"]')).toHaveAttribute("content", /width=device-width/);
+}
+
 test("public pages", async ({ page, fixture, artifacts }) => {
   await fixture.login(page, "guest");
   for (const [path, slug] of [
@@ -81,6 +87,7 @@ test("public pages", async ({ page, fixture, artifacts }) => {
   // Legacy surface: screenshot only, it must look unchanged.
   await page.goto(`/kiosk/${fixture.audit.ids.machineCode}`);
   await page.waitForLoadState("networkidle");
+  await expectLegacyChrome(page);
   await artifacts.screenshot(page, "theme-kiosk");
 });
 
@@ -127,6 +134,7 @@ test("admin pages", async ({ page, fixture, artifacts }) => {
   // Legacy surface: screenshot only, it must look unchanged.
   await page.goto(`/print/trips/${trip.id}`);
   await page.waitForLoadState("networkidle");
+  await expectLegacyChrome(page);
   await artifacts.screenshot(page, "theme-print");
 });
 

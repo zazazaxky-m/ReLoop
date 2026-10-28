@@ -2,7 +2,9 @@
    (docs/superpowers/specs/2026-10-27-app-editorial-theme-design.md) and must
    look unchanged. This scope re-declares the values the tokens had on main
    before the theme work, plus Tailwind's default red/amber/blue/slate, which
-   app/globals.css warms. Checked by tests/theme/legacy.test.ts. */
+   app/globals.css warms, and the old app face, selection and scrollbar. The
+   old browser chrome color is each legacy layout's viewport. Checked by
+   tests/theme/legacy.test.ts. */
 .legacy-theme {
   --color-background: #f3f7f5;
   --color-surface: #ffffff;
@@ -74,11 +76,12 @@
   --color-slate-800: oklch(27.9% 0.041 260.031);
   --color-slate-900: oklch(20.8% 0.042 265.755);
   --color-slate-950: oklch(12.9% 0.042 264.695);
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   min-height: 100vh;
   background-color: var(--color-background);
   color: var(--color-foreground);
-  font-family: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-family: var(--font-sans);
 }
 
 .dark .legacy-theme {
@@ -110,6 +113,25 @@
   --color-status-maintenance: #2563eb;
   --color-status-error: #dc2626;
   --color-status-offline: #64748b;
+}
+
+.legacy-theme ::selection,
+.legacy-theme::selection {
+  background: var(--color-brand-200);
+  color: var(--color-brand-900);
+}
+
+/* The page scrollbar belongs to html, outside the surface, hence the :has(). */
+@media (pointer: fine) {
+  html:has(.legacy-theme)::-webkit-scrollbar-thumb,
+  .legacy-theme ::-webkit-scrollbar-thumb {
+    background: #bdcbc2;
+  }
+}
+
+html.dark:has(.legacy-theme)::-webkit-scrollbar-thumb,
+.dark .legacy-theme ::-webkit-scrollbar-thumb {
+  background: #2b3a32;
 }
 
 /* Whatever the legacy surface does not cover (e.g. below the print sheet)
