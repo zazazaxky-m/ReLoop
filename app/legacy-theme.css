@@ -125,3 +125,12 @@ body:has(.legacy-theme) {
 body:has(.legacy-theme)::before {
   display: none;
 }
+
+/* The trip print page whitens html, body and .print-root for print; this
+   wrapper sits between them and must not print its screen background. */
+@media print {
+  .legacy-theme {
+    min-height: auto;
+    background: none;
+  }
+}
