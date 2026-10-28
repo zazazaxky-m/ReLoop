@@ -5,6 +5,27 @@ import { cn } from "@/lib/cn";
 /** Kept for call-site compatibility; the editorial card is neutral. */
 type MetricTone = "green" | "blue" | "amber" | "teal" | "slate";
 
+// Values never wrap: "Rp 12.345.678" is one word (Intl joins "Rp" with a no-break
+// space) and a split amount reads as a different one. Short values keep the large
+// size; longer ones scale with the card width (cqi), the divisor being the length
+// bucket's widest width in em (Anton digits run about 0.46em). Literal classes so
+// Tailwind can generate them.
+const FIT_BY_LENGTH: [maxLength: number, className: string][] = [
+  [4, "text-4xl sm:text-[2.75rem]"],
+  [6, "text-[length:min(2.75rem,calc(100cqi/3))]"],
+  [8, "text-[length:min(2.75rem,calc(100cqi/3.7))]"],
+  [10, "text-[length:min(2.75rem,calc(100cqi/4.6))]"],
+  [12, "text-[length:min(2.75rem,calc(100cqi/5.5))]"],
+  [14, "text-[length:min(2.75rem,calc(100cqi/6.5))]"],
+  [16, "text-[length:min(2.75rem,calc(100cqi/7.4))]"],
+];
+const FIT_LONGEST = "text-[length:min(2.75rem,calc(100cqi/8.4))]";
+
+function fitValue(value: ReactNode): string {
+  const length = typeof value === "string" || typeof value === "number" ? String(value).length : 0;
+  return FIT_BY_LENGTH.find(([max]) => length <= max)?.[1] ?? FIT_LONGEST;
+}
+
 export function MetricCard({
   label,
   value,
@@ -22,9 +43,6 @@ export function MetricCard({
   emphasis?: boolean;
   className?: string;
 }) {
-  // A formatted amount such as "Rp 12.345.678" cannot wrap (Intl joins "Rp" with
-  // a no-break space): in a narrow card it drops a size and the icon makes room.
-  const long = typeof value === "string" && value.length > 8;
   return (
     <Card
       data-emphasis={emphasis ? "true" : undefined}
@@ -34,36 +52,20 @@ export function MetricCard({
         className,
       )}
     >
-      <div className="flex h-full items-start justify-between gap-3">
-        <div className="min-w-0 space-y-2">
-          <p
-            className={cn(
-              "text-xs font-bold uppercase tracking-[0.1em]",
-              emphasis ? "text-sidebar-muted" : "text-muted",
-            )}
-          >
-            {label}
-          </p>
-          <p
-            className={cn(
-              "font-display leading-none tracking-[-0.01em] break-words",
-              long ? "text-xl @[13rem]:text-4xl @[17rem]:text-[2.75rem]" : "text-4xl sm:text-[2.75rem]",
-              emphasis ? "text-lime" : "text-foreground",
-            )}
-          >
-            {value}
-          </p>
-          {hint ? (
-            <p className={cn("text-xs leading-5", emphasis ? "text-sidebar-muted" : "text-muted")}>
-              {hint}
-            </p>
-          ) : null}
-        </div>
+      {/* The icon shares the label row so the value gets the card's full width. */}
+      <div className="flex items-start justify-between gap-3">
+        <p
+          className={cn(
+            "min-w-0 pt-1 text-xs font-bold uppercase tracking-[0.1em]",
+            emphasis ? "text-sidebar-muted" : "text-muted",
+          )}
+        >
+          {label}
+        </p>
         {Icon ? (
           <span
             className={cn(
-              "h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg",
-              long ? "hidden @[13rem]:flex" : "flex",
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg",
               emphasis ? "bg-lime text-ink" : "bg-surface-soft text-foreground",
             )}
           >
@@ -71,6 +73,21 @@ export function MetricCard({
           </span>
         ) : null}
       </div>
+      <p
+        data-metric-value=""
+        className={cn(
+          "mt-2 whitespace-nowrap font-display leading-none tracking-[-0.01em]",
+          fitValue(value),
+          emphasis ? "text-lime" : "text-foreground",
+        )}
+      >
+        {value}
+      </p>
+      {hint ? (
+        <p className={cn("mt-2 text-xs leading-5", emphasis ? "text-sidebar-muted" : "text-muted")}>
+          {hint}
+        </p>
+      ) : null}
     </Card>
   );
 }

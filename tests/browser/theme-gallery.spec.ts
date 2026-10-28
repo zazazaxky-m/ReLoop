@@ -42,6 +42,11 @@ async function capture(page: Page, path: string, slug: string, screenshot: (page
   // Measure the settled layout, not the fallback font before DM Sans swaps in.
   await page.evaluate(() => document.fonts.ready);
   expect(await page.evaluate(horizontalOverflow)).toBeLessThanOrEqual(known.overflow ?? 0);
+  // Metric values never wrap (a split amount reads as another one), so each must fit its card.
+  const clipped = await page
+    .locator("[data-metric-value]")
+    .evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
+  expect(clipped).toEqual([]);
 
   const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
   const critical = axe.violations.filter((v) => v.impact === "critical" && !known.critical?.includes(v.id));

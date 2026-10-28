@@ -49,17 +49,33 @@ describe("MetricCard", () => {
     for (const c of ['data-emphasis="true"', "bg-ink", "text-lime"]) expect(off).not.toContain(c);
   });
 
-  // "Rp 12.345.678" is one unbreakable word (Intl puts a no-break space after "Rp").
-  it("fits a long amount in a narrow card instead of breaking the number", () => {
-    const icon = () => createElement("svg");
-    const long = render(createElement(MetricCard, { label: "Total diperoleh", value: "Rp\u00a012.345.678", icon }));
-    expect(long).toMatch(/^<div class="[^"]*@container/);
-    expect(long).toMatch(/class="[^"]*text-xl @\[13rem\]:text-4xl[^"]*">Rp/);
-    expect(long).toMatch(/<span class="[^"]*\bhidden @\[13rem\]:flex\b[^"]*"><svg/);
+  // "Rp 12.345.678" is one unbreakable word (Intl puts a no-break space after "Rp"),
+  // and "Rp 5.000" or a count of 1234 must not split either: the value keeps one
+  // line and its size follows the card width (cqi) and its length.
+  const icon = () => createElement("svg");
+  const valueTag = (html: string) => html.match(/<p\b[^>]*data-metric-value[^>]*>/)?.[0] ?? "";
 
-    const short = render(createElement(MetricCard, { label: "Mesin", value: 24, icon }));
-    expect(short).toMatch(/class="[^"]*text-4xl[^"]*">24</);
-    expect(short).not.toMatch(/<span class="[^"]*\bhidden\b/);
+  it("keeps every value on one line", () => {
+    for (const value of [24, 1234, "Rp\u00a05.000", "Rp\u00a012.345.678"]) {
+      const tag = valueTag(render(createElement(MetricCard, { label: "Saldo", value, icon })));
+      expect(tag).toContain("whitespace-nowrap");
+      expect(tag).not.toContain("break-words");
+    }
+  });
+
+  it("gives the value the card's full width by putting the icon in the label row", () => {
+    const html = render(createElement(MetricCard, { label: "Total diperoleh", value: "Rp\u00a012.345.678", icon }));
+    expect(html).toMatch(/^<div class="[^"]*@container/);
+    expect(html.indexOf("<svg")).toBeLessThan(html.indexOf("data-metric-value"));
+    expect(html).not.toMatch(/class="[^"]*\bhidden\b/);
+  });
+
+  it("sizes a value by its length against the card width", () => {
+    const tag = (value: string | number) => valueTag(render(createElement(MetricCard, { label: "x", value })));
+    expect(tag(24)).toContain("text-4xl");
+    expect(tag(1234)).toContain("text-4xl");
+    expect(tag("Rp\u00a05.000")).toContain("text-[length:min(2.75rem,calc(100cqi/3.7))]");
+    expect(tag("Rp\u00a012.345.678")).toContain("text-[length:min(2.75rem,calc(100cqi/6.5))]");
   });
 });
 
