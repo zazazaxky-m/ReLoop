@@ -283,6 +283,7 @@ function SlideEditor({
       <CardContent className="space-y-4">
         {slides.map((slide, index) => {
           const uploadKey = `${kind}-${index}`;
+          const fieldId = (key: keyof HeroSlide) => `hero-${uploadKey}-${key}`;
           return (
             <div
               key={index}
@@ -338,8 +339,9 @@ function SlideEditor({
                     </label>
                   </div>
                 </div>
-                <FormField label="Label kecil">
+                <FormField label="Label kecil" htmlFor={fieldId("eyebrow")}>
                   <Input
+                    id={fieldId("eyebrow")}
                     value={slide.eyebrow}
                     onChange={(event) =>
                       onUpdate(index, "eyebrow", event.target.value)
@@ -347,8 +349,9 @@ function SlideEditor({
                     maxLength={60}
                   />
                 </FormField>
-                <FormField label="Tautan tujuan">
+                <FormField label="Tautan tujuan" htmlFor={fieldId("href")}>
                   <Input
+                    id={fieldId("href")}
                     value={slide.href}
                     onChange={(event) =>
                       onUpdate(index, "href", event.target.value)
@@ -356,8 +359,9 @@ function SlideEditor({
                     placeholder={kind === "mobile" ? "/campaigns" : "/register"}
                   />
                 </FormField>
-                <FormField label="Judul" className="sm:col-span-2" required>
+                <FormField label="Judul" htmlFor={fieldId("title")} className="sm:col-span-2" required>
                   <Input
+                    id={fieldId("title")}
                     value={slide.title}
                     onChange={(event) =>
                       onUpdate(index, "title", event.target.value)
@@ -366,8 +370,9 @@ function SlideEditor({
                     required
                   />
                 </FormField>
-                <FormField label="Deskripsi" className="sm:col-span-2">
+                <FormField label="Deskripsi" htmlFor={fieldId("description")} className="sm:col-span-2">
                   <Input
+                    id={fieldId("description")}
                     value={slide.description}
                     onChange={(event) =>
                       onUpdate(index, "description", event.target.value)
@@ -377,10 +382,12 @@ function SlideEditor({
                 </FormField>
                 <FormField
                   label="URL / path gambar"
+                  htmlFor={fieldId("imageUrl")}
                   hint="Terisi otomatis setelah upload. URL HTTPS juga dapat digunakan."
                   className="sm:col-span-2"
                 >
                   <Input
+                    id={fieldId("imageUrl")}
                     value={slide.imageUrl}
                     onChange={(event) =>
                       onUpdate(index, "imageUrl", event.target.value)
