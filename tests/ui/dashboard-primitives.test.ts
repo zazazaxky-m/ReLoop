@@ -2,11 +2,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FillLevelBar } from "@/components/machine/FillLevelBar";
-import { toneClasses } from "@/components/ui/Badge";
+import { Badge, toneClasses } from "@/components/ui/Badge";
 import { DataTable } from "@/components/ui/DataTable";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { QuickAction } from "@/components/ui/QuickAction";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Timeline } from "@/components/ui/Timeline";
 
 // Dashboard primitives in direction "B · Berkarakter" (spec: "Logged-in app").
@@ -78,6 +79,20 @@ describe("MetricCard", () => {
     expect(tag(1234)).toContain("text-4xl");
     expect(tag("Rp\u00a05.000")).toContain("text-[length:min(2.75rem,calc(100cqi/3.7))]");
     expect(tag("Rp\u00a012.345.678")).toContain("text-[length:min(2.75rem,calc(100cqi/6.5))]");
+  });
+});
+
+// A badge is a label, not a number: inside a metric value it would otherwise
+// inherit Anton and the value's tight tracking (MachineDetailView's "Status").
+describe("badge in a metric value", () => {
+  it.each([
+    ["a registered status", createElement(StatusBadge, { status: "ONLINE" })],
+    ["an unregistered status", createElement(StatusBadge, { status: "SOMETHING_NEW" })],
+    ["a plain badge", createElement(Badge, { tone: "info" }, "Baru")],
+  ])("sets %s in the app face", (_name, badge) => {
+    const html = render(createElement(MetricCard, { label: "Status", value: badge }));
+    const badgeClass = html.match(/<span class="([^"]*rounded-full border[^"]*)"/)?.[1] ?? "";
+    expect(badgeClass.split(" ")).toEqual(expect.arrayContaining(["font-sans", "tracking-normal"]));
   });
 });
 

@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { Badge, type Tone, toneClasses } from "./Badge";
+import { Badge, badgeBase, type Tone, toneClasses } from "./Badge";
 import { cn } from "@/lib/cn";
 import {
   AlertTriangle,
@@ -135,7 +135,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold",
+        badgeBase,
         toneClasses[tone],
         className,
       )}
