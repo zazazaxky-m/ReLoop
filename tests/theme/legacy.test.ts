@@ -92,6 +92,14 @@ describe("legacy theme scope", () => {
     expect(legacyCss).toMatch(/\nbody:has\(\.legacy-theme\)::before\s*\{\s*display:\s*none;\s*\}/);
   });
 
+  // The trip print page whitens html, body and .print-root for print; the wrapper
+  // between them must not paint its screen background onto the sheet.
+  it("steps out of the way when printing", () => {
+    expect(legacyCss).toMatch(
+      /@media print\s*\{\s*\.legacy-theme\s*\{\s*min-height:\s*auto;\s*background:\s*none;\s*\}\s*\}/,
+    );
+  });
+
   it.each([
     ["kiosk", KioskLayout],
     ["machine display", MachineDisplayLayout],

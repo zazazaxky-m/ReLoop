@@ -31,7 +31,7 @@ const BREAK_TEXT: Record<ChainBreak, string> = {
 
 const TONE_CLASS: Record<Tone, string> = {
   ok: "text-brand-700",
-  warn: "text-amber-700",
+  warn: "text-amber-700 dark:text-amber-400",
   muted: "text-muted",
 };
 
@@ -129,7 +129,7 @@ export function AuditChainVerifier() {
             Verifikasi rantai audit sesuai nomor urut untuk mendeteksi manipulasi. Arsip audit lama dilaporkan terpisah.
           </p>
           {result ? <AuditChainResult result={result} /> : null}
-          {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
+          {error ? <p className="mt-2 text-sm text-status-error">{error}</p> : null}
         </div>
         <Button type="button" onClick={runVerify} disabled={loading}>
           {loading ? "Memverifikasi…" : "Verifikasi rantai"}

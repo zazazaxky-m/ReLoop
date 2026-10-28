@@ -27,11 +27,15 @@ function tsxFiles(dir: string): string[] {
     .map((file) => path.posix.join(dir, file.split(path.sep).join("/")));
 }
 
+function appFiles(): string[] {
+  return [...tsxFiles("app"), ...tsxFiles("components")].filter(
+    (file) => !EXCLUDED.some((excluded) => file.startsWith(excluded)),
+  );
+}
+
 describe("raw palette guard", () => {
   it("leaves no untokened palette colors in the app", () => {
-    const files = [...tsxFiles("app"), ...tsxFiles("components")].filter(
-      (file) => !EXCLUDED.some((excluded) => file.startsWith(excluded)),
-    );
+    const files = appFiles();
     expect(files.length).toBeGreaterThan(50);
 
     const hits: string[] = [];
@@ -44,6 +48,26 @@ describe("raw palette guard", () => {
             if (match) hits.push(`${file}:${i + 1} ${match[0]}`);
           }
         });
+    }
+    expect(hits).toEqual([]);
+  });
+
+  // Red, amber, blue and slate are warmed for light mode only: their pale
+  // backgrounds stay pale and their deep text shades stay deep in dark mode.
+  it("pairs every light-only warm color with a dark variant", () => {
+    const risky = /(?<![\w:-])(?:bg-(?:red|amber|blue|slate)-(?:50|100)|text-(?:red|amber|blue|slate)-[5-9]00)(?![\w-])/g;
+    const hits: string[] = [];
+    for (const file of appFiles()) {
+      const source = readFileSync(path.join(ROOT, file), "utf8");
+      for (const literal of source.matchAll(/(["'`])((?:(?!\1)[^\n])*?)\1/g)) {
+        const classes = literal[2];
+        for (const [color] of classes.matchAll(risky)) {
+          const kind = color.slice(0, color.indexOf("-"));
+          if (!classes.includes(`dark:${kind}-`)) {
+            hits.push(`${file}:${source.slice(0, literal.index).split("\n").length} ${color}`);
+          }
+        }
+      }
     }
     expect(hits).toEqual([]);
   });
