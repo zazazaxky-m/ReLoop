@@ -100,6 +100,19 @@ describe("editorial palette", () => {
     }
   });
 
+  // OSM tiles stay light in dark mode, so pins (and the legend that keys them)
+  // keep the light-mode status colors; dark-mode hues fall to about 2:1 on land.
+  it("keeps map pins in the light status colors over the light tiles", () => {
+    const scoped = readBlock(css, ".dark .leaflet-marker-pane, .dark .map-status-light");
+    const osmLand = "#f2efe9";
+    for (const status of ["online", "full", "maintenance", "error", "offline"]) {
+      const key = `color-status-${status}`;
+      expect(scoped[key], key).toBe(light[key]);
+      expect(contrast(light[key], osmLand), key).toBeGreaterThanOrEqual(3);
+    }
+    expect(scoped["color-surface"]).toBe(light["color-surface"]);
+  });
+
   it("map markers use status tokens", () => {
     const markers = readRepoFile("components/map/map-markers.css");
     for (const status of ["online", "full", "maintenance", "error", "offline"]) {

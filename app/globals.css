@@ -263,6 +263,17 @@ button:not(:disabled),
   --color-muted: #454c40;
 }
 
+/* OSM map tiles stay light in dark mode: pins, and the legend that keys them,
+   keep the light status colors, and the pin's inner disc stays light. */
+.dark .leaflet-marker-pane, .dark .map-status-light {
+  --color-surface: #f7f6ef;
+  --color-status-online: #3d7a2a;
+  --color-status-full: #b7791f;
+  --color-status-maintenance: #3a5290;
+  --color-status-error: #b5462b;
+  --color-status-offline: #62685a;
+}
+
 .dark ::-webkit-scrollbar-thumb {
   background: #2b4436;
 }

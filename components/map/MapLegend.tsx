@@ -1,5 +1,7 @@
 // Static color classes (not inline styles, which our CSP blocks); keep in sync
-// with the .rl-status--* colors in map-markers.css.
+// with the .rl-status--* colors in map-markers.css. map-status-light keeps the
+// pins' light status colors in dark mode (globals.css); the ring keeps the dots
+// visible on the dark page.
 const ITEMS: { label: string; dotClass: string }[] = [
   { label: "Online", dotClass: "bg-status-online" },
   { label: "Penuh", dotClass: "bg-status-full" },
@@ -10,11 +12,11 @@ const ITEMS: { label: string; dotClass: string }[] = [
 
 export function MapLegend({ showCampaign = true }: { showCampaign?: boolean }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
+    <div className="map-status-light flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
       {ITEMS.map((i) => (
         <span key={i.label} className="flex items-center gap-1.5">
           <span
-            className={`inline-block h-3 w-3 rounded-full ${i.dotClass}`}
+            className={`inline-block h-3 w-3 rounded-full dark:ring-1 dark:ring-on-ink ${i.dotClass}`}
             aria-hidden
           />
           {i.label}
