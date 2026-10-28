@@ -18,6 +18,11 @@ export const toneClasses: Record<Tone, string> = {
   brand: "bg-brand-100 text-brand-700 border-brand-300 dark:bg-brand-950/30 dark:text-status-online dark:border-brand-900/40",
 };
 
+// A badge is a label in the app face wherever it sits, including inside an
+// Anton metric value with its tight tracking.
+export const badgeBase =
+  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-sans text-xs font-bold tracking-normal";
+
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   tone?: Tone;
 }
@@ -26,7 +31,7 @@ export function Badge({ tone = "neutral", className, ...props }: BadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold",
+        badgeBase,
         toneClasses[tone],
         className,
       )}

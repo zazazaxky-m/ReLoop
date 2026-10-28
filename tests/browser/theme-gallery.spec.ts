@@ -20,6 +20,7 @@ const RESTYLED = new Set<string>([
   "/dashboard/pengepul",
   "/dashboard/admin",
   "/dashboard/admin/machines",
+  "/dashboard/admin/machines/[id]",
   "/dashboard/superadmin",
   "/dashboard/superadmin/users",
   "/dashboard/superadmin/config",
@@ -35,8 +36,15 @@ const KNOWN_DEFECTS: Record<string, { overflow?: number; critical?: string[] }> 
 
 const horizontalOverflow = () => document.documentElement.scrollWidth - window.innerWidth;
 
-async function capture(page: Page, path: string, slug: string, screenshot: (page: Page, name: string) => Promise<string>) {
-  const known = KNOWN_DEFECTS[path] ?? {};
+/** `route` is the path's pattern in RESTYLED and KNOWN_DEFECTS, for a path with a seeded id. */
+async function capture(
+  page: Page,
+  path: string,
+  slug: string,
+  screenshot: (page: Page, name: string) => Promise<string>,
+  route = path,
+) {
+  const known = KNOWN_DEFECTS[route] ?? {};
   await page.goto(path);
   await expect(page.locator("h1").first()).toBeVisible();
   // Measure the settled layout, not the fallback font before DM Sans swaps in.
@@ -51,7 +59,7 @@ async function capture(page: Page, path: string, slug: string, screenshot: (page
   const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
   const critical = axe.violations.filter((v) => v.impact === "critical" && !known.critical?.includes(v.id));
   expect(critical.map((v) => v.id)).toEqual([]);
-  if (RESTYLED.has(path)) {
+  if (RESTYLED.has(route)) {
     expect(axe.violations.filter((v) => v.id === "color-contrast").flatMap((v) => v.nodes.map((n) => n.target.join(" ")))).toEqual([]);
   }
 
@@ -105,6 +113,16 @@ test("admin pages", async ({ page, fixture, artifacts }) => {
   ] as const) {
     await capture(page, path, slug, artifacts.screenshot);
   }
+  // Its status metric holds a badge, which must keep the app face (not Anton).
+  await capture(
+    page,
+    `/dashboard/admin/machines/${fixture.audit.ids.machineA}`,
+    "admin-machine-detail",
+    artifacts.screenshot,
+    "/dashboard/admin/machines/[id]",
+  );
+  const statusBadge = page.locator("[data-metric-value] > span").first();
+  expect(await statusBadge.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"DM Sans"/);
 
   // Legacy surface: screenshot only, it must look unchanged.
   await page.goto(`/print/trips/${trip.id}`);
