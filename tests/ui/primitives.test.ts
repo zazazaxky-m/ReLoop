@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { BrandLogo } from "@/components/BrandLogo";
 import { MapLegend } from "@/components/map/MapLegend";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { toneClasses } from "@/components/ui/Badge";
 import { buttonVariants } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/FormField";
@@ -85,8 +86,18 @@ describe("NotificationBell", () => {
   });
 });
 
-// Map pins sit on light OSM tiles in dark mode too.
+// Lime is the brand accent, never a status color (spec anti-goal).
 describe("status colors in dark mode", () => {
+  it("gives no badge tone lime text in dark mode", () => {
+    for (const [tone, classes] of Object.entries(toneClasses)) {
+      expect(classes, tone).not.toMatch(/dark:text-brand-[345]00\b/);
+    }
+  });
+
+  it.each(["ACTIVE", "ON_THE_WAY", "ARRIVED", "CHECK_OUT"])("renders %s in the status green", (status) => {
+    expect(render(createElement(StatusBadge, { status }))).toContain("dark:text-status-online");
+  });
+
   it("keys the legend in the pins' light status colors, ringed for the dark page", () => {
     const html = render(createElement(MapLegend));
     expect(html).toMatch(/^<div class="[^"]*\bmap-status-light\b/);
