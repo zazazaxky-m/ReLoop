@@ -74,6 +74,15 @@ describe("editorial palette", () => {
     ["dark", "blue-400", "surface", 4.5],
     ["dark", "slate-400", "surface", 4.5],
     ["dark", "status-error", "surface", 4.5],
+    // Pages color text with brand-600/700/800 in light mode only; dark mode must
+    // keep that text readable on every dark surface.
+    ["dark", "brand-600", "surface", 4.5],
+    ["dark", "brand-600", "background", 4.5],
+    ["dark", "brand-700", "surface", 4.5],
+    ["dark", "brand-700", "surface-soft", 4.5],
+    ["dark", "brand-700", "brand-50", 4.5],
+    ["dark", "brand-800", "surface", 4.5],
+    ["dark", "brand-800", "brand-50", 4.5],
   ];
 
   it.each(pairs)("%s: %s on %s is at least %s:1", (scheme, fg, bg, min) => {
@@ -87,5 +96,17 @@ describe("editorial palette", () => {
         if (key.startsWith("color-")) expect(value, key).toMatch(/^#[0-9a-f]{6}$/);
       }
     }
+  });
+
+  it("map markers use status tokens", () => {
+    const markers = readRepoFile("components/map/map-markers.css");
+    for (const status of ["online", "full", "maintenance", "error", "offline"]) {
+      expect(markers).toMatch(new RegExp(`\\.rl-status--${status}\\s*\\{\\s*color:\\s*var\\(--color-status-${status}\\)`));
+    }
+    expect(markers).not.toContain("#0d9488");
+    expect(markers).toMatch(/\.rl-campaign-pin\s*\{[^}]*background:\s*var\(--color-ink\)[^}]*color:\s*var\(--color-lime\)/);
+    // Leaflet paints popups white; they follow the theme so popup text stays readable in dark mode.
+    expect(markers).toMatch(/\.leaflet-popup-content-wrapper[^{]*\{[^}]*background:\s*var\(--color-surface\)/);
+    expect(readRepoFile("components/map/MapLegend.tsx")).not.toContain("bg-[#");
   });
 });

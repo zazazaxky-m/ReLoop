@@ -7,7 +7,24 @@ import { expect, test } from "../support/browser-fixture";
 // Every page is screenshotted per viewport and scheme; pages listed in
 // RESTYLED must also be free of axe color-contrast violations.
 
-const RESTYLED = new Set<string>(["/login", "/register", "/forgot-password", "/privacy", "/terms"]);
+const RESTYLED = new Set<string>([
+  "/login",
+  "/register",
+  "/forgot-password",
+  "/privacy",
+  "/terms",
+  "/dashboard/user",
+  "/dashboard/user/wallet",
+  "/map",
+  "/scan",
+  "/dashboard/pengepul",
+  "/dashboard/admin",
+  "/dashboard/admin/machines",
+  "/dashboard/superadmin",
+  "/dashboard/superadmin/users",
+  "/dashboard/superadmin/config",
+  "/dashboard/superadmin/audit",
+]);
 
 // Defects already present on main (7b0361f) before the theme work; they are
 // tolerated here so the gallery still catches anything new.

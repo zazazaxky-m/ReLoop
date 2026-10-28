@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { Button } from "@/components/ui";
 import { AlertTriangle } from "@/components/ui/icons";
 
 export default function ScanError({
@@ -27,12 +28,7 @@ export default function ScanError({
           Pastikan izin kamera aktif, lalu coba lagi.
         </p>
       </div>
-      <button
-        onClick={reset}
-        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-      >
-        Coba lagi
-      </button>
+      <Button onClick={reset}>Coba lagi</Button>
     </div>
   );
 }

@@ -1,13 +1,14 @@
 /*
  * Leaflet marker/popup HTML is injected as strings, so these styles live in a
  * stylesheet: inline style="" attributes are blocked by the production CSP.
- * Status colors match STATUS_COLOR in MapView and the MapLegend dots.
+ * Colors come from the theme tokens in app/globals.css, the same ones the
+ * MapLegend dots use, so markers and popups follow light and dark mode.
  */
-.rl-status--online { color: #16a34a; }
-.rl-status--full { color: #d97706; }
-.rl-status--maintenance { color: #2563eb; }
-.rl-status--error { color: #dc2626; }
-.rl-status--offline { color: #64748b; }
+.rl-status--online { color: var(--color-status-online); }
+.rl-status--full { color: var(--color-status-full); }
+.rl-status--maintenance { color: var(--color-status-maintenance); }
+.rl-status--error { color: var(--color-status-error); }
+.rl-status--offline { color: var(--color-status-offline); }
 
 /* iconAnchor already places the tip on the coordinate; no extra translate. */
 .rl-pin {
@@ -17,6 +18,10 @@
 }
 .rl-pin svg {
   display: block;
+}
+/* The pin's inner disc follows the theme so the status-colored label stays readable. */
+.rl-pin svg circle {
+  fill: var(--color-surface);
 }
 .rl-pin__label {
   position: absolute;
@@ -32,35 +37,42 @@
   width: 26px;
   height: 26px;
   border-radius: 9999px;
-  background: #0d9488;
-  border: 2px solid #fff;
+  background: var(--color-ink);
+  border: 2px solid var(--color-on-ink);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--color-lime);
   font-size: 13px;
+}
+
+/* Leaflet paints popups white; follow the theme instead. */
+.leaflet-container .leaflet-popup-content-wrapper,
+.leaflet-container .leaflet-popup-tip {
+  background: var(--color-surface);
+  color: var(--color-foreground);
 }
 
 .rl-popup {
   min-width: 180px;
-  font-family: system-ui;
+  font-family: var(--font-sans);
 }
 .rl-popup--campaign {
   min-width: 160px;
 }
 .rl-popup p {
   margin: 4px 0 0;
-  color: #475569;
+  color: var(--color-muted);
 }
 .rl-popup .rl-popup__title {
   margin: 0;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-foreground);
 }
 .rl-popup .rl-popup__meta {
   margin: 2px 0 6px;
-  color: #64748b;
+  color: var(--color-muted);
   font-size: 12px;
 }
 .rl-popup--campaign .rl-popup__meta {
@@ -83,7 +95,11 @@
   margin-top: 2px;
 }
 .rl-popup .rl-popup__reward {
+  display: inline-block;
   margin: 0;
-  color: #0d9488;
-  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--color-lime);
+  color: var(--color-ink);
+  font-weight: 700;
 }

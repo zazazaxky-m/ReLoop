@@ -744,14 +744,14 @@ export function TripManager({
           <CardContent className="space-y-5">
             {val.validationStage === "CHECK_OUT" ? (
               valTripBags.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-800 p-4 text-center text-sm text-muted">
+                <div className="rounded-xl border border-dashed border-border p-4 text-center text-sm text-muted">
                   Tidak ada tas yang terdaftar untuk trip ini.
                 </div>
               ) : (
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {valTripBags.map((bag) => (
-                      <div key={bag.id} className="p-3 border rounded-xl border-gray-200 dark:border-gray-800 space-y-2 bg-surface">
+                      <div key={bag.id} className="p-3 border rounded-xl border-border space-y-2 bg-surface">
                         <div className="flex justify-between items-center">
                           <span className="font-mono text-sm font-semibold text-brand-800 dark:text-brand-400">{bag.bagQrCode}</span>
                           {bag.wasteType?.name && (
@@ -775,13 +775,13 @@ export function TripManager({
                 </div>
               )
             ) : (
-              <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-800 p-4 text-sm text-muted">
+              <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted">
                 Check-in hanya mencatat gerbang masuk. Kondisi kantong diisi saat check-out.
                 {valTripBags.length > 0 ? ` (${valTripBags.length} kantong terdaftar)` : ""}
               </div>
             )}
 
-            <div className="border-t border-gray-200 dark:border-gray-800 pt-4">
+            <div className="border-t border-border pt-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 <FormField label="Tahap validasi" htmlFor="v-stage">
                   <Select

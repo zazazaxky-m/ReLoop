@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { BrandLogo } from "@/components/BrandLogo";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { buttonVariants } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/FormField";
@@ -71,5 +72,14 @@ describe("BrandLogo", () => {
     const html = render(createElement(BrandLogo, { width: 128, height: 40, surface: "dark" }));
     expect(html.match(/<img/g)).toHaveLength(1);
     expect(html).toContain('src="/reloop-logo-name-dark.svg"');
+  });
+});
+
+describe("NotificationBell", () => {
+  it("matches the round theme toggle beside it in the top bar", () => {
+    const button = render(createElement(NotificationBell)).match(/<button\b[^>]*>/)?.[0] ?? "";
+    expect(button).toContain("rounded-full");
+    expect(button).toContain("focus-visible:ring-offset-background");
+    expect(button).not.toContain("shadow-sm");
   });
 });

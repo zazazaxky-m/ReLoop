@@ -26,7 +26,7 @@ import {
   Recycle,
   Wallet,
 } from "@/components/ui/icons";
-import { formatDateTime, formatRupiah } from "@/lib/format";
+import { formatDateTime, formatDayHeading, formatRupiah } from "@/lib/format";
 
 export default async function UserDashboardPage() {
   const user = await requirePageUser(["USER"]);
@@ -66,6 +66,7 @@ export default async function UserDashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow={formatDayHeading(new Date())}
         title={`Halo, ${user.name.split(" ")[0]}!`}
         description="Pantau aktivitas setor, saldo reward, dan program yang sedang berlangsung."
         actions={

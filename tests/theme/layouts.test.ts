@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, type ComponentType, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import AuthLayout from "@/app/(auth)/layout";
@@ -14,18 +14,25 @@ import AccountDeletionPage from "@/app/(legal)/account-deletion/page";
 import DataDeletionPage from "@/app/(legal)/data-deletion/page";
 import PrivacyPage from "@/app/(legal)/privacy/page";
 import TermsPage from "@/app/(legal)/terms/page";
+import DashboardError from "@/app/dashboard/error";
+import ScanError from "@/app/scan/error";
+import { AppShell, type AppShellUser } from "@/components/AppShell";
 import { AuthForm } from "@/components/auth/AuthForm";
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/dashboard/admin",
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
+
+// Polls the API from an effect; the shell test only needs the frame around it.
+vi.mock("@/components/notifications/NotificationBell", () => ({ NotificationBell: () => null }));
 
 // An async server component that reads request headers; it renders only a script.
 vi.mock("@/components/auth/LinkTokenCapture", () => ({ LinkTokenCapture: () => null }));
 
-// Public pages from docs/superpowers/specs/2026-10-27-app-editorial-theme-design.md
-// ("Public pages"): the auth poster built from landing artwork, and the legal
-// pages as an editorial reading page.
+// Layouts from docs/superpowers/specs/2026-10-27-app-editorial-theme-design.md:
+// the auth poster built from landing artwork, the legal pages as an editorial
+// reading page, and the app shell in dashboard style B.
 
 /** The first element `<tag ...>...</tag>` in `html`; auth markup never nests the tag. */
 function element(html: string, tag: string): string {
@@ -184,5 +191,71 @@ describe("legal pages", () => {
       expect(tag).toContain("border-rule-strong");
       expect(tag).toContain("pt-8");
     }
+  });
+});
+
+describe("app shell", () => {
+  const Shell = AppShell as ComponentType<{ user: AppShellUser; children?: ReactNode }>;
+  const user: AppShellUser = {
+    name: "Admin Satu",
+    email: "admin@reloop.test",
+    role: "ADMIN",
+    organizationName: "Bank Sampah Asri",
+  };
+  const html = renderToStaticMarkup(createElement(Shell, { user }, createElement("h1", null, "Dashboard")));
+  const sidebar = element(html, "aside");
+  const sidebarLinks = sidebar.match(/<a\b[^>]*>/g) ?? [];
+  const bottomNav = html.match(/<nav\b[^>]*aria-label="Navigasi utama"[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? "";
+
+  it("puts the sidebar on ink", () => {
+    expect(sidebar.slice(0, sidebar.indexOf(">"))).toContain("bg-sidebar");
+  });
+
+  it("marks the active page with a lime pill", () => {
+    const [dashboard] = links(sidebar, "/dashboard/admin");
+    expect(dashboard).toContain("Dashboard");
+    expect(dashboard).toContain("bg-lime");
+    expect(dashboard).toContain("text-ink");
+    const [machines] = links(sidebar, "/dashboard/admin/machines");
+    expect(machines).not.toContain("bg-lime");
+  });
+
+  it("shows a lime focus ring on every sidebar link", () => {
+    expect(sidebarLinks.length).toBeGreaterThan(5);
+    for (const link of sidebarLinks) {
+      expect(link).toContain("focus-visible:ring-lime");
+      expect(link).toContain("focus-visible:ring-offset-sidebar");
+    }
+  });
+
+  it("uses only the light-lettered wordmark on the sidebar", () => {
+    expect(sidebar).toContain("/reloop-logo-name-dark.svg");
+    expect(sidebar).not.toContain('/reloop-logo-name.svg"');
+    expect(sidebar).not.toContain('/reloop-logo.svg"');
+  });
+
+  it("puts the bottom navigation on ink with lime focus rings", () => {
+    expect(bottomNav.slice(0, bottomNav.indexOf(">"))).toContain("bg-sidebar");
+    const bottomLinks = bottomNav.match(/<a\b[^>]*>/g) ?? [];
+    expect(bottomLinks.length).toBeGreaterThan(2);
+    for (const link of bottomLinks) expect(link).toContain("focus-visible:ring-lime");
+  });
+
+  it("uses no inline styles or old green accents", () => {
+    expect(html).not.toContain("style=");
+    expect(html).not.toMatch(/bg-brand-600|text-brand-[78]00|bg-brand-50\b/);
+  });
+});
+
+describe("error pages", () => {
+  it.each([
+    ["dashboard", DashboardError],
+    ["scan", ScanError],
+  ] as const)("%s retries with the shared primary pill", (_name, Page) => {
+    const html = renderToStaticMarkup(createElement(Page, { error: new Error("x"), reset: () => {} }));
+    const button = html.match(/<button\b[^>]*>/)?.[0] ?? "";
+    expect(button).toContain("bg-ink");
+    expect(button).toContain("rounded-full");
+    expect(button).not.toMatch(/bg-brand-600|text-white/);
   });
 });

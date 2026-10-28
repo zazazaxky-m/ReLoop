@@ -14,6 +14,7 @@ import {
 } from "@/components/ui";
 import { Megaphone, Recycle, Truck } from "@/components/ui/icons";
 import { FillLevelBar } from "@/components/machine/FillLevelBar";
+import { formatDayHeading } from "@/lib/format";
 
 export default async function AdminDashboardPage() {
   const user = await requirePageUser(["ADMIN"]);
@@ -48,6 +49,7 @@ export default async function AdminDashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow={formatDayHeading(new Date())}
         title="Dashboard Admin"
         description="Pantau mesin, pickup, dan aktivitas operasional organisasi."
         actions={
@@ -60,7 +62,13 @@ export default async function AdminDashboardPage() {
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <MetricCard label="Mesin" value={machineCount} icon={Recycle} tone="green" />
         <MetricCard label="Mesin penuh" value={fullMachines} icon={Truck} hint="Perlu pickup" tone="amber" />
-        <MetricCard label="Perlu perhatian" value={offlineMachines} icon={Recycle} tone="slate" />
+        <MetricCard
+          label="Perlu perhatian"
+          value={offlineMachines}
+          icon={Recycle}
+          tone="slate"
+          emphasis={offlineMachines > 0}
+        />
         <MetricCard label="Campaign aktif" value={campaigns} icon={Megaphone} tone="blue" />
       </div>
 
