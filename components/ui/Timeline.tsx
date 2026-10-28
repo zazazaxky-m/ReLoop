@@ -3,7 +3,7 @@ import { cn } from "@/lib/cn";
 import type { Tone } from "./Badge";
 
 const dotTone: Record<Tone, string> = {
-  success: "bg-brand-500",
+  success: "bg-brand-500 dark:bg-status-online",
   warning: "bg-amber-500",
   danger: "bg-status-error",
   info: "bg-blue-500",

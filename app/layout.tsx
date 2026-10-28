@@ -6,23 +6,10 @@ import { NONCE_HEADER } from "@/lib/security-headers";
 import { SITE_DESCRIPTION, SITE_NAME, siteUrl } from "@/lib/site";
 import "./globals.css";
 
-// Editorial faces shared with the landing page (self-hosted, OFL).
-const dmSans = localFont({
-  src: [
-    { path: "../public/landing/fonts/dm-sans-400.ttf", weight: "400" },
-    { path: "../public/landing/fonts/dm-sans-700.ttf", weight: "700" },
-  ],
-  variable: "--font-dm-sans",
-  display: "swap",
-});
-
-const anton = localFont({
-  src: "../public/landing/fonts/anton.ttf",
-  variable: "--font-anton",
-  display: "swap",
-});
-
-// Only the legacy surfaces (kiosk, machine display, print) still use it.
+// The editorial faces (DM Sans, Anton) are declared in app/globals.css at the
+// landing's own URLs, not through next/font: next/font would copy them to new
+// URLs and preload them on every route, the landing included. Only the legacy
+// surfaces (kiosk, machine display, print) still use Jakarta.
 const jakarta = localFont({
   src: "../public/fonts/plus-jakarta-sans-latin.woff2",
   variable: "--font-jakarta",
@@ -81,7 +68,7 @@ export default async function RootLayout({
   return (
     <html
       lang="id"
-      className={`${dmSans.variable} ${anton.variable} ${jakarta.variable}`}
+      className={jakarta.variable}
       suppressHydrationWarning
       nonce={nonce}
     >

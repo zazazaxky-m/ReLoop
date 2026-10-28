@@ -2,10 +2,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FillLevelBar } from "@/components/machine/FillLevelBar";
+import { toneClasses } from "@/components/ui/Badge";
 import { DataTable } from "@/components/ui/DataTable";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { QuickAction } from "@/components/ui/QuickAction";
+import { Timeline } from "@/components/ui/Timeline";
 
 // Dashboard primitives in direction "B · Berkarakter" (spec: "Logged-in app").
 
@@ -111,5 +113,19 @@ describe("FillLevelBar", () => {
 
   it("turns amber when nearly full", () => {
     expect(render(createElement(FillLevelBar, { percent: 85 }))).toContain("fill-amber-500");
+  });
+});
+
+// Lime is the brand accent, never a status color (spec anti-goal): in dark mode
+// "success" uses the online status green the map and legend already use.
+describe("success status in dark mode", () => {
+  it("colors the success badge with the online status green, not lime", () => {
+    expect(toneClasses.success).toContain("dark:text-status-online");
+    expect(toneClasses.success).not.toMatch(/dark:text-brand-[34]00/);
+  });
+
+  it("colors the success timeline dot with the online status green", () => {
+    const html = render(createElement(Timeline, { items: [{ id: "1", title: "Diterima", tone: "success" }] }));
+    expect(html).toContain("dark:bg-status-online");
   });
 });

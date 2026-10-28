@@ -74,6 +74,8 @@ describe("editorial palette", () => {
     ["dark", "blue-400", "surface", 4.5],
     ["dark", "slate-400", "surface", 4.5],
     ["dark", "status-error", "surface", 4.5],
+    ["dark", "status-online", "surface", 4.5],
+    ["dark", "status-online", "brand-50", 4.5],
     // Pages color text with brand-600/700/800 in light mode only; dark mode must
     // keep that text readable on every dark surface.
     ["dark", "brand-600", "surface", 4.5],

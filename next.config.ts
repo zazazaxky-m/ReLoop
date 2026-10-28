@@ -28,6 +28,16 @@ const nextConfig: NextConfig = {
 
       },
 
+      {
+
+        // Shared by the landing and the app (app/globals.css). Not
+        // content-hashed, so a week rather than immutable.
+        source: "/landing/fonts/:file*",
+
+        headers: [{ key: "Cache-Control", value: "public, max-age=604800" }],
+
+      },
+
     ];
 
   },

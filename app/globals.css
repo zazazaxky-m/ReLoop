@@ -3,6 +3,50 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Editorial faces at the same URLs as the landing's own @font-face rules
+   (components/landing/editorial/landing.css): each file downloads once, and a
+   visitor going from the landing to the app already has it cached. Pages
+   outside the landing preload DM Sans through lib/fonts.ts. */
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/landing/fonts/dm-sans-400.ttf") format("truetype");
+}
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/landing/fonts/dm-sans-700.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Anton";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/landing/fonts/anton.ttf") format("truetype");
+}
+/* Arial sized to each face's metrics (the values next/font generated) so text
+   keeps its place while the faces swap in. */
+@font-face {
+  font-family: "DM Sans Fallback";
+  src: local("Arial");
+  ascent-override: 94.36%;
+  descent-override: 29.49%;
+  line-gap-override: 0%;
+  size-adjust: 105.13%;
+}
+@font-face {
+  font-family: "Anton Fallback";
+  src: local("Arial");
+  ascent-override: 127.93%;
+  descent-override: 35.79%;
+  line-gap-override: 0%;
+  size-adjust: 91.94%;
+}
+
 /* Editorial palette shared with the landing page
    (docs/superpowers/specs/2026-10-27-app-editorial-theme-design.md).
    Values are #rrggbb so tests/theme/palette.test.ts can check contrast. */
@@ -104,10 +148,10 @@
   --color-status-error: #b5462b;
   --color-status-offline: #62685a;
 
-  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, -apple-system,
+  --font-sans: "DM Sans", "DM Sans Fallback", ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   /* Anton: metric values, quick-action numbers, auth poster band only. */
-  --font-display: var(--font-anton), Impact, "Arial Narrow", sans-serif;
+  --font-display: "Anton", "Anton Fallback", Impact, "Arial Narrow", sans-serif;
 }
 
 html {

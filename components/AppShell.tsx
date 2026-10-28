@@ -11,6 +11,7 @@ import { BrandLogo } from "@/components/BrandLogo";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
+import { preloadEditorialFonts } from "@/lib/fonts";
 import { ROLE_LABELS, type AppRole } from "@/lib/roles";
 import {
   Building,
@@ -143,6 +144,7 @@ export function AppShell({
   user: AppShellUser;
   children: React.ReactNode;
 }) {
+  preloadEditorialFonts();
   const pathname = usePathname();
   const router = useRouter();
   const items = NAV[user.role] ?? [];
