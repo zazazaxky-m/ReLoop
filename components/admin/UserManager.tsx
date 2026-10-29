@@ -121,6 +121,7 @@ export function UserManager({
       className: "w-[220px]",
       render: (r) => (
         <Select
+          aria-label={`Peran ${r.name}`}
           value={r.role}
           disabled={busy}
           onChange={(e) => patch(r.id, { role: e.target.value })}
@@ -142,6 +143,7 @@ export function UserManager({
       className: "w-[220px]",
       render: (r) => (
         <Select
+          aria-label={`Status ${r.name}`}
           value={r.status}
           disabled={busy}
           onChange={(e) => patch(r.id, { status: e.target.value })}

@@ -1,9 +1,9 @@
 import { createElement, type ComponentType, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import KioskLayout from "@/app/kiosk/[code]/layout";
-import MachineDisplayLayout from "@/app/machine/[code]/display/layout";
-import PrintLayout from "@/app/print/layout";
+import KioskLayout, { viewport as kioskViewport } from "@/app/kiosk/[code]/layout";
+import MachineDisplayLayout, { viewport as displayViewport } from "@/app/machine/[code]/display/layout";
+import PrintLayout, { viewport as printViewport } from "@/app/print/layout";
 import { readBlock, readRepoFile } from "./css-tokens";
 
 // Kiosk, machine display and trip print are out of scope for the editorial
@@ -55,6 +55,12 @@ const OLD_DARK: Record<string, string> = {
   "color-brand-200": "#14532d",
 };
 
+// The app face, browser chrome color, text selection and scrollbar thumb on main
+// at 7b0361f; the new theme sets them on :root, html and the universal selector.
+const OLD_FONT_SANS =
+  'var(--font-jakarta), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif';
+const OLD_THEME_COLOR = "#16a34a";
+
 const globals = readRepoFile("app/globals.css");
 const legacyCss = readRepoFile("app/legacy-theme.css");
 const tailwindDefaults = readBlock(readRepoFile("node_modules/tailwindcss/theme.css"), "@theme default");
@@ -83,6 +89,35 @@ describe("legacy theme scope", () => {
       if (old === undefined) continue;
       expect(legacyDark[key], key).toBe(old);
     }
+  });
+
+  it("restores the old app face, so font-sans inside resolves to Jakarta", () => {
+    expect(legacyLight["font-sans"]?.replace(/\s+/g, " ")).toBe(OLD_FONT_SANS);
+    expect(legacyCss).toMatch(/\n\.legacy-theme\s*\{[^}]*\bfont-family:\s*var\(--font-sans\);/);
+  });
+
+  it("restores the old text selection colors", () => {
+    expect(legacyCss).toMatch(
+      /\n\.legacy-theme ::selection,\s*\.legacy-theme::selection\s*\{\s*background:\s*var\(--color-brand-200\);\s*color:\s*var\(--color-brand-900\);\s*\}/,
+    );
+  });
+
+  // The page scrollbar belongs to html, outside the surface, hence the :has().
+  it("restores the old scrollbar thumb, on the page and inside the surface", () => {
+    expect(legacyCss).toMatch(
+      /@media \(pointer: fine\)\s*\{\s*html:has\(\.legacy-theme\)::-webkit-scrollbar-thumb,\s*\.legacy-theme ::-webkit-scrollbar-thumb\s*\{\s*background:\s*#bdcbc2;\s*\}\s*\}/,
+    );
+    expect(legacyCss).toMatch(
+      /\nhtml\.dark:has\(\.legacy-theme\)::-webkit-scrollbar-thumb,\s*\.dark \.legacy-theme ::-webkit-scrollbar-thumb\s*\{\s*background:\s*#2b3a32;\s*\}/,
+    );
+  });
+
+  it.each([
+    ["kiosk", kioskViewport],
+    ["machine display", displayViewport],
+    ["print", printViewport],
+  ])("colors the browser chrome the old green on the %s route", (_name, viewport) => {
+    expect(viewport.themeColor).toBe(OLD_THEME_COLOR);
   });
 
   it("gives the page body behind a legacy surface the old background, without paper grain", () => {

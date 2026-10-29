@@ -27,16 +27,9 @@ const RESTYLED = new Set<string>([
   "/dashboard/superadmin/audit",
 ]);
 
-// Defects already present on main (7b0361f) before the theme work; they are
-// tolerated here so the gallery still catches anything new.
-const KNOWN_DEFECTS: Record<string, { overflow?: number; critical?: string[] }> = {
-  "/dashboard/superadmin/users": { critical: ["select-name"] },
-  "/dashboard/superadmin/config": { critical: ["label"] },
-};
-
 const horizontalOverflow = () => document.documentElement.scrollWidth - window.innerWidth;
 
-/** `route` is the path's pattern in RESTYLED and KNOWN_DEFECTS, for a path with a seeded id. */
+/** `route` is the path's pattern in RESTYLED, for a path with a seeded id. */
 async function capture(
   page: Page,
   path: string,
@@ -44,12 +37,11 @@ async function capture(
   screenshot: (page: Page, name: string) => Promise<string>,
   route = path,
 ) {
-  const known = KNOWN_DEFECTS[route] ?? {};
   await page.goto(path);
   await expect(page.locator("h1").first()).toBeVisible();
   // Measure the settled layout, not the fallback font before DM Sans swaps in.
   await page.evaluate(() => document.fonts.ready);
-  expect(await page.evaluate(horizontalOverflow)).toBeLessThanOrEqual(known.overflow ?? 0);
+  expect(await page.evaluate(horizontalOverflow)).toBeLessThanOrEqual(0);
   // Metric values never wrap (a split amount reads as another one), so each must fit its card.
   const clipped = await page
     .locator("[data-metric-value]")
@@ -57,13 +49,19 @@ async function capture(
   expect(clipped).toEqual([]);
 
   const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
-  const critical = axe.violations.filter((v) => v.impact === "critical" && !known.critical?.includes(v.id));
-  expect(critical.map((v) => v.id)).toEqual([]);
+  const critical = axe.violations.filter((v) => v.impact === "critical");
+  expect(critical.flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(" ")}`))).toEqual([]);
   if (RESTYLED.has(route)) {
     expect(axe.violations.filter((v) => v.id === "color-contrast").flatMap((v) => v.nodes.map((n) => n.target.join(" ")))).toEqual([]);
   }
 
   await screenshot(page, `theme-${slug}`);
+}
+
+// A legacy layout's viewport overrides the root theme color and keeps the rest.
+async function expectLegacyChrome(page: Page) {
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#16a34a");
+  await expect(page.locator('meta[name="viewport"]')).toHaveAttribute("content", /width=device-width/);
 }
 
 test("public pages", async ({ page, fixture, artifacts }) => {
@@ -81,6 +79,7 @@ test("public pages", async ({ page, fixture, artifacts }) => {
   // Legacy surface: screenshot only, it must look unchanged.
   await page.goto(`/kiosk/${fixture.audit.ids.machineCode}`);
   await page.waitForLoadState("networkidle");
+  await expectLegacyChrome(page);
   await artifacts.screenshot(page, "theme-kiosk");
 });
 
@@ -127,6 +126,7 @@ test("admin pages", async ({ page, fixture, artifacts }) => {
   // Legacy surface: screenshot only, it must look unchanged.
   await page.goto(`/print/trips/${trip.id}`);
   await page.waitForLoadState("networkidle");
+  await expectLegacyChrome(page);
   await artifacts.screenshot(page, "theme-print");
 });
 
