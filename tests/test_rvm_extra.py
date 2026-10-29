@@ -496,10 +496,12 @@ class CameraFullTest(unittest.TestCase):
             for i in range(3):
                 f = Path(w.evidence_dir) / f"new{i}.jpg"
                 f.write_bytes(b"y")
+            # Created last, so newest: a directory must not take a capture's slot.
             (Path(w.evidence_dir) / "stale.jpg").mkdir()
             w.cleanup_old_captures()
             self.assertFalse(old.exists())
             self.assertEqual(len(list(Path(w.evidence_dir).rglob("new*.jpg"))), 2)
+            self.assertTrue((Path(w.evidence_dir) / "stale.jpg").is_dir())
 
     def _run_frames(self, tmp, frames, want, timeout=3.0):
         w = self._worker(tmp)
