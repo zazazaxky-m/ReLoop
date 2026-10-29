@@ -27,7 +27,7 @@ jobs:
         run: npm run lint
 
       - name: Dependency license check
-        run: npx license-checker --onlyAllow 'MIT;Apache-2.0;BSD-3-Clause;ISC;0BSD;CC0-1.0' --summary --failOn 'GPL;AGPL'
+        run: npm run licenses:check
 
       - name: Run tests
         run: npm test

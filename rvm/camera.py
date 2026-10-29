@@ -257,8 +257,9 @@ class CameraWorker:
     def cleanup_old_captures(self) -> None:
         if not self.evidence_dir.exists():
             return
+        # Only regular files count toward max_local_captures.
         files = sorted(
-            self.evidence_dir.rglob("*.jpg"),
+            (path for path in self.evidence_dir.rglob("*.jpg") if path.is_file()),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )

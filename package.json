@@ -21,6 +21,7 @@
     "test:realtime": "node scripts/run-audit-tests.mjs realtime",
     "test:rvm": "node scripts/run-audit-tests.mjs python",
     "test:flutter": "node scripts/run-audit-tests.mjs flutter",
+    "licenses:check": "npx -y license-checker@25.0.1 --summary --excludePrivatePackages --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense;BlueOak-1.0.0;Python-2.0;MPL-2.0;LGPL-3.0-or-later;CC-BY-4.0'",
     "prisma:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",

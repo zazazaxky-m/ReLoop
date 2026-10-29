@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -31,6 +32,32 @@ describe("run-audit-tests runner", () => {
     expect(result.stderr).toMatch(/missing dependency: Docker Engine/);
     expect(result.stdout).not.toMatch(/starting isolated PostgreSQL/);
     expect(`${result.stdout}${result.stderr}`).not.toContain("operational-secret");
+  });
+
+  // Docker CLI 28 (GitHub's ubuntu-24.04 runners) answers `docker info --format`
+  // with exit 0 and an empty version when the daemon is unreachable; only the
+  // client-side `compose version` still works.
+  it("fails by name when docker info exits 0 without a server version", () => {
+    const bin = mkdtempSync(path.join(os.tmpdir(), "reloop-fake-docker-"));
+    writeFileSync(
+      path.join(bin, "docker"),
+      [
+        "#!/bin/sh",
+        'if [ "$1" = info ]; then echo "Cannot connect to the Docker daemon" >&2; echo; exit 0; fi',
+        'if [ "$1 $2" = "compose version" ]; then echo 2.38.2; exit 0; fi',
+        'echo "Cannot connect to the Docker daemon" >&2; exit 1',
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    try {
+      const result = runRunner(["integration"], { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}` });
+      expect(result.status).toBe(2);
+      expect(result.stderr).toMatch(/missing dependency: Docker Engine/);
+      expect(result.stdout).not.toMatch(/starting isolated PostgreSQL/);
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 
   it("reports the Flutter gate as not run when the SDK is missing", () => {
