@@ -388,11 +388,10 @@ jobs:
           npm audit --json > reports/npm-audit.json || true
           npm audit --audit-level=high | tee reports/npm-audit.txt || true
 
+      # shell: bash adds pipefail, so a rejected license is not hidden by tee.
       - name: Dependency license audit
-        run: |
-          npx license-checker --summary --failOn 'GPL;AGPL' \
-            --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;0BSD;CC0-1.0;Unlicense;BlueOak-1.0.0;Python-2.0' \
-            | tee reports/licenses.txt
+        shell: bash
+        run: npm run --silent licenses:check | tee reports/licenses.txt
 
       - name: Upload npm audit artifact
         if: always()
