@@ -169,7 +169,8 @@ function compose(run, args) {
 
 function assertDockerAvailable() {
   const info = docker(null, ["info", "--format", "{{.ServerVersion}}"]);
-  if (info.error || info.status !== 0) {
+  // Docker CLI 28 exits 0 with an empty version when the daemon is unreachable.
+  if (info.error || info.status !== 0 || !info.stdout?.trim()) {
     throw new DependencyError(
       "Docker Engine",
       "`docker info` failed; PostgreSQL 16 and Redis 7 for the audit harness run in Docker (no mock fallback)",
