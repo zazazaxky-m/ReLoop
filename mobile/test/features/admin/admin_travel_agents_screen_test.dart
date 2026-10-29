@@ -161,13 +161,18 @@ void main() {
     expect(find.text('Coba Lagi'), findsOneWidget);
   });
 
-  testWidgets('invite dialog posts and shows success', (tester) async {
+  // POST /api/travel-agents (A03) mails an invitation and answers with the
+  // agent's status here: PENDING until it is accepted, INVITED when the agent
+  // was already active.
+  Future<void> invite(WidgetTester tester, String organizationStatus) async {
     await tester.binding.setSurfaceSize(const Size(800, 1600));
     stubAgents();
     when(() => mockApi.post('/api/travel-agents', data: any(named: 'data')))
         .thenAnswer(
       (_) async => ok('/api/travel-agents', {
-        'invite': {'status': 'INVITED'},
+        'invite': {'id': 'inv-1'},
+        'organizationStatus': organizationStatus,
+        'delivery': 'QUEUED',
       }),
     );
 
@@ -185,9 +190,22 @@ void main() {
     );
     await tester.tap(find.text('Simpan'));
     await tester.pumpAndSettle();
+  }
 
+  testWidgets('invite dialog posts and shows the invitation is pending',
+      (tester) async {
+    await invite(tester, 'PENDING');
     expect(
-      find.textContaining('langsung berstatus invited'),
+      find.textContaining('Status pending sampai undangan diterima'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('re-inviting an active agent keeps verified members',
+      (tester) async {
+    await invite(tester, 'INVITED');
+    expect(
+      find.textContaining('Anggota yang sudah terverifikasi tetap punya akses'),
       findsOneWidget,
     );
   });
